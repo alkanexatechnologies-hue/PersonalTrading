@@ -4759,31 +4759,6 @@ function renderOiWallsCardHtml(d) {
     </div>`;
 }
 
-function renderAnalysisHtml(C) {
-  if (!C) return "";
-  const cCls = C.conclusion === "BULL_CONFIRM" ? "go" : C.conclusion === "BEAR_CONFIRM" ? "bear" : C.conclusion === "CONFLICT" ? "conflict" : "wait";
-  const reasons = (C.reasons || []).map((r) => `<li>${r}</li>`).join("");
-  return `
-    <details class="mtc mtc-analysis ${cCls}" open>
-      <summary class="mtc-analysis-sum"><h5>Market स्थिति — analysis</h5><span class="mtc-scenario-caret">⌄</span></summary>
-      <div class="mtc-sec"><p>${C.situation || "—"}</p></div>
-      ${reasons ? `<div class="mtc-sec"><h5>मुख्य कारण</h5><ul class="mtc-reasons">${reasons}</ul></div>` : ""}
-
-      <details class="mtc-scenario">
-        <summary>
-          ${C.path && C.path.up ? `<span class="mtc-pathrow"><b class="up">ऊपर:</b> ${C.path.up}</span>` : ""}
-          ${C.path && C.path.down ? `<span class="mtc-pathrow"><b class="down">नीचे:</b> ${C.path.down}</span>` : ""}
-          <span class="mtc-scenario-caret">⌄ detail</span>
-        </summary>
-        <div class="mtc-grid2">
-          <div class="mtc-sec mtc-bull"><h5>Bullish case</h5><p>${C.bullCase || "—"}</p></div>
-          <div class="mtc-sec mtc-bear"><h5>Bearish case</h5><p>${C.bearCase || "—"}</p></div>
-        </div>
-      </details>
-
-      <div class="mtc-guidance">🧭 Trader निर्देश: ${C.guidance || "—"}</div>
-    </details>`;
-}
 
 // Model-agreement bulletin: does the 5m scalp / 15m scalp / 1h directional
 // read all point the same way? d.bulletin was already computed server-side
@@ -5054,8 +5029,6 @@ function renderMasterSelector(d) {
       </div>
 
       ${renderBulletinHtml(d)}
-
-      ${renderAnalysisHtml(C)}
 
       <div class="mts-tablewrap">
         <table class="mts-table">
