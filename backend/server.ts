@@ -17,9 +17,11 @@ try {
 import express from "express";
 import cors from "cors";
 import path from "path";
+import fs from "fs";
 import apiRouter, { startHourlyScheduler } from "./routes/api";
 import { CONFIG } from "./config";
-import { getProvider } from "./data";
+import { getProvider, setActiveProvider } from "./data";
+import { rememberGrowwToken, setFeedFlags } from "./data/sessionFeed";
 import { getExitCheckHealth } from "./paper/engine";
 
 const app = express();
@@ -67,12 +69,33 @@ process.on("unhandledRejection", (err) => {
   console.error(`[unhandledRejection] (#${unhandledRejectionCount})`, err instanceof Error ? err.message : err);
 });
 
+// Auto-reconnect Groww on boot using the saved token (data/routes/api.ts's
+// /connect + /connect-groww already persist it to .groww_token, but only
+// loaded it into the live session when the user clicked Connect - meaning a
+// simple restart previously dropped the live feed every time even though the
+// token file was sitting right there). Best-effort: a stale/expired token
+// just leaves the feed off, same as before, rather than blocking startup.
+function autoConnectGroww(): void {
+  const tokenFile = path.join(process.cwd(), ".groww_token");
+  try {
+    const token = fs.readFileSync(tokenFile, "utf-8").trim();
+    if (!token) return;
+    setActiveProvider("groww", token);
+    rememberGrowwToken(token);
+    setFeedFlags({ groww: true });
+    console.log(`  Groww         : reconnecting with saved token...`);
+  } catch {
+    /* no saved token - feed stays off until Connect data is used */
+  }
+}
+
 app.listen(CONFIG.port, () => {
   console.log(`\n  NSE Intraday Assistant`);
   console.log(`  ----------------------`);
   console.log(`  Data provider : ${getProvider().name}`);
   console.log(`  Dashboard     : http://localhost:${CONFIG.port}`);
   console.log(`  API base      : http://localhost:${CONFIG.port}/api\n`);
+  autoConnectGroww();
   // Auto-record the hourly 15-min-model shortlist (9:30-15:30 IST) for evening backtest.
   startHourlyScheduler();
 });
