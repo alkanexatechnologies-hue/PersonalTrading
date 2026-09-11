@@ -1,5 +1,6 @@
 import { HoldTimeframe, Interval, OptionSuggestion, SignalResult, StrikeIdea, TimeDecay } from "../types";
 import { SymbolDef, getStrikeStep } from "../config";
+import { DIRECTION_THRESHOLD } from "../signals/score";
 
 export interface OptionSizingInput {
   capital?: number; // trading capital in INR
@@ -18,8 +19,9 @@ const INTERVAL_MINUTES: Record<Interval, number> = {
   "1d": 375,
 };
 
-// Minimum absolute score before we suggest a directional option trade.
-const ENTRY_THRESHOLD = 15;
+// Minimum absolute score before we suggest a directional option trade (the same
+// cutoff used everywhere else in the app - see signals/score.ts).
+const ENTRY_THRESHOLD = DIRECTION_THRESHOLD;
 // ATM options behave with a delta of ~0.5; we use this to translate an
 // underlying move into an approximate option-premium move.
 const ATM_DELTA = 0.5;

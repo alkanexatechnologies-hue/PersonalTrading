@@ -44,6 +44,7 @@ async function init() {
   state.tpUniverse = "index";
   initOiCommand();
   startOiCommandLive();
+  startIndexStrip();
   initAsk();
 
   loadTraderMind();
@@ -1448,6 +1449,57 @@ function renderTabFlow(name) {
     <div class="flow-legend"><span class="flow-lg flow-in">📥 input</span><span class="flow-lg flow-proc">⚙️ process</span><span class="flow-lg flow-gate">🚦 gate</span><span class="flow-lg flow-out">🎯 output</span></div>`;
 }
 
+// Preserve scroll position across a live-polled panel's re-render and flash a
+// brief "just updated" pulse, instead of the previous plain innerHTML replace
+// on every poll - which reset scroll position and any expanded row on every
+// tick and read as "nothing is really live" even though data was refreshing
+// underneath. Used by the OI Command / Paper Desk / Top Picks live pollers.
+function renderLive(containerId, renderFn) {
+  const box = el(containerId);
+  const scrollTop = box ? box.scrollTop : 0;
+  renderFn();
+  const box2 = el(containerId);
+  if (!box2) return;
+  box2.scrollTop = scrollTop;
+  box2.classList.remove("just-updated");
+  void box2.offsetWidth; // restart the CSS animation on every call
+  box2.classList.add("just-updated");
+}
+
+// ---------- persistent index strip (Option Trading mode) ----------
+// A slim, always-visible NIFTY/BANKNIFTY glance so index levels are readable
+// while browsing Paper Desk / Top Pick without switching to OI Command. Reads
+// from the same cached quote pipeline OI Command's own spot price comes from,
+// so the numbers shown here and inside OI Command are provably in sync rather
+// than two independently-fetched copies that could drift apart.
+const INDEX_STRIP_SYMBOLS = [
+  { symbol: "^NSEI", label: "NIFTY" },
+  { symbol: "^NSEBANK", label: "BANKNIFTY" },
+];
+let indexStripTimer = null;
+async function refreshIndexStrip() {
+  const box = el("index-strip");
+  if (!box || !document.body.classList.contains("mode-option")) return;
+  try {
+    const quotes = await Promise.all(
+      INDEX_STRIP_SYMBOLS.map((s) => fetch(`/api/quote/${encodeURIComponent(s.symbol)}`).then((r) => r.json()).catch(() => null))
+    );
+    const items = INDEX_STRIP_SYMBOLS.map((s, i) => {
+      const q = quotes[i];
+      if (!q || q.price == null) return `<span class="is-item"><b>${s.label}</b> <span class="wl-sub">—</span></span>`;
+      const chg = q.changePercent;
+      const cls = chg > 0 ? "up" : chg < 0 ? "down" : "";
+      return `<span class="is-item"><b>${s.label}</b> ${fmt(q.price)} <span class="is-chg ${cls}">${chg >= 0 ? "+" : ""}${fmt(chg)}%</span></span>`;
+    }).join("");
+    box.innerHTML = items + `<span class="is-item wl-sub">${isMarketOpen() ? '<span class="live-dot"></span> live' : "market closed"}</span>`;
+  } catch (_) { /* ignore transient */ }
+}
+function startIndexStrip() {
+  if (indexStripTimer) return;
+  refreshIndexStrip();
+  indexStripTimer = setInterval(refreshIndexStrip, 5000);
+}
+
 function switchTab(name) {
   // Remember where we came from so "Selected Stock" has a working Back button.
   const curActive = document.querySelector("#tabs .tab.active");
@@ -1473,6 +1525,7 @@ function switchTab(name) {
 
   if (name === "toppicks" && !state.topPicksLoaded) { state.topPicksLoaded = true; loadTopPicks(); }
   if (name === "bullrank" && !state.bullRankLoaded) { state.bullRankLoaded = true; loadBullRank(); }
+  if (name === "stockoptions" && !state.stockOptionsInit) { state.stockOptionsInit = true; initStockOptions(); }
 
   if (name === "movetiming" && !state.moveTimingInit) { state.moveTimingInit = true; initMoveTiming(); }
   document.body.classList.toggle("oi-focus", name === "oicommand");
@@ -1493,6 +1546,13 @@ function switchTab(name) {
 const MODE_NAV = {
   option: [
     { nav: "oicommand", ico: "🎯", lbl: "OI Cmd" },
+    { nav: "paper", ico: "🧪", lbl: "Paper" },
+    { nav: "toppicks", ico: "📈", lbl: "Top Pick" },
+    { nav: "watchlist", ico: "📋", lbl: "List" },
+    { nav: "more", ico: "☰", lbl: "More" },
+  ],
+  stockOption: [
+    { nav: "stockoptions", ico: "📊", lbl: "Stk Opt" },
     { nav: "paper", ico: "🧪", lbl: "Paper" },
     { nav: "toppicks", ico: "📈", lbl: "Top Pick" },
     { nav: "watchlist", ico: "📋", lbl: "List" },
@@ -1550,9 +1610,13 @@ function setupMobileNav() {
 
 // ---------- desk mode (Option Trading vs Stock Swing Trading) ----------
 const MODE_KEY = "nsa_mode";
-const MODE_FIRST = { option: "oicommand", swing: "news" };
+const VALID_MODES = ["option", "stockOption", "swing"];
+const MODE_FIRST = { option: "oicommand", stockOption: "stockoptions", swing: "news" };
 const MODE_TABS = {
   option: ["oicommand", "paper", "toppicks", "earlymoves"],
+  // Paper Desk and Top Pick are shared with Option Trading (same panels, already
+  // pool-filtered/labelled by kind) rather than duplicated for this desk.
+  stockOption: ["stockoptions", "paper", "toppicks"],
   swing: ["news", "bullrank", "todaymovers", "stock", "bigmove", "movetiming"],
 };
 
@@ -1575,7 +1639,7 @@ function showModeGate(allowClose) {
 }
 
 function chooseMode(mode) {
-  if (mode !== "option" && mode !== "swing") mode = "option";
+  if (!VALID_MODES.includes(mode)) mode = "option";
   try { localStorage.setItem(MODE_KEY, mode); } catch (_) {}
   el("mode-gate")?.classList.add("hidden");
   applyMode(mode);
@@ -1583,13 +1647,22 @@ function chooseMode(mode) {
 
 function applyMode(mode) {
   const body = document.body;
-  body.classList.toggle("mode-option", mode === "option");
-  body.classList.toggle("mode-swing", mode === "swing");
+  VALID_MODES.forEach((m) => body.classList.toggle("mode-" + m, m === mode));
   renderMobileNav(mode);
+  if (mode === "option") refreshIndexStrip();
+  // Show only the tabs that belong to this desk. A tab can belong to more than
+  // one desk (Paper Desk / Top Pick are shared between Option Trading and Stock
+  // Option Trading), so this is driven from MODE_TABS directly rather than the
+  // older grp-option/grp-swing CSS classes, which only ever encoded a strict
+  // one-tab-one-desk mapping.
+  const allowed = new Set(MODE_TABS[mode] || []);
+  document.querySelectorAll("#tabs .tab").forEach((t) => {
+    t.classList.toggle("hidden", !allowed.has(t.getAttribute("data-tab")));
+  });
   // If the active tab isn't part of this desk, jump to the desk's first tab.
   const active = document.querySelector("#tabs .tab.active");
   const activeTab = active ? active.getAttribute("data-tab") : null;
-  if (!activeTab || !MODE_TABS[mode].includes(activeTab)) switchTab(MODE_FIRST[mode]);
+  if (!activeTab || !allowed.has(activeTab)) switchTab(MODE_FIRST[mode]);
   else syncMobileNav(activeTab);
 }
 
@@ -1597,7 +1670,7 @@ function applyMode(mode) {
 function enterApp() {
   let saved = null;
   try { saved = localStorage.getItem(MODE_KEY); } catch (_) {}
-  if (saved === "option" || saved === "swing") applyMode(saved);
+  if (VALID_MODES.includes(saved)) applyMode(saved);
   else showModeGate(false);
 }
 
@@ -2134,20 +2207,25 @@ async function loadSignal(symbol) {
 }
 
 // ---------- options trade setup ----------
-async function loadOption(symbol) {
-  const body = el("option-body");
+// `ids` lets a second consumer (the Stock Options tab) reuse this exact fetch +
+// render flow against its own controls/container instead of the "Selected
+// Stock" tab's, rather than duplicating the fetch/render logic.
+async function loadOption(symbol, ids = {}) {
+  const bodyId = ids.body || "option-body";
+  const body = el(bodyId);
+  if (!body) return;
   const params = new URLSearchParams({
     interval: state.interval,
-    capital: el("opt-capital").value || "100000",
-    risk: el("opt-risk").value || "2",
+    capital: el(ids.capital || "opt-capital")?.value || "100000",
+    risk: el(ids.risk || "opt-risk")?.value || "2",
   });
-  const prem = el("opt-premium").value;
+  const prem = el(ids.premium || "opt-premium")?.value;
   if (prem) params.set("premium", prem);
 
   try {
     const data = await fetch(`/api/options/${encodeURIComponent(symbol)}?${params}`).then((r) => r.json());
     if (data.error) { body.textContent = data.error; return; }
-    renderOption(data.option, data.risk);
+    renderOption(data.option, data.risk, bodyId);
   } catch (e) {
     body.textContent = "Could not load option setup: " + e.message;
   }
@@ -2177,8 +2255,9 @@ function riskRadarHtml(risk) {
     </div>`;
 }
 
-function renderOption(o, radarData) {
-  const body = el("option-body");
+function renderOption(o, radarData, bodyId = "option-body") {
+  const body = el(bodyId);
+  if (!body) return;
   const radar = riskRadarHtml(radarData);
   if (!o.fno) {
     body.innerHTML = radar + `<p class="wl-sub">${o.reason}</p>`;
@@ -2256,6 +2335,29 @@ function renderOption(o, radarData) {
     ${decay}
     ${risk}
     <p class="opt-disclaimer">${o.disclaimer}</p>`;
+}
+
+// ---------- Stock Option Trading tab (per-stock F&O trade + risk) ----------
+// Reuses loadOption()/renderOption() (the same engine behind the "Selected
+// Stock" tab's options card) against a stock-only picker + its own container,
+// instead of duplicating the fetch/render logic for a second desk.
+const SOPT_IDS = { body: "sopt-body", capital: "sopt-capital", risk: "sopt-risk", premium: "sopt-premium" };
+function initStockOptions() {
+  const sel = el("sopt-symbol");
+  const btn = el("sopt-get");
+  if (sel && !sel.options.length) {
+    const stocks = (state.symbols || []).filter((s) => s.type !== "index" && s.fno);
+    sel.innerHTML = stocks.length
+      ? stocks.map((s) => `<option value="${s.symbol}">${s.name}</option>`).join("")
+      : `<option value="">No F&O stocks configured</option>`;
+  }
+  if (btn && !btn.dataset.wired) {
+    btn.dataset.wired = "1";
+    btn.addEventListener("click", () => {
+      const symbol = sel?.value;
+      if (symbol) loadOption(symbol, SOPT_IDS);
+    });
+  }
 }
 
 // ---------- volume & big players ----------
@@ -3374,7 +3476,7 @@ async function loadPaper() {
     ]);
     state.paperDaily = daily; // cached; re-rendered each live tick without re-fetching
     state.paperHindi = hindi;
-    renderPaper(s);
+    renderLive("paper", () => renderPaper(s));
   } catch (e) {
     el("paper").textContent = "Failed to load: " + e.message;
   }
@@ -3398,10 +3500,10 @@ function startPaperLive() {
       }
       if (isMarketOpen()) {
         const s = await fetch("/api/paper/marks").then((r) => r.json()); // live marks + exits
-        renderPaper(s);
+        renderLive("paper", () => renderPaper(s));
       } else if (paperLiveTick % 30 === 0) {
         const s = await fetch("/api/paper/state").then((r) => r.json()); // slow poll when closed
-        renderPaper(s);
+        renderLive("paper", () => renderPaper(s));
       }
     } catch (_) {
       /* ignore transient */
@@ -4147,8 +4249,15 @@ async function loadOiCommand() {
   try {
     const d = await fetchJSON("/api/oi-command?symbol=" + encodeURIComponent(sym), 25000);
     if (!d.available && !d.bulletin) { if (box) box.innerHTML = `<div class="wl-sub">${d.message || d.error || "उपलब्ध नहीं"}</div>`; if (st) st.textContent = ""; return; }
-    renderMasterSelector(d);
-    if (st) st.textContent = "";
+    renderLive("oicommand", () => renderMasterSelector(d));
+    // Freshness: the OI/candle data behind this screen is cached server-side
+    // (routes/api.ts already computes dataAgeSec/refresh) - surface it so "is
+    // this actually live" is visible rather than implicit.
+    if (st) {
+      const age = d.dataAgeSec != null ? Math.round(d.dataAgeSec) : null;
+      const live = d.refresh?.marketOpen !== false && age != null && age < 60;
+      st.innerHTML = age == null ? "" : live ? `<span class="live-dot"></span> as of ${age}s ago` : `as of ${age}s ago`;
+    }
   } catch (e) {
     if (st) st.textContent = e.name === "AbortError" ? "timeout" : "Failed: " + e.message;
   }
@@ -5036,7 +5145,7 @@ async function loadTopPicks() {
   try {
     const data = await fetchJSON("/api/top-picks", 22000);
     if (data.error) { if (!silent) box.textContent = data.error; return; }
-    renderTopPicks(data);
+    renderLive("toppicks", () => renderTopPicks(data));
   } catch (e) {
     if (!silent && !state.topPicksData) box.textContent = "Scan failed: " + e.message;
   } finally {

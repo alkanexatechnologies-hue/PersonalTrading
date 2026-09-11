@@ -2075,9 +2075,31 @@ body.oi-focus #mind-bar { max-height: 15vh; margin-bottom: 3px; }
   .lg-tag { font-size: 22px; }
 }
 
-/* ============ Desk mode: filter tabs by Option vs Swing ============ */
-body.mode-option #tabs .tab.grp-swing { display: none !important; }
-body.mode-swing  #tabs .tab.grp-option { display: none !important; }
+.index-strip {
+  display: none; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 8px 14px; margin-bottom: 8px; background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: 10px;
+  font-variant-numeric: tabular-nums;
+}
+body.mode-option .index-strip { display: flex; }
+.index-strip .is-item { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.index-strip .is-chg.up { color: var(--green); }
+.index-strip .is-chg.down { color: var(--red); }
+
+/* A brief "just refreshed" pulse on a live-polled panel (OI Command, Paper
+   Desk, Top Picks) - visual confirmation the numbers underneath just synced
+   with the market, without a jarring full teardown/rebuild feel. */
+@keyframes nsaLivePulse {
+  0% { box-shadow: 0 0 0 0 rgba(22,199,132,0.30); }
+  100% { box-shadow: 0 0 0 0 rgba(22,199,132,0); }
+}
+.just-updated { animation: nsaLivePulse 0.7s ease-out; }
+@media (prefers-reduced-motion: reduce) { .just-updated { animation: none; } }
+
+/* ============ Desk mode: filter tabs by desk (JS-driven via MODE_TABS,
+   toggling this class - a tab can belong to more than one desk, e.g. Paper
+   Desk/Top Pick are shared between Option Trading and Stock Option Trading) ============ */
+#tabs .tab.hidden { display: none !important; }
 
 /* Desk selector overlay (shown after login). */
 .mode-gate {
@@ -2092,7 +2114,7 @@ body.mode-swing  #tabs .tab.grp-option { display: none !important; }
 .mode-gate.hidden { display: none; }
 .mg-inner { width: 100%; max-width: 720px; text-align: center; display: flex; flex-direction: column; align-items: center; }
 .mg-sub { font-size: 15px; color: var(--muted); margin: 4px 0 22px; letter-spacing: 0.5px; }
-.mg-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; width: 100%; }
+.mg-btns { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; width: 100%; }
 .mg-btn {
   display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center;
   padding: 26px 18px; border-radius: 16px; cursor: pointer;
@@ -2109,6 +2131,9 @@ body.mode-swing  #tabs .tab.grp-option { display: none !important; }
 .mg-swing { border-color: rgba(59,130,246,0.35); }
 .mg-swing:hover { border-color: #3b82f6; }
 .mg-swing .mg-t { color: #6ea8fe; }
+.mg-stockoption { border-color: rgba(168,85,247,0.35); }
+.mg-stockoption:hover { border-color: #a855f7; }
+.mg-stockoption .mg-t { color: #c084fc; }
 .mg-close {
   margin-top: 22px; background: transparent; border: 1px solid var(--border);
   color: var(--muted); padding: 9px 18px; border-radius: 10px; font-weight: 600;
