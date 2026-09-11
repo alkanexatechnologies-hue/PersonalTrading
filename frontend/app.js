@@ -4605,16 +4605,14 @@ function renderMasterSelector(d) {
     </tr>`;
 
   const regime = X.regime || "—";
+  const risk = d.riskRadar || null;
   box.innerHTML = `
     <div class="mts">
       <div class="mts-head">
         <div class="mts-title">🎯 Master Trade Selector</div>
-        <div class="mts-controls">
-          <span class="mts-chip">regime: <b>${regime}</b></span>
-          <span class="mts-chip">CALL/PUT LTP confirm</span>
-          <span class="mts-chip">one trade at a time</span>
-          <span class="mts-chip mts-prem ${premCls}">Prem: ${premState}</span>
-          <span class="mts-chip">RR / Score gate</span>
+        <div class="mts-head-actions">
+          <button type="button" class="mts-log-link" id="mts-oi-toggle">📊 OI Details</button>
+          <button type="button" class="mts-log-link" id="mts-log">🧾 View log</button>
         </div>
       </div>
 
@@ -4633,6 +4631,18 @@ function renderMasterSelector(d) {
           <b>${money(d.putLtp)}</b> <em class="${pctCls(d.putLtpChgPct)}">${pctTxt(d.putLtpChgPct)}</em>
           <small>day ${money(rng.putHi)} / ${money(rng.putLo)}</small>
         </div>
+      </div>
+
+      ${risk ? `<div class="mts-risk-wrap">${riskRadarHtml(risk)}</div>` : ""}
+
+      <div id="mts-oi" class="mts-oi ${state.mtsOiOpen ? "" : "hidden"}">${renderOiDetailsHtml(d)}</div>
+
+      <div class="mts-controls">
+        <span class="mts-chip">regime: <b>${regime}</b></span>
+        <span class="mts-chip">CALL/PUT LTP confirm</span>
+        <span class="mts-chip">one trade at a time</span>
+        <span class="mts-chip mts-prem ${premCls}">Prem: ${premState}</span>
+        <span class="mts-chip">RR / Score gate</span>
       </div>
 
       ${renderCommentaryHtml(C)}
@@ -4656,12 +4666,8 @@ function renderMasterSelector(d) {
         <span class="mts-final-lab">🎯 Final Master Decision:</span>
         <span class="mts-final-word">${verdict}</span>
         <span class="mts-final-reason">— ${reason || "—"}</span>
-        <button type="button" class="mts-log-link" id="mts-oi-toggle">📊 OI Details</button>
-        <button type="button" class="mts-log-link" id="mts-log">🧾 View log</button>
         <span class="mts-next">Next check: auto · <b id="mts-next">15s</b></span>
       </div>
-
-      <div id="mts-oi" class="mts-oi ${state.mtsOiOpen ? "" : "hidden"}">${renderOiDetailsHtml(d)}</div>
     </div>`;
 
   // Connect to the decision log (arbiter verdicts are already written there).

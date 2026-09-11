@@ -2150,18 +2150,27 @@ body.mode-option .index-strip { display: flex; }
 }
 
 /* ============ Master Trade Selector (OI Command main screen) ============ */
-.mts { display: flex; flex-direction: column; gap: 8px; }
+/* More breathing room between major sections than the original 8px - the
+   dense, same-weight blocks were the main complaint (everything read as one
+   continuous wall regardless of importance). */
+.mts { display: flex; flex-direction: column; gap: 18px; }
 .mts-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .mts-title { font-size: 15px; font-weight: 800; color: var(--text); }
-.mts-controls { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+/* OI Details + View log moved here (top of the card) from the bottom of a
+   long scroll, so both are reachable without hunting past the table. */
+.mts-head-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+/* Secondary "how this works" chips (regime, gates) - de-prioritized below the
+   verdict/LTP/risk hero row, since they're static explanation, not a live
+   trade decision the way the hero row is. */
+.mts-controls { display: flex; gap: 6px; flex-wrap: wrap; opacity: 0.85; }
 .mts-chip {
   font-size: 11px; color: var(--muted); background: var(--panel-2);
   border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px;
 }
 .mts-chip b { color: var(--text); }
 
-/* Verdict + CALL/PUT LTP boxes. */
-.mts-verdict-row { display: grid; grid-template-columns: 1fr 160px 160px; gap: 6px; }
+/* Verdict + CALL/PUT LTP boxes - the hero row, most important info first. */
+.mts-verdict-row { display: grid; grid-template-columns: 1fr 160px 160px; gap: 10px; }
 .mts-verdict {
   display: flex; align-items: center; gap: 10px; padding: 7px 12px;
   border-radius: 8px; border: 1px solid var(--border); background: #10141b;
@@ -2190,16 +2199,23 @@ body.mode-option .index-strip { display: flex; }
 .mts-ltp-box em { font-style: normal; font-size: 12px; font-weight: 700; }
 .mts-ltp-box small { font-size: 10px; color: var(--muted); }
 
+/* Risk Radar (options/riskRadar.ts) - previously computed server-side but
+   never actually rendered on this tab, so a trader saw a trade recommendation
+   here with no risk read next to it. Reuses the exact same .risk-radar
+   component/CSS already used on the Options and Stock Options tabs. */
+.mts-risk-wrap { margin: 0; }
+
 /* Decision table. */
 .mts-tablewrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
 .mts-table { width: 100%; border-collapse: collapse; font-size: 11.5px; min-width: 900px; }
 .mts-table th {
   text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px;
-  color: var(--muted); font-weight: 700; padding: 8px 8px; border-bottom: 1px solid var(--border);
+  color: var(--muted); font-weight: 700; padding: 10px 10px; border-bottom: 1px solid var(--border);
   white-space: nowrap; position: sticky; top: 0; background: var(--panel);
 }
-.mts-table td { padding: 9px 8px; border-bottom: 1px solid rgba(255,255,255,0.05); vertical-align: top; font-variant-numeric: tabular-nums; }
+.mts-table td { padding: 12px 10px; border-bottom: 1px solid rgba(255,255,255,0.05); vertical-align: top; font-variant-numeric: tabular-nums; }
 .mts-table tr:last-child td { border-bottom: none; }
+.mts-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.015); }
 .mts-strat { display: inline-block; font-weight: 800; font-size: 11px; padding: 3px 8px; border-radius: 6px; border-left: 3px solid var(--muted); }
 .mts-setup { color: #6ea8fe; border-left-color: #3b82f6; background: rgba(59,130,246,0.10); }
 .mts-directional { color: #c98bff; border-left-color: #a855f7; background: rgba(168,85,247,0.10); }
@@ -2238,8 +2254,14 @@ body.mode-option .index-strip { display: flex; }
 .mts-next b { color: var(--text); }
 
 @media (max-width: 820px) {
+  .mts { gap: 14px; }
+  .mts-head-actions { width: 100%; }
+  .mts-head-actions .mts-log-link { flex: 1; text-align: center; }
   .mts-verdict-row { grid-template-columns: 1fr; }
   .mts-verdict-word { font-size: 15px; }
+  .mts-ltp-box { flex-direction: row; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .mts-final { padding: 10px 12px; }
+  .mts-final-reason { min-width: 100%; order: 3; }
 }
 
 /* ============ OI Details drawer (inside Master Trade Selector) ============ */
@@ -2285,15 +2307,19 @@ body.mode-option .index-strip { display: flex; }
 }
 
 /* ============ Intelligent Market Commentary card (pure Hindi) ============ */
-.mtc { border: 1px solid var(--border); border-left: 3px solid var(--amber); border-radius: 10px; background: #0b1220; padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
+.mtc { border: 1px solid var(--border); border-left: 3px solid var(--amber); border-radius: 10px; background: #0b1220; padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; }
 .mtc.go { border-left-color: #16c784; }
 .mtc.bear { border-left-color: #ea3943; }
 .mtc.conflict { border-left-color: #a855f7; }
 .mtc.wait { border-left-color: var(--amber); }
-.mtc-levels { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
-.mtc-levels > div { background: var(--panel-2); border: 1px solid var(--border); border-radius: 7px; padding: 4px 6px; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.mtc-levels span { font-size: 9px; color: var(--muted); }
+.mtc-levels { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.mtc-levels > div { background: var(--panel-2); border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.mtc-levels span { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
 .mtc-levels b { font-size: 13px; font-variant-numeric: tabular-nums; }
+/* Spot / price is the anchor value everything else is read against - lift it
+   visually above its four sibling level cells instead of five equal boxes. */
+.mtc-levels > div:nth-child(3) { background: var(--panel); border-color: var(--blue); }
+.mtc-levels > div:nth-child(3) b { font-size: 16px; color: var(--text); }
 .mtc-sec h5 { margin: 0 0 3px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); font-weight: 800; }
 .mtc-sec p { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--text); }
 .mtc-reasons { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.7; }
@@ -2326,8 +2352,14 @@ body.mode-option .index-strip { display: flex; }
 .up { color: #16c784; } .down { color: #ea3943; }
 
 @media (max-width: 820px) {
+  .mtc { padding: 12px; gap: 12px; }
   .mtc-levels { grid-template-columns: repeat(2, 1fr); }
+  .mtc-levels > div:nth-child(3) { grid-column: 1 / -1; }
   .mtc-grid2 { grid-template-columns: 1fr; }
+}
+@media (max-width: 480px) {
+  .mtc-levels { grid-template-columns: 1fr 1fr; }
+  .mts-table { font-size: 11px; }
 }
 
 /* ============ Consolidated cockpit strip (status | Trader Mind | risk) ============ */
