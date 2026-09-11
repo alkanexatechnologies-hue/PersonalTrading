@@ -1,5 +1,6 @@
 import { Candle, SwingPick } from "../types";
 import { ema, rsi, last, atr } from "../indicators";
+import { atrStopTarget } from "../indicators/riskLevels";
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -69,11 +70,12 @@ export function computeSwing(symbol: string, name: string, daily: Candle[]): Swi
   // isn't unreasonably far on very volatile names.
   const recentLows = daily.slice(Math.max(0, n - 10)).map((c) => c.low);
   const swingLow = recentLows.length ? Math.min(...recentLows) : price;
-  const atrFloor = atrVal != null ? entry - 1.5 * atrVal : swingLow;
+  const atrLevels = atrVal != null ? atrStopTarget(entry, atrVal, 1) : null;
+  const atrFloor = atrLevels != null ? atrLevels.stop : swingLow;
   const stop = round2(Math.max(swingLow, atrFloor));
   // Projected swing target: a typical multi-day breakout runs ~2.5 ATR from the
   // trigger. Honest, volatility-based - not a promise.
-  const target = atrVal != null ? round2(entry + 2.5 * atrVal) : round2(entry * 1.08);
+  const target = atrLevels != null ? round2(atrLevels.target) : round2(entry * 1.08);
   const expectedMovePct = round2(((target - entry) / entry) * 100);
   const riskReward = entry - stop > 0 ? round2((target - entry) / (entry - stop)) : null;
 

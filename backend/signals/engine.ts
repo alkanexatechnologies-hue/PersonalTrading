@@ -12,6 +12,8 @@ import {
 } from "../indicators";
 import { DISCLAIMER } from "../config";
 import { MAX_SCORE, WEIGHTS } from "./score";
+import { atrStopTarget } from "../indicators/riskLevels";
+import { dayHighLow } from "../indicators/dayRange";
 
 // Each indicator contributes a signed vote in [-weight, +weight].
 // The sum is normalised to a -100..+100 score. Weights are shared with the
@@ -26,18 +28,9 @@ export function computeSignal(symbol: string, candles: Candle[]): SignalResult {
   const asOf = candles[candles.length - 1].time;
 
   // Current session (day) high/low - key intraday levels for CALL/PUT decisions.
-  const lastDay = new Date((asOf + 19800) * 1000).toISOString().slice(0, 10);
-  let dHigh = -Infinity;
-  let dLow = Infinity;
-  for (const c of candles) {
-    const d = new Date((c.time + 19800) * 1000).toISOString().slice(0, 10);
-    if (d === lastDay) {
-      if (c.high > dHigh) dHigh = c.high;
-      if (c.low < dLow) dLow = c.low;
-    }
-  }
-  const dayHigh = isFinite(dHigh) ? round2(dHigh) : null;
-  const dayLow = isFinite(dLow) ? round2(dLow) : null;
+  const { high: dHigh, low: dLow } = dayHighLow(candles);
+  const dayHigh = dHigh != null ? round2(dHigh) : null;
+  const dayLow = dLow != null ? round2(dLow) : null;
 
   // 1. EMA 9/21 crossover (trend)
   const ema9 = last(ema(closes, 9));
@@ -203,13 +196,9 @@ export function computeSignal(symbol: string, candles: Candle[]): SignalResult {
   let suggestedStopLoss: number | null = null;
   let suggestedTarget: number | null = null;
   if (atrLast != null && score !== 0) {
-    if (score > 0) {
-      suggestedStopLoss = round2(price - 1.5 * atrLast);
-      suggestedTarget = round2(price + 2.5 * atrLast);
-    } else {
-      suggestedStopLoss = round2(price + 1.5 * atrLast);
-      suggestedTarget = round2(price - 2.5 * atrLast);
-    }
+    const { stop, target } = atrStopTarget(price, atrLast, score > 0 ? 1 : -1);
+    suggestedStopLoss = round2(stop);
+    suggestedTarget = round2(target);
   }
 
   votes.sort((a, b) => b.weight - a.weight);

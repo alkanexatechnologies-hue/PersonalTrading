@@ -1,4 +1,0 @@
-﻿RELIANCE.NS : available=True rows=15 
-HINDUNILVR.NS : available=True rows=15 
-BAJFINANCE.NS : available=False rows=0 chain 429
-^NSEBANK : available=True rows=15 

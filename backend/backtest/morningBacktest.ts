@@ -1,6 +1,7 @@
 import { Candle } from "../types";
 import { atr } from "../indicators";
 import { computeSignal } from "../signals/engine";
+import { istDateOfSec, istMinuteOfDay, istTimeOfSec } from "../util/istTime";
 
 // ---- Morning-window directional backtest (9:15-11:00 IST) ----
 // Replays the SIGNAL logic bar-by-bar over the last N days with NO lookahead:
@@ -42,9 +43,9 @@ export interface MorningBacktestResult {
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
-const istDateOf = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(0, 10);
-const istMin = (t: number) => { const d = new Date((t + 19800) * 1000); return d.getUTCHours() * 60 + d.getUTCMinutes(); };
-const istHM = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(11, 16);
+const istDateOf = istDateOfSec;
+const istMin = istMinuteOfDay;
+const istHM = istTimeOfSec;
 
 const WIN_START = 9 * 60 + 15; // 09:15
 const WIN_END = 11 * 60; // 11:00

@@ -1,7 +1,0 @@
-{"id":"mtwj8pw8-1","ts":1789105535000,"channel":"oi-command","symbol":"^NSEI","mode":null,"eventType":"DATA_HEALTH_RESTORED","severity":"info","summary":"^NSEI: OI feed back to normal — reads live again","payload":{}}
-{"id":"mtwjdb0o-4","ts":1789105749000,"channel":"oi-command","symbol":"^NSEI","mode":null,"eventType":"DATA_HEALTH_DEGRADE","severity":"warn","summary":"^NSEI: OI feed degraded (stale / rate-limited) — reads may lag","payload":{}}
-{"id":"mtwke4mw-b","ts":1789107467000,"channel":"oi-command","symbol":"^NSEI","mode":null,"eventType":"DATA_HEALTH_RESTORED","severity":"info","summary":"^NSEI: OI feed back to normal — reads live again","payload":{}}
-{"id":"mtwkggqo-d","ts":1789107576000,"channel":"oi-command","symbol":"^NSEI","mode":null,"eventType":"DATA_HEALTH_DEGRADE","severity":"warn","summary":"^NSEI: OI feed degraded (stale / rate-limited) — reads may lag","payload":{}}
-{"id":"mtwkgmww-f","ts":1789107584000,"channel":"oi-command","symbol":"^NSEI","mode":null,"eventType":"DATA_HEALTH_RESTORED","severity":"info","summary":"^NSEI: OI feed back to normal — reads live again","payload":{}}
-{"id":"mtwkiwpc-h","ts":1789107690000,"channel":"oi-command","symbol":"^NSEI","mode":null,"eventType":"DATA_HEALTH_DEGRADE","severity":"warn","summary":"^NSEI: OI feed degraded (stale / rate-limited) — reads may lag","payload":{}}
-{"id":"mtwkj0k8-j","ts":1789107695000,"channel":"oi-command","symbol":"^NSEI","mode":null,"eventType":"DATA_HEALTH_RESTORED","severity":"info","summary":"^NSEI: OI feed back to normal — reads live again","payload":{}}

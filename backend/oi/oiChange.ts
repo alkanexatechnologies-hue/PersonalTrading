@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { OiAnalysis } from "../types";
+import { istDateStr, istTimeStr } from "../util/istTime";
 
 // ---- OI-change tracker (ITM / ATM / OTM, same strike, both sides) ----
 // The feed gives LIVE per-strike OI + premium but not the day's CHANGE. So we
@@ -23,8 +24,8 @@ const baselines = new Map<string, Baseline>();
 const FILE = path.join(process.cwd(), "data", "oi-baselines.json");
 let loaded = false;
 
-function istDate(): string { return new Date(Date.now() + 19800000).toISOString().slice(0, 10); }
-function istTime(): string { return new Date(Date.now() + 19800000).toISOString().slice(11, 16); }
+function istDate(): string { return istDateStr(); }
+function istTime(): string { return istTimeStr(); }
 
 function loadBaselines(): void {
   if (loaded) return;

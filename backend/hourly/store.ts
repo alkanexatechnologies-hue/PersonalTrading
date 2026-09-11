@@ -1,20 +1,14 @@
 import fs from "fs";
 import path from "path";
 import { HourlyPick } from "../types";
+import { istDateStr, istTimeStr } from "../util/istTime";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 
-export function istDateStr(d = new Date()): string {
-  // Convert to IST (UTC+5:30) and take the calendar date.
-  return new Date(d.getTime() + 19800000).toISOString().slice(0, 10);
-}
-
-export function istSlot(d = new Date()): string {
-  const ist = new Date(d.getTime() + 19800000);
-  const hh = String(ist.getUTCHours()).padStart(2, "0");
-  const mm = String(ist.getUTCMinutes()).padStart(2, "0");
-  return `${hh}:${mm}`;
-}
+// Re-exported from the shared util so existing callers of `istDateStr`/`istSlot`
+// from this module keep working unchanged.
+export { istDateStr };
+export const istSlot = istTimeStr;
 
 function ensureDir() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });

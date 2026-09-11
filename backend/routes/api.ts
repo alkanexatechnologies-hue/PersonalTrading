@@ -127,6 +127,8 @@ import {
 } from "../indicators";
 import { buildMarketCommentary, detectStructure, formatTradeReview } from "../commentary/marketCommentary";
 import { CONFIG, DEFAULT_SYMBOLS, DISCLAIMER, SymbolDef, nearestStrike, SWING_SYMBOLS, findSymbolDef, ALL_SYMBOLS } from "../config";
+import { istDateOfSec } from "../util/istTime";
+import { dayHighLow } from "../indicators/dayRange";
 import { Interval, NextDayPick, Opportunity, TradeAlert, OiAnalysis } from "../types";
 
 const router = Router();
@@ -2276,12 +2278,10 @@ router.get("/ask", async (req: Request, res: Response) => {
     const optType = opp?.optionType ?? (bull ? "CE" : "PE");
 
     // TODAY'S RANGE: intraday low–high + where spot sits inside it.
-    const istDayOf = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(0, 10);
-    const todayIso3 = istDayOf(c15[c15.length - 1].time);
-    const todays = c15.filter((x) => istDayOf(x.time) === todayIso3);
     const lastC = c15[c15.length - 1];
-    const dayHigh = todays.length ? Math.max(...todays.map((x) => x.high)) : lastC.high;
-    const dayLow = todays.length ? Math.min(...todays.map((x) => x.low)) : lastC.low;
+    const { high: dHigh, low: dLow } = dayHighLow(c15);
+    const dayHigh = dHigh ?? lastC.high;
+    const dayLow = dLow ?? lastC.low;
     const rangePos = dayHigh > dayLow ? Math.round(((spot - dayLow) / (dayHigh - dayLow)) * 100) : null;
     const rangeWhere = rangePos == null ? "" : rangePos >= 70 ? "ऊपरी हिस्से में (High के पास)" : rangePos <= 30 ? "निचले हिस्से में (Low के पास)" : "बीच में";
 
@@ -3061,7 +3061,7 @@ async function buildOiCommand(def: SymbolDef): Promise<any> {
       const strongSupport = oiLvl(below[0], "PE"), weakSupport = oiLvl(below[1], "PE");
       // Opening 15-min high/low (first 15m bar today) + previous-day high/low.
       let orbHigh: number | null = null, orbLow: number | null = null, pdh: number | null = null, pdl: number | null = null;
-      const istDayOf = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(0, 10);
+      const istDayOf = istDateOfSec;
       const istMinOf = (t: number) => { const d = new Date((t + 19800) * 1000); return d.getUTCHours() * 60 + d.getUTCMinutes(); };
       if (c15arr.length) {
         const today = istDayOf(c15arr[c15arr.length - 1].time);

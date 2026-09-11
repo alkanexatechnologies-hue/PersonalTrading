@@ -1,5 +1,6 @@
 import { Candle } from "../types";
 import { adx as adxIndicator, ema } from "../indicators";
+import { istMinuteOfDay } from "../util/istTime";
 
 export interface FilterOptions {
   useTrendFilter: boolean;
@@ -28,12 +29,6 @@ export const DEFAULT_FILTERS: FilterOptions = {
 export interface FilterMasks {
   longOk: boolean[];
   shortOk: boolean[];
-}
-
-// Minutes since IST midnight for an epoch-seconds timestamp.
-function istMinuteOfDay(epochSec: number): number {
-  const istSec = (epochSec + 19800) % 86400; // +5:30
-  return Math.floor(istSec / 60);
 }
 
 /**

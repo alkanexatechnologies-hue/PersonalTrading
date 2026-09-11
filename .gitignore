@@ -5,8 +5,5 @@ dist/
 .DS_Store
 .groww_token
 .groww_creds.ps1
-data/whatsapp-config.json
-data/whatsapp-sent.json
-data/whatsapp-log.json
-data/oi-log/
+data/
 .truedata_creds
