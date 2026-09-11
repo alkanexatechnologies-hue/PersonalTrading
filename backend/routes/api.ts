@@ -3162,6 +3162,16 @@ async function buildOiCommand(def: SymbolDef): Promise<any> {
         oiHelpful: payload.setup.oiHelpful, pxHelpful: payload.setup.pxHelpful,
         invalidation, support, resistance, expLow, expHigh, last5mDir,
       });
+      // Pre-trade risk score (volatility spike, choppy-market theta trap, time-of-
+      // day risk, volume spike, sharp-candle risk, premium sensitivity to a single
+      // bar's move). computeRiskRadar already existed and was fully built/tested,
+      // but was previously wired into nothing except the standalone
+      // GET /options/:symbol route - disconnected from OI Command entirely, so a
+      // trader saw a trade recommendation here with no risk read next to it. Now
+      // attached to every OI Command response.
+      try {
+        payload.riskRadar = c15arr.length ? computeRiskRadar(c15arr, { interval: "15m" as Interval, premium: r0(ltp) }) : null;
+      } catch { payload.riskRadar = null; }
       const recDir = payload.recommendation?.directional || {};
       const band = [payload.spot, recDir.spotTarget, recDir.spotStop, invalidation, r0(spot + expHigh), r0(spot - expLow)]
         .filter((x: any) => x != null && Number(x) > 0)
@@ -5524,10 +5534,32 @@ router.get("/paper/tick", async (req: Request, res: Response) => {
     res.status(502).json({ error: e?.message || "Paper tick failed" });
   }
 });
+// Attach a pre-trade risk read (computeRiskRadar) to each OPEN position, so the
+// Paper Desk shows the same risk badge as OI Command instead of a bare P&L
+// number. Attached at the route layer (not inside paper/engine.ts's tick loop)
+// so it never touches the hot autonomous-trading path - purely additive to what
+// the UI receives. Best-effort per position: a candle-fetch failure for one
+// symbol just omits that position's badge rather than failing the whole poll.
+async function withRiskRadar(summary: any): Promise<any> {
+  if (!summary || !Array.isArray(summary.open) || !summary.open.length) return summary;
+  const open = await Promise.all(
+    summary.open.map(async (pos: any) => {
+      try {
+        const candles = await getCandlesCached(pos.symbol, "15m");
+        if (!candles || candles.length < 15) return pos;
+        const riskRadar = computeRiskRadar(candles, { interval: "15m" as Interval, premium: pos.lastPrice ?? pos.entryPrice });
+        return { ...pos, riskRadar };
+      } catch {
+        return pos;
+      }
+    })
+  );
+  return { ...summary, open };
+}
 // Fast mark-to-market (open premiums + target/stop exits only). Polled ~1s by the UI.
 router.get("/paper/marks", async (req: Request, res: Response) => {
   try {
-    res.json(await markPaper(paperDeps(req.query.force === "true")));
+    res.json(await withRiskRadar(await markPaper(paperDeps(req.query.force === "true"))));
   } catch (e: any) {
     res.status(502).json({ error: e?.message || "Paper marks failed" });
   }
