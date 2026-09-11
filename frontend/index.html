@@ -88,7 +88,7 @@
           <button type="button" class="mg-btn mg-option" data-mode="option">
             <span class="mg-ico">🎯</span>
             <span class="mg-t">Option Trading</span>
-            <span class="mg-d">OI Command · AI Paper Desk · Option Top Pick · Early Moves</span>
+            <span class="mg-d">Trader Dashboard · AI Paper Desk · Option Top Pick · Early Moves</span>
           </button>
           <button type="button" class="mg-btn mg-stockoption" data-mode="stockOption">
             <span class="mg-ico">📊</span>
@@ -230,7 +230,7 @@
         <!-- Persistent NIFTY/BANKNIFTY glance strip, Option Trading desk only. -->
         <div id="index-strip" class="index-strip"></div>
         <div class="tabs" id="tabs">
-          <button class="tab active grp-option" data-tab="oicommand" data-group="option">🎯 OI Command</button>
+          <button class="tab active grp-option" data-tab="oicommand" data-group="option">🎯 Trader Dashboard</button>
           <button class="tab grp-option" data-tab="paper" data-group="option">AI Paper Desk</button>
           <button class="tab grp-option" data-tab="toppicks" data-group="option">Option Top Pick</button>
           <button class="tab grp-option" data-tab="earlymoves" data-group="option">⚡ Early Moves</button>
@@ -285,7 +285,7 @@
               <div class="tm-head-row1">
                 <select id="tm-symbol" class="ask-symbol"></select>
                 <span id="tm-live" class="tm-live"><span class="live-dot"></span>LIVE</span>
-                <span class="wl-sub" style="margin-left:auto">Same engine as OI Command, laid out as one command view.</span>
+                <span class="wl-sub" style="margin-left:auto">Same engine as Trader Dashboard, laid out as one command view.</span>
               </div>
               <div class="tm-head-row2">
                 <div class="tm-spot"><b id="tm-spot-val">—</b><span id="tm-spot-chg" class="tm-spot-chg"></span></div>
@@ -346,11 +346,11 @@
           </div>
         </div><!-- /panel-earlymoves -->
 
-        <!-- ================= TAB: OI Command (single-symbol OI-change command screen) ================= -->
+        <!-- ================= TAB: Trader Dashboard (single-symbol OI-change command screen) ================= -->
         <div class="tab-panel active" id="panel-oicommand">
           <div class="oic-cockpit">
             <div class="oic-toolbar">
-              <b>OI Command</b>
+              <b>Trader Dashboard</b>
               <select id="oic-symbol"><option value="">लोड…</option></select>
               <button id="oic-refresh" class="ghost">↻</button>
               <span id="oic-rel" class="rel-badge rel-med">rel: —</span>
@@ -359,7 +359,7 @@
               <button id="oic-log-btn" class="ghost" title="Decision Log — every GO/WAIT flip, module state change, and trade emit / veto / dedup">🧾 Log</button>
             </div>
             <div id="oic-backtest"></div>
-            <div id="oicommand">OI Command लोड हो रहा…</div>
+            <div id="oicommand">Trader Dashboard लोड हो रहा…</div>
             <!-- Decision Log slide-out drawer (opens over the live view) -->
             <div id="oic-log-drawer" class="oic-log-drawer hidden">
               <div class="oic-log-drawer-head">

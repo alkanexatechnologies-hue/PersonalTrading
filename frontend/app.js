@@ -40,7 +40,7 @@ async function init() {
   loadIndexDesk();
   startWatchlistAutoRefresh();
 
-  // OI Command is the default tab for Monday live testing of the OI model.
+  // Trader Dashboard is the default tab for Monday live testing of the OI model.
   state.tpUniverse = "index";
   initOiCommand();
   startOiCommandLive();
@@ -1394,7 +1394,7 @@ function setupTabs() {
 // ---------- per-tab analysis flowcharts (review the logic of each tab) ----------
 // Step types: in=input/data, proc=processing, gate=filter/gate, out=output, note.
 const TAB_FLOW = {
-  oicommand: { title: "OI Command — Monday test: OI vs VWAP / GainzAlgo v2 / 4-Layer", steps: [
+  oicommand: { title: "Trader Dashboard — Monday test: OI vs VWAP / GainzAlgo v2 / 4-Layer", steps: [
     { t: "in", text: "Groww option chain (~90s) + VWAP/ADX from 15m + 4-Layer (no RSI/MACD) + GainzAlgo v2 (high-prob buy filter) + last 5m bar + futures buildup" },
     { t: "proc", text: "Correlate each model vs OI direction: AGREE / AGAINST / FLAT. Consensus AGREE needs ≥2 agrees and 0 against." },
     { t: "proc", text: "Sentiment/Liquidity/Risk pipeline: regime → liquidity → sentiment → premium → wall-reaction → trade-score → dedup → display threshold." },
@@ -1425,7 +1425,7 @@ const TAB_FLOW = {
     { t: "note", text: "This is a HISTORICAL TENDENCY, not a prediction — a stock's regime can change. High bull % = better CE candidate; low = better PE candidate." },
   ]},
   paper: { title: "AI Paper Desk — Directional + Scalp, win-win anytime", steps: [
-    { t: "in", text: "LIVE market data: Index 5m/15m/1h · Option chain OI · OI Command bulletin" },
+    { t: "in", text: "LIVE market data: Index 5m/15m/1h · Option chain OI · Trader Dashboard bulletin" },
     { t: "proc", text: "DIRECTIONAL: OI TAKE + 1h bulletin same side. No 4-layer opposite-side fallback." },
     { t: "proc", text: "SCALP: 5m+15m bulletin agree, or burst firing with 5m signal. No fade/anticipation-against-signal." },
     { t: "gate", text: "No clock windows (9:20/lunch/3pm removed). No daily trade-count cap. NSE session only (realistic fills). EOD flatten ~15:25." },
@@ -1495,7 +1495,7 @@ function renderTabFlow(name) {
 // brief "just updated" pulse, instead of the previous plain innerHTML replace
 // on every poll - which reset scroll position and any expanded row on every
 // tick and read as "nothing is really live" even though data was refreshing
-// underneath. Used by the OI Command / Paper Desk / Top Picks live pollers.
+// underneath. Used by the Trader Dashboard / Paper Desk / Top Picks live pollers.
 function renderLive(containerId, renderFn) {
   const box = el(containerId);
   const scrollTop = box ? box.scrollTop : 0;
@@ -1510,9 +1510,9 @@ function renderLive(containerId, renderFn) {
 
 // ---------- persistent index strip (Option Trading mode) ----------
 // A slim, always-visible NIFTY/BANKNIFTY glance so index levels are readable
-// while browsing Paper Desk / Top Pick without switching to OI Command. Reads
-// from the same cached quote pipeline OI Command's own spot price comes from,
-// so the numbers shown here and inside OI Command are provably in sync rather
+// while browsing Paper Desk / Top Pick without switching to Trader Dashboard.
+// Reads from the same cached quote pipeline Trader Dashboard's own spot price
+// comes from, so the numbers shown here and there are provably in sync rather
 // than two independently-fetched copies that could drift apart.
 const INDEX_STRIP_SYMBOLS = [
   { symbol: "^NSEI", label: "NIFTY" },
@@ -2404,7 +2404,7 @@ function initStockOptions() {
 }
 
 // ---------- Trader Mind tab (options-interest command view) ----------
-// Reuses the same live data OI Command already fetches (GET /api/oi-command)
+// Reuses the same live data Trader Dashboard already fetches (GET /api/oi-command)
 // plus GET /api/signal (the same indicator-vote breakdown the "Selected
 // Stock" tab's Confirmation panel uses) and GET /api/candles (the same
 // candle+overlay endpoint the main chart uses) - laid out as one dense
@@ -4576,7 +4576,7 @@ function renderOpeningPlay(d) {
   box.querySelectorAll("tbody tr[data-sym]").forEach((t) => t.addEventListener("click", () => openStock(t.getAttribute("data-sym"))));
 }
 
-// ---------- OI Command (single-symbol OI-change command screen) ----------
+// ---------- Trader Dashboard (single-symbol OI-change command screen) ----------
 async function initOiCommand() {
   const sel = el("oic-symbol");
   if (sel && !sel.dataset.loaded) {
@@ -4867,7 +4867,7 @@ function renderOiDetailsHtml(d) {
     </div>`;
 }
 
-// ===================== Master Trade Selector (OI Command main screen) =====================
+// ===================== Master Trade Selector (Trader Dashboard main screen) =====================
 // Replaces the old cockpit view. Shows SETUP / DIRECTIONAL / SCALP as one decision table,
 // the CALL + PUT LTP, and the Final Master Decision — all from the arbiter (d.ext.arbitration),
 // which is already mirrored to the central log (arbitration/decision channels).
@@ -5232,7 +5232,7 @@ function renderOiReview(d, conf) {
   box.innerHTML = `${bar("5", "5m")} ${bar("15", "15m")} ${bar("60", "1h")}`;
 }
 
-// ---------- OI Command BACK-TEST (today) ----------
+// ---------- Trader Dashboard BACK-TEST (today) ----------
 // Back-tests the grid's concrete recommendation on REAL option + spot candles:
 // the recommended ATM CE/PE trade (grid target/stop) across the session, its
 // 5/15/60m direction accuracy, plus a replay of the day's logged signals.
@@ -5305,7 +5305,7 @@ function renderOiBacktest(d) {
   }
 
   box.innerHTML = `<div class="oic-bt-wrap">
-    <div class="oic-bt-title">📊 OI Command Back-test · <b>${d.name}</b> · ${d.date}
+    <div class="oic-bt-title">📊 Trader Dashboard Back-test · <b>${d.name}</b> · ${d.date}
       <button class="oic-cbtn" onclick="loadOiBacktest()">↻ फिर चलाएँ</button>
       <button class="oic-cbtn" onclick="el('oic-backtest').innerHTML=''">✕ बंद करें</button>
     </div>

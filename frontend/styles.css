@@ -804,7 +804,7 @@ button.ghost.active { background: var(--blue); border-color: var(--blue); color:
 .mt-form { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; background: rgba(255,255,255,0.02); }
 .mt-form-title { font-size: 12px; font-weight: 700; margin-bottom: 8px; }
 
-/* OI Command — cockpit: GO stays sticky, the rest scrolls on laptop */
+/* Trader Dashboard — cockpit: GO stays sticky, the rest scrolls on laptop */
 body.oi-focus { overflow: hidden; }
 body.oi-focus .disclaimer,
 body.oi-focus .ask-bar,
@@ -1415,7 +1415,7 @@ body.oi-focus #panel-toppicks .tp-hide-outlook { display: none !important; }
 #watchlist .brand { margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
 #watchlist .brand h1 { font-size: 15px; }
 
-/* Trader Mind sits in the main content so OI Command still sees best-case */
+/* Trader Mind sits in the main content so Trader Dashboard still sees best-case */
 .mind-idx { font-size: 11px; line-height: 1.35; padding: 2px 0; border-top: 1px dashed var(--border); }
 .mind-idx:first-child { border-top: none; }
 .mind-idx b { display: block; }
@@ -1510,7 +1510,7 @@ body.oi-focus #panel-toppicks .tp-hide-outlook { display: none !important; }
 .ocb-ltp-click { cursor: pointer; }
 .ocb-ltp-click:hover { background: rgba(59,130,246,0.12); border-radius: 4px; }
 
-/* ---- OI Command back-test ---- */
+/* ---- Trader Dashboard back-test ---- */
 .oic-bt-wrap { max-width: 1040px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; background: #0b1220; }
 .oic-bt-title { font-size: 12px; font-weight: 700; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .oic-bt-sec { border: 1px solid var(--border); border-radius: 7px; padding: 6px 8px; margin-bottom: 7px; background: rgba(255,255,255,0.02); }
@@ -1577,7 +1577,7 @@ body.oi-focus #panel-toppicks .tp-hide-outlook { display: none !important; }
 
 
 /* ===================================================================== */
-/*  OI Command cockpit — design corrections (reorder + extension surface) */
+/*  Trader Dashboard cockpit — design corrections (reorder + extension surface) */
 /* ===================================================================== */
 
 /* §3 Typography flip: GO/WAIT is now a BACKGROUND STATE (the .oic-go.go /
@@ -1943,7 +1943,7 @@ body.oi-focus .signal-block { padding: 6px 12px; font-size: 13px; }
 }
 
 /* ============ Thin & Compact density pass (same data, less height) ============ */
-/* Reduces padding/margins/heights across the OI Command cockpit so Setup,
+/* Reduces padding/margins/heights across the Trader Dashboard cockpit so Setup,
    Directional and Log get more vertical room. No fields are removed. */
 
 /* Trader Mind strip → single thin row (state + best-case chips inline). */
@@ -1962,7 +1962,7 @@ body.oi-focus #mind-bar { max-height: 15vh; margin-bottom: 3px; }
 #tab-flow-wrap { margin: 2px 0; }
 #tab-flow-toggle { padding: 3px 8px; font-size: 11px; }
 
-/* OI Command dashboard: tighter grid + less trailing space. */
+/* Trader Dashboard dashboard: tighter grid + less trailing space. */
 .oic-dash { gap: 6px; padding-bottom: 8px; }
 .oic-toolbar { padding: 2px 0 4px; gap: 6px; }
 
@@ -2089,7 +2089,7 @@ body.mode-option .index-strip { display: flex; }
 .index-strip .is-chg.up { color: var(--green); }
 .index-strip .is-chg.down { color: var(--red); }
 
-/* A brief "just refreshed" pulse on a live-polled panel (OI Command, Paper
+/* A brief "just refreshed" pulse on a live-polled panel (Trader Dashboard, Paper
    Desk, Top Picks) - visual confirmation the numbers underneath just synced
    with the market, without a jarring full teardown/rebuild feel. */
 @keyframes nsaLivePulse {
@@ -2149,7 +2149,7 @@ body.mode-option .index-strip { display: flex; }
   .mg-t { font-size: 17px; }
 }
 
-/* ============ Master Trade Selector (OI Command main screen) ============ */
+/* ============ Master Trade Selector (Trader Dashboard main screen) ============ */
 /* More breathing room between major sections than the original 8px - the
    dense, same-weight blocks were the main complaint (everything read as one
    continuous wall regardless of importance). */
