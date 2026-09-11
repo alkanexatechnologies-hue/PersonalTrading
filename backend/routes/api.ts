@@ -86,6 +86,8 @@ import { logOiSignal, evaluateOiSignals, reviewOiSignals } from "../oi/oiCommand
 import { auditSignal } from "../compliance/signalAudit";
 import { complianceMeta } from "../compliance/disclosures";
 import { login as doLogin, logout as doLogout, sessionInfo, validate as validateSession } from "../auth/session";
+import { getNotifyEmail, setNotifyEmail, rotateCredentials, maybeRotateForNewDay } from "../auth/credentials";
+import { emailConfigured } from "../auth/mailer";
 import { computeOiVolume } from "../oi/oiVolume";
 import { growwChainForExpiry } from "../data/growwProvider";
 import { reviewOptionTrade } from "../backtest/optionReview";
@@ -3742,6 +3744,39 @@ router.post("/logout", (req: Request, res: Response) => {
   res.json({ ok: true });
 });
 
+// Login-credential email notifications. Requires an existing valid session
+// (this router's auth gate already covers everything except /login, /session,
+// /logout) - so the very first login still uses the console-printed password,
+// but from then on the user can have every future 08:00 IST rotation emailed
+// to them instead of hunting through server logs.
+function maskEmail(email: string): string {
+  const at = email.indexOf("@");
+  if (at <= 1) return email;
+  return email.slice(0, 1) + "***" + email.slice(at - 1);
+}
+router.get("/auth/email", (_req: Request, res: Response) => {
+  const email = getNotifyEmail();
+  res.json({ email: email ? maskEmail(email) : null, configured: !!email, smtpConfigured: emailConfigured() });
+});
+router.post("/auth/email", (req: Request, res: Response) => {
+  const email = String(req.body?.email ?? "").trim();
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ ok: false, error: "That doesn't look like a valid email address." });
+  }
+  setNotifyEmail(email || null);
+  res.json({ ok: true, email: email ? maskEmail(email) : null, smtpConfigured: emailConfigured() });
+});
+// Manual "rotate now" - mostly useful right after setting a notification email,
+// so you don't have to wait for the next 08:00 IST to see it work.
+router.post("/auth/rotate", async (_req: Request, res: Response) => {
+  try {
+    const creds = await rotateCredentials();
+    res.json({ ok: true, username: creds.username, emailed: !!creds.notifyEmail, smtpConfigured: emailConfigured() });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e?.message || "Rotation failed." });
+  }
+});
+
 // COMPLIANCE: read the signal audit trail (JSON). CSV export is available via
 // /api/log/export.csv?channel=signal-audit. Filters: ?symbol=&mins=&limit=
 router.get("/audit/signals", (req: Request, res: Response) => {
@@ -5589,6 +5624,11 @@ export function startHourlyScheduler() {
   hourlySchedulerStarted = true;
   try { syncSessionProvider(); } catch { /* ignore */ }
   setInterval(() => { try { syncSessionProvider(); } catch { /* ignore */ } }, 30_000);
+  // Daily login-credential rotation (08:00 IST) - checked every minute so the
+  // 08:00 boundary is caught promptly without polling too often; the rotation
+  // itself is a no-op unless today hasn't rotated yet (see credentials.ts).
+  maybeRotateForNewDay().catch(() => {});
+  setInterval(() => { maybeRotateForNewDay().catch(() => {}); }, 60_000);
   setInterval(async () => {
     try {
       if (!isTradingTimeIST()) return;

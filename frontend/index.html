@@ -165,6 +165,19 @@
           <b>GENERATE TOKEN &amp; SAVE</b> — the server mints the access token and stores it <b>securely server-side (.groww_token), so it persists across every session</b>
           (the full token is never shown or logged). Tokens expire daily ~6 AM IST — just press the button again to re-mint. No manual restart; the provider reconnects automatically.
         </p>
+
+        <div class="cp-divider"></div>
+        <h4>Login notifications</h4>
+        <label class="cp-label" for="auth-email">Notify email <span class="wl-sub">(optional)</span></label>
+        <div class="gc-field">
+          <input id="auth-email" type="email" placeholder="you@example.com" autocomplete="off" autocapitalize="off" spellcheck="false" />
+          <button id="auth-email-save" type="button" class="auth-email-save" aria-label="Save">💾</button>
+        </div>
+        <div id="auth-email-status" class="conn-status"></div>
+        <p class="wl-sub cp-note">
+          Dashboard credentials stay the same across restarts and only rotate automatically once a day at <b>08:00 IST</b> — set an email here to have each new
+          password sent to you instead of checking the server console. Requires the server's SMTP env vars (SMTP_HOST/SMTP_USER/SMTP_PASS) to actually be configured.
+        </p>
       </div>
     </header>
 

@@ -944,7 +944,7 @@ function setupConnect() {
   const panel = el("connect-panel");
   el("connect-btn").addEventListener("click", () => {
     const nowHidden = panel.classList.toggle("hidden");
-    if (!nowHidden) { loadGrowwConfig(); startGrowwPoll(); } else stopGrowwPoll();
+    if (!nowHidden) { loadGrowwConfig(); startGrowwPoll(); loadAuthEmail(); } else stopGrowwPoll();
   });
   el("connect-close").addEventListener("click", () => { panel.classList.add("hidden"); stopGrowwPoll(); });
 
@@ -969,7 +969,49 @@ function setupConnect() {
   const upd = el("gc-update-token");
   if (upd) upd.addEventListener("click", doForgetToken);
 
+  const saveEmail = el("auth-email-save");
+  if (saveEmail) saveEmail.addEventListener("click", doSaveAuthEmail);
+
   refreshConnection();
+}
+
+// ---------- login-notification email (credential rotation) ----------
+async function loadAuthEmail() {
+  const inp = el("auth-email");
+  const status = el("auth-email-status");
+  try {
+    const d = await fetch("/api/auth/email").then((r) => r.json());
+    if (inp && d.email) inp.placeholder = d.email + " (saved)";
+    if (status) {
+      status.textContent = d.configured
+        ? (d.smtpConfigured ? "" : "Email saved, but the server has no SMTP env vars set (SMTP_HOST/SMTP_USER/SMTP_PASS) - rotations will still show in the server console.")
+        : "";
+      status.className = "conn-status" + (d.configured && !d.smtpConfigured ? " warn" : "");
+    }
+  } catch (_) { /* best-effort */ }
+}
+async function doSaveAuthEmail() {
+  const inp = el("auth-email");
+  const status = el("auth-email-status");
+  const email = (inp?.value || "").trim();
+  try {
+    const r = await fetch("/api/auth/email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    }).then((res) => res.json());
+    if (!r.ok) { if (status) { status.textContent = r.error || "Could not save."; status.className = "conn-status err"; } return; }
+    if (inp) inp.value = "";
+    if (status) {
+      status.textContent = email
+        ? (r.smtpConfigured ? `Saved. Future rotations (08:00 IST) will be emailed to ${r.email}.` : `Saved, but the server has no SMTP env vars set - rotations will show in the console instead.`)
+        : "Notification email removed.";
+      status.className = "conn-status" + (email && !r.smtpConfigured ? " warn" : " ok");
+    }
+    loadAuthEmail();
+  } catch (e) {
+    if (status) { status.textContent = "Could not save: " + e.message; status.className = "conn-status err"; }
+  }
 }
 
 // Delete the saved Groww token, then prompt the user to generate a fresh one.

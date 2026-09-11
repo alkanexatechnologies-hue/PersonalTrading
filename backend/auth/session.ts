@@ -7,33 +7,19 @@
 // SECURITY NOTES:
 //  - Credentials are checked SERVER-SIDE only (never shipped in frontend JS).
 //  - The password is compared as a SHA-256 hash using a constant-time compare.
-//  - Set LOGIN_USER / LOGIN_PASS env vars for a fixed login. If unset, a
-//    random one-time password is generated at startup and printed once to the
-//    console — this replaces a previous hardcoded, guessable default
-//    ("Alkasrivastava" / "Alkasrivastava") that shipped in source.
+//  - Set LOGIN_USER / LOGIN_PASS env vars for a permanently fixed login.
+//    Otherwise credentials are generated once and PERSIST across restarts
+//    (see auth/credentials.ts) — they only rotate on the daily 08:00 IST
+//    schedule, optionally emailed to a configured address, rather than
+//    resetting every time the process restarts.
 //  - Sessions are opaque random tokens held in memory and expire daily at
-//    07:00 AM IST (matching the paper-desk daily reset).
+//    07:00 AM IST (matching the paper-desk daily reset) — independent of the
+//    08:00 IST credential-rotation schedule.
 
 import crypto from "crypto";
-
-const envUser = process.env.LOGIN_USER;
-const envPass = process.env.LOGIN_PASS;
-const GENERATED_PASS = envPass ? null : crypto.randomBytes(9).toString("base64url");
-
-const DEFAULT_USER = envUser || "admin";
-const DEFAULT_PASS = envPass || GENERATED_PASS!;
-
-if (GENERATED_PASS) {
-  // eslint-disable-next-line no-console
-  console.log(`\n  Dashboard login (no LOGIN_USER / LOGIN_PASS set):`);
-  console.log(`    user     : ${DEFAULT_USER}`);
-  console.log(`    password : ${GENERATED_PASS}`);
-  console.log(`  This password is regenerated every restart. Set LOGIN_USER / LOGIN_PASS env vars for a fixed login.\n`);
-}
+import { getCredentials } from "./credentials";
 
 const sha256 = (s: string) => crypto.createHash("sha256").update(s, "utf8").digest();
-const USER_HASH = sha256(DEFAULT_USER);
-const PASS_HASH = sha256(DEFAULT_PASS);
 
 function safeEqual(a: Buffer, b: Buffer): boolean {
   if (a.length !== b.length) return false;
@@ -64,8 +50,11 @@ export interface LoginResult {
 }
 
 export function login(username: string, password: string): LoginResult {
-  const okUser = safeEqual(sha256(String(username ?? "")), USER_HASH);
-  const okPass = safeEqual(sha256(String(password ?? "")), PASS_HASH);
+  // Read fresh every call (not cached at module load) since credentials can
+  // now rotate at runtime on the daily schedule.
+  const creds = getCredentials();
+  const okUser = safeEqual(sha256(String(username ?? "")), sha256(creds.username));
+  const okPass = safeEqual(sha256(String(password ?? "")), sha256(creds.password));
   if (!okUser || !okPass) return { ok: false, error: "Invalid username or password." };
   const token = crypto.randomBytes(32).toString("hex");
   const expiresAt = nextExpiry();
