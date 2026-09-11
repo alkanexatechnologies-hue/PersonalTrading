@@ -234,6 +234,7 @@
           <button class="tab grp-option" data-tab="paper" data-group="option">AI Paper Desk</button>
           <button class="tab grp-option" data-tab="toppicks" data-group="option">Option Top Pick</button>
           <button class="tab grp-option" data-tab="earlymoves" data-group="option">⚡ Early Moves</button>
+          <button class="tab grp-option" data-tab="tradermind" data-group="option">🧠 Trader Mind</button>
           <button class="tab" data-tab="stockoptions" data-group="stockOption">📊 Stock Options</button>
           <button class="tab grp-swing" data-tab="news" data-group="swing">Market News</button>
           <button class="tab grp-swing" data-tab="bullrank" data-group="swing">Bull % Rank</button>
@@ -273,6 +274,55 @@
               <div id="sopt-body" class="option-body">
                 Pick a stock above and click "Get option trade" for a CALL/PUT idea with strike, stop-loss, quantity and a pre-trade risk read.
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ================= TAB: Trader Mind (options-interest command view) ================= -->
+        <div class="tab-panel" id="panel-tradermind">
+          <div class="tm">
+            <div class="tm-head">
+              <div class="tm-head-row1">
+                <select id="tm-symbol" class="ask-symbol"></select>
+                <span id="tm-live" class="tm-live"><span class="live-dot"></span>LIVE</span>
+                <span class="wl-sub" style="margin-left:auto">Same engine as OI Command, laid out as one command view.</span>
+              </div>
+              <div class="tm-head-row2">
+                <div class="tm-spot"><b id="tm-spot-val">—</b><span id="tm-spot-chg" class="tm-spot-chg"></span></div>
+                <div class="tm-meta"><span>ATM</span><b id="tm-atm">—</b></div>
+                <div class="tm-meta"><span>Expiry</span><b id="tm-expiry">—</b></div>
+                <div class="tm-meta"><span>Time</span><b id="tm-time">—</b></div>
+                <div class="tm-badge"><span>Regime</span><b id="tm-regime">—</b></div>
+                <div class="tm-badge"><span>OI Bias</span><b id="tm-oibias">—</b></div>
+                <div class="tm-gauge">
+                  <svg viewBox="0 0 100 100" width="56" height="56">
+                    <circle cx="50" cy="50" r="42" fill="none" stroke="var(--border)" stroke-width="9"></circle>
+                    <circle id="tm-gauge-ring" cx="50" cy="50" r="42" fill="none" stroke="var(--green)" stroke-width="9" stroke-linecap="round" transform="rotate(-90 50 50)" stroke-dasharray="264" stroke-dashoffset="264"></circle>
+                  </svg>
+                  <div class="tm-gauge-txt"><b id="tm-conf">—</b><span>/100</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="tm-row2">
+              <div class="mtg-card"><h5>Market structure</h5><div id="tm-structure"></div></div>
+              <div class="mtg-card tm-chartcard"><h5>Price chart (5 min)</h5><div id="tm-chart" class="tm-chart"></div></div>
+            </div>
+
+            <div class="tm-row2">
+              <div class="mtg-card"><h5>OI map (open interest)</h5><div id="tm-oimap" style="overflow-x:auto"></div></div>
+              <div class="mtg-card"><h5>OI heatmap</h5><div id="tm-heatmap" style="overflow-x:auto"></div></div>
+            </div>
+
+            <div class="tm-row2">
+              <div class="mtg-card"><h5>OI flow</h5><div id="tm-oiflow"></div></div>
+              <div class="mtg-card"><h5>Confirmation engine</h5><div id="tm-confirm"></div></div>
+            </div>
+
+            <div class="tm-row3">
+              <div class="mtg-card"><h5>Key levels</h5><div id="tm-levels"></div></div>
+              <div class="mtg-card"><h5>System commentary</h5><div id="tm-commentary"></div></div>
+              <div class="mtg-card"><h5>Trade plan</h5><div id="tm-plan"></div></div>
             </div>
           </div>
         </div>

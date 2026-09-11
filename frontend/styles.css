@@ -2220,6 +2220,138 @@ body.mode-option .index-strip { display: flex; }
   .mtg-grid { grid-template-columns: 1fr; }
 }
 
+/* ============ Trader Mind tab (options-interest command view) ============ */
+/* Same dark theme tokens (--panel/--panel-2/--border/--muted/--green/--red/
+   --amber/--blue) as every other tab - a distinct layout, not a distinct
+   skin, so it reads as part of the same product. */
+.tm { display: flex; flex-direction: column; gap: 16px; }
+.tm-head { display: flex; flex-direction: column; gap: 10px; }
+.tm-head-row1 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tm-live { display: flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; color: var(--green); }
+.tm-head-row2 {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px;
+}
+.tm-spot { display: flex; align-items: baseline; gap: 8px; }
+.tm-spot b { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.tm-spot-chg { font-size: 13px; font-weight: 700; }
+.tm-spot-chg.up { color: var(--green); } .tm-spot-chg.down { color: var(--red); }
+.tm-meta { display: flex; flex-direction: column; gap: 1px; }
+.tm-meta span { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
+.tm-meta b { font-size: 13px; font-variant-numeric: tabular-nums; }
+.tm-badge {
+  display: flex; flex-direction: column; gap: 2px; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 8px; padding: 5px 10px;
+}
+.tm-badge span { font-size: 9px; color: var(--muted); text-transform: uppercase; }
+.tm-badge b { font-size: 13px; }
+.tm-gauge { position: relative; margin-left: auto; width: 56px; height: 56px; }
+.tm-gauge svg { display: block; }
+#tm-gauge-ring { transition: stroke-dashoffset 0.6s ease, stroke 0.3s ease; }
+.tm-gauge-txt {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.tm-gauge-txt b { font-size: 15px; font-weight: 800; line-height: 1; }
+.tm-gauge-txt span { font-size: 8px; color: var(--muted); }
+
+.tm-row2 { display: grid; grid-template-columns: 1fr 1.4fr; gap: 12px; align-items: start; }
+.tm-row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; align-items: start; }
+.tm-chartcard { min-width: 0; }
+.tm-chart { width: 100%; height: 280px; }
+
+/* Market structure: support | track w/ spot dot | resistance. */
+.tm-struct-row { display: flex; align-items: center; gap: 10px; }
+.tm-struct-box {
+  flex: 0 0 auto; text-align: center; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 12px; min-width: 90px;
+}
+.tm-struct-box span { display: block; font-size: 9px; color: var(--muted); text-transform: uppercase; }
+.tm-struct-box b { display: block; font-size: 18px; font-variant-numeric: tabular-nums; margin: 3px 0; }
+.tm-struct-box em { font-style: normal; font-size: 10px; font-weight: 700; }
+.tm-struct-box.down b { color: var(--green); } .tm-struct-box.down em { color: var(--green); }
+.tm-struct-box.up b { color: var(--red); } .tm-struct-box.up em { color: var(--red); }
+.tm-struct-track { position: relative; flex: 1; height: 46px; min-width: 80px; }
+.tm-struct-line {
+  position: absolute; top: 22px; left: 0; right: 0; height: 6px; border-radius: 3px;
+  background: linear-gradient(90deg, #16c784, #f0b90b, #ea3943);
+}
+.tm-struct-dot {
+  position: absolute; top: 16px; width: 18px; height: 18px; margin-left: -9px;
+  border-radius: 50%; background: var(--text); border: 3px solid var(--blue);
+}
+.tm-struct-spot {
+  position: absolute; top: -6px; transform: translateX(-50%); text-align: center; font-size: 12px; font-weight: 800;
+  white-space: nowrap; background: var(--panel); border: 1px solid var(--blue); border-radius: 6px; padding: 2px 8px;
+}
+.tm-struct-spot small { display: block; font-size: 9px; font-weight: 400; color: var(--muted); }
+
+/* OI heatmap. */
+.tm-heat-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.tm-heat-table th { text-align: center; font-size: 9px; text-transform: uppercase; color: var(--muted); padding: 6px; border-bottom: 1px solid var(--border); }
+.tm-heat-table td { padding: 6px; text-align: center; font-variant-numeric: tabular-nums; border-bottom: 1px solid rgba(255,255,255,0.04); }
+.tm-heat-table .tm-heat-strike { font-weight: 700; background: var(--panel-2); }
+.tm-heat-atm .tm-heat-strike { color: var(--blue); }
+.tm-heat.hi.ce { background: rgba(234,57,67,0.45); font-weight: 700; }
+.tm-heat.med.ce { background: rgba(234,57,67,0.22); }
+.tm-heat.lo.ce { background: rgba(234,57,67,0.08); }
+.tm-heat.hi.pe { background: rgba(22,199,132,0.45); font-weight: 700; }
+.tm-heat.med.pe { background: rgba(22,199,132,0.22); }
+.tm-heat.lo.pe { background: rgba(22,199,132,0.08); }
+.tm-heat-legend { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--muted); margin-top: 8px; }
+.tm-heat-key { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+.tm-heat-key.hi { background: rgba(234,57,67,0.45); } .tm-heat-key.med { background: rgba(234,57,67,0.22); } .tm-heat-key.lo { background: rgba(234,57,67,0.08); }
+
+/* OI flow tiles + PCR row. */
+.tm-flow-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 12px; }
+.tm-flow-tile { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; text-align: center; }
+.tm-flow-tile span { display: block; font-size: 9px; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
+.tm-flow-tile b { font-size: 14px; font-weight: 800; }
+.tm-flow-tile b.up { color: var(--green); } .tm-flow-tile b.down { color: var(--red); }
+.tm-flow-tile small { display: block; font-size: 9px; color: var(--muted); margin-top: 2px; }
+.tm-flow-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.tm-flow-stats div { text-align: center; }
+.tm-flow-stats span { display: block; font-size: 9px; color: var(--muted); text-transform: uppercase; }
+.tm-flow-stats b { font-size: 13px; font-variant-numeric: tabular-nums; }
+
+/* Confirmation engine. */
+.tm-confirm-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.tm-confirm-table th { text-align: left; font-size: 9px; text-transform: uppercase; color: var(--muted); padding: 6px 4px; border-bottom: 1px solid var(--border); }
+.tm-confirm-table td { padding: 7px 4px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+.tm-confirm-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.tm-confirm-dot.up { background: var(--green); } .tm-confirm-dot.down { background: var(--red); } .tm-confirm-dot.neu { background: var(--amber); }
+.tm-confirm-total {
+  display: flex; justify-content: space-between; align-items: center; margin-top: 10px; padding-top: 10px;
+  border-top: 1px solid var(--border); font-weight: 800;
+}
+.tm-confirm-total span { font-size: 11px; text-transform: uppercase; color: var(--muted); }
+.tm-confirm-total b { font-size: 18px; color: var(--green); }
+
+/* System commentary + status pill. */
+.tm-commentary-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.tm-status-pill { font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 999px; }
+.tm-status-pill.wait { background: rgba(240,166,58,0.16); color: var(--amber); }
+.tm-status-pill.go { background: rgba(22,199,132,0.16); color: var(--green); }
+
+/* Trade plan alert button. */
+.tm-alert-btn {
+  width: 100%; margin-top: 10px; padding: 10px; border-radius: 8px; border: none; cursor: pointer;
+  background: var(--green); color: #06241a; font-weight: 800; font-size: 13px;
+}
+.tm-alert-btn:hover { filter: brightness(1.08); }
+
+@media (max-width: 980px) {
+  .tm-row2 { grid-template-columns: 1fr; }
+  .tm-row3 { grid-template-columns: 1fr 1fr; }
+  .tm-head-row2 { gap: 10px; }
+}
+@media (max-width: 620px) {
+  .tm-row3 { grid-template-columns: 1fr; }
+  .tm-struct-row { flex-direction: column; align-items: stretch; }
+  .tm-struct-track { height: 60px; margin: 6px 0; }
+  .tm-flow-stats { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .tm-gauge { margin-left: 0; }
+}
+
 .mts-verdict {
   display: flex; align-items: center; gap: 10px; padding: 7px 12px;
   border-radius: 8px; border: 1px solid var(--border); background: #10141b;

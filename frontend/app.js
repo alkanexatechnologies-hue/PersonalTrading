@@ -1574,6 +1574,7 @@ function switchTab(name) {
   renderWatchlist();
   if (name === "oicommand") { initOiCommand(); startOiCommandLive(); }
   if (name === "earlymoves") { loadEarlyMoves(); startEarlyMovesTab(); }
+  if (name === "tradermind") { initTraderMindTab(); startTraderMindLive(); }
 
   if (name === "paper") { loadPaper(); startPaperLive(); }
   if (name === "news") loadNews();
@@ -1655,7 +1656,7 @@ const MODE_KEY = "nsa_mode";
 const VALID_MODES = ["option", "stockOption", "swing"];
 const MODE_FIRST = { option: "oicommand", stockOption: "stockoptions", swing: "news" };
 const MODE_TABS = {
-  option: ["oicommand", "paper", "toppicks", "earlymoves"],
+  option: ["oicommand", "paper", "toppicks", "earlymoves", "tradermind"],
   // Paper Desk and Top Pick are shared with Option Trading (same panels, already
   // pool-filtered/labelled by kind) rather than duplicated for this desk.
   stockOption: ["stockoptions", "paper", "toppicks"],
@@ -2399,6 +2400,330 @@ function initStockOptions() {
       const symbol = sel?.value;
       if (symbol) loadOption(symbol, SOPT_IDS);
     });
+  }
+}
+
+// ---------- Trader Mind tab (options-interest command view) ----------
+// Reuses the same live data OI Command already fetches (GET /api/oi-command)
+// plus GET /api/signal (the same indicator-vote breakdown the "Selected
+// Stock" tab's Confirmation panel uses) and GET /api/candles (the same
+// candle+overlay endpoint the main chart uses) - laid out as one dense
+// command view instead of spread across tabs. No new backend routes.
+let tmChart = null, tmCandleSeries = null, tmEma21Series = null, tmEma50Series = null, tmVwapSeries = null;
+let tmSymbolsLoaded = false, tmLiveTimer = null, tmBusy = false;
+let tmLastPcr = {}; // symbol -> previous poll's PCR, for a ΔPCR readout (not a stored server field)
+const tmAlerts = []; // {symbol, level, dir, label}
+
+function initTraderMindTab() {
+  const sel = el("tm-symbol");
+  if (sel && !tmSymbolsLoaded) {
+    tmSymbolsLoaded = true;
+    const syms = state.symbols || [];
+    const idx = syms.filter((s) => s.type === "index");
+    const eq = syms.filter((s) => s.type !== "index" && s.fno);
+    const grp = (label, arr) => arr.length ? `<optgroup label="${label}">${arr.map((s) => `<option value="${s.symbol}">${s.name}</option>`).join("")}</optgroup>` : "";
+    sel.innerHTML = grp("Indices", idx) + grp("Stocks", eq);
+    sel.value = "^NSEI";
+    sel.addEventListener("change", loadTraderMindTab);
+  }
+  if (!tmChart) buildTraderMindChart();
+  loadTraderMindTab();
+}
+
+function buildTraderMindChart() {
+  const container = el("tm-chart");
+  if (!container || typeof LightweightCharts === "undefined") return;
+  tmChart = LightweightCharts.createChart(container, chartOpts(container.clientWidth, 280));
+  tmCandleSeries = tmChart.addCandlestickSeries({ upColor: "#16c784", downColor: "#ea3943", wickUpColor: "#16c784", wickDownColor: "#ea3943", borderVisible: false });
+  tmEma21Series = tmChart.addLineSeries({ color: "#5b9bd5", lineWidth: 1 });
+  tmEma50Series = tmChart.addLineSeries({ color: "#2962ff", lineWidth: 2 });
+  tmVwapSeries = tmChart.addLineSeries({ color: "#a855f7", lineWidth: 1, lineStyle: 2 });
+  window.addEventListener("resize", () => { if (tmChart) tmChart.applyOptions({ width: container.clientWidth }); });
+}
+
+function startTraderMindLive() {
+  if (tmLiveTimer) return;
+  tmLiveTimer = setInterval(() => {
+    const pn = document.getElementById("panel-tradermind");
+    if (!pn || !pn.classList.contains("active") || tmBusy) return;
+    loadTraderMindTab();
+  }, 15000);
+}
+
+async function loadTraderMindTab() {
+  const sym = el("tm-symbol")?.value || "^NSEI";
+  if (tmBusy) return;
+  tmBusy = true;
+  try {
+    const [d, sig, quote, candleData] = await Promise.all([
+      fetch(`/api/oi-command?symbol=${encodeURIComponent(sym)}`).then((r) => r.json()),
+      fetch(`/api/signal/${encodeURIComponent(sym)}?interval=5m`).then((r) => r.json()).catch(() => null),
+      fetch(`/api/quote/${encodeURIComponent(sym)}`).then((r) => r.json()).catch(() => null),
+      fetch(`/api/candles/${encodeURIComponent(sym)}?interval=5m`).then((r) => r.json()).catch(() => null),
+    ]);
+    if (d.error) return;
+    renderTmHead(d, sig, quote, sym);
+    renderTmChartData(candleData);
+    renderTmStructure(d);
+    renderTmOiMap(d);
+    renderTmHeatmap(d);
+    renderTmFlow(d, sym);
+    renderTmConfirm(sig);
+    renderTmLevels(d);
+    renderTmCommentary(d, sig);
+    renderTmPlan(d, sym);
+    checkTmAlerts(sym, d.spot);
+  } catch (e) {
+    console.warn("Trader Mind load failed:", e.message);
+  } finally {
+    tmBusy = false;
+  }
+}
+
+function renderTmHead(d, sig, quote, sym) {
+  const spotEl = el("tm-spot-val"), chgEl = el("tm-spot-chg");
+  if (spotEl) spotEl.textContent = d.spot != null ? fmt(d.spot) : "—";
+  if (chgEl) {
+    if (quote && quote.change != null) {
+      const up = quote.change >= 0;
+      chgEl.className = "tm-spot-chg " + (up ? "up" : "down");
+      chgEl.textContent = `${up ? "▲" : "▼"} ${fmt(Math.abs(quote.change))} (${up ? "+" : ""}${fmt(quote.changePercent)}%)`;
+    } else chgEl.textContent = "";
+  }
+  const atm = el("tm-atm"); if (atm) atm.textContent = (d.oiSummary && d.oiSummary.atmStrike) || d.setup?.strike || "—";
+  const exp = el("tm-expiry"); if (exp) exp.textContent = d.expiry || "—";
+  const time = el("tm-time"); if (time) time.textContent = new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false });
+  const regime = el("tm-regime"); if (regime) regime.textContent = (d.ext && d.ext.regime) || "—";
+  const bias = el("tm-oibias");
+  if (bias) {
+    const v = d.oiVerdict || "Neutral";
+    bias.textContent = v;
+    bias.className = v === "Bullish" ? "up" : v === "Bearish" ? "down" : "";
+  }
+  const conf = sig ? sig.confidence : (d.recommendation?.directional?.confidence ?? null);
+  const confEl = el("tm-conf"); if (confEl) confEl.textContent = conf != null ? Math.round(conf) : "—";
+  const ring = el("tm-gauge-ring");
+  if (ring && conf != null) {
+    const c = 2 * Math.PI * 42;
+    ring.style.strokeDashoffset = String(c * (1 - Math.max(0, Math.min(100, conf)) / 100));
+    ring.style.stroke = conf >= 70 ? "#16c784" : conf >= 40 ? "#f0b90b" : "#ea3943";
+  }
+  const live = el("tm-live"); if (live) live.style.display = d.refresh?.marketOpen === false ? "none" : "";
+}
+
+function renderTmChartData(data) {
+  if (!data || data.error || !tmCandleSeries) return;
+  const c = data.candles || [];
+  tmCandleSeries.setData(c.map((x) => ({ time: x.time, open: x.open, high: x.high, low: x.low, close: x.close })));
+  if (data.overlays) {
+    if (data.overlays.ema21) tmEma21Series.setData(alignSeries(c, data.overlays.ema21));
+    if (data.overlays.ema50) tmEma50Series.setData(alignSeries(c, data.overlays.ema50));
+    if (data.overlays.vwap) tmVwapSeries.setData(alignSeries(c, data.overlays.vwap));
+  }
+  if (tmChart) tmChart.timeScale().fitContent();
+}
+
+function renderTmStructure(d) {
+  const box = el("tm-structure");
+  if (!box) return;
+  const support = d.oiSummary?.putWall?.strike ?? d.levels?.orbLow ?? null;
+  const resistance = d.oiSummary?.callWall?.strike ?? d.levels?.orbHigh ?? null;
+  const spot = d.spot;
+  let pct = 50;
+  if (support != null && resistance != null && resistance > support && spot != null) {
+    pct = Math.max(2, Math.min(98, Math.round(((spot - support) / (resistance - support)) * 100)));
+  }
+  box.innerHTML = `
+    <div class="tm-struct-row">
+      <div class="tm-struct-box down"><span>SUPPORT</span><b>${support != null ? fmt(support) : "—"}</b><em>PUT WALL${d.oiSummary?.putPct != null ? " · " + d.oiSummary.putPct + "%" : ""}</em></div>
+      <div class="tm-struct-track">
+        <div class="tm-struct-line"></div>
+        <div class="tm-struct-dot" style="left:${pct}%"></div>
+        <div class="tm-struct-spot" style="left:${pct}%">${spot != null ? fmt(spot) : "—"}<small>ATM ${d.oiSummary?.atmStrike ?? "—"}</small></div>
+      </div>
+      <div class="tm-struct-box up"><span>RESISTANCE</span><b>${resistance != null ? fmt(resistance) : "—"}</b><em>CALL WALL${d.oiSummary?.callPct != null ? " · " + d.oiSummary.callPct + "%" : ""}</em></div>
+    </div>`;
+}
+
+function renderTmOiMap(d) {
+  const box = el("tm-oimap");
+  if (!box) return;
+  // Same chain data as the OI Details drawer - a different, denser skin of it here.
+  box.innerHTML = renderOiDetailsHtml(d);
+}
+
+function renderTmHeatmap(d) {
+  const box = el("tm-heatmap");
+  if (!box) return;
+  const rows = d.oiChain || [];
+  if (!rows.length) { box.innerHTML = `<div class="wl-sub" style="padding:8px">No chain loaded yet.</div>`; return; }
+  const maxOi = Math.max(1, ...rows.map((r) => Math.max(r.ce.oi || 0, r.pe.oi || 0)));
+  const heat = (v) => {
+    const ratio = (v || 0) / maxOi;
+    return ratio >= 0.66 ? "hi" : ratio >= 0.33 ? "med" : "lo";
+  };
+  const oiL = (n) => (n == null ? "—" : n >= 100000 ? (n / 100000).toFixed(2) + "L" : n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(Math.round(n)));
+  const trs = rows.slice().sort((a, b) => b.strike - a.strike).map((r) => `
+    <tr class="${r.atm ? "tm-heat-atm" : ""}">
+      <td class="tm-heat ${heat(r.ce.oi)} ce">${oiL(r.ce.oi)}</td>
+      <td class="tm-heat-strike">${r.strike}</td>
+      <td class="tm-heat ${heat(r.pe.oi)} pe">${oiL(r.pe.oi)}</td>
+    </tr>`).join("");
+  box.innerHTML = `
+    <table class="tm-heat-table">
+      <thead><tr><th>Call OI</th><th>Strike</th><th>Put OI</th></tr></thead>
+      <tbody>${trs}</tbody>
+    </table>
+    <div class="tm-heat-legend">
+      <span class="tm-heat-key hi"></span> High OI &nbsp; <span class="tm-heat-key med"></span> Medium OI &nbsp; <span class="tm-heat-key lo"></span> Low OI
+    </div>`;
+}
+
+function renderTmFlow(d, sym) {
+  const box = el("tm-oiflow");
+  if (!box) return;
+  const rows = d.oiChain || [];
+  const n = rows.length || 1;
+  const count = (pred) => rows.filter(pred).length;
+  const pct = (n2) => Math.round((n2 / n) * 100);
+  const callW = pct(count((r) => (r.ce.action || "").startsWith("Call writing")));
+  const putW = pct(count((r) => (r.pe.action || "").startsWith("Put writing")));
+  const callU = pct(count((r) => (r.ce.action || "").startsWith("Call unwinding")));
+  const putU = pct(count((r) => (r.pe.action || "").startsWith("Put unwinding")));
+  const tile = (label, p, cls) => `<div class="tm-flow-tile"><span>${label}</span><b class="${cls}">${p >= 40 ? "HIGH" : "LOW"}</b><small>${p}% of strikes</small></div>`;
+  const S = d.oiSummary || {};
+  const pcr = S.pcr;
+  const prevPcr = tmLastPcr[sym];
+  const dPcr = pcr != null && prevPcr != null ? Math.round((pcr - prevPcr) * 100) / 100 : null;
+  if (pcr != null) tmLastPcr[sym] = pcr;
+  const totOi = (S.totCe || 0) + (S.totPe || 0);
+  const churn = totOi > 0 ? Math.abs((S.netCeChg || 0) + (S.netPeChg || 0)) / totOi : 0;
+  box.innerHTML = `
+    <div class="tm-flow-grid">
+      ${tile("Call writing", callW, "down")}
+      ${tile("Put writing", putW, "up")}
+      ${tile("Call unwinding", callU, "up")}
+      ${tile("Put unwinding", putU, "down")}
+    </div>
+    <div class="tm-flow-stats">
+      <div><span>PCR</span><b>${pcr != null ? pcr.toFixed(2) : "—"}</b></div>
+      <div><span>Δ PCR</span><b class="${dPcr > 0 ? "up" : dPcr < 0 ? "down" : ""}">${dPcr != null ? (dPcr >= 0 ? "+" : "") + dPcr : "—"}</b></div>
+      <div><span>Total OI</span><b>${totOi ? (totOi / 10000000).toFixed(1) + " Cr" : "—"}</b></div>
+      <div><span>Volume</span><b>${churn >= 0.03 ? "HIGH" : "LOW"}</b></div>
+    </div>`;
+}
+
+function renderTmConfirm(sig) {
+  const box = el("tm-confirm");
+  if (!box) return;
+  if (!sig || !sig.votes) { box.innerHTML = `<div class="wl-sub" style="padding:8px">Signal not available.</div>`; return; }
+  const rows = sig.votes.map((v) => {
+    const cls = v.bias === "bullish" ? "up" : v.bias === "bearish" ? "down" : "neu";
+    const score = Math.round(v.weight) * (v.bias === "bearish" ? -1 : 1);
+    return `<tr>
+      <td>${v.name}</td>
+      <td><span class="tm-confirm-dot ${cls}"></span>${v.bias === "bullish" ? "Bullish" : v.bias === "bearish" ? "Bearish" : "Neutral"}</td>
+      <td class="${cls}">${score >= 0 ? "+" : ""}${score}</td>
+    </tr>`;
+  }).join("");
+  box.innerHTML = `
+    <table class="tm-confirm-table">
+      <thead><tr><th>Factor</th><th>Signal</th><th>Score</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="tm-confirm-total"><span>TOTAL SCORE</span><b>${sig.confidence}/100</b></div>`;
+}
+
+function renderTmLevels(d) {
+  const box = el("tm-levels");
+  if (!box) return;
+  const L = d.commentary?.levels || {};
+  const gN = (n) => (n == null ? "—" : Number(n).toLocaleString("en-IN"));
+  box.innerHTML = `
+    <div class="o2-lv"><span>Current spot</span><b>${gN(d.spot)}</b></div>
+    <div class="o2-lv"><span class="up">Immediate support</span><b>${gN(L.immSupport)}</b></div>
+    <div class="o2-lv"><span class="up">Major support</span><b>${gN(L.majorSupport)}</b></div>
+    <div class="o2-lv"><span class="down">Immediate resistance</span><b>${gN(L.immResistance)}</b></div>
+    <div class="o2-lv"><span class="down">Major resistance</span><b>${gN(L.majorResistance)}</b></div>`;
+}
+
+function renderTmCommentary(d, sig) {
+  const box = el("tm-commentary");
+  if (!box) return;
+  const C = d.commentary || {};
+  const dir = d.recommendation?.directional || {};
+  const bullish = d.oiVerdict === "Bullish" || (sig && sig.score > 0);
+  const bearish = d.oiVerdict === "Bearish" || (sig && sig.score < 0);
+  const biasCls = bullish ? "up" : bearish ? "down" : "";
+  const biasWord = bullish ? "BULLISH BIAS" : bearish ? "BEARISH BIAS" : "NEUTRAL";
+  const ready = !!dir.take;
+  const side = d.setup?.optionType && d.setup.optionType !== "—" ? d.setup.optionType : (d.oiDirection === "UP" ? "CE" : d.oiDirection === "DOWN" ? "PE" : "—");
+  box.innerHTML = `
+    <div class="tm-commentary-head">
+      <span class="${biasCls}" style="font-weight:800;font-size:15px">🐂 ${biasWord}</span>
+      <span class="tm-status-pill ${ready ? "go" : "wait"}">${ready ? "READY" : "WAIT FOR CONFIRMATION"}</span>
+    </div>
+    <p style="margin:10px 0;font-size:13px;line-height:1.6;color:var(--muted)">${C.situation || "Analysis loads once the OI chain and candles are both available."}</p>
+    ${side !== "—" ? `<div style="font-size:13px;line-height:1.8">
+      <b>Preferred setup:</b> ${side === "CE" ? "CALL" : "PUT"}<br>
+      <b>Entry trigger:</b> ${dir.spotTarget ? fmt(dir.spotTarget) + " breakout + OI confirmation" : "waiting for a confirmed trigger"}<br>
+      <b>SL:</b> ${dir.stop != null ? fmt(dir.stop) : "—"} &nbsp;|&nbsp; <b>Target:</b> ${dir.target != null ? fmt(dir.target) : "—"}
+    </div>` : ""}`;
+}
+
+function renderTmPlan(d, sym) {
+  const box = el("tm-plan");
+  if (!box) return;
+  const dir = d.recommendation?.directional || {};
+  const side = d.setup?.optionType && d.setup.optionType !== "—" ? d.setup.optionType : (d.oiDirection === "UP" ? "CE" : d.oiDirection === "DOWN" ? "PE" : null);
+  const sideWord = side === "CE" ? "CALL (Buy on breakout)" : side === "PE" ? "PUT (Buy on breakdown)" : "—";
+  const trigger = dir.spotTarget ?? d.plan?.highSpot ?? null;
+  const stop = dir.spotStop ?? d.plan?.lowSpot ?? null;
+  const support = d.oiSummary?.putWall?.strike, resistance = d.oiSummary?.callWall?.strike;
+  const rr = dir.target != null && dir.stop != null && dir.ltp != null && (dir.ltp - dir.stop) > 0
+    ? ((dir.target - dir.ltp) / (dir.ltp - dir.stop)).toFixed(1) : null;
+  box.innerHTML = `
+    <div class="o2-lv"><span>Trade status</span><b class="${dir.take ? "up" : ""}">${dir.take ? "GO" : "WAIT"}</b></div>
+    <div class="o2-lv"><span>Preferred side</span><b>${sideWord}</b></div>
+    <div class="o2-lv"><span>Entry trigger</span><b>${trigger != null ? fmt(trigger) + " breakout" : "—"}</b></div>
+    <div class="o2-lv"><span>Stop loss</span><b class="down">${stop != null ? fmt(stop) : "—"}</b></div>
+    <div class="o2-lv"><span>Target(s)</span><b class="up">${dir.target != null ? fmt(dir.target) : "—"}${resistance ? " / " + fmt(resistance) : ""}</b></div>
+    <div class="o2-lv"><span>Invalidation</span><b>${support ? "Below " + fmt(support) : "—"}</b></div>
+    <div class="o2-lv"><span>Risk/Reward</span><b>${rr ? "1 : " + rr : "—"}</b></div>
+    <button type="button" class="tm-alert-btn" id="tm-alert-btn">🔔 Set alert for ${trigger != null ? fmt(trigger) : "breakout"}</button>`;
+  const btn = el("tm-alert-btn");
+  if (btn && trigger != null) {
+    btn.addEventListener("click", () => addTmAlert(sym, trigger, side === "PE" ? "below" : "above"));
+  }
+}
+
+// A light client-side price-watch: no server persistence, checked on every
+// 15s poll while this tab is open. Reuses the same Notification permission /
+// beep pattern as the app's existing watchlist alerts (toggleNotify/beep).
+async function addTmAlert(symbol, level, dir) {
+  try {
+    if ("Notification" in window && Notification.permission !== "granted") await Notification.requestPermission();
+  } catch (_) { /* ignore */ }
+  tmAlerts.push({ symbol, level, dir, label: `${symbol} ${dir === "above" ? "breaks above" : "breaks below"} ${fmt(level)}` });
+  const status = el("tm-plan");
+  if (status) {
+    const note = document.createElement("div");
+    note.className = "wl-sub";
+    note.style.marginTop = "6px";
+    note.textContent = `Alert armed: notifies when ${dir === "above" ? "≥" : "≤"} ${fmt(level)}.`;
+    status.appendChild(note);
+  }
+}
+function checkTmAlerts(symbol, spot) {
+  if (!tmAlerts.length || spot == null) return;
+  for (let i = tmAlerts.length - 1; i >= 0; i--) {
+    const a = tmAlerts[i];
+    if (a.symbol !== symbol) continue;
+    const hit = a.dir === "above" ? spot >= a.level : spot <= a.level;
+    if (!hit) continue;
+    try { if ("Notification" in window && Notification.permission === "granted") new Notification("Trader Mind alert", { body: a.label }); } catch (_) {}
+    try { beep(); } catch (_) {}
+    tmAlerts.splice(i, 1);
   }
 }
 
