@@ -57,6 +57,19 @@ export const OI_DIR_MIN = 60;       // show TAKE on the tab
 export const OI_SCALP_MIN = 50;
 export const OI_ALGO_FLOOR = 68;    // matches paper CONFIRM_FLOOR
 
+// expHigh (points, an ATR-derived expected move already computed by the caller)
+// relative to spot approximates today's actual volatility. A "normal" day is
+// ~0.8% of spot; premium target/stop percentages below scale around that instead
+// of applying the same +20%/-12% (directional) or +10%/-6% (scalp) regardless of
+// whether today is unusually quiet or unusually violent. Bounded so an extreme
+// reading doesn't blow the target/stop out unreasonably.
+const BASELINE_EXP_MOVE_PCT = 0.008;
+function oiVolMult(p: Pick<OiTradeInput, "spot" | "expHigh">): number {
+  const expMovePct = p.spot > 0 ? (p.expHigh || 0) / p.spot : 0;
+  if (!expMovePct) return 1;
+  return Math.max(0.7, Math.min(1.6, expMovePct / BASELINE_EXP_MOVE_PCT));
+}
+
 function roomOk(p: OiTradeInput): { ok: boolean; reason: string } {
   const dir = p.oiDirection === "UP" ? 1 : p.oiDirection === "DOWN" ? -1 : 0;
   if (!dir) return { ok: false, reason: "no OI direction" };
@@ -91,6 +104,7 @@ function scalpConfidence(p: OiTradeInput): number {
 
 export function recommendOiTrades(p: OiTradeInput): OiRecommendations {
   const dirSign = p.oiDirection === "UP" ? 1 : p.oiDirection === "DOWN" ? -1 : 0;
+  const vm = oiVolMult(p);
   const common = commonSkips(p);
   const room = roomOk(p);
 
@@ -99,8 +113,8 @@ export function recommendOiTrades(p: OiTradeInput): OiRecommendations {
   if (p.oiConfidence < OI_DIR_MIN) dSkip.push(`OI confidence ${p.oiConfidence} < ${OI_DIR_MIN}`);
   if (!room.ok) dSkip.push(room.reason);
   const dLtp = p.ltp;
-  const dTgt = dLtp != null ? r2(dLtp * 1.20) : null;
-  const dSl = dLtp != null ? r2(dLtp * 0.88) : null;
+  const dTgt = dLtp != null ? r2(dLtp * (1 + 0.20 * vm)) : null;
+  const dSl = dLtp != null ? r2(dLtp * (1 - 0.12 * vm)) : null;
   const dTake = dSkip.length === 0;
   const dConf = p.oiConfidence;
   const directional: OiTradeLeg = {
@@ -131,8 +145,8 @@ export function recommendOiTrades(p: OiTradeInput): OiRecommendations {
   if (want && p.last5mDir === -want) sSkip.push("last 5m bar against OI direction");
   if (p.status.startsWith("BOOK")) sSkip.push("move already captured — no fresh scalp");
   const sLtp = p.ltp;
-  const sTgt = sLtp != null ? r2(sLtp * 1.10) : null;
-  const sSl = sLtp != null ? r2(sLtp * 0.94) : null;
+  const sTgt = sLtp != null ? r2(sLtp * (1 + 0.10 * vm)) : null;
+  const sSl = sLtp != null ? r2(sLtp * (1 - 0.06 * vm)) : null;
   const sTake = sSkip.length === 0;
   const scalp: OiTradeLeg = {
     take: sTake,

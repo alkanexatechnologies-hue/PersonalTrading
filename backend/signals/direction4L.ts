@@ -1,5 +1,6 @@
 import { Candle, OiAnalysis } from "../types";
 import { atr, bollinger, ema, last, macd, rsi, supertrend, vwap } from "../indicators";
+import { DIRECTION_THRESHOLD } from "./score";
 
 /**
  * 4-Layer Direction Engine.
@@ -182,7 +183,7 @@ export function computeDirection4L(symbol: string, name: string, c15: Candle[], 
   ];
   layers.forEach((L) => { L.contribution = round2(L.score * L.weight); });
   const score = Math.max(-100, Math.min(100, Math.round(layers.reduce((s, L) => s + L.contribution, 0))));
-  const direction: Direction4LResult["direction"] = score >= 15 ? "Bullish" : score <= -15 ? "Bearish" : "Neutral";
+  const direction: Direction4LResult["direction"] = score >= DIRECTION_THRESHOLD ? "Bullish" : score <= -DIRECTION_THRESHOLD ? "Bearish" : "Neutral";
 
   const netSign = score > 0 ? 1 : score < 0 ? -1 : 0;
   const layersAgree = netSign === 0 ? 0 : layers.filter((L) => Math.sign(L.contribution) === netSign).length;

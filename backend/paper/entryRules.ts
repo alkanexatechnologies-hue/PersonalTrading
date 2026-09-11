@@ -1,6 +1,7 @@
 import { Candle, OiAnalysis } from "../types";
 import { Direction4LResult } from "../signals/direction4L";
 import { ema, vwap, last } from "../indicators";
+import { DIRECTION_THRESHOLD } from "../signals/score";
 
 // ---- Paper auto-trade ENTRY RULES (price-structure driven, NO RSI/MACD) ----
 // The user's ruleset: decide direction from PDH/PDL, Previous Day Close, Day Open,
@@ -10,7 +11,21 @@ import { ema, vwap, last } from "../indicators";
 // stop. This module is used ONLY by the paper engine's idea generators, so the
 // rest of the app (Direction engine, Top Picks) keeps its original behaviour.
 
-const PROFIT_CAP_PCT = 0.15; // book profit at +15% of premium (per user rule)
+const PROFIT_CAP_PCT = 0.15; // baseline profit cap at +15% of premium on a "normal" volatility day (per user rule)
+const FLOOR_STOP_PCT = 0.12; // baseline max loss on premium on a "normal" volatility day
+// A daily ATR at/around this fraction of spot is treated as a "normal" volatility
+// day (matches the spot*0.01 fallback already used elsewhere in this codebase,
+// e.g. paper/engine.ts's atrForZone, for consistency). Actual ATR above/below
+// this scales the profit cap / stop floor / S/R room requirement instead of
+// applying the same fixed percentages regardless of how volatile the day is.
+const BASELINE_ATR_PCT = 0.01;
+
+/** Ratio of today's actual volatility to the baseline "normal" day, clamped to a
+ * sane band so an extreme reading doesn't blow the cap/stop out unreasonably. */
+function volMult(spot: number, atrDaily: number | null): number {
+  const atrPct = atrDaily && atrDaily > 0 && spot > 0 ? atrDaily / spot : BASELINE_ATR_PCT;
+  return Math.max(0.7, Math.min(1.6, atrPct / BASELINE_ATR_PCT));
+}
 
 export interface NoMomoDirection {
   direction: "Bullish" | "Bearish" | "Neutral";
@@ -25,7 +40,7 @@ export function directionNoMomentum(d4: Direction4LResult): NoMomoDirection {
   const layers = d4.layers.filter((L) => L.key !== "momentum");
   const raw = layers.reduce((s, L) => s + L.contribution, 0); // contribution = layerScore(-1..1) * weight
   const score = Math.max(-100, Math.min(100, Math.round(raw * (100 / 85))));
-  const direction = score >= 15 ? "Bullish" : score <= -15 ? "Bearish" : "Neutral";
+  const direction = score >= DIRECTION_THRESHOLD ? "Bullish" : score <= -DIRECTION_THRESHOLD ? "Bearish" : "Neutral";
   const netSign = score > 0 ? 1 : score < 0 ? -1 : 0;
   const agree = netSign === 0 ? 0 : layers.filter((L) => Math.sign(L.contribution) === netSign).length;
   const confidence = Math.max(5, Math.min(97, Math.round(Math.abs(score) * 0.7 + agree * 9)));
@@ -104,9 +119,12 @@ export function levelContext(candles: Candle[], daily: Candle[], oi: OiAnalysis 
 
 // S/R ROOM GATE: don't buy into the opposing major wall. For a CE (bullish) there
 // must be meaningful room UP to major resistance; for a PE (bearish) room DOWN to
-// major support. `minRoom` scales with the daily ATR.
+// major support. `minRoom` scales with the daily ATR. Thresholds raised from an
+// earlier 0.15%/0.15xATR (loose enough to barely block an entry sitting right at
+// the wall) to 0.3%/0.35xATR - meaningfully protective without being so wide it
+// blocks legitimate room-to-run setups.
 export function srRoomOk(direction: "Bullish" | "Bearish", spot: number, lv: LevelContext, atrDaily: number | null): { ok: boolean; reason: string } {
-  const minRoom = Math.max(spot * 0.0015, 0.15 * (atrDaily || spot * 0.01));
+  const minRoom = Math.max(spot * 0.003, 0.35 * (atrDaily || spot * 0.01));
   if (direction === "Bullish") {
     if (lv.majorResistance != null && lv.majorResistance - spot < minRoom) {
       return { ok: false, reason: `major resistance ${Math.round(lv.majorResistance)} बिल्कुल पास (room ${Math.round(lv.majorResistance - spot)}) — CE के लिए जगह नहीं` };
@@ -120,29 +138,38 @@ export function srRoomOk(direction: "Bullish" | "Bearish", spot: number, lv: Lev
 }
 
 // Anchor the SPOT target to the major S/R (don't project beyond the wall) and cap
-// the PREMIUM target at +15% of entry premium. Also tighten the premium stop so a
-// capped target still keeps a healthy (~1.3) reward:risk. Returns adjusted values.
+// the PREMIUM target around +15% of entry premium. Also tighten the premium stop
+// so a capped target still keeps a healthy (~1.3) reward:risk. `atrDaily` scales
+// the profit cap / stop floor with actual volatility instead of applying the same
+// fixed +15%/-12% regardless of whether today is quiet or violent: a quiet day
+// (low ATR) caps profit tighter and a volatile day allows more room, both bounded
+// so neither drifts to an unreasonable extreme. Returns adjusted values.
 export function capTargetAndStop(idea: {
   direction: "Bullish" | "Bearish"; spot: number; spotTarget: number; spotStop: number;
   premium: number; premiumTarget: number; premiumStop: number;
-}, lv: LevelContext): { spotTarget: number; premiumTarget: number; premiumStop: number; expectedMovePct: number; note: string } {
+}, lv: LevelContext, atrDaily: number | null = null): { spotTarget: number; premiumTarget: number; premiumStop: number; expectedMovePct: number; note: string } {
   const notes: string[] = [];
   let spotTarget = idea.spotTarget;
   // Stick to major S/R: cap the projected spot target at the wall.
   if (idea.direction === "Bullish" && lv.majorResistance != null && spotTarget > lv.majorResistance) { spotTarget = lv.majorResistance; notes.push(`target major resistance ${Math.round(lv.majorResistance)} पर सीमित`); }
   if (idea.direction === "Bearish" && lv.majorSupport != null && spotTarget < lv.majorSupport) { spotTarget = lv.majorSupport; notes.push(`target major support ${Math.round(lv.majorSupport)} पर सीमित`); }
 
-  // Cap premium profit at +15% of entry (per user rule).
-  const cap = idea.premium * (1 + PROFIT_CAP_PCT);
+  const vm = volMult(idea.spot, atrDaily);
+  const profitCapPct = PROFIT_CAP_PCT * vm;
+  const floorStopPct = FLOOR_STOP_PCT * vm;
+
+  // Cap premium profit at ~+15% of entry, scaled by today's volatility.
+  const cap = idea.premium * (1 + profitCapPct);
   let premiumTarget = Math.min(idea.premiumTarget, cap);
   if (premiumTarget < idea.premium) premiumTarget = cap; // guard bad inputs
-  if (premiumTarget >= cap - 1e-6) notes.push(`profit +15% (₹${Math.round(cap * 100) / 100}) पर capped`);
+  if (premiumTarget >= cap - 1e-6) notes.push(`profit +${Math.round(profitCapPct * 1000) / 10}% (₹${Math.round(cap * 100) / 100}) पर capped`);
 
-  // Tighten stop so a +15% target keeps ~1.3 reward:risk; never looser than the
-  // original stop, and never worse than a -12% premium floor.
+  // Tighten stop so the (volatility-scaled) target keeps ~1.3 reward:risk; never
+  // looser than the original stop, and never worse than the volatility-scaled
+  // premium floor.
   const rewardAbs = premiumTarget - idea.premium;
   const stopForRR = idea.premium - rewardAbs / 1.3;                 // gives ~1.3 gross RR
-  const floorStop = idea.premium * (1 - 0.12);                       // max -12% loss on premium
+  const floorStop = idea.premium * (1 - floorStopPct);               // max loss on premium, volatility-scaled
   let premiumStop = Math.max(idea.premiumStop, stopForRR, floorStop); // higher = tighter
   if (premiumStop >= idea.premium) premiumStop = idea.premium * 0.9;  // safety
 

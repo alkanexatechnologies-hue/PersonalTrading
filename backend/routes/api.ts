@@ -48,7 +48,7 @@ export function growwSignalsAllowed(): { allowed: boolean; reason: string } {
 import { withTimeout } from "../util/timeout";
 import { appendOiExcel, saveLastOiJson, loadLastOiJson, reviewMoodFromFile } from "../oi/oiExcel";
 import { computeSignal } from "../signals/engine";
-import { computeScoreSeries } from "../signals/score";
+import { computeScoreSeries, DIRECTION_THRESHOLD } from "../signals/score";
 import { runBacktest } from "../backtest/engine";
 import { suggestOptionTrade } from "../options/suggest";
 import { computeRiskRadar } from "../options/riskRadar";
@@ -3304,6 +3304,25 @@ async function buildOiCommand(def: SymbolDef): Promise<any> {
         c5: { ...detectCandlePattern(c5arr as any), tf: "5m" },
         c15: { ...detectCandlePattern(c15arr as any), tf: "15m" },
       });
+      // The OI lesson's own "reverse risk" read (model conflict, weak ADX trend,
+      // late-in-the-move candle) previously only ever showed up as narration in
+      // the lesson panel while the trade card next to it still read as a clean
+      // TAKE with algoReady=true. Feed it back: downgrade confidence, disable
+      // auto-trade eligibility (oiGridToIdea below checks algoReady before the
+      // paper engine will act on this idea), and add an explicit reason so the
+      // trader sees WHY, rather than the recommendation and the lesson silently
+      // disagreeing with each other.
+      if (payload.lesson?.mode === "REVERSE_RISK") {
+        const REVERSE_RISK_PENALTY = 15;
+        for (const leg of [payload.recommendation?.directional, payload.recommendation?.scalp]) {
+          if (!leg) continue;
+          leg.confidence = Math.max(0, leg.confidence - REVERSE_RISK_PENALTY);
+          leg.algoReady = false;
+          if (leg.take) {
+            leg.reasons = [...(leg.reasons || []), "⚠ reverse-risk read (model conflict / weak trend / late move) — auto-trade disabled, size down or wait"];
+          }
+        }
+      }
       payload.bulletin = buildMoveBulletin({
         c5: c5arr, c15: c15arr, c60: c60arr,
         oiDir: payload.oiDirection,
@@ -5119,7 +5138,7 @@ function paperDeps(force = false): TickDeps {
           const cap = capTargetAndStop({
             direction: p.direction, spot: p.spot, spotTarget: p.spotTarget, spotStop: p.spotStop,
             premium: p.premium, premiumTarget: p.premiumTarget, premiumStop: p.premiumStop,
-          }, lv);
+          }, lv, atrDaily);
           let cleanRating: number | undefined;
           let cleanGrade: string | undefined;
           try { const cm = await getCleanRatingCached(p.symbol, p.name); if (cm) { cleanRating = cm.rating; cleanGrade = cm.grade; } } catch { /* optional */ }
@@ -5977,7 +5996,7 @@ router.get("/opportunities", async (req: Request, res: Response) => {
         if (candles.length < 30) return null;
         const sig = computeSignal(def.symbol, candles);
         const direction: Opportunity["direction"] =
-          sig.score >= 15 ? "bullish" : sig.score <= -15 ? "bearish" : "neutral";
+          sig.score >= DIRECTION_THRESHOLD ? "bullish" : sig.score <= -DIRECTION_THRESHOLD ? "bearish" : "neutral";
         const optionType = direction === "bullish" ? "CE" : direction === "bearish" ? "PE" : null;
         const atmStrike = def.fno ? nearestStrike(sig.price, def) : null;
         const opp: Opportunity = {

@@ -1,6 +1,7 @@
 import { SymbolDef } from "../config";
 import { Candle, NextDayPick } from "../types";
 import { computeSignal } from "../signals/engine";
+import { DIRECTION_THRESHOLD } from "../signals/score";
 
 /**
  * Build a next-session bias for one symbol from DAILY candles.
@@ -17,7 +18,7 @@ export function buildNextDayPick(def: SymbolDef, daily: Candle[]): NextDayPick |
   const closingStrength = range > 0 ? ((lastC.close - lastC.low) / range) * 100 : 50;
   const changePercent = prevC.close ? ((lastC.close - prevC.close) / prevC.close) * 100 : 0;
 
-  const bias: NextDayPick["bias"] = sig.score >= 15 ? "Bullish" : sig.score <= -15 ? "Bearish" : "Neutral";
+  const bias: NextDayPick["bias"] = sig.score >= DIRECTION_THRESHOLD ? "Bullish" : sig.score <= -DIRECTION_THRESHOLD ? "Bearish" : "Neutral";
 
   // Outlook score: conviction x confidence, tilted by whether the close aligns
   // with the bias (strong close supports a bullish carry; weak close supports bearish).

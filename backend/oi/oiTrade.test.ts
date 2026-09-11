@@ -28,7 +28,7 @@ function baseInput(overrides: Partial<OiTradeInput> = {}): OiTradeInput {
     support: 24800,
     resistance: 25300, // far enough away that roomOk passes
     expLow: 60,
-    expHigh: 150,
+    expHigh: 200, // 0.8% of spot = BASELINE_EXP_MOVE_PCT, so volMult is exactly 1
     last5mDir: 1,
     ...overrides,
   };
@@ -41,12 +41,26 @@ test("recommendOiTrades: FLAT direction takes neither leg, with an explicit reas
   assert.ok(out.directional.skipReasons.includes("OI FLAT — WAIT"));
 });
 
-test("recommendOiTrades: a clean UP setup is taken directionally with +20% target / -12% stop off ltp", () => {
-  const out = recommendOiTrades(baseInput());
+test("recommendOiTrades: a clean UP setup is taken directionally with +20% target / -12% stop off ltp on a normal-volatility day", () => {
+  const out = recommendOiTrades(baseInput()); // expHigh=200=0.8% of spot -> volMult exactly 1
   assert.equal(out.directional.take, true);
   assert.equal(out.directional.action, "BUY ATM CE (directional)");
-  assert.equal(out.directional.target, 120); // 100 * 1.20
-  assert.equal(out.directional.stop, 88); // 100 * 0.88
+  assert.equal(out.directional.target, 120); // 100 * (1 + 0.20*1)
+  assert.equal(out.directional.stop, 88); // 100 * (1 - 0.12*1)
+});
+
+test("recommendOiTrades: a quiet day (low expHigh) tightens the target/stop instead of using the flat +20%/-12%", () => {
+  // expHigh=100 -> expMovePct=0.4% of spot -> half the baseline -> volMult clamps to 0.7
+  const out = recommendOiTrades(baseInput({ expHigh: 100 }));
+  assert.equal(out.directional.target, 114); // 100 * (1 + 0.20*0.7)
+  assert.equal(out.directional.stop, 91.6); // 100 * (1 - 0.12*0.7)
+});
+
+test("recommendOiTrades: a volatile day (high expHigh) widens the target/stop instead of using the flat +20%/-12%", () => {
+  // expHigh=500 -> expMovePct=2% of spot -> 2.5x baseline -> volMult clamps to 1.6
+  const out = recommendOiTrades(baseInput({ expHigh: 500 }));
+  assert.equal(out.directional.target, 132); // 100 * (1 + 0.20*1.6)
+  assert.equal(out.directional.stop, 80.8); // 100 * (1 - 0.12*1.6)
 });
 
 test("recommendOiTrades: DOWN direction recommends a PE, not a CE", () => {

@@ -11,7 +11,7 @@ import {
   vwap,
 } from "../indicators";
 import { DISCLAIMER } from "../config";
-import { MAX_SCORE, WEIGHTS } from "./score";
+import { MAX_SCORE, WEIGHTS, DIRECTION_THRESHOLD } from "./score";
 import { atrStopTarget } from "../indicators/riskLevels";
 import { dayHighLow } from "../indicators/dayRange";
 
@@ -222,9 +222,9 @@ export function computeSignal(symbol: string, candles: Candle[]): SignalResult {
 
 function toLabel(score: number): SignalLabel {
   if (score >= 50) return "STRONG BUY";
-  if (score >= 15) return "BUY";
+  if (score >= DIRECTION_THRESHOLD) return "BUY";
   if (score <= -50) return "STRONG SELL";
-  if (score <= -15) return "SELL";
+  if (score <= -DIRECTION_THRESHOLD) return "SELL";
   return "HOLD";
 }
 

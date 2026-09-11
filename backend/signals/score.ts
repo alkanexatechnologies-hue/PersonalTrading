@@ -13,6 +13,13 @@ export const WEIGHTS = {
 
 export const MAX_SCORE = Object.values(WEIGHTS).reduce((a, b) => a + b, 0);
 
+// Directional-bias cutoff on the shared -100..+100 score scale: at/above this is
+// Bullish/BUY, at/below its negative is Bearish/SELL, between is Neutral/HOLD.
+// Centralized here (was the same unexplained magic 15 repeated independently in
+// signals/engine.ts, signals/direction4L.ts, nextday/outlook.ts, paper/entryRules.ts
+// and routes/api.ts) so it's documented and tunable in one place.
+export const DIRECTION_THRESHOLD = 15;
+
 /**
  * Vectorised score for every bar (-100..+100), computed once over the full
  * series so the backtest runs in O(n). Bars without enough history are null.
