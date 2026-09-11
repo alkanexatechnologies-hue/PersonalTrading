@@ -597,7 +597,9 @@ function dailyLossCapHit(s: PaperState, istDate: string): boolean {
 }
 
 // ---- costs / marking ----
-function tradeFriction(kind: PoolKind, entryVal: number, exitVal: number): number {
+// Exported (in addition to being used internally) so the P&L math can be unit
+// tested directly - see paper/engine.pnl.test.ts.
+export function tradeFriction(kind: PoolKind, entryVal: number, exitVal: number): number {
   const slip = isOption(kind) ? OPT_SLIP : EQ_SLIP;
   const slippage = slip * (entryVal + exitVal);
   let charges: number;
@@ -610,7 +612,7 @@ function tradeFriction(kind: PoolKind, entryVal: number, exitVal: number): numbe
   }
   return round2(slippage + charges);
 }
-function optionMark(pos: PaperPosition, spot: number, nowEpoch: number): number {
+export function optionMark(pos: PaperPosition, spot: number, nowEpoch: number): number {
   const denom = pos.spotTarget - pos.spotEntry;
   if (!denom) {
     // spotTarget == spotEntry means this position was opened with a degenerate
@@ -670,7 +672,7 @@ function buildRemark(pos: PaperPosition, reason: ExitReason, pnlPct: number): st
   }
 }
 
-function closePosition(s: PaperState, pos: PaperPosition, exitPrice: number, reason: ExitReason, nowEpoch: number) {
+export function closePosition(s: PaperState, pos: PaperPosition, exitPrice: number, reason: ExitReason, nowEpoch: number) {
   const pool = poolOf(s, pos.kind);
   const entryVal = pos.entryPrice * pos.qty;
   const exitVal = exitPrice * pos.qty;

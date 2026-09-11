@@ -9,6 +9,7 @@
     "start": "tsx backend/server.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
+    "test": "tsx --test \"backend/**/*.test.ts\"",
     "backtest:oi": "tsx scripts/oi-backtest.ts"
   },
   "dependencies": {

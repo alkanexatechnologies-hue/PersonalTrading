@@ -1,4 +1,8 @@
-// Probe whether NSE's public option-chain API is reachable from this environment.
+// Manual connectivity probe - NOT an automated test (no assertions, not run by
+// `npm test` or any CI). Run by hand with `tsx scripts/probe-nse-connectivity.ts`
+// to check whether NSE's public option-chain API is reachable and what its
+// cookie/auth handshake looks like from this environment. Formerly named
+// test-nse.ts, which read as an automated test when it isn't one.
 const HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",

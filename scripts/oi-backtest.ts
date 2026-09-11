@@ -4,6 +4,12 @@ import { GrowwProvider } from "../backend/data/growwProvider";
 import { backtestOiCommandLog, LogReplayResult, OiTradeSim } from "../backend/backtest/oiCommand";
 
 // ---- OI Command Back-Test — CLI runner -------------------------------------
+// This is a manual reporting tool, NOT an automated test: it prints formatted
+// win-rate/outcome stats for a human to read, with no assertions and no
+// pass/fail exit code, so it won't catch a signal-logic regression unless
+// someone runs it by hand and notices the numbers look wrong. For automated
+// regression coverage of the signal/backtest logic, see
+// backend/backtest/engine.test.ts (run via `npm test`).
 // Usage:
 //   npm run backtest:oi                     -> LIVE grid back-test for NIFTY today
 //   npm run backtest:oi -- live ^NSEBANK    -> live grid for another F&O index
