@@ -5,10 +5,10 @@ import { CONFIG } from "../config/arbitration";
 // runExtPipeline() below in the exact Step-11 order. Nothing here edits Setup
 // (entryRules.ts), the exit stack, or the capital-guard MATH.
 import {
-  ExtInputs, MarketRegime, WallReactionState,
+  ExtInputs, MarketRegime, WallReactionState, LiquidityState,
   scoreExtension, logOpeningBias, buildRiskComment, RiskComment,
   DedupRecord, DedupContext, checkDedup, armDedup, releaseOnExit, observePrice,
-  logDecision,
+  logDecision, arbitrate, ArbiterCandidate, computeTradeScore,
 } from "./ext";
 
 // ---- Autonomous PAPER-trading engine (simulated, no real orders) ----
@@ -814,6 +814,7 @@ export interface ExtDecision {
   reason: string;
   regime: MarketRegime;
   wallReactionState: WallReactionState;
+  liquidityState: LiquidityState;   // for scoring a rival Scalp candidate in arbitrate()
   rrFloorOverride: number | null;   // 1.5 when sentiment opposed
   relaxTargetForBreak: boolean;     // wallReaction === "BREAK"
   fp: string;
@@ -837,7 +838,7 @@ function runExtPipeline(inp: ExtInputs, idea: OptionIdea, dedupStore: DedupRecor
 
   const base = {
     finalScore: score.finalScore, setupQuality: score.setupQuality, regime,
-    wallReactionState, rrFloorOverride: score.rrFloorOverride,
+    wallReactionState, liquidityState: ext.liquidity.liquidityState, rrFloorOverride: score.rrFloorOverride,
     relaxTargetForBreak: wallReactionState === "BREAK", inp,
     scoreReasons: [ext.regime.note, ext.liquidity.note, ext.sentiment.note, ext.premium.note, ext.wall.note, ...score.reasons].filter(Boolean),
   };
@@ -874,7 +875,7 @@ export function extDedupPeek(ctx: DedupContext): { suppressed: boolean; reason: 
 }
 
 // Try to open one option position; returns "OPENED" or a Hindi skip reason.
-async function tryOpenOption(s: PaperState, deps: TickDeps, idea: OptionIdea, kind: PoolKind, requireClean: boolean): Promise<string> {
+async function tryOpenOption(s: PaperState, deps: TickDeps, idea: OptionIdea, kind: PoolKind, requireClean: boolean, rivalScalp?: OptionIdea | null): Promise<string> {
   const r2v = (n: number) => Math.round(n * 100) / 100;
   if (s.open.some((p) => p.kind === kind && p.symbol === idea.symbol)) return `पहले से ${idea.symbol} में position खुला है`;
   if (idea.dte != null && idea.dte <= 1 && (idea.confidence ?? 0) < 80) return `expiry के करीब (dte=${idea.dte}) — conf ${idea.confidence ?? 0}<80 चाहिए`;
@@ -905,6 +906,38 @@ async function tryOpenOption(s: PaperState, deps: TickDeps, idea: OptionIdea, ki
       if (extDecision.suppressed) {
         logDecision({ type: "duplicate", mode: "Directional", symbol: idea.symbol, text: `${idea.symbol} ${idea.optionType}: duplicate, no re-entry — ${extDecision.reason}` });
         return `dedup — ${extDecision.reason}`;
+      }
+      // ===== MASTER TRADE SELECTOR — now load-bearing, not display-only =====
+      // Same arbitrate() the OI Command cockpit uses to compute GO/WAIT/CONFLICT
+      // for display. Previously arbitrate() was never imported by paper/engine.ts
+      // — the dashboard could show CONFLICT while a position opened anyway
+      // (reverse-engineered spec, problem #16). Now a genuine opposing-side
+      // conflict against a live Scalp candidate for this symbol blocks entry.
+      {
+        const candidates: ArbiterCandidate[] = [{
+          mode: "Directional", direction: idea.direction,
+          finalScore: extDecision.finalScore, setupQuality: extDecision.setupQuality,
+          eligible: true, vetoed: false, suppressed: false,
+        }];
+        if (rivalScalp) {
+          const scBase = calibratedWinProb({ scalp: true, confidence: rivalScalp.confidence ?? 55, strikeReason: "OI-SCALP" });
+          const scScore = computeTradeScore({
+            baseTrigger: true, baseConfidence: scBase, direction: rivalScalp.direction, premiumState: "Neutral",
+            regime: extDecision.regime, wallReaction: extDecision.wallReactionState,
+            sentimentState: "Neutral", liquidityState: extDecision.liquidityState,
+          });
+          candidates.push({
+            mode: "Scalp", direction: rivalScalp.direction, finalScore: scScore.finalScore,
+            setupQuality: scScore.setupQuality, eligible: true, vetoed: scScore.vetoed, suppressed: false,
+          });
+        }
+        const verdict = arbitrate(candidates);
+        if (verdict.verdict === "CONFLICT") {
+          return `Master Selector: CONFLICT — ${verdict.reason} (entry रोका गया, dashboard के verdict के मुताबिक)`;
+        }
+        if (verdict.verdict === "GO" && verdict.primary && verdict.primary.mode !== "Directional") {
+          return `Master Selector: ${verdict.primary.mode} जीता (Directional नहीं) — entry रोका गया`;
+        }
       }
       // On a BREAK read, relax Setup's target-anchored-to-wall cap for THIS trade
       // ONLY. Done here at trade construction (the step that consumes Setup's
@@ -1145,11 +1178,15 @@ async function tickPaperImpl(deps: TickDeps): Promise<any> {
   check.notes.push("Clock windows off — win-win setup पर किसी भी समय entry (NSE session)");
 
   // SCALPS: quality + concurrent cap only
+  // (scalpIdeasThisTick is hoisted so the Index-options block below can hand the
+  // live Scalp candidate to the Master Selector arbitration in tryOpenOption.)
+  let scalpIdeasThisTick: OptionIdea[] = [];
   if (!eod && !lossCapHit && deps.getScalpIdeas &&
       s.open.filter((p) => p.scalp).length < MAX_SCALP &&
       deps.nowEpoch - (s.lastScalpEntry || 0) >= SCALP_THROTTLE) {
     try {
       const scalpIdeas = await deps.getScalpIdeas();
+      scalpIdeasThisTick = scalpIdeas;
       if (!scalpIdeas.length) check.notes.push("कोई scalp win-win नहीं (5m+15m / OI TAKE नहीं मिला)");
       for (const idea of scalpIdeas) {
         if (s.open.filter((p) => p.scalp).length >= MAX_SCALP) break;
@@ -1171,7 +1208,8 @@ async function tickPaperImpl(deps: TickDeps): Promise<any> {
         if (!ideas.length) check.notes.push("कोई index option idea नहीं (OI TAKE + 1h bulletin नहीं)");
         for (const idea of ideas) {
           if (s.open.filter((p) => p.kind === "indexOption" && !p.scalp).length >= MAX_INDEX_OPT) break;
-          const reason = await tryOpenOption(s, deps, idea, "indexOption", false);
+          const rivalScalp = scalpIdeasThisTick.find((si) => si.symbol === idea.symbol) || null;
+          const reason = await tryOpenOption(s, deps, idea, "indexOption", false, rivalScalp);
           recIdea("indexOption", idea, reason);
           if (reason === "OPENED") { s.tradesToday += 1; s.lastEntry.indexOption = deps.nowEpoch; }
         }

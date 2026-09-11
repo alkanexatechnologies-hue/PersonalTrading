@@ -1,0 +1,575 @@
+<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8"/>
+<style>
+  body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1a1a1a;line-height:1.4}
+  h1{font-size:20pt;color:#1b2a44;border-bottom:2px solid #2b3d5c;padding-bottom:4px}
+  h2{font-size:15pt;color:#1b2a44;margin-top:16px}
+  h3{font-size:12.5pt;color:#2b3d5c}
+  code{background:#eef;padding:1px 3px;font-family:Consolas,monospace;font-size:10pt}
+  table{margin:8px 0}
+  th,td{border:1px solid #bbb}
+</style></head><body><h1>Strategy &amp; Market Decision Engine — Reverse-Engineered Specification</h1>
+<p><b>Status:</b> Documentation only. No production code was modified to produce this</p>
+<p>document. All claims are cited to <code>file:line</code> in the backend as it exists today.</p>
+<p>Where the codebase disagrees with itself (multiple implementations of the same</p>
+<p>concept), every version is documented — none are silently picked as "the" answer.</p>
+<p>All paths are relative to <code>backend/</code> unless otherwise noted.</p>
+<hr/>
+<h2>1. Executive Summary</h2>
+<p>This is a <b>discretionary-assist paper-trading system</b> for NSE index/stock</p>
+<p>options — it computes signals, scores, and simulated (never live) trades, but</p>
+<p>was built up incrementally as independent modules rather than one designed</p>
+<p>engine. The investigation found:</p>
+<ul style="margin:4px 0">
+<li><b>Four independent market-regime classifiers</b> (<code>paper/ext/marketRegime.ts</code>,</li>
+</ul>
+<p>  and three separate ADX-based ones in <code>routes/api.ts</code>) that use different</p>
+<p>  labels, different thresholds, and never call each other.</p>
+<ul style="margin:4px 0">
+<li><b>Three parallel OI-verdict computations</b> (<code>oi/oi.ts</code> / <code>data/growwProvider.ts</code>'s</li>
+</ul>
+<p>  ±1 score, <code>oi/oiChange.ts</code>'s ±100 5-factor score, and the trading-facing</p>
+<p>  <code>oiDirection</code> relabel of the second one) that can and do disagree.</p>
+<ul style="margin:4px 0">
+<li><b>Five different PCR (put-call ratio) bullish/bearish threshold pairs</b> live</li>
+</ul>
+<p>  simultaneously across five files.</p>
+<ul style="margin:4px 0">
+<li><b>The single most important architectural finding</b>: the "Master Trade</li>
+</ul>
+<p>  Selector" arbiter (<code>paper/ext/tradeArbiter.ts</code>'s <code>arbitrate()</code>) that decides</p>
+<p>  GO / WAIT / CONFLICT for the UI is **never consulted by the paper-trading</p>
+<p>  engine** (<code>paper/engine.ts</code>) that actually opens positions. The two systems</p>
+<p>  run in parallel and can disagree — the dashboard can show "CONFLICT ⚠" while</p>
+<p>  a position opens anyway. See §10.</p>
+<ul style="margin:4px 0">
+<li><b>No position-scaling logic exists anywhere</b> — every entry is a brand-new,</li>
+</ul>
+<p>  independent position; there is no add-on entry, no averaging in, no partial</p>
+<p>  profit-taking, and (confirmed explicitly) no path that increases exposure</p>
+<p>  because price moved against an existing trade.</p>
+<ul style="margin:4px 0">
+<li>A meaningful amount of duplicate-logic cleanup (shared IST-time math, a</li>
+</ul>
+<p>  shared ATR stop/target helper, a shared day-range helper, and centralizing</p>
+<p>  the reused ±15 direction threshold into one constant) was already done in a</p>
+<p>  prior session on this codebase — noted inline below where relevant so this</p>
+<p>  document doesn't re-flag already-fixed issues as open problems.</p>
+<hr/>
+<h2>2. Current Architecture</h2>
+<h3>2.1 Module map</h3>
+<table border="1" cellspacing="0" cellpadding="5" style="border-collapse:collapse;font-size:10.5pt"><tr><th style="background:#2b3d5c;color:#fff;text-align:left">Concern</th><th style="background:#2b3d5c;color:#fff;text-align:left">File(s)</th></tr><tr><td>Technical indicators (EMA/RSI/MACD/ATR/Supertrend/ADX/Bollinger/VWAP)</td><td><code>indicators/index.ts</code></td></tr><tr><td>Technical signal score (6-factor, 100-scale)</td><td><code>signals/score.ts</code>, <code>signals/engine.ts</code></td></tr><tr><td>4-Layer Direction Engine (Structure/Trend/Derivatives/Momentum)</td><td><code>signals/direction4L.ts</code></td></tr><tr><td>Bar-eligibility filters (trend/ADX/time)</td><td><code>signals/filters.ts</code></td></tr><tr><td>OI chain read, verdict #1 (±1 score)</td><td><code>oi/oi.ts</code>, <code>data/growwProvider.ts</code></td></tr><tr><td>OI baseline diff, buildup classification, verdict #2 (±100 score)</td><td><code>oi/oiChange.ts</code></td></tr><tr><td>OI walls, directional/scalp recommendation, conflict tally, model correlation</td><td><code>oi/oiTrade.ts</code></td></tr><tr><td>Move-agreement bulletin (5m/15m/1h)</td><td><code>oi/bulletin.ts</code></td></tr><tr><td>"Setup" price-structure entry rules (no RSI/MACD)</td><td><code>paper/entryRules.ts</code></td></tr><tr><td>Sentiment/Liquidity/Risk extension pipeline (regime→liquidity→sentiment→opening bias→premium→wall reaction→score)</td><td><code>paper/ext/*.ts</code></td></tr><tr><td>Master candidate arbitration (GO/WAIT/CONFLICT)</td><td><code>paper/ext/tradeArbiter.ts</code></td></tr><tr><td>Portfolio risk advisory</td><td><code>paper/ext/riskComment.ts</code></td></tr><tr><td>Re-entry suppression (fingerprint dedup)</td><td><code>paper/ext/tradeDedup.ts</code></td></tr><tr><td>Pre-trade risk scoring (volatility/ADX/time/volume/candle/premium-swing)</td><td><code>options/riskRadar.ts</code></td></tr><tr><td>"GainzAlgo v2" buy/sell checklist scorer</td><td><code>options/highProbAlgo.ts</code></td></tr><tr><td>Paper-trading engine (entry, sizing, exits, capital guards)</td><td><code>paper/engine.ts</code></td></tr><tr><td>Route composition, response assembly</td><td><code>routes/api.ts</code> (<code>buildOiCommand</code>, <code>/oi-command</code> handler)</td></tr></table>
+<h3>2.2 The two parallel call chains (this is the crux of the architecture)</h3>
+<p><b>Chain A — <code>buildOiCommand()</code> (<code>routes/api.ts:2928</code>)</b>, produces the OI/technical</p>
+<p>read:</p>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">getOiCached(def)
+  → recordOiBaseline + computeOiChange(...)           → oc          [oi/oiChange.ts]
+  → loadBars() (15m/5m/60m/daily candles)
+  → recommendOiTrades({...})                          → payload.recommendation   [oi/oiTrade.ts]
+  → computeRiskRadar                                   → payload.riskRadar        [options/riskRadar.ts]
+  → buildOiWalls                                        → payload.walls            [oi/oiTrade.ts]
+  → correlateOiModels({...})                            → payload.correlate        [oi/oiTrade.ts]
+  → buildOiLesson({...})                                → payload.lesson           [oi/oiTrade.ts]
+  → REVERSE_RISK gate (api.ts:3327-3336) — mutates payload.recommendation in place
+  → buildMoveBulletin, moodReview, quality, logging
+  → return payload</pre>
+<p><code>buildOiCommand()</code> returns here. <b><code>payload.ext</code> does not exist yet.</b></p>
+<p><b>Chain B — the <code>/oi-command</code> route handler (<code>routes/api.ts:3649-3680</code>)</b>, wraps</p>
+<p>Chain A and adds the extension pipeline:</p>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">data = buildOiCommand(def)                              [Chain A above]
+ext  = extForOiPayload(data)
+         → assembleExtInputs()
+         → scoreExtension()  (7 steps, paper/ext/pipeline.ts)
+              1. computeMarketRegime      [paper/ext/marketRegime.ts]
+              2. computeLiquidityGuard    [paper/ext/liquidityGuard.ts]
+              3. computeSentiment4L       [paper/ext/sentiment4L.ts]
+              4. computeOpeningBias       [paper/ext/openingBias.ts]  (first 30 min only)
+              5. computePremiumSentiment  [paper/ext/premiumSentiment.ts]
+              6. computeWallReaction      [paper/ext/wallReaction.ts]  (only if at a wall)
+              7. computeTradeScore        [paper/ext/tradeScore.ts]  → finalScore, setupQuality
+         → buildRiskComment()             [paper/ext/riskComment.ts]  (portfolio heat/drawdown, advisory)
+         → extDedupPeek() (read-only — does not arm dedup)
+         → build ArbiterCandidate[] for Directional + Scalp
+         → arbitrate(candidates)          [paper/ext/tradeArbiter.ts]  → GO / WAIT / CONFLICT
+reconcileOiState(...), checkArbiterWatchdog(...)   (logging only)
+res.json({ ...data, ext })</pre>
+<p><b>Chain C — the actual paper-trading entry path (<code>paper/engine.ts</code>)</b>, runs</p>
+<p><b>entirely independently</b> of Chain B's <code>arbitrate()</code> result:</p>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">tickPaper() / tickPaperScalps() (timers, every 5min / 90s)
+  → getIndexOptionIdeas() / getStockOptionIdeas() / getScalpIdeas()  [routes/api.ts, calls oiGridToIdea() among others]
+  → tryOpenOption(idea)
+       → runExtPipeline(idea)  → scoreExtension() AGAIN (a fresh, separate call — not the same object as Chain B's)
+       → confidence/RR/win-probability/regime/heat/cash/position-cap gates
+       → open position, or reject with a reason string</pre>
+<p><code>oiGridToIdea()</code> (<code>routes/api.ts:3401</code>) is the only bridge between Chain A/B's</p>
+<p>OI recommendation and Chain C — it re-checks <code>rec.take &amp;&amp; rec.algoReady</code> plus</p>
+<p>bulletin agreement, and returns <code>null</code> (no idea at all) otherwise. **<code>arbitrate()</code>'s</p>
+<p>GO/WAIT/CONFLICT verdict itself is never read by <code>paper/engine.ts</code>** — confirmed</p>
+<p>by grep: <code>paper/engine.ts</code> imports `scoreExtension, logOpeningBias,</p>
+<p>buildRiskComment, checkDedup, armDedup, releaseOnExit, observePrice,</p>
+<p>logDecision<code> from </code>./ext<code>, but never </code>arbitrate<code> or </code>ArbiterCandidate`.</p>
+<p><code>arbitrate()</code> is called from exactly one place in the entire backend: the</p>
+<p><code>/oi-command</code> route handler, for display only (<code>api.ts:3556</code>, code comment:</p>
+<p>*"This SHOWS what the modules say (read-only) — it does not open trades or arm</p>
+<p>dedup."*).</p>
+<hr/>
+<h2>3. Market Regime Logic</h2>
+<p>There is no single regime engine — <b>four independent classifiers</b> coexist:</p>
+<table border="1" cellspacing="0" cellpadding="5" style="border-collapse:collapse;font-size:10.5pt"><tr><th style="background:#2b3d5c;color:#fff;text-align:left">#</th><th style="background:#2b3d5c;color:#fff;text-align:left">Location</th><th style="background:#2b3d5c;color:#fff;text-align:left">Labels</th><th style="background:#2b3d5c;color:#fff;text-align:left">Method</th><th style="background:#2b3d5c;color:#fff;text-align:left">Scope</th><th style="background:#2b3d5c;color:#fff;text-align:left">Hard gate?</th></tr><tr><td>1</td><td><code>paper/ext/marketRegime.ts:60-103</code></td><td>Trending / Compressed / Transitioning</td><td>3+ consecutive fractal HH+HL or LH+LL swings (window step 8 bars) → Trending; ATR(14) &lt; 85% of its 20-bar avg → Compressed; squeeze→fire burst release → Transitioning; else Transitioning (indeterminate default)</td><td>Per-candidate, feeds the extension pipeline's scoring</td><td>No — informational, feeds <code>tradeScore</code>'s ±4 bonus and <code>setupQuality</code>'s clarity points only</td></tr><tr><td>2</td><td><code>routes/api.ts:412-431</code></td><td>Trending (ADX≥25) / Weak trend (18-25) / Range-bound (&lt;18)</td><td>ADX(14), <b>NIFTY 15m only</b></td><td>Global status endpoint, feeds a separate <code>tradeZone</code> (TRADE-ON/SELECTIVE/NO-TRADE) verdict at <code>api.ts:432-472</code></td><td>Feeds <code>tradeZone</code>, but <code>tradeZone</code> itself isn't consumed by the paper engine either (display-only status)</td></tr><tr><td>3</td><td><code>routes/api.ts:5317-5328</code> (<code>deps.getRegime</code>)</td><td>Trending (≥25) / <b>Range</b> (&lt;18) / Weak (18-25)</td><td>ADX(14), per symbol</td><td>Injected into the paper engine as <code>TickDeps.getRegime</code></td><td><b>Yes</b> — <code>"Range"</code> prohibits opening a non-OI-tagged, non-scalp directional idea (<code>paper/engine.ts:885-887</code>)</td></tr><tr><td>4</td><td><code>routes/api.ts:2645-2671</code> (<code>classifyRegime</code>)</td><td>good / lottery / whipsaw / range (Hindi labels)</td><td>ADX≥23 → good; squeeze&lt;0.7 &amp; ADX&lt;22 → lottery; ADX&lt;20 &amp; ≥3 EMA9/21 crossovers in last 12 bars → whipsaw; else range</td><td>Per-timeframe UI display (<code>5m</code>/<code>15m</code>/<code>1h</code>) and the <code>/signal/:symbol</code> route's <code>regime</code> field</td><td>No — display-only</td></tr></table>
+<p><b>Note the label collision</b>: classifier #2 uses <code>"Range-bound"</code>, classifier #3</p>
+<p>uses <code>"Range"</code> — same ADX&lt;18 condition, different string, so code that greps</p>
+<p>for one literal will silently miss the other.</p>
+<p><b>Only classifier #3 actually blocks a trade</b>, and only for one idea class</p>
+<p>(non-OI, non-scalp directional). Scalp ideas and any idea whose <code>strikeReason</code></p>
+<p>is OI-tagged bypass regime protection entirely (§14, problem 13).</p>
+<hr/>
+<h2>4. OI Logic</h2>
+<h3>4.1 Walls (support/resistance)</h3>
+<p><code>buildOiWalls()</code> (<code>oi/oiTrade.ts:302-345</code>) computes <b>two tiers</b>:</p>
+<ul style="margin:4px 0">
+<li><code>immR</code>/<code>immS</code> — nearest strike above/below spot (the "immediate" wall).</li>
+<li><code>bestR</code>/<code>bestS</code> — the strike with the <b>largest OI</b> on that side (the true</li>
+</ul>
+<p>  "wall") — mapped to <code>payload.oiSummary.callWall</code>/<code>putWall</code> (<code>api.ts:3201-3210</code>).</p>
+<p>A <b>third, cruder</b> notion exists in <code>oi/oi.ts:100-106</code> (duplicated verbatim in</p>
+<p><code>data/growwProvider.ts:530-535</code>): support/resistance = the single strike with</p>
+<p>max PE/CE OI <b>across the whole chain</b>, not filtered by side-of-spot.</p>
+<p>"Fever" (OI concentration near ATM, ±5 strikes): <code>putPct &gt;= 55</code> → PUT fever</p>
+<p>(bullish lean); <code>callPct &gt;= 55</code> → CALL fever (bearish lean) (<code>oiTrade.ts:335-343</code>).</p>
+<h3>4.2 Writing / unwinding classification</h3>
+<p><code>actionFor()</code> (<code>oi/oiChange.ts:67-72</code>), exact rule (per-strike, per-side, diffed</p>
+<p>against the day's first-reading baseline):</p>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">oiChg &gt; 0, CE → "Call writing ↑"     (bearish)
+oiChg &gt; 0, PE → "Put writing ↑"      (bullish)
+oiChg &lt; 0, CE → "Call unwinding ↓"   (bullish)
+oiChg &lt; 0, PE → "Put unwinding ↓"    (bearish)
+oiChg == null → "building baseline"
+oiChg == 0    → "flat"</pre>
+<h3>4.3 PCR — five different threshold pairs live simultaneously</h3>
+<table border="1" cellspacing="0" cellpadding="5" style="border-collapse:collapse;font-size:10.5pt"><tr><th style="background:#2b3d5c;color:#fff;text-align:left">File</th><th style="background:#2b3d5c;color:#fff;text-align:left">Bullish</th><th style="background:#2b3d5c;color:#fff;text-align:left">Bearish</th><th style="background:#2b3d5c;color:#fff;text-align:left">Notes</th></tr><tr><td><code>oi/oi.ts:133-136</code>, <code>growwProvider.ts:557-560</code></td><td>≥1.2</td><td>≤0.7</td><td>±1 verdict score</td></tr><tr><td><code>oi/oiChange.ts:175-178</code></td><td>≥1.2</td><td>≤0.8</td><td>contributes ±15 to the 5-factor <code>oiDirScore</code></td></tr><tr><td><code>oi/bulletin.ts:90-92</code></td><td>≥1.05</td><td>≤0.85</td><td>move-agreement bulletin</td></tr><tr><td><code>options/highProbAlgo.ts:90-94</code></td><td>≥1.1 (trap fail if ≤0.7)</td><td>≤0.85 (trap fail if ≥1.2)</td><td>GainzAlgo checklist</td></tr><tr><td><code>commentary/marketCommentary.ts:186-188</code></td><td>≥1.1</td><td>≤0.7</td><td>narrative commentary</td></tr></table>
+<p>**A PCR of 0.9, for example, reads "bearish" under <code>oiChange.ts</code>'s rule but</p>
+<p>"neutral" everywhere else** — a genuine cross-module inconsistency, not a</p>
+<p>deliberate design choice (§14, problem 2).</p>
+<h3>4.4 OI direction (UP/DOWN/FLAT) — the number that actually drives trading</h3>
+<p><code>computeOiChange()</code>'s <code>oiDirScore</code> (<code>oi/oiChange.ts:167-194</code>), five additive</p>
+<p>factors on a ±100 scale:</p>
+<table border="1" cellspacing="0" cellpadding="5" style="border-collapse:collapse;font-size:10.5pt"><tr><th style="background:#2b3d5c;color:#fff;text-align:left">Factor</th><th style="background:#2b3d5c;color:#fff;text-align:left">Contribution</th></tr><tr><td>Net PE-writing vs CE-writing near ATM (bias)</td><td>±25</td></tr><tr><td>PCR ≥1.2 / ≤0.8</td><td>±15</td></tr><tr><td>Futures buildup (Long buildup/Short covering vs Short buildup/Long unwinding)</td><td>±20</td></tr><tr><td>Distance to support vs resistance (closer to one wall)</td><td>±10</td></tr><tr><td>Max single-strike buildup "very high" flag</td><td>±10</td></tr></table>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">oiVerdict = oiDirScore &gt;= 20 ? "Bullish" : oiDirScore &lt;= -20 ? "Bearish" : "Neutral"
+oiConfidence = min(100, |oiDirScore|)</pre>
+<p><code>routes/api.ts</code> then relabels this 1:1 with no extra threshold:</p>
+<p><code>oiDirection = Bullish→"UP" / Bearish→"DOWN" / Neutral→"FLAT"</code>.</p>
+<p><b>A second, wholly independent verdict</b> exists in <code>oi/oi.ts:130-145</code> (and its</p>
+<p>duplicate in <code>growwProvider.ts:555-567</code>): a coarse ±1 integer score (PCR ±1,</p>
+<p>CE/PE whole-chain buildup ±1), `bias = score&gt;=1 ? "Bullish" : score&lt;=-1 ?</p>
+<p>"Bearish" : "Neutral"`. This is <b>display-only</b> for the trading path (the</p>
+<p><code>oiDirection</code> that gates <code>recommendOiTrades</code> sources from <code>oiChange.ts</code>, not</p>
+<p><code>oi.ts</code>) but <b>is</b> consumed as a separate directional input elsewhere</p>
+<p>(<code>signals/direction4L.ts:122</code>, <code>predict/dayOutlook.ts</code>), meaning the app can</p>
+<p>show two different "OI bias" numbers for the same instant, sourced from two</p>
+<p>unrelated formulas.</p>
+<p><b>Both-sides-writing case</b>: there is no explicit "conflicted OI" state. If CE</p>
+<p>and PE are both writing roughly equally, the <code>bias</code> net-of-the-two calculation</p>
+<p>(<code>oiChange.ts:133-141</code>) falls into <code>"Neutral"</code> — the same bucket as genuinely</p>
+<p>flat/no-activity — losing the distinction between "nothing is happening" and</p>
+<p>"both sides are fighting hard."</p>
+<h3>4.5 Conflict resolution — <code>buildOiLesson()</code>'s pay/reverse tally</h3>
+<p><code>oi/oiTrade.ts:373-459</code>, a point tally (asymmetric thresholds):</p>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">pay += 1   if oiDir !== FLAT
+pay += 2   if model consensus AGREE
+rev += 2   if model consensus CONFLICT       rev += 1 if MIXED
+pay += 1   if ADX &gt;= 20                      rev += 1 if ADX &lt; 16
+pay += 1   if 5m candle agrees with direction
+rev += 2   if 5m candle opposes with strength &gt;= 0.6
+rev += 1   if 5m candle is a Doji
+rev += 1   if 15m reversal-pattern candle opposes direction
+rev += 1   if capturedPct &gt;= 80 (move already captured)
+rev += 1   if data stale
+rev += 1   if no same-day baseline yet
+rev += 1   if price within 0.15% of the OI wall in that direction
+
+mode = "PAY_CHANCE"    if pay &gt;= rev + 2  AND oiDir != FLAT
+mode = "REVERSE_RISK"  if rev &gt;= pay + 1
+mode = "UNCLEAR"       otherwise</pre>
+<p>Note the deliberate asymmetry: PAY_CHANCE needs a 2-point margin; REVERSE_RISK</p>
+<p>only needs a 1-point margin — the system is built to default to caution on any</p>
+<p>near-tie.</p>
+<p><code>correlateOiModels()</code> (<code>oi/oiTrade.ts:213-272</code>) — the model-agreement input</p>
+<p>to the tally above — counts 5 non-OI "model votes" (VWAP, 4-Layer direction,</p>
+<p>GainzAlgo pass/fail, last-5m-bar, futures buildup) against the OI direction:</p>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">against == 0 &amp;&amp; agree &gt;= 2  → "AGREE"
+against &gt;= 2                → "CONFLICT"
+else                        → "MIXED"</pre>
+<hr/>
+<h2>5. Technical Logic</h2>
+<h3>5.1 <code>signals/score.ts</code> + <code>signals/engine.ts</code> — the 100-scale, 6-factor score</h3>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">WEIGHTS = { emaCross: 22, supertrend: 22, vwap: 18, macd: 18, rsi: 12, bollinger: 8 }
+MAX_SCORE = 100
+DIRECTION_THRESHOLD = 15   (centralized; reused by direction4L.ts, entryRules.ts, nextday/outlook.ts, routes/api.ts, options/suggest.ts)</pre>
+<table border="1" cellspacing="0" cellpadding="5" style="border-collapse:collapse;font-size:10.5pt"><tr><th style="background:#2b3d5c;color:#fff;text-align:left">Indicator</th><th style="background:#2b3d5c;color:#fff;text-align:left">Formula</th><th style="background:#2b3d5c;color:#fff;text-align:left">Notes</th></tr><tr><td>EMA9/21 cross</td><td>`contrib = sign(ema9-ema21) * 22 * min(1,</td><td>spreadPct</td><td>/0.5)`</td><td>strength-scaled</td></tr><tr><td>Supertrend</td><td><code>contrib = direction * 22</code></td><td><b>full weight, no scaling</b> — binary all-or-nothing</td></tr><tr><td>VWAP</td><td>`contrib = sign(price-vwap) * 18 * min(1,</td><td>diffPct</td><td>/0.4)`</td><td>strength-scaled</td></tr><tr><td>MACD histogram</td><td>`contrib = sign(hist) * 18 * max(0.4, min(1,</td><td>hist</td><td>/</td><td>macdLine</td><td>))`</td><td><b>floor of 0.4</b> — never contributes less than 40% of its weight once non-zero</td></tr><tr><td>RSI(14)</td><td><code>&lt;30</code>→+12, <code>&gt;70</code>→-12, <code>&gt;=55</code>→+4.8, <code>&lt;=45</code>→-4.8, else 0</td><td>dead zone 45-55</td></tr><tr><td>Bollinger(20,2)</td><td><code>price&gt;=upper</code>→-8, <code>price&lt;=lower</code>→+8, else 0</td><td>binary, no gradation</td></tr></table>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">score = clamp(round(Σcontrib), -100, 100)
+confidence = clamp(round(|score|*0.6 + agreement*100*0.4), 0, 100)
+label: score&gt;=50→"STRONG BUY", &gt;=15→"BUY", &lt;=-50→"STRONG SELL", &lt;=-15→"SELL", else "HOLD"</pre>
+<h3>5.2 <code>signals/direction4L.ts</code> — 4-Layer Direction Engine (separate, more elaborate)</h3>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">WEIGHTS = { structure: 40, trend: 25, derivatives: 20, momentum: 15 }</pre>
+<p>Each layer is a mean of <code>-1/0/+1</code> votes × its weight:</p>
+<ul style="margin:4px 0">
+<li><b>Structure (40%)</b>: PDH/PDL breakout (buffer = max(0.05% of price, 0.1×ATR)); opening range (09:15-09:45 IST) breakout; 2-bar fractal HH/HL vs LH/LL (40-bar window); day-range position (≥75%/≤25%).</li>
+<li><b>Trend (25%)</b>: EMA9 vs EMA21 sign; Supertrend(10,3) direction; VWAP sign.</li>
+<li><b>Derivatives (20%)</b>: OI bias (from <code>oi.ts</code>'s verdict, not <code>oiChange.ts</code>'s); OI buildup type; futures buildup; IV skew (±4% deadband). Futures basis and option volume sub-signals are explicitly omitted (feed doesn't provide them).</li>
+<li><b>Momentum (15%)</b>: RSI ≥55/≤45; MACD histogram sign; price vs Bollinger mid; volume only counted if RVOL≥1.2.</li>
+</ul>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">score = clamp(round(Σ layerScore*weight), -100, 100)
+direction = score&gt;=15 ? "Bullish" : score&lt;=-15 ? "Bearish" : "Neutral"
+confidence = clamp(round(|score|*0.7 + layersAgree*7), 5, 97)</pre>
+<h3>5.3 Risk Radar (<code>options/riskRadar.ts</code>) — display-only, not an entry gate</h3>
+<p><code>SEVERITY_WEIGHT = {danger:35, caution:18, info:8}</code>. Seven rules:</p>
+<table border="1" cellspacing="0" cellpadding="5" style="border-collapse:collapse;font-size:10.5pt"><tr><th style="background:#2b3d5c;color:#fff;text-align:left">Rule</th><th style="background:#2b3d5c;color:#fff;text-align:left">Threshold</th><th style="background:#2b3d5c;color:#fff;text-align:left">Severity</th></tr><tr><td>ATR spike</td><td>ratio ≥1.4 (danger ≥1.8)</td><td>caution/danger</td></tr><tr><td>No clear trend</td><td>ADX &lt;20</td><td>caution</td></tr><tr><td>Opening 15 min</td><td>IST 09:15-09:30</td><td>caution</td></tr><tr><td>Late session</td><td>IST ≥14:45</td><td>caution</td></tr><tr><td>Unusual volume</td><td>RVOL ≥2 (danger ≥3)</td><td>caution/danger</td></tr><tr><td>Sharp candle</td><td>5-bar range ≥2×ATR</td><td>caution</td></tr><tr><td>Premium sensitivity</td><td>1-ATR move ≥25% of premium (danger ≥40%)</td><td>caution/danger</td></tr><tr><td>Theta reminder</td><td>always shown</td><td>info</td></tr></table>
+<p><code>spikeRisk = min(100, Σseverity_weight)</code>; <code>level = High(≥60)/Elevated(≥30)/Low</code>.</p>
+<p>**This score is computed and displayed but is not read by <code>tryOpenOption()</code> or</p>
+<p>any entry-gating code** — it is informational for the trader, not a system</p>
+<p>veto (§14, problem 4/13 — arguably a missed opportunity, not a bug).</p>
+<h3>5.4 GainzAlgo v2 (<code>options/highProbAlgo.ts</code>)</h3>
+<p><code>evaluateBuyAlgo()</code> — starts at score 36, **any single check failing fails the</p>
+<p>whole evaluation** (all-must-pass, not a weighted sum with a floor): confidence</p>
+<p>≥68, quality ≥52, market alignment not Conflict, decay not High near expiry,</p>
+<p>theta/day ≤22%, OI bias agrees, PCR not a "trap," ADX ≥18, VWAP agrees, opening</p>
+<p>range break agrees, <code>srRoomOk</code>, 4-Layer direction agrees (not Neutral), RVOL</p>
+<p>≥0.85, not exhausted (&gt;65% of daily ATR used), delta ≥0.4, premium ≥1.5.</p>
+<hr/>
+<h2>6. Setup Engine (<code>paper/entryRules.ts</code>)</h2>
+<p>The codebase's own comments identify this module as <b>"the user's ruleset"</b> —</p>
+<p>price-structure driven, deliberately excluding RSI/MACD, used only by the</p>
+<p>paper engine's idea generators.</p>
+<table border="1" cellspacing="0" cellpadding="5" style="border-collapse:collapse;font-size:10.5pt"><tr><th style="background:#2b3d5c;color:#fff;text-align:left">Function</th><th style="background:#2b3d5c;color:#fff;text-align:left">What it computes</th></tr><tr><td><code>directionNoMomentum()</code></td><td>Re-derives 4L direction excluding the Momentum layer (Structure 40 + Trend 25 + Derivatives 20 = 85, renormalized to 100). Threshold: same shared ±15.</td></tr><tr><td><code>levelContext()</code></td><td>PDH/PDL/PDC, day open, opening range (09:15-09:45 IST), VWAP, major S/R (heaviest OI wall, falls back to PDH/PDL), 2-bar swing fractal (40-bar window), and a 3-vote bias nudge (price vs dayOpen/PDC/VWAP).</td></tr><tr><td><code>srRoomOk()</code></td><td><code>minRoom = max(spot*0.3%, 0.35×ATR)</code> — <b>raised from an earlier 0.15%/0.15×ATR</b> (code comment confirms this was already tightened in a prior session).</td></tr><tr><td><code>capTargetAndStop()</code></td><td>Volatility-scaled (not flat): <code>vm = clamp(atrDaily/spot / 1%, 0.7, 1.6)</code>; profit cap <code>15%×vm</code>, floor stop <code>12%×vm</code>; also holds ~1.3 reward:risk and clamps the spot target to the major wall.</td></tr></table>
+<p><b><code>entryRules.ts</code> itself defines no standalone numeric "setup score" floor</b> —</p>
+<p>its only quantitative gate is the shared ±15 direction threshold. It is also</p>
+<p><b>regime-agnostic</b>: none of its four functions read any regime value.</p>
+<h3>Setup condition table (actual implementation)</h3>
+<table border="1" cellspacing="0" cellpadding="5" style="border-collapse:collapse;font-size:10.5pt"><tr><th style="background:#2b3d5c;color:#fff;text-align:left">Condition</th><th style="background:#2b3d5c;color:#fff;text-align:left">Required</th><th style="background:#2b3d5c;color:#fff;text-align:left">Where enforced</th><th style="background:#2b3d5c;color:#fff;text-align:left">Reason</th></tr><tr><td>Direction not Neutral</td><td>Yes</td><td><code>directionNoMomentum</code> via <code>getStockOptionIdeas</code> (<code>api.ts:5177</code>)</td><td>±15 score threshold</td></tr><tr><td>Direction matches idea's proposed side</td><td>Yes</td><td><code>api.ts:5177</code></td><td>categorical check, no score margin</td></tr><tr><td>Level-context bias agrees (or neutral)</td><td>Yes</td><td><code>api.ts:5179</code></td><td><code>lv.bias !== 0 &amp;&amp; lv.bias !== direction</code> → reject</td></tr><tr><td>Room to major wall</td><td>Yes</td><td><code>srRoomOk()</code>, <code>api.ts:5182</code></td><td>0.3%/0.35×ATR</td></tr><tr><td>OI</td><td>No (separate path)</td><td>not consulted by <code>entryRules.ts</code></td><td>Setup and OI/Directional are independent codepaths (§7)</td></tr><tr><td>VIX-equivalent (ADX regime)</td><td>No, within <code>entryRules.ts</code></td><td>only enforced downstream via <code>deps.getRegime</code> (§3, classifier 3)</td><td>not part of the Setup module itself</td></tr><tr><td>Minimum score</td><td>No explicit gate in this module</td><td>downstream consumers apply their own floors (below)</td><td>—</td></tr></table>
+<p>The broader paper-trading pipeline that *consumes* Setup/OI ideas layers its</p>
+<p>own floors on top (none of these live inside <code>entryRules.ts</code>):</p>
+<table border="1" cellspacing="0" cellpadding="5" style="border-collapse:collapse;font-size:10.5pt"><tr><th style="background:#2b3d5c;color:#fff;text-align:left">Constant</th><th style="background:#2b3d5c;color:#fff;text-align:left">Value</th><th style="background:#2b3d5c;color:#fff;text-align:left">File</th></tr><tr><td><code>CONFIRM_FLOOR</code></td><td>72 (55 for OI-tagged ideas)</td><td><code>paper/engine.ts:279</code></td></tr><tr><td><code>WIN_PROB_MIN_DIR</code> / <code>WIN_PROB_MIN_SCALP</code></td><td>52 / 54</td><td><code>paper/engine.ts:275-276</code></td></tr><tr><td><code>OPT_RR_MIN</code> / <code>INTRADAY_RR_MIN</code></td><td>1.3 (net of cost)</td><td><code>paper/engine.ts:293-294</code></td></tr><tr><td><code>tradeScore</code> clamp</td><td>floor 52, ceiling 62</td><td><code>config/arbitration.ts:10</code></td></tr><tr><td><code>OI_DIR_MIN</code> / <code>OI_SCALP_MIN</code> / <code>OI_ALGO_FLOOR</code></td><td>60 / 50 / 68</td><td><code>oi/oiTrade.ts:56-58</code></td></tr><tr><td><code>setupQualityMinForOverride</code></td><td>50</td><td><code>config/arbitration.ts:24</code></td></tr><tr><td><code>DISPLAY_QUALITY_MIN</code></td><td>30</td><td><code>config/arbitration.ts:14</code></td></tr></table>
+<p><b>"SETUP DETECTED" vs "TRADE READY"</b>: the codebase draws these tiers</p>
+<p>explicitly (§7 elaborates the directional side of this same ladder):</p>
+<p>1. <b>Idea exists</b> — a direction/strike is computed at all.</p>
+<p>2. <b>Take</b> — passes the module's own quality bar (<code>entryRules.ts</code>'s</p>
+<p>   categorical checks, or <code>oiTrade.ts</code>'s confidence+room checks) and is shown</p>
+<p>   as a recommendation.</p>
+<p>3. <b>algoReady</b> — clears <code>OI_ALGO_FLOOR</code>(68) and was not REVERSE_RISK-downgraded.</p>
+<p>4. <b>Actually opened</b> — passes <code>tryOpenOption()</code>'s independent, stricter gate</p>
+<p>   stack (confidence, RR, win-probability, heat, cash, position caps).</p>
+<hr/>
+<h2>7. Directional Engine</h2>
+<p>Two distinct codepaths compute CALL/PUT/NEUTRAL; they are independent and can</p>
+<p>disagree.</p>
+<h3>7.1 <code>recommendOiTrades()</code> (<code>oi/oiTrade.ts:105-172</code>) — directional + scalp legs</h3>
+<p>Shared inputs: <code>OI_DIR_MIN=60</code>, <code>OI_SCALP_MIN=50</code>, <code>OI_ALGO_FLOOR=68</code>.</p>
+<p>Volatility multiplier: <code>vm = clamp((expHigh/spot)/0.8%, 0.7, 1.6)</code>.</p>
+<p><b>Common skips</b> (both legs): no same-day OI baseline; chain stale (&gt;90s); OI</p>
+<p>FLAT; <code>status</code> starts with "AVOID"; no live premium; no CE/PE resolved.</p>
+<p><b>Directional leg</b>: additionally needs <code>oiConfidence &gt;= 60</code> and <code>roomOk()</code></p>
+<p>(room ≥ max(expLow, 0.1% of spot) to the opposing wall). Target/stop:</p>
+<p><code>ltp × (1 ± 0.20/0.12 × vm)</code>. <code>algoReady = take &amp;&amp; confidence &gt;= 68</code>.</p>
+<p><b>Scalp leg</b>: needs <code>scalpConfidence &gt;= 50</code> (base confidence +8 if premium</p>
+<p>helpful, +5 if OI helpful, +7 if 5m bar agrees, <b>-12</b> if 5m bar opposes —</p>
+<p>asymmetric penalty), <code>roomOk()</code>, premium not already falling, 5m bar not</p>
+<p>opposing, and status not "BOOK" (move already captured). Target/stop:</p>
+<p><code>ltp × (1 ± 0.10/0.06 × vm)</code>.</p>
+<h3>7.2 The REVERSE_RISK feedback loop (<code>routes/api.ts:3327-3336</code>)</h3>
+<p>If <code>buildOiLesson()</code>'s mode is <code>REVERSE_RISK</code>: both legs get <code>confidence -= 15</code></p>
+<p>and <b><code>algoReady</code> forced to <code>false</code> unconditionally</b> (regardless of whether</p>
+<p>the post-penalty confidence still clears the floor). <code>take</code> is left untouched</p>
+<p>— a REVERSE_RISK setup can still display as a recommendation, just not be</p>
+<p>auto-tradeable, with an explicit reason appended to <code>leg.reasons</code>.</p>
+<h3>7.3 Bullish bias does NOT automatically mean BUY CALL</h3>
+<p>The code enforces a 4-tier ladder before a trade actually opens:</p>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">OI direction computed (UP/DOWN/FLAT)
+        ↓
+"take" — passes commonSkips + confidence floor + room check
+        ↓
+"algoReady" — take &amp;&amp; confidence &gt;= OI_ALGO_FLOOR(68) &amp;&amp; not REVERSE_RISK-downgraded
+        ↓
+oiGridToIdea() — ALSO requires: 1h bulletin direction matches (directional),
+                 or 5m AND 15m bulletin both match (scalp)
+        ↓
+tryOpenOption() — an entirely separate, independent gate stack:
+  confidence &gt;= CONFIRM_FLOOR(72, or 55 if OI-tagged)
+  regime != "Range" (non-OI, non-scalp ideas only)
+  extension pipeline: not vetoed/suppressed by dedup or "Decaying" premium
+  reward:risk &gt;= 1.3 (net of cost)
+  win-probability &gt;= 52 (directional) / 54 (scalp)
+  portfolio heat under cap (hard, unless extension ran — then advisory)
+  cash available, position-count cap for that pool not exceeded
+        ↓
+POSITION OPENED</pre>
+<p>Any stage can reject; there is no single point where "Bullish" alone commits</p>
+<p>capital.</p>
+<hr/>
+<h2>8. Scaling Engine</h2>
+<p>**Confirmed: no scale-in, add-on entry, or averaging logic exists anywhere in</p>
+<p>this codebase.** Grepping the entire <code>paper/</code> directory for</p>
+<p>averaging/scale-in/add-on terminology returns nothing, and the code</p>
+<p>structurally prevents it: <code>tryOpenOption()</code> opens with a hard same-symbol,</p>
+<p>same-pool block —</p>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">if (s.open.some(p =&gt; p.kind === kind &amp;&amp; p.symbol === idea.symbol))
+  return `पहले से ${idea.symbol} में position खुला है`;   // paper/engine.ts:879</pre>
+<p>Every new idea for a symbol/pool that already has an open position is rejected</p>
+<p>outright. Every opened position is a brand-new object; nothing ever merges</p>
+<p>quantity into an existing one.</p>
+<h3>8.1 Position limits</h3>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">MAX_INDEX_OPT = 1      MAX_STOCK_OPT = 2      MAX_INTRADAY = 2      MAX_SCALP = 1
+MAX_SCALPS_PER_DAY = 999   (no daily quota — quality gate only)
+MAX_TRADES_PER_DAY  = 999   (no daily quota — quality gate only)
+SCALP_THROTTLE = 45s   (anti-double-fill)      THROTTLE_SEC = 90s   (same-symbol spam guard)</pre>
+<p>(<code>paper/engine.ts:266-274</code>)</p>
+<h3>8.2 Capital / risk limits</h3>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">RISK_PER_TRADE = 1%            HEAT_CAP_PCT = 6% of combined starting capital
+DAILY_LOSS_CAP_PCT = 3%        MAX_DRAWDOWN_PCT = 10%
+MAX_SINGLE_LOT_LOSS_PCT = 6%</pre>
+<p>(<code>paper/engine.ts:280,295-298,286</code>)</p>
+<p><b>Heat cap enforcement is inconsistent by codepath</b> (§14, problem 5): it is a</p>
+<p>hard block for ideas that did *not* go through the extension pipeline (scalp,</p>
+<p>or when <code>getExtInputs</code> is absent), but *advisory-only* (surfaced via</p>
+<p><code>riskComment</code>, not blocking) for directional ideas that did — a deliberate</p>
+<p>choice per the code's own comment ("Portfolio HEAT is ADVISORY on the</p>
+<p>extension path — it flexes with the user's per-trade judgment"), but a real</p>
+<p>inconsistency depending on which path an idea took. <code>DAILY_LOSS_CAP_PCT</code> and</p>
+<p><code>MAX_DRAWDOWN_PCT</code> are hard backstops in both cases; the latter force-closes</p>
+<p>every open position and sets the pool inactive (a true kill switch).</p>
+<h3>8.3 Exits — single target, one trailing-stop tier, no Target 1/2</h3>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">Fixed target (non-scalp): +15% premium
+TRAIL_ARM = 1.08 / TRAIL_GIVE = 1.04           (non-scalp trailing stop)
+SCALP_TRAIL_ARM = 1.08 / SCALP_TRAIL_GIVE = 1.03  (scalp trailing stop)
+Scalp hard rupee caps: +₹700/-₹350 per lot (NIFTY), +₹1000/-₹350 (other indices)</pre>
+<p><code>closePosition()</code> always closes the <b>entire</b> position quantity in one call —</p>
+<p>there is no partial-size exit function anywhere in <code>paper/engine.ts</code>. No</p>
+<p>"Target 1 / Target 2" concept exists.</p>
+<h3>8.4 Re-entry — fingerprint + price-distance, not time-based</h3>
+<p><code>paper/ext/tradeDedup.ts</code> — fingerprint = <code>mode|direction|strike|roundedEntryZone|wallRef</code>.</p>
+<p>An <b>open</b> fingerprint blocks re-fire outright. An <b>exited</b> fingerprint</p>
+<p>re-arms only if wall reaction, regime, or the wall reference itself changed,</p>
+<p><b>or</b> price has moved away by ≥1×ATR and returned. **There is no time-based</p>
+<p>cooldown anywhere** (§14, problem 14) — this applies to directional trades</p>
+<p>only; scalp re-entry is bounded solely by <code>MAX_SCALP=1</code> and the 45s throttle.</p>
+<h3>8.5 Explicit confirmation: no averaging down</h3>
+<p>Confirmed absent by direct inspection of <code>tryOpenOption()</code> and the tick-loop</p>
+<p>entry code. The only reaction to adverse price movement is the exit-side logic</p>
+<p>(stop/stall/decay/reversal checks) — which closes positions, never opens a</p>
+<p>second one. The same-symbol block (§8, opening paragraph) structurally</p>
+<p>prevents any path from adding exposure to a losing trade.</p>
+<hr/>
+<h2>9. Scoring Engine — all systems in this codebase</h2>
+<table border="1" cellspacing="0" cellpadding="5" style="border-collapse:collapse;font-size:10.5pt"><tr><th style="background:#2b3d5c;color:#fff;text-align:left">System</th><th style="background:#2b3d5c;color:#fff;text-align:left">Scale</th><th style="background:#2b3d5c;color:#fff;text-align:left">Minimum to matter</th><th style="background:#2b3d5c;color:#fff;text-align:left">File</th></tr><tr><td><code>computeSignal</code> (technical)</td><td>-100..100</td><td>±15 for BUY/SELL label</td><td><code>signals/engine.ts</code></td></tr><tr><td>4-Layer Direction</td><td>-100..100</td><td>±15 for Bullish/Bearish</td><td><code>signals/direction4L.ts</code></td></tr><tr><td><code>oiDirScore</code></td><td>-100..100</td><td>±20 for Bullish/Bearish</td><td><code>oi/oiChange.ts</code></td></tr><tr><td><code>oi/oi.ts</code> verdict</td><td>-1/0/+1</td><td>±1 for Bullish/Bearish</td><td><code>oi/oi.ts</code></td></tr><tr><td>OI recommendation confidence</td><td>0-100</td><td>60 (dir) / 50 (scalp) take, 68 algoReady</td><td><code>oi/oiTrade.ts</code></td></tr><tr><td><code>tradeScore.finalScore</code></td><td>clamped 52-62</td><td>n/a (always in-band by construction)</td><td><code>paper/ext/tradeScore.ts</code></td></tr><tr><td><code>setupQuality</code></td><td>0-100</td><td>30 to display, 50 for arbiter clarity override</td><td><code>paper/ext/tradeScore.ts</code></td></tr><tr><td>GainzAlgo buy score</td><td>0-100 (starts 36)</td><td>all-must-pass checklist, not a floor alone</td><td><code>options/highProbAlgo.ts</code></td></tr><tr><td>Risk Radar <code>spikeRisk</code></td><td>0-100</td><td>n/a — display only, no gate</td><td><code>options/riskRadar.ts</code></td></tr><tr><td>Paper-engine confidence floor</td><td>0-100</td><td><code>CONFIRM_FLOOR</code> 72 (55 if OI-tagged)</td><td><code>paper/engine.ts</code></td></tr><tr><td>Win-probability</td><td>0-100</td><td>52 (dir) / 54 (scalp)</td><td><code>paper/engine.ts</code></td></tr></table>
+<p>There is no single unified "the score" — a trade idea accumulates confidence</p>
+<p>independently in at least three of these systems before it can open a</p>
+<p>position, and none of them share a common scale or vocabulary (0-100 confidence</p>
+<p>vs -100..100 direction vs a hard-clamped 52-62 composite).</p>
+<hr/>
+<h2>10. Conflict Resolution</h2>
+<table border="1" cellspacing="0" cellpadding="5" style="border-collapse:collapse;font-size:10.5pt"><tr><th style="background:#2b3d5c;color:#fff;text-align:left">Scenario</th><th style="background:#2b3d5c;color:#fff;text-align:left">Actual resolution</th></tr><tr><td><b>OI Bullish, EMA/VWAP/MACD mixed</b></td><td><code>signals/engine.ts</code>'s own weighted sum absorbs this — no separate conflict state; the 6-factor sum simply nets out. Only becomes a formal "conflict" if it also disagrees with OI (see next row).</td></tr><tr><td><b>OI Bullish vs 4-Layer Bearish</b></td><td>4L direction is one of 5 votes in <code>correlateOiModels()</code>. If ≥2 of the 5 models oppose OI → <code>consensus="CONFLICT"</code> → <code>buildOiLesson</code> adds <code>rev+=2</code> → if <code>rev&gt;=pay+1</code>, mode becomes <code>REVERSE_RISK</code> → both legs' <code>algoReady</code> forced <code>false</code> → <code>oiGridToIdea()</code> returns <code>null</code> → <b>no trade</b>. A single disagreeing model (<code>against==1</code>) only yields <code>"MIXED"</code> (<code>rev+=1</code>) and may not flip the mode — a genuine trade can still fire despite one dissenting model.</td></tr><tr><td><b>Market Regime Bullish but Call OI = heavy resistance</b></td><td>Not a single check — <code>srRoomOk()</code> (wall-distance) feeds only <code>GainzAlgo</code>'s pass/fail, which becomes one of the 5 <code>correlateOiModels</code> votes; it does <b>not</b> directly veto <code>tradeScore.ts</code> or <code>tradeArbiter.ts</code>. Separately, <code>wallReaction.ts</code>'s <code>REJECT</code> state (OI velocity + burst state + volume + regime bias) only affects <code>tradeScore</code>'s ±4 bonus, not a hard veto either.</td></tr><tr><td><b>Score is high but breakout not confirmed</b></td><td>No single unified check exists. <code>srRoomOk</code> failing is a categorical reject in <code>entryRules.ts</code>'s own consumer (<code>api.ts:5182</code>), but for the OI-driven path a high score can still proceed if <code>roomOk()</code> (a different, looser room check) passes even without an explicit breakout confirmation — these are two different room-distance formulas guarding two different codepaths (§14, problem 4).</td></tr><tr><td><b>Directional and Scalp candidates both want to fire</b></td><td>Resolved by <code>arbitrate()</code> (<code>paper/ext/tradeArbiter.ts:47-94</code>): rank by <code>finalScore</code> then <code>setupQuality</code>; single candidate → GO; same direction or &gt;6-point score gap → leader GOes, other demoted; opposing direction within 6 points → clarity tie-break at <code>setupQuality&gt;=50</code>, else genuine <code>"CONFLICT"</code> (both suppressed).</td></tr><tr><td><b><code>tradeArbiter</code> returns "CONFLICT"</b></td><td><b>Does not block auto-entry.</b> <code>arbitrate()</code> is called from exactly one place in the backend — the <code>/oi-command</code> display route. <code>paper/engine.ts</code> never imports it. A CONFLICT verdict only: (a) changes what the frontend Master Trade Selector shows, (b) logs an <code>ARBITER_CONFLICT</code> warning, (c) after 15 minutes persisting, triggers a log-only watchdog warning. <b>The paper engine can open a position via <code>tryOpenOption()</code>'s own independent gates while the UI simultaneously displays CONFLICT.</b> This is the single most significant finding of this investigation.</td></tr></table>
+<hr/>
+<h2>11. Trade State Machine</h2>
+<p>Positions are strictly <b>binary</b> — <code>open</code> or <code>closed</code> — via `PaperState.open:</p>
+<p>PaperPosition[]<code> / </code>closed: PaperTrade[]`. **No PENDING, ARMED, or ACTIVE</p>
+<p>intermediate state exists anywhere** in the <code>PaperPosition</code>/<code>PaperState</code> types.</p>
+<p>A position transitions from nonexistent directly to <code>open</code> (via <code>tryOpenOption</code></p>
+<p>or <code>openManual</code>), and from <code>open</code> to <code>closed</code> (via <code>closePosition()</code>), with no</p>
+<p>state in between.</p>
+<p>Terminal <code>exitReason</code> values — these ARE the state machine's only outcomes:</p>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">target | stop | eod | time | end | decay | stall | trail | profit | reversal | risk</pre>
+<p>The dedup fingerprint (§8.4) has its own small two-state machine, independent</p>
+<p>of position state: <code>open</code> (armed, blocks re-fire) → <code>exited</code> (released on</p>
+<p>close, may re-arm under the conditions in §8.4). This is the closest thing to</p>
+<p>a "cooldown" state in the codebase, and it is condition-based, not time-based.</p>
+<hr/>
+<h2>12. Risk Controls</h2>
+<table border="1" cellspacing="0" cellpadding="5" style="border-collapse:collapse;font-size:10.5pt"><tr><th style="background:#2b3d5c;color:#fff;text-align:left">Control</th><th style="background:#2b3d5c;color:#fff;text-align:left">Value</th><th style="background:#2b3d5c;color:#fff;text-align:left">Hard or advisory</th><th style="background:#2b3d5c;color:#fff;text-align:left">Scope</th></tr><tr><td><code>RISK_PER_TRADE</code></td><td>1% of pool</td><td>sizing input, not a gate</td><td>all entries</td></tr><tr><td><code>HEAT_CAP_PCT</code></td><td>6% of combined starting capital</td><td><b>Hard</b> for non-extension ideas; <b>advisory</b> for extension-scored directional ideas</td><td>portfolio</td></tr><tr><td><code>DAILY_LOSS_CAP_PCT</code></td><td>-3% realised today</td><td>Hard — blocks new entries</td><td>portfolio</td></tr><tr><td><code>MAX_DRAWDOWN_PCT</code></td><td>-10% total equity</td><td>Hard — force-closes everything, deactivates</td><td>portfolio</td></tr><tr><td><code>MAX_SINGLE_LOT_LOSS_PCT</code></td><td>6%</td><td>sizing ceiling override</td><td>per-position</td></tr><tr><td><code>OPT_RR_MIN</code> / <code>INTRADAY_RR_MIN</code></td><td>1.3, net of cost</td><td>Hard</td><td>per-entry</td></tr><tr><td><code>WIN_PROB_MIN_DIR</code> / <code>_SCALP</code></td><td>52 / 54</td><td>Hard</td><td>per-entry</td></tr><tr><td>Risk Radar (<code>spikeRisk</code>)</td><td>0-100</td><td><b>Advisory only — not read by any entry gate</b></td><td>per-symbol display</td></tr><tr><td><code>riskComment</code> (portfolio heat/drawdown text)</td><td>—</td><td><b>Advisory only</b>, even where the numeric heat cap is hard elsewhere</td><td>portfolio display</td></tr></table>
+<hr/>
+<h2>13. Example Scenarios</h2>
+<h3>Example 1 — Strong Bullish (NIFTY)</h3>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">Market Data:   NIFTY 15m, ADX 27, EMA9&gt;EMA21, price&gt;VWAP, MACD hist positive
+OI Analysis:   oiDirScore +55 (net PE writing, PCR 1.3, long-buildup futures) → oiVerdict "Bullish" → oiDirection "UP", oiConfidence 55→ (further away-from-wall bonus) 65
+Technical:     computeSignal score +62 "STRONG BUY"; 4L direction "Bullish" score +48
+Regime:        marketRegime "Trending" (3 HH/HL swings); deps.getRegime "Trending" (ADX 27)
+Setup:         directionNoMomentum "Bullish"; levelContext bias +1 (price above dayOpen/PDC/VWAP); srRoomOk passes (room to resistance &gt; 0.35×ATR)
+Directional:   recommendOiTrades directional leg: confidence 65&gt;=60, roomOk passes → take=true, algoReady=true (65&lt;68 — NOT yet algoReady on confidence alone)
+               correlateOiModels: VWAP/4L/GainzAlgo/5m/futures nearly all agree → consensus AGREE → buildOiLesson pay=6,rev=0 → PAY_CHANCE (no REVERSE_RISK penalty)
+Scaling:       no existing NIFTY index-option position open → MAX_INDEX_OPT(1) slot free
+Final:         tryOpenOption: confidence needs re-evaluation post-extension (tradeScore may lift it into the 52-62 band as a separate number); RR/win-prob/heat/cash all clear → POSITION OPENED (CE)</pre>
+<h3>Example 2 — Strong Bearish (BANKNIFTY)</h3>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">Mirror of Example 1: oiDirScore -58 (CE writing, PCR 0.75, short-buildup futures) → oiDirection "DOWN"
+computeSignal score -60 "STRONG SELL"; 4L "Bearish" -50
+marketRegime "Trending" (LH/LL fractal); deps.getRegime "Trending"
+recommendOiTrades scalp+directional legs both clear thresholds; correlateOiModels AGREE
+No existing position, capital/RR/win-prob clear → PUT position opened.</pre>
+<h3>Example 3 — Range Market</h3>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">Market Data:   NIFTY chopping, ADX 14
+OI Analysis:   CE and PE both writing at similar magnitude → net bias inconclusive → oiDirScore near 0 → oiVerdict "Neutral" → oiDirection "FLAT"
+Technical:     computeSignal score ±8 "HOLD"
+Regime:        deps.getRegime "Range" (ADX&lt;18); classifyRegime "whipsaw" or "range" on lower timeframes
+Setup:         directionNoMomentum likely "Neutral" (score inside ±15)
+Directional:   recommendOiTrades commonSkips fires "OI FLAT — WAIT" on both legs → take=false
+Scaling:       n/a — nothing to scale
+Final:         Even if some other idea path proposed a directional trade, paper/engine.ts:885-887 explicitly rejects it: "regime=Range (flat market — theta risk में buy नहीं)" (non-OI, non-scalp ideas only) → WAIT / NO TRADE</pre>
+<h3>Example 4 — Bullish OI but Bearish Technicals</h3>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">OI Analysis:   oiDirScore +30 → oiVerdict "Bullish" → oiDirection "UP", oiConfidence 65 (&gt;=60, take=true)
+Technical:     4L direction "Bearish" (EMA/Supertrend/VWAP all below), computeSignal score -20 "SELL"
+Regime:        Transitioning (indeterminate)
+correlateOiModels: 4L opposes (against+1); if VWAP also opposes (against+2) → consensus "CONFLICT"
+buildOiLesson: rev+=2 (CONFLICT) plus possibly +1 more (ADX&lt;16 or stale) → rev&gt;=pay+1 → mode "REVERSE_RISK"
+REVERSE_RISK gate (api.ts:3327): directional leg confidence 65-15=50, algoReady forced false, reason appended: "⚠ reverse-risk read (model conflict / weak trend / late move) — auto-trade disabled, size down or wait"
+oiGridToIdea(): algoReady is false → returns null → no OptionIdea built
+Final:         The UI can still show "take: true" with a visibly downgraded confidence and the reverse-risk reason, but no paper position opens (WAIT, effectively) — the arbiter's own CONFLICT-detection (if the two candidates were both offered to arbitrate()) would independently also show CONFLICT on the dashboard, though (per §10) that verdict is not what actually stopped the trade — the algoReady=false gate is.</pre>
+<h3>Example 5 — Breakout + OI confirmation</h3>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">Market Data:   Price closes above PDH with a wide-range candle
+OI Analysis:   PE writing accelerating at the strike just below (support forming), CE unwinding above → oiDirScore +45 → "Bullish", oiDirection "UP"
+Technical:     4L Structure layer fires +1 (PDH breakout) and +1 (opening-range breakout, if within 09:15-09:45); Trend layer agrees; computeSignal STRONG BUY
+Regime:        marketRegime "Transitioning" (squeeze→fire) or "Trending"; wallReaction "BREAK" (OI velocity + burst-state + regime bonus, e.g. +0.2 Trending or +0.3 Transitioning-with-prior-squeeze)
+Setup:         srRoomOk passes (room opened up post-breakout); GainzAlgo evaluateBuyAlgo: ADX&gt;=18 ✓, OI agrees ✓, PCR not a trap ✓, VWAP agrees ✓, OR-break agrees ✓, srRoomOk ✓, 4L agrees ✓, RVOL&gt;=1.2 ✓ → pass=true
+Directional:   correlateOiModels: GainzAlgo+VWAP+4L+5m all agree, 0 against → consensus "AGREE" → buildOiLesson pay high, rev low → "PAY_CHANCE"
+               recommendOiTrades: confidence clears both OI_DIR_MIN and OI_ALGO_FLOOR → algoReady=true
+Scaling:       no existing position for the symbol/pool
+Final:         oiGridToIdea's bulletin-agreement check passes (1h dir matches) → tryOpenOption clears confidence/RR/win-prob/heat/cash/position-cap → POSITION OPENED</pre>
+<hr/>
+<h2>14. Current Problems</h2>
+<p>1. <b>Duplicate logic</b> — four market-regime classifiers (§3), three OI-verdict</p>
+<p>   computations (§4.4), five PCR threshold pairs (§4.3), and a naming</p>
+<p>   collision (<code>ceBuildup</code>/<code>peBuildup</code> means different things and is computed</p>
+<p>   differently in <code>oi/oi.ts</code> vs <code>oi/oiChange.ts</code>). *Note: shared IST-time math,</p>
+<p>   the ATR stop/target helper, the day-range helper, and the ±15 direction</p>
+<p>   threshold were already centralized in a prior session on this codebase —</p>
+<p>   not re-flagged here.*</p>
+<p>2. <b>Conflicting rules</b> — the same PCR value can read "bullish"/"neutral"/"bearish"</p>
+<p>   depending on which of five modules evaluates it (§4.3); the same ADX&lt;18</p>
+<p>   condition is labeled <code>"Range-bound"</code> in one place and <code>"Range"</code> in another,</p>
+<p>   risking silent misses in any code that greps for one literal.</p>
+<p>3. <b>Hardcoded thresholds</b> — virtually every threshold in this document is a</p>
+<p>   hardcoded literal (many now named constants after prior cleanup, but still</p>
+<p>   not centrally configured or derived from backtest data): the 6/50/15</p>
+<p>   arbitration constants, the 52-62 tradeScore clamp, all six <code>signals/score.ts</code></p>
+<p>   weights, every PCR pair, every ADX cutoff.</p>
+<p>4. <b>Missing confirmation</b> — <code>srRoomOk()</code> (Setup module) and <code>roomOk()</code></p>
+<p>   (OI-trade module) are two different wall-distance formulas guarding two</p>
+<p>   different codepaths with no shared source of truth; Risk Radar's warnings</p>
+<p>   are computed but never consulted by any entry gate.</p>
+<p>5. <b>Weak risk controls</b> — the 6% heat cap is a hard block for some ideas and</p>
+<p>   advisory-only for others, depending on which pipeline the idea passed</p>
+<p>   through — an inconsistency, not a deliberate risk-tiering design.</p>
+<p>6. <b>False-signal possibilities</b> — Supertrend contributes its full 22-point</p>
+<p>   weight with zero strength-scaling (binary), while every other weighted</p>
+<p>   indicator scales by signal strength; MACD's <code>max(0.4, ...)</code> floor means a</p>
+<p>   barely-non-zero histogram still contributes 40% of its weight, amplifying</p>
+<p>   noise near the zero-line.</p>
+<p>7. <b>Look-ahead bias</b> — not confirmed either way by this investigation;</p>
+<p>   <code>computeScoreSeries()</code> is documented as a deliberate "vectorized clone" of</p>
+<p>   the live scorer for live/backtest parity, which suggests care was taken,</p>
+<p>   but a dedicated audit of candle-boundary handling (does any function ever</p>
+<p>   read the still-forming current bar as if it were closed?) was out of scope</p>
+<p>   here and should be done explicitly before relying on backtest numbers.</p>
+<p>8. <b>Stale-data risk</b> — the OI path checks <code>stale</code> (&gt;90s) explicitly in</p>
+<p>   <code>commonSkips()</code>, but technical-indicator computation from cached candles</p>
+<p>   has no equivalent independent staleness check of its own.</p>
+<p>9. <b>Overlapping strategies</b> — GainzAlgo (<code>highProbAlgo.ts</code>) and the extension</p>
+<p>   pipeline's <code>tradeScore.ts</code> are two separate, independently-weighted</p>
+<p>   "should this trade fire" scorers for essentially the same question,</p>
+<p>   connected only loosely (GainzAlgo's pass/fail becomes a single vote inside</p>
+<p>   <code>correlateOiModels</code>, not a direct input to <code>tradeScore</code>).</p>
+<p>10. <b>Scaling risks</b> — moot in the sense that no scaling exists, but the</p>
+<p>    *absence* itself is a limitation: no partial profit-taking means every</p>
+<p>    winning trade is all-or-nothing at a single fixed target.</p>
+<p>11. <b>Race conditions</b> — a concurrency bug in the paper-trading tick loop</p>
+<p>    (overlapping timers/routes double-opening positions against a stale cash</p>
+<p>    read) was identified and fixed in a prior session on this codebase (a</p>
+<p>    mutex now serializes all entry points). No further race condition was</p>
+<p>    identified in this investigation, though <code>extDedupPeek()</code>'s read-only</p>
+<p>    "does not arm" comment (§2.2) implies a peek/arm gap that was not</p>
+<p>    independently verified as race-safe here.</p>
+<p>12. <b>Incorrect OI interpretation risk</b> — simultaneous heavy CALL and PUT</p>
+<p>    writing collapses into the same <code>"Neutral"</code>/<code>"FLAT"</code> bucket as genuine</p>
+<p>    inactivity, discarding a real, distinguishable market condition (a</p>
+<p>    two-sided fight, often a precursor to a large move) that the system</p>
+<p>    currently cannot represent or reason about.</p>
+<p>13. <b>Missing market-regime protection</b> — only one of four regime classifiers</p>
+<p>    (<code>deps.getRegime</code>) actually blocks a trade, and only for non-OI-tagged,</p>
+<p>    non-scalp directional ideas — scalp trades and OI-sourced ideas bypass</p>
+<p>    regime protection entirely, even in a confirmed Range/choppy market.</p>
+<p>14. <b>Missing trade cooldown</b> — confirmed absent. Re-entry suppression is</p>
+<p>    fingerprint + price-distance based (§8.4), not time-based; nothing</p>
+<p>    prevents rapid-fire re-entry at a *different* price/strike immediately</p>
+<p>    after a stop-out.</p>
+<p>15. <b>"One trade at a time" is narrower than it sounds</b> — enforced per</p>
+<p>    (symbol, pool), not globally. Up to 6 positions can be concurrently open</p>
+<p>    across pools (1 index option + 2 stock options + 2 intraday + 1 scalp) —</p>
+<p>    not a single global "only one position ever" rule.</p>
+<p>16. <b>(Not on the original checklist, but the most consequential finding)</b> —</p>
+<p>    **the Master Trade Selector's displayed verdict is disconnected from the</p>
+<p>    paper engine's actual entry decision.** <code>arbitrate()</code> (GO/WAIT/CONFLICT) is</p>
+<p>    computed purely for the <code>/oi-command</code> display response and is never</p>
+<p>    imported by <code>paper/engine.ts</code>. A user can watch the dashboard show</p>
+<p>    "CONFLICT ⚠" while a position opens in the background via the entirely</p>
+<p>    separate <code>tryOpenOption()</code> gate stack — the single most misleading gap in</p>
+<p>    the current architecture, and the top candidate for the recommended fix</p>
+<p>    in §15.</p>
+<hr/>
+<h2>15. Recommended Architecture</h2>
+<p>Principle: **one engine per concern, one source of truth per number, and the</p>
+<p>UI's verdict must be the same verdict the trading engine actually acted on.**</p>
+<p>No strategy calculation should live in a route handler (<code>routes/api.ts</code></p>
+<p>currently hosts orchestration logic — like the REVERSE_RISK downgrade and the</p>
+<p>raw <code>deps.getRegime</code> classifier — that belongs in a domain module instead).</p>
+<p>Note: this codebase is a Node/Express backend with a vanilla-JS frontend, not</p>
+<p>React — the "no calculations in UI components" principle is **already</p>
+<p>satisfied** on the frontend side; the actual violation is domain logic living</p>
+<p>in the HTTP route layer instead of a domain module.</p>
+<table border="1" cellspacing="0" cellpadding="5" style="border-collapse:collapse;font-size:10.5pt"><tr><th style="background:#2b3d5c;color:#fff;text-align:left">Engine</th><th style="background:#2b3d5c;color:#fff;text-align:left">Input</th><th style="background:#2b3d5c;color:#fff;text-align:left">Processing</th><th style="background:#2b3d5c;color:#fff;text-align:left">Output</th><th style="background:#2b3d5c;color:#fff;text-align:left">Replaces</th></tr><tr><td><b>MarketRegimeEngine</b></td><td>candles (multi-timeframe), OI, burst state</td><td>ONE fractal+ATR+ADX-informed classifier with one label set</td><td><code>{regime, confidence, note}</code></td><td>The 4 classifiers in §3</td></tr><tr><td><b>OIAnalysisEngine</b></td><td>option chain, baseline</td><td>ONE PCR threshold set, ONE writing/unwinding classifier, ONE walls/max-pain calc, an explicit "two-sided/conflicted" state</td><td><code>{oiDirection, oiConfidence, walls, pcrState, twoSided: bool}</code></td><td><code>oi/oi.ts</code>, <code>oi/oiChange.ts</code>, <code>growwProvider.ts</code>'s duplicate, the 5 PCR pairs</td></tr><tr><td><b>TechnicalAnalysisEngine</b></td><td>candles</td><td>Unchanged in substance — <code>signals/score.ts</code> + <code>direction4L.ts</code> + <code>indicators/*</code> are already reasonably well-factored</td><td><code>{score, direction4L, votes}</code></td><td>(mostly keep as-is; fix Supertrend/MACD scaling inconsistency, §14.6)</td></tr><tr><td><b>SetupEngine</b></td><td>levels, technical direction, OI</td><td><code>entryRules.ts</code>'s existing functions, with the scattered floor constants (<code>CONFIRM_FLOOR</code>, <code>OI_*_MIN</code>, <code>WIN_PROB_MIN_*</code>) collected into one config surface</td><td><code>{setup: bool, levels, room}</code></td><td><code>entryRules.ts</code> (mostly keep; consolidate config)</td></tr><tr><td><b>DirectionalEngine</b></td><td>Setup + OI + correlation</td><td><code>recommendOiTrades</code> + <code>buildOiLesson</code>'s conflict tally, with REVERSE_RISK applied *inside* this engine, not in the route handler</td><td><code>{direction, take, algoReady, reasons}</code></td><td><code>oi/oiTrade.ts</code> + the <code>routes/api.ts:3327</code> gate</td></tr><tr><td><b>ScalingEngine</b></td><td>open positions, confirmation strength</td><td><b>Does not exist today.</b> If scaling is ever wanted: explicit add-on rules gated on *improved* confirmation (not adverse price alone), a max-entries cap, and a capital-exposure cap distinct from the single-entry heat cap</td><td><code>{allowAddOn: bool, maxQty}</code></td><td>nothing — net-new</td></tr><tr><td><b>RiskEngine</b></td><td>Risk Radar, portfolio heat/drawdown/daily-loss</td><td>Unify Risk Radar (currently display-only) and <code>riskComment</code> (currently mixed hard/advisory) into one engine with <b>consistently enforced</b> thresholds regardless of which upstream pipeline produced the idea</td><td><code>{heatOk, drawdownOk, dailyCapOk, warnings[]}</code></td><td><code>riskRadar.ts</code> + <code>riskComment.ts</code> + the heat-cap inconsistency in <code>paper/engine.ts</code></td></tr><tr><td><b>TradeStateEngine</b></td><td>position lifecycle events</td><td>A real typed state machine (<code>NoTrade → Setup → Directional → Ready → Entry → Active → [Exit reasons]</code>), replacing the current implicit binary open/closed</td><td><code>{state, history[]}</code></td><td>the implicit state in <code>PaperState.open/closed</code></td></tr><tr><td><b>MasterTradeSelector</b></td><td>all engine outputs above</td><td><code>arbitrate()</code>'s existing logic, but <b>its verdict becomes a required input to <code>tryOpenOption()</code></b> — a CONFLICT verdict must block entry, not just the display</td><td>`{verdict: GO\</td><td>WAIT\</td><td>CONFLICT}`, now load-bearing</td><td><code>tradeArbiter.ts</code> (fix the wiring gap, §14.16 — the single highest-value change)</td></tr></table>
+<hr/>
+<h2>16. Exact Decision Tree</h2>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">MARKET DATA (candles, option chain, quote)
+        ↓
+DATA VALIDATION (candle count, chain availability, staleness)
+   → reject: "not enough data" / disk-cache fallback with stale=true
+        ↓
+MARKET REGIME  ←── 4 independent classifiers (§3), inconsistently consumed
+        ↓
+OI MARKET STRUCTURE  ←── 3 independent verdicts (§4.4), 5 PCR pairs (§4.3)
+        ↓
+TECHNICAL CONFIRMATION  (computeSignal 6-factor + 4-Layer Direction)
+        ↓
+SETUP ENGINE (entryRules.ts: direction, levels, room)
+   → reject: Neutral direction / bias mismatch / room fail
+        ↓
+DIRECTIONAL ENGINE (recommendOiTrades: take, algoReady)
+   → reject: commonSkips / confidence &lt; OI_DIR_MIN(60) / room fail
+   → downgrade: REVERSE_RISK (correlateOiModels CONFLICT) → confidence-15, algoReady=false
+        ↓
+[PARALLEL, NOT SEQUENTIAL] MASTER TRADE SELECTOR (arbitrate: GO/WAIT/CONFLICT)
+   — computed for display; NOT consulted by the path below (§10, §14.16)
+        ↓
+oiGridToIdea() — bulletin agreement (1h for directional, 5m+15m for scalp)
+   → reject: algoReady false / bulletin disagrees
+        ↓
+SCALING — n/a (no scaling exists); same-symbol/pool check
+   → reject: position already open for this symbol+pool
+        ↓
+ENTRY TRIGGER — tryOpenOption()
+   confidence &gt;= CONFIRM_FLOOR(72, or 55 if OI-tagged)
+   regime != "Range" (non-OI, non-scalp only)
+   extension pipeline: not vetoed (Decaying premium) / not suppressed (dedup)
+   RR &gt;= 1.3 net-of-cost, win-probability &gt;= 52/54
+        ↓
+RISK MANAGEMENT
+   heat cap (hard or advisory depending on path) / cash check / position-count cap
+   → reject: any of the above
+        ↓
+TRADE MANAGEMENT (open position)
+   fixed target (+15% or scalp rupee caps) / single trailing-stop tier
+   exit: target | stop | trail | stall | decay | reversal | eod | risk | profit
+        ↓
+CLOSED (dedup fingerprint marked "exited", re-arms on wall/regime change or 1×ATR move-away)</pre>
+<hr/>
+<h2>Current Logic vs. Recommended Logic — Comparison</h2>
+<table border="1" cellspacing="0" cellpadding="5" style="border-collapse:collapse;font-size:10.5pt"><tr><th style="background:#2b3d5c;color:#fff;text-align:left">Aspect</th><th style="background:#2b3d5c;color:#fff;text-align:left">Current Logic</th><th style="background:#2b3d5c;color:#fff;text-align:left">Recommended Logic</th></tr><tr><td>Market regime</td><td>4 independent classifiers, different labels/thresholds, only 1 enforces anything</td><td>1 classifier, 1 label set, consistently enforced everywhere it applies</td></tr><tr><td>OI verdict</td><td>3 parallel computations (±1 score, ±100 score, and a relabel of the latter)</td><td>1 computation, 1 confidence scale</td></tr><tr><td>PCR thresholds</td><td>5 different bullish/bearish pairs across 5 files</td><td>1 shared threshold pair</td></tr><tr><td>Two-sided OI (both walls writing)</td><td>Collapses into "Neutral"/"FLAT" — indistinguishable from no activity</td><td>An explicit "conflicted/two-sided" state, reasoned about separately</td></tr><tr><td>Master Trade Selector verdict</td><td>Computed for display only; never gates the paper engine — can show CONFLICT while a trade opens</td><td>Verdict is a required input to entry — CONFLICT blocks entry</td></tr><tr><td>Heat cap (6%)</td><td>Hard for some ideas, advisory for others, depending on which pipeline produced the idea</td><td>Enforced consistently regardless of source pipeline</td></tr><tr><td>Risk Radar</td><td>Computed, displayed, never consulted by any gate</td><td>Feeds the unified RiskEngine's entry decision, not just the UI</td></tr><tr><td>Supertrend / MACD weighting</td><td>Supertrend binary full-weight; MACD floored at 40% contribution — inconsistent with the other 4 strength-scaled indicators</td><td>All six indicators strength-scaled consistently, or the exceptions documented as deliberate</td></tr><tr><td>Trade cooldown</td><td>None — fingerprint+price-distance dedup only, no time-based cooldown</td><td>Add an explicit minimum cooldown window per symbol after a stop-out, independent of price movement</td></tr><tr><td>Scaling</td><td>Does not exist; no averaging-in (confirmed, and correctly so)</td><td>If added: explicit add-on rules gated on improved confirmation only, never on adverse price, with its own max-entries/max-exposure caps</td></tr><tr><td>GainzAlgo vs tradeScore</td><td>Two independent "should this fire" scorers, loosely coupled via one vote in a 5-model tally</td><td>Either merge into one scorer, or make the coupling explicit and documented as intentional</td></tr><tr><td>Config</td><td>Thresholds hardcoded (many now named constants) across a dozen files</td><td>One central strategy-config module per engine, as listed in §15</td></tr><tr><td>Domain logic location</td><td>Some lives in <code>routes/api.ts</code> (e.g. REVERSE_RISK gate, <code>deps.getRegime</code>)</td><td>Moved into the owning domain engine; routes only orchestrate and shape HTTP responses</td></tr></table>
+<hr/>
+<p>**End of specification. No code was modified to produce this document — per</p>
+<p>your instruction, this is the reverse-engineered baseline only. Awaiting your</p>
+<p>review and approval before any implementation work begins.**</p></body></html>
