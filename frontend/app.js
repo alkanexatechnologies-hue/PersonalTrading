@@ -2274,7 +2274,12 @@ async function loadOption(symbol, ids = {}) {
   }
 }
 
-function riskRadarHtml(risk) {
+// `extraHtml` (optional) is appended inside the same card, below the
+// disclaimer - used by Trader Dashboard to fold its market-situation read
+// into this card instead of keeping it as a separate section, since the two
+// were reading as duplicated. Other callers (Options / Stock Options tabs)
+// don't pass it and are unaffected.
+function riskRadarHtml(risk, extraHtml = "") {
   if (!risk) return "";
   const lvlCls = risk.level === "High" ? "danger" : risk.level === "Elevated" ? "caution" : "low";
   const items = (risk.warnings || [])
@@ -2295,6 +2300,34 @@ function riskRadarHtml(risk) {
       <div class="rr-sub">ATR ${risk.atrPct ?? "-"}%${risk.atrRatio ? " · " + risk.atrRatio + "x normal" : ""}${risk.adx != null ? " · ADX " + risk.adx : ""}${risk.premiumSwingPct != null ? " · 1 ATR ≈ " + risk.premiumSwingPct + "% of premium" : ""}</div>
       <ul class="rr-list">${items}</ul>
       <p class="opt-disclaimer">${risk.note}</p>
+      ${extraHtml}
+    </div>`;
+}
+
+// Market-situation read (situation text, reasons, bull/bear scenario, trader
+// guidance) - folded into the Risk Radar card on Trader Dashboard via
+// riskRadarHtml's extraHtml param, since the two previously sat as separate
+// sections and read as duplicated content.
+function renderMarketReadHtml(C) {
+  if (!C) return "";
+  const reasons = (C.reasons || []).map((r) => `<li>${r}</li>`).join("");
+  return `
+    <div class="rr-market">
+      <div class="rr-market-head">🗺️ Market स्थिति</div>
+      <p class="rr-market-p">${C.situation || "—"}</p>
+      ${reasons ? `<ul class="rr-market-reasons">${reasons}</ul>` : ""}
+      <details class="rr-market-scenario">
+        <summary>
+          ${C.path && C.path.up ? `<span class="mtc-pathrow"><b class="up">ऊपर:</b> ${C.path.up}</span>` : ""}
+          ${C.path && C.path.down ? `<span class="mtc-pathrow"><b class="down">नीचे:</b> ${C.path.down}</span>` : ""}
+          <span class="mtc-scenario-caret">⌄ detail</span>
+        </summary>
+        <div class="rr-market-grid2">
+          <div class="rr-market-case up"><h5>Bullish case</h5><p>${C.bullCase || "—"}</p></div>
+          <div class="rr-market-case down"><h5>Bearish case</h5><p>${C.bearCase || "—"}</p></div>
+        </div>
+      </details>
+      <div class="rr-market-guidance">🧭 Trader निर्देश: ${C.guidance || "—"}</div>
     </div>`;
 }
 
@@ -5020,7 +5053,7 @@ function renderMasterSelector(d) {
         <span class="mts-chip">RR / Score gate</span>
       </div>
 
-      ${risk ? riskRadarHtml(risk) : ""}
+      ${risk ? riskRadarHtml(risk, renderMarketReadHtml(C)) : renderMarketReadHtml(C)}
 
       <div class="mtg-grid">
         ${renderLevelsCardHtml(C)}

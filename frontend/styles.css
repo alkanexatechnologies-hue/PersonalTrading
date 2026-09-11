@@ -413,6 +413,38 @@ button.ghost.on { background: var(--green); border-color: var(--green); color: #
 .rr-tag.rr-info { background: #1a2130; color: var(--muted); }
 .rr-text { color: var(--text); }
 
+/* Market-situation read, folded into the Risk Radar card (Trader Dashboard) via
+   riskRadarHtml's extraHtml param instead of a separate section - works both
+   nested (a border-top separator from the risk content above it) and standalone
+   (own background/radius) if risk data isn't available for a given poll. */
+.rr-market {
+  margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);
+}
+/* Standalone (risk data unavailable for this poll, so it's not nested inside
+   a .risk-radar card): give it its own card look instead of a bare top border. */
+.mts > .rr-market {
+  margin-top: 0; padding-top: 0; border-top: none;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px;
+}
+.rr-market-head { font-weight: 800; letter-spacing: 0.5px; margin-bottom: 6px; font-size: 13px; }
+.rr-market-p { margin: 0 0 8px; font-size: 13px; line-height: 1.6; color: var(--text); }
+.rr-market-reasons { margin: 0 0 8px; padding-left: 18px; font-size: 12.5px; line-height: 1.6; color: var(--text); }
+.rr-market-scenario > summary { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; cursor: pointer; list-style: none; font-size: 12.5px; background: var(--panel); border-radius: 8px; padding: 7px 9px; }
+.rr-market-scenario > summary::-webkit-details-marker { display: none; }
+.rr-market-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+.rr-market-case { padding-left: 10px; }
+.rr-market-case.up { border-left: 3px solid var(--green); }
+.rr-market-case.down { border-left: 3px solid var(--red); }
+.rr-market-case h5 { margin: 0 0 3px; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--muted); font-weight: 800; }
+.rr-market-case p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--text); }
+.rr-market-guidance {
+  margin-top: 10px; font-size: 13px; font-weight: 600; line-height: 1.5;
+  background: rgba(59,130,246,0.10); border: 1px solid rgba(59,130,246,0.3); border-radius: 8px; padding: 8px 10px;
+}
+@media (max-width: 620px) {
+  .rr-market-grid2 { grid-template-columns: 1fr; }
+}
+
 /* ---------- Tabs ---------- */
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 8px; flex-wrap: wrap;
   position: sticky; top: 0; z-index: 4; background: var(--bg); padding-top: 2px; }
