@@ -19,6 +19,7 @@ import path from "path";
 import apiRouter, { startHourlyScheduler } from "./routes/api";
 import { CONFIG } from "./config";
 import { getProvider } from "./data";
+import { getExitCheckHealth } from "./paper/engine";
 
 const app = express();
 
@@ -43,11 +44,23 @@ app.get("/", (_req, res) => {
 
 // Health
 app.get("/health", (_req, res) =>
-  res.json({ ok: true, provider: getProvider().name, time: new Date().toISOString() })
+  res.json({
+    ok: true,
+    provider: getProvider().name,
+    time: new Date().toISOString(),
+    unhandledRejections: unhandledRejectionCount,
+    exitCheckFailures: getExitCheckHealth(),
+  })
 );
 
+// Process-wide unhandled-rejection safety net. Previously log-only, so a
+// rejection escaping a poller vanished into the console with no operational
+// signal. Now also counted and surfaced on /health so a persistent failure is
+// visible from the outside instead of indistinguishable from silence.
+let unhandledRejectionCount = 0;
 process.on("unhandledRejection", (err) => {
-  console.error("[unhandledRejection]", err instanceof Error ? err.message : err);
+  unhandledRejectionCount++;
+  console.error(`[unhandledRejection] (#${unhandledRejectionCount})`, err instanceof Error ? err.message : err);
 });
 
 app.listen(CONFIG.port, () => {

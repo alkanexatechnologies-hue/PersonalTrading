@@ -325,6 +325,24 @@ const isOption = (k: PoolKind) => k === "indexOption" || k === "stockOption";
 
 let state: PaperState | null = null;
 
+// ---- Concurrency guard ----
+// markPaper (HTTP /paper/marks, polled ~1s by the UI), tickPaper (HTTP
+// /paper/tick and a 5-min timer), and tickPaperScalps (a 90s timer) all read,
+// mutate, and save() the same module-level `state`. Each caller in routes/api.ts
+// only guarded against re-entering ITSELF (its own timer), not against one of
+// the OTHER two running at the same time - and tryOpenOption's own body awaits
+// (regime/extension lookups) before its cash-check-and-deduct step, so two
+// overlapping ticks could each see the same "slot free" / "cash available" read
+// and both open a position, double-spending pool.cash. Serializing every call
+// through one queue removes the race entirely: whichever call arrives second
+// simply runs after the first has fully finished (mutated + saved) its work.
+let paperLock: Promise<unknown> = Promise.resolve();
+function withPaperLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = paperLock.then(fn, fn);
+  paperLock = run.then(() => undefined, () => undefined);
+  return run;
+}
+
 function emptyState(): PaperState {
   return {
     version: STATE_VERSION, active: false, days: 20, startEpoch: 0, startDate: "",
@@ -343,15 +361,35 @@ function load(): PaperState {
     const parsed = JSON.parse(fs.readFileSync(FILE, "utf-8"));
     // Reset incompatible (pre-3-pool) state.
     state = parsed && parsed.version === STATE_VERSION && parsed.indexOption ? parsed : emptyState();
-  } catch {
+  } catch (e) {
+    // A missing file (first run) is normal and silent. A file that EXISTS but
+    // fails to parse is real corruption (crash mid-write, disk error) or a read
+    // racing a concurrent write - back it up and log loudly instead of quietly
+    // wiping every open position and the whole trade history with no trace.
+    if (fs.existsSync(FILE)) {
+      try {
+        const backup = `${FILE}.corrupt-${Date.now()}`;
+        fs.copyFileSync(FILE, backup);
+        console.error(`[paper] state file failed to parse - backed up to ${backup}; starting from empty state. Cause:`, e instanceof Error ? e.message : e);
+      } catch (backupErr) {
+        console.error(`[paper] state file failed to parse AND backup failed - starting from empty state. Cause:`, e instanceof Error ? e.message : e, backupErr);
+      }
+    }
     state = emptyState();
   }
   return state!;
 }
 function save() {
   if (!state) return;
-  fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(state, null, 2), "utf-8");
+  const dir = path.dirname(FILE);
+  fs.mkdirSync(dir, { recursive: true });
+  // Atomic write: write to a temp file first, then rename over the real file.
+  // A plain writeFileSync leaves a truncated/invalid JSON file behind if the
+  // process is killed mid-write; rename is atomic on the same filesystem, so
+  // readers always see either the old complete file or the new complete one.
+  const tmp = path.join(dir, `.paper-state.tmp-${process.pid}`);
+  fs.writeFileSync(tmp, JSON.stringify(state, null, 2), "utf-8");
+  fs.renameSync(tmp, FILE);
   writeCsvs(state);
 }
 
@@ -455,6 +493,7 @@ export async function markManual(deps: TickDeps): Promise<void> {
   const s = load();
   if (!s.manualOpen || !s.manualOpen.length) return;
   for (const pos of [...s.manualOpen]) {
+    const long = pos.instrument === "equity" ? pos.direction === "Bullish" : true;
     let price: number | null = null;
     try {
       if (pos.instrument === "option" && pos.optionType && pos.strike != null && pos.expiry && deps.getOptionPremium) {
@@ -463,23 +502,32 @@ export async function markManual(deps: TickDeps): Promise<void> {
         price = await deps.getSpot(pos.symbol);
       }
     } catch { price = null; }
-    if (price == null || !(price > 0)) continue;
-    pos.lastPrice = round2(price);
-    const long = pos.instrument === "equity" ? pos.direction === "Bullish" : true;
-    // Ratchet the trailing stop off the best favourable price seen.
-    if (long) {
-      if (price > pos.peakPrice) pos.peakPrice = round2(price);
-      const trail = round2(pos.peakPrice * (1 - pos.trailPct));
-      if (trail > pos.stopPrice) pos.stopPrice = trail;
-    } else {
-      if (price < pos.peakPrice) pos.peakPrice = round2(price);
-      const trail = round2(pos.peakPrice * (1 + pos.trailPct));
-      if (trail < pos.stopPrice) pos.stopPrice = trail;
+    const havePrice = price != null && price > 0;
+    if (havePrice) {
+      pos.lastPrice = round2(price as number);
+      // Ratchet the trailing stop off the best favourable price seen.
+      if (long) {
+        if ((price as number) > pos.peakPrice) pos.peakPrice = round2(price as number);
+        const trail = round2(pos.peakPrice * (1 - pos.trailPct));
+        if (trail > pos.stopPrice) pos.stopPrice = trail;
+      } else {
+        if ((price as number) < pos.peakPrice) pos.peakPrice = round2(price as number);
+        const trail = round2(pos.peakPrice * (1 + pos.trailPct));
+        if (trail < pos.stopPrice) pos.stopPrice = trail;
+      }
     }
-    // Month-end square-off (hold through the entry month, then close).
-    if (deps.istDate > pos.monthEnd) { closeManualPos(s, pos, price, "end", deps.nowEpoch); continue; }
+    // Month-end square-off (hold through the entry month, then close). Runs
+    // unconditionally - even when today's live-price fetch failed - falling back
+    // to the last known price, so a position whose feed is permanently broken
+    // (delisted underlying, bad/expired `expiry`) still gets force-closed instead
+    // of being skipped forever.
+    if (deps.istDate > pos.monthEnd) {
+      closeManualPos(s, pos, pos.lastPrice ?? pos.entryPrice, "end", deps.nowEpoch);
+      continue;
+    }
+    if (!havePrice) continue;
     // Trailing / initial stop hit.
-    const hit = long ? price <= pos.stopPrice : price >= pos.stopPrice;
+    const hit = long ? (price as number) <= pos.stopPrice : (price as number) >= pos.stopPrice;
     if (hit) {
       const moved = long ? pos.peakPrice > pos.entryPrice : pos.peakPrice < pos.entryPrice;
       closeManualPos(s, pos, pos.stopPrice, moved ? "trail" : "stop", deps.nowEpoch);
@@ -563,7 +611,16 @@ function tradeFriction(kind: PoolKind, entryVal: number, exitVal: number): numbe
   return round2(slippage + charges);
 }
 function optionMark(pos: PaperPosition, spot: number, nowEpoch: number): number {
-  const denom = (pos.spotTarget - pos.spotEntry) || 1;
+  const denom = pos.spotTarget - pos.spotEntry;
+  if (!denom) {
+    // spotTarget == spotEntry means this position was opened with a degenerate
+    // target (a bug upstream in entry construction) - falling back to an
+    // arbitrary divisor (previously `|| 1`) would fabricate a premium slope,
+    // driving real exit decisions off a made-up number. Hold at entry price
+    // instead so it's visibly flat rather than silently wrong.
+    console.error(`[paper] optionMark: degenerate position ${pos.id} (${pos.symbol}) has spotTarget === spotEntry (${pos.spotEntry}); holding mark at entry price.`);
+    return pos.entryPrice;
+  }
   const slope = ((pos.premiumTarget ?? pos.entryPrice) - pos.entryPrice) / denom;
   let mark = pos.entryPrice + slope * (spot - pos.spotEntry);
   if (pos.thetaPctPerDay && pos.entryEpoch) {
@@ -571,6 +628,26 @@ function optionMark(pos: PaperPosition, spot: number, nowEpoch: number): number 
     mark -= pos.entryPrice * (pos.thetaPctPerDay / 100) * heldFrac;
   }
   return Math.max(0.05, round2(mark));
+}
+
+// ---- Exit-check health telemetry ----
+// The downside-protection checks in the exit loop below (OI module/bias, regime,
+// index-bias) are each best-effort: if the dependency throws, we hold the
+// position rather than fail the whole tick. That used to mean a genuinely BROKEN
+// dependency (a real bug, not just "no data today") could silently stop firing
+// forever with zero trace. Track consecutive failures per check and log once a
+// check starts failing persistently, so a real break is visible instead of
+// indistinguishable from an ordinary no-data day.
+const exitCheckFailures = new Map<string, number>();
+function noteExitCheckError(check: string, err: unknown): void {
+  const n = (exitCheckFailures.get(check) ?? 0) + 1;
+  exitCheckFailures.set(check, n);
+  if (n === 1 || n % 20 === 0) {
+    console.error(`[paper] exit check "${check}" failed (${n}x so far):`, err instanceof Error ? err.message : err);
+  }
+}
+function noteExitCheckOk(check: string): void {
+  if (exitCheckFailures.has(check)) exitCheckFailures.delete(check);
 }
 
 type ExitReason = PaperTrade["exitReason"];
@@ -673,7 +750,10 @@ async function applyMinderGate(
   return ex;
 }
 
-export async function markPaper(deps: TickDeps): Promise<any> {
+export function markPaper(deps: TickDeps): Promise<any> {
+  return withPaperLock(() => markPaperImpl(deps));
+}
+async function markPaperImpl(deps: TickDeps): Promise<any> {
   const s = load();
   if (deps.marketOpen) { try { await markManual(deps); } catch { /* manual marking is best-effort */ } }
   if (!s.active || !deps.marketOpen) return getPaperSummary();
@@ -939,7 +1019,10 @@ async function tryOpenOption(s: PaperState, deps: TickDeps, idea: OptionIdea, ki
   return "OPENED";
 }
 
-export async function tickPaper(deps: TickDeps): Promise<any> {
+export function tickPaper(deps: TickDeps): Promise<any> {
+  return withPaperLock(() => tickPaperImpl(deps));
+}
+async function tickPaperImpl(deps: TickDeps): Promise<any> {
   const s = load();
   if (deps.marketOpen) { try { await markManual(deps); } catch { /* manual marking best-effort */ } }
   // Per-cycle trade-scan diagnostic (surfaced in the Paper tab).
@@ -976,6 +1059,7 @@ export async function tickPaper(deps: TickDeps): Promise<any> {
       if (!ex && deps.getOiModule) {
         try {
           const m = await deps.getOiModule(pos.symbol);
+          noteExitCheckOk("getOiModule");
           if (m) {
             const want = bull ? "UP" : "DOWN";
             const against = bull ? "DOWN" : "UP";
@@ -987,23 +1071,25 @@ export async function tickPaper(deps: TickDeps): Promise<any> {
               ex = { price: optionMark(pos, spot, deps.nowEpoch), reason: "reversal" };
             }
           }
-        } catch { /* ignore */ }
+        } catch (e) { noteExitCheckError("getOiModule", e); }
       }
       if (!ex && deps.getOiBias) {
         try {
           const bias = await deps.getOiBias(pos.symbol);
+          noteExitCheckOk("getOiBias");
           const against = (bull && bias === "Bearish") || (!bull && bias === "Bullish");
           const favMove = bull ? spot - pos.spotEntry : pos.spotEntry - spot;
           const expMove = Math.abs(pos.spotTarget - pos.spotEntry) || 1;
           if (against && favMove / expMove < 0.5) ex = { price: optionMark(pos, spot, deps.nowEpoch), reason: "stall" };
-        } catch { /* ignore */ }
+        } catch (e) { noteExitCheckError("getOiBias", e); }
       }
       if (!ex && deps.getRegime) {
         try {
           const rg = await deps.getRegime(pos.symbol);
+          noteExitCheckOk("getRegime");
           const mark = optionMark(pos, spot, deps.nowEpoch);
           if (rg && rg.dir !== 0 && rg.dir !== (bull ? 1 : -1) && mark <= pos.entryPrice) ex = { price: mark, reason: "reversal" };
-        } catch { /* ignore */ }
+        } catch (e) { noteExitCheckError("getRegime", e); }
       }
       // INDEX-aware stop (user rule): if this STOCK option's parent index has turned
       // AGAINST the trade and we're not in profit, cut it — the stock tends to snap
@@ -1011,9 +1097,10 @@ export async function tickPaper(deps: TickDeps): Promise<any> {
       if (!ex && pos.kind === "stockOption" && deps.getIndexBiasFor) {
         try {
           const ib = await deps.getIndexBiasFor(pos.symbol);
+          noteExitCheckOk("getIndexBiasFor");
           const mark = optionMark(pos, spot, deps.nowEpoch);
           if (ib && ib.dir !== 0 && ib.dir !== (bull ? 1 : -1) && mark <= pos.entryPrice) ex = { price: mark, reason: "reversal" };
-        } catch { /* ignore */ }
+        } catch (e) { noteExitCheckError("getIndexBiasFor", e); }
       }
       ex = await applyMinderGate(ex, pos, deps); // hold through tests, exit on real reversals
       if (ex) closePosition(s, pos, ex.price, ex.reason, deps.nowEpoch);
@@ -1024,7 +1111,11 @@ export async function tickPaper(deps: TickDeps): Promise<any> {
       // we're not in profit, exit early (stock tends to follow its index).
       let idxCut = false;
       if (deps.getIndexBiasFor && spot <= pos.spotEntry) {
-        try { const ib = await deps.getIndexBiasFor(pos.symbol); if (ib && ib.dir === -1) idxCut = true; } catch { /* ignore */ }
+        try {
+          const ib = await deps.getIndexBiasFor(pos.symbol);
+          noteExitCheckOk("getIndexBiasFor");
+          if (ib && ib.dir === -1) idxCut = true;
+        } catch (e) { noteExitCheckError("getIndexBiasFor", e); }
       }
       if (spot >= pos.spotTarget) closePosition(s, pos, pos.spotTarget, "target", deps.nowEpoch);
       else if (spot <= pos.spotStop) closePosition(s, pos, pos.spotStop, "stop", deps.nowEpoch);
@@ -1149,7 +1240,10 @@ export async function tickPaper(deps: TickDeps): Promise<any> {
 
 // Faster OI-scalp algo loop (~90s). Only tries new scalp entries; exits stay on
 // the regular mark/tick path. No live broker orders.
-export async function tickPaperScalps(deps: TickDeps): Promise<any> {
+export function tickPaperScalps(deps: TickDeps): Promise<any> {
+  return withPaperLock(() => tickPaperScalpsImpl(deps));
+}
+async function tickPaperScalpsImpl(deps: TickDeps): Promise<any> {
   const s = load();
   if (!s.active || !deps.marketOpen) return getPaperSummary();
   if (deps.istDate !== s.tradesTodayDate) { s.tradesToday = 0; s.scalpsToday = 0; s.tradesTodayDate = deps.istDate; }
@@ -1177,6 +1271,13 @@ function poolSummary(s: PaperState, k: PoolKind) {
   const pnl = round2(equity - poolOf(s, k).startCapital);
   const pnlPct = poolOf(s, k).startCapital ? round2((pnl / poolOf(s, k).startCapital) * 100) : 0;
   return { ...poolOf(s, k), equity, pnl, pnlPct };
+}
+
+// Current consecutive-failure count per exit-check dependency (see
+// noteExitCheckError above), for the /health endpoint - lets a persistently
+// broken check (vs. an ordinary no-data day) be noticed from the outside.
+export function getExitCheckHealth(): Record<string, number> {
+  return Object.fromEntries(exitCheckFailures);
 }
 
 export function getPaperSummary(): any {
