@@ -15,6 +15,7 @@ try {
 }
 
 import express from "express";
+import cors from "cors";
 import path from "path";
 import apiRouter, { startHourlyScheduler } from "./routes/api";
 import { CONFIG } from "./config";
@@ -23,6 +24,9 @@ import { getExitCheckHealth } from "./paper/engine";
 
 const app = express();
 
+// This is a personal, local dashboard (see auth/session.ts) - no other origin
+// should be able to call the API at all, cross-origin or otherwise.
+app.use(cors({ origin: false }));
 app.use(express.json());
 
 // API

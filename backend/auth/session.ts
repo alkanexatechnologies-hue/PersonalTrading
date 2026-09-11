@@ -1,19 +1,35 @@
 // ============================ Local access gate (paper desk) ============================
 // A lightweight, single-user login gate for the dashboard. This is NOT a
-// multi-tenant auth system — it protects a personal, local paper-desk UI.
+// multi-tenant auth system — it protects a personal, local paper-desk UI, and
+// is enforced server-side on every /api route (see routes/api.ts) so it isn't
+// just a cosmetic screen in front of an otherwise-open API.
 //
 // SECURITY NOTES:
 //  - Credentials are checked SERVER-SIDE only (never shipped in frontend JS).
 //  - The password is compared as a SHA-256 hash using a constant-time compare.
-//  - Defaults are Alkasrivastava / Alkasrivastava, overridable via env
-//    (LOGIN_USER / LOGIN_PASS) so the secret can live outside source if desired.
+//  - Set LOGIN_USER / LOGIN_PASS env vars for a fixed login. If unset, a
+//    random one-time password is generated at startup and printed once to the
+//    console — this replaces a previous hardcoded, guessable default
+//    ("Alkasrivastava" / "Alkasrivastava") that shipped in source.
 //  - Sessions are opaque random tokens held in memory and expire daily at
 //    07:00 AM IST (matching the paper-desk daily reset).
 
 import crypto from "crypto";
 
-const DEFAULT_USER = process.env.LOGIN_USER || "Alkasrivastava";
-const DEFAULT_PASS = process.env.LOGIN_PASS || "Alkasrivastava";
+const envUser = process.env.LOGIN_USER;
+const envPass = process.env.LOGIN_PASS;
+const GENERATED_PASS = envPass ? null : crypto.randomBytes(9).toString("base64url");
+
+const DEFAULT_USER = envUser || "admin";
+const DEFAULT_PASS = envPass || GENERATED_PASS!;
+
+if (GENERATED_PASS) {
+  // eslint-disable-next-line no-console
+  console.log(`\n  Dashboard login (no LOGIN_USER / LOGIN_PASS set):`);
+  console.log(`    user     : ${DEFAULT_USER}`);
+  console.log(`    password : ${GENERATED_PASS}`);
+  console.log(`  This password is regenerated every restart. Set LOGIN_USER / LOGIN_PASS env vars for a fixed login.\n`);
+}
 
 const sha256 = (s: string) => crypto.createHash("sha256").update(s, "utf8").digest();
 const USER_HASH = sha256(DEFAULT_USER);

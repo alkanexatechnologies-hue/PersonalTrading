@@ -58,10 +58,18 @@ except Exception as e:
     print("This usually means the subscription/entitlement is not active yet.")
 
 # Save the token to a local file so the app runner can pick it up automatically.
+# Restricted to owner-only read/write (this is a live broker credential sitting
+# in plaintext on disk). chmod is a POSIX-only restriction - on Windows this is
+# a no-op, so treat the file itself as sensitive regardless of platform (don't
+# zip/share the project folder with it inside).
 token_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".groww_token")
 try:
     with open(token_path, "w", encoding="utf-8") as f:
         f.write(access_token)
+    try:
+        os.chmod(token_path, 0o600)
+    except Exception:
+        pass
     print(f"\nToken saved to: {token_path}")
 except Exception as e:
     print(f"(Could not save token file: {e})")

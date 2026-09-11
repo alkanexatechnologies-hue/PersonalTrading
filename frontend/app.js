@@ -7549,6 +7549,29 @@ function startClock() {
 
 // ---------- local access gate ----------
 const LG_TOKEN_KEY = "nsa_session";
+
+// The backend now requires a Bearer session token on every /api route except
+// /api/login, /api/session and /api/logout (see routes/api.ts). Previously
+// only the login-gate's own two calls attached the Authorization header, so
+// enforcing auth server-side would otherwise 401 every other call in this
+// file. Patching window.fetch once here covers all of them without touching
+// each of the ~85 call sites individually.
+(function installAuthFetch() {
+  const nativeFetch = window.fetch.bind(window);
+  const PUBLIC = ["/api/login", "/api/session", "/api/logout"];
+  window.fetch = (input, init) => {
+    const url = typeof input === "string" ? input : (input && input.url) || "";
+    if (url.startsWith("/api/") && !PUBLIC.some((p) => url.startsWith(p))) {
+      const token = localStorage.getItem(LG_TOKEN_KEY);
+      if (token) {
+        init = init || {};
+        init.headers = Object.assign({}, init.headers || {}, { Authorization: "Bearer " + token });
+      }
+    }
+    return nativeFetch(input, init);
+  };
+})();
+
 async function setupLoginGate() {
   const gate = el("login-gate");
   if (!gate) return;

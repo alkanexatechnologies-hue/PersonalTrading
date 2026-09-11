@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import rateLimit from "express-rate-limit";
 import { getProvider, setActiveProvider } from "../data";
 import { syncSessionProvider, rememberGrowwToken, forgetGrowwToken, isMarketOpenIST, setFeedFlags, getFeedFlags, hasGrowwToken, growwProviderForOi, getGrowwTokenMasked } from "../data/sessionFeed";
 
@@ -84,7 +85,7 @@ import { evaluateBuyAlgo, buyContextFromCandles } from "../options/highProbAlgo"
 import { logOiSignal, evaluateOiSignals, reviewOiSignals } from "../oi/oiCommandLog";
 import { auditSignal } from "../compliance/signalAudit";
 import { complianceMeta } from "../compliance/disclosures";
-import { login as doLogin, logout as doLogout, sessionInfo } from "../auth/session";
+import { login as doLogin, logout as doLogout, sessionInfo, validate as validateSession } from "../auth/session";
 import { computeOiVolume } from "../oi/oiVolume";
 import { growwChainForExpiry } from "../data/growwProvider";
 import { reviewOptionTrade } from "../backtest/optionReview";
@@ -132,6 +133,24 @@ import { dayHighLow } from "../indicators/dayRange";
 import { Interval, NextDayPick, Opportunity, TradeAlert, OiAnalysis } from "../types";
 
 const router = Router();
+
+// ---- Access gate: require a valid session on every route except the login
+// flow itself. A login UI existed on the frontend (backend/auth/session.ts)
+// but nothing server-side ever checked it, so the entire trading/paper/OI API
+// was reachable with zero authentication regardless of what the dashboard
+// showed. This is a single-user local gate (see auth/session.ts), not
+// multi-tenant auth.
+const PUBLIC_API_PATHS = new Set(["/login", "/session", "/logout"]);
+function bearerToken(req: Request): string | undefined {
+  const header = req.headers.authorization || "";
+  const m = /^Bearer\s+(.+)$/i.exec(header);
+  return m ? m[1] : undefined;
+}
+router.use((req: Request, res: Response, next) => {
+  if (PUBLIC_API_PATHS.has(req.path)) return next();
+  if (validateSession(bearerToken(req))) return next();
+  res.status(401).json({ error: "Unauthorized. Please log in." });
+});
 
 // ---- Short-TTL in-memory cache to speed up (and de-duplicate) repeated scans ----
 // The day-outlook and hourly scans hit overlapping symbols and run back-to-back;
@@ -656,8 +675,13 @@ router.post("/connect-groww", async (req: Request, res: Response) => {
     recordGrowwReconnect();
     const q = await getProvider().getQuote("RELIANCE.NS"); // verify it works
     // Persist the token locally so it's reused across every session (gitignored).
+    // Restricted to owner-only read/write - this is a live broker credential
+    // sitting in plaintext on disk; mode is enforced with an explicit chmod
+    // since writeFileSync's `mode` option only applies when the file is
+    // newly created, not when it already exists and is being overwritten.
     try {
-      fs.writeFileSync(tokenFile, token, "utf-8");
+      fs.writeFileSync(tokenFile, token, { encoding: "utf-8", mode: 0o600 });
+      fs.chmodSync(tokenFile, 0o600);
     } catch {
       /* ignore */
     }
@@ -3666,7 +3690,16 @@ const bearer = (req: Request): string | null => {
   const h = String(req.headers.authorization || "");
   return h.startsWith("Bearer ") ? h.slice(7) : null;
 };
-router.post("/login", (req: Request, res: Response) => {
+// Rate-limit login attempts so the (now no-longer-hardcoded, but still finite)
+// password can't be brute-forced over the network.
+const loginLimiter = rateLimit({
+  windowMs: 10 * 60_000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, error: "Too many login attempts. Try again later." },
+});
+router.post("/login", loginLimiter, (req: Request, res: Response) => {
   const { username, password } = req.body || {};
   const r = doLogin(String(username || ""), String(password || ""));
   if (!r.ok) return res.status(401).json({ ok: false, error: r.error });
