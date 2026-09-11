@@ -2169,9 +2169,9 @@ body.mode-option .index-strip { display: flex; }
 }
 .mts-chip b { color: var(--text); }
 
-/* Verdict + CALL/PUT LTP boxes - the hero row, most important info first. */
-/* Dashboard Grid hero: verdict + CALL + PUT + a compact risk tile, one row. */
-.mtg-hero { display: grid; grid-template-columns: 1fr 150px 150px 110px; gap: 10px; }
+/* Dashboard Grid hero: verdict + a compact risk tile, one row (the CALL/PUT
+   LTP boxes that used to sit here were removed). */
+.mtg-hero { display: grid; grid-template-columns: 1fr 110px; gap: 10px; }
 .mtg-risk-hero {
   border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; background: #0b1220;
   display: flex; flex-direction: column; justify-content: center; gap: 1px;
@@ -2212,11 +2212,11 @@ body.mode-option .index-strip { display: flex; }
 .mtc-analysis > *:not(.mtc-analysis-sum) { margin-top: 10px; }
 
 @media (max-width: 980px) {
-  .mtg-hero { grid-template-columns: 1fr 1fr; }
   .mtg-grid { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 620px) {
   .mtg-hero { grid-template-columns: 1fr; }
+  .mtg-hero .mtg-risk-hero { width: 100%; }
   .mtg-grid { grid-template-columns: 1fr; }
 }
 
@@ -2367,18 +2367,6 @@ body.mode-option .index-strip { display: flex; }
 .mts-verdict.go .mts-verdict-word { color: #16c784; }
 .mts-verdict.conflict .mts-verdict-word { color: #ea3943; }
 .mts-verdict-sub { font-size: 13px; color: var(--muted); line-height: 1.4; }
-.mts-ltp-box {
-  border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; background: #0b1220;
-  display: flex; flex-direction: column; justify-content: center; gap: 1px;
-}
-.mts-ltp-box.call { border-color: rgba(234,57,67,0.4); }
-.mts-ltp-box.put { border-color: rgba(22,199,132,0.4); }
-.mts-ltp-box span { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
-.mts-ltp-box b { font-size: 16px; font-variant-numeric: tabular-nums; }
-.mts-ltp-box.call b { color: #ff6b73; }
-.mts-ltp-box.put b { color: #16c784; }
-.mts-ltp-box em { font-style: normal; font-size: 12px; font-weight: 700; }
-.mts-ltp-box small { font-size: 10px; color: var(--muted); }
 
 /* Risk Radar (options/riskRadar.ts) - previously computed server-side but
    never actually rendered on this tab, so a trader saw a trade recommendation
@@ -2439,7 +2427,6 @@ body.mode-option .index-strip { display: flex; }
   .mts-head-actions { width: 100%; }
   .mts-head-actions .mts-log-link { flex: 1; text-align: center; }
   .mts-verdict-word { font-size: 15px; }
-  .mts-ltp-box { flex-direction: row; align-items: baseline; gap: 8px; flex-wrap: wrap; }
   .mts-final { padding: 10px 12px; }
   .mts-final-reason { min-width: 100%; order: 3; }
   .oic-bull-row { grid-template-columns: 1fr; }

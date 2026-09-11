@@ -5027,16 +5027,6 @@ function renderMasterSelector(d) {
           <div class="mts-verdict-word">${vWord}</div>
           <div class="mts-verdict-sub">${C ? C.headline : (reason || "—")}</div>
         </div>
-        <div class="mts-ltp-box call">
-          <span>CALL LTP</span>
-          <b>${money(d.callLtp)}</b> <em class="${pctCls(d.callLtpChgPct)}">${pctTxt(d.callLtpChgPct)}</em>
-          <small>day ${money(rng.callHi)} / ${money(rng.callLo)}</small>
-        </div>
-        <div class="mts-ltp-box put">
-          <span>PUT LTP</span>
-          <b>${money(d.putLtp)}</b> <em class="${pctCls(d.putLtpChgPct)}">${pctTxt(d.putLtpChgPct)}</em>
-          <small>day ${money(rng.putHi)} / ${money(rng.putLo)}</small>
-        </div>
         ${risk ? `
         <div class="mtg-risk-hero rr-${riskLvlCls}">
           <span>Risk</span>
