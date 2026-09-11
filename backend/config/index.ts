@@ -1,4 +1,8 @@
-import { Interval } from "./types";
+// Main app config: symbols, strikes, ports, provider settings, disclaimers.
+// (See ./arbitration.ts for the separate Sentiment/Liquidity/Risk-extension
+// arbitration constants - split out because they're tuned independently and
+// consumed by a different, smaller set of callers.)
+import { Interval } from "../types";
 
 // Default watchlist of liquid NSE names + key indices.
 // Symbology: NSE equities use the ".NS" suffix; indices use "^" (mapped to the
