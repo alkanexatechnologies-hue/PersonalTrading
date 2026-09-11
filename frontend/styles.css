@@ -2170,7 +2170,50 @@ body.mode-option .index-strip { display: flex; }
 .mts-chip b { color: var(--text); }
 
 /* Verdict + CALL/PUT LTP boxes - the hero row, most important info first. */
-.mts-verdict-row { display: grid; grid-template-columns: 1fr 160px 160px; gap: 10px; }
+/* Dashboard Grid hero: verdict + CALL + PUT + a compact risk tile, one row. */
+.mtg-hero { display: grid; grid-template-columns: 1fr 150px 150px 110px; gap: 10px; }
+.mtg-risk-hero {
+  border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; background: #0b1220;
+  display: flex; flex-direction: column; justify-content: center; gap: 1px;
+}
+.mtg-risk-hero span { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.mtg-risk-hero b { font-size: 15px; }
+.mtg-risk-hero small { font-size: 10px; color: var(--muted); }
+.mtg-risk-hero.rr-danger { border-color: rgba(234,57,67,0.5); } .mtg-risk-hero.rr-danger b { color: #ea3943; }
+.mtg-risk-hero.rr-caution { border-color: rgba(240,166,58,0.5); } .mtg-risk-hero.rr-caution b { color: #f0a63a; }
+.mtg-risk-hero.rr-low { border-color: rgba(22,199,132,0.5); } .mtg-risk-hero.rr-low b { color: #16c784; }
+
+/* Dashboard Grid secondary row: Risk Radar detail, Levels, Writer battle, OI
+   walls - independent cards scanned side by side instead of one long column. */
+.mtg-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; align-items: start; }
+.mtg-grid > .risk-radar { margin-bottom: 0; }
+.mtg-card { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+.mtg-card h5 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--muted); font-weight: 800; }
+.o2-lv { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.o2-lv:last-child { border-bottom: none; }
+/* Spot/price is the anchor value everything else on this card is read
+   against - lift it above its sibling rows instead of five equal lines. */
+.mtc-lv-spot { border-left: 2px solid var(--blue); padding-left: 8px; margin-left: -8px; font-weight: 700; }
+.mtc-lv-spot b { font-size: 15px !important; color: var(--text); }
+
+/* Analysis card is now a <details> (collapsed content is still all here, one
+   click away) rather than always-open competing with the cards above it. */
+.mtc-analysis-sum { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }
+.mtc-analysis-sum::-webkit-details-marker { display: none; }
+.mtc-analysis-sum h5 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text); font-weight: 800; }
+.mtc-analysis-sum .mtc-scenario-caret { margin-left: auto; color: var(--muted); }
+.mtc-analysis[open] .mtc-analysis-sum .mtc-scenario-caret { color: var(--blue); }
+.mtc-analysis > *:not(.mtc-analysis-sum) { margin-top: 10px; }
+
+@media (max-width: 980px) {
+  .mtg-hero { grid-template-columns: 1fr 1fr; }
+  .mtg-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 620px) {
+  .mtg-hero { grid-template-columns: 1fr; }
+  .mtg-grid { grid-template-columns: 1fr; }
+}
+
 .mts-verdict {
   display: flex; align-items: center; gap: 10px; padding: 7px 12px;
   border-radius: 8px; border: 1px solid var(--border); background: #10141b;
@@ -2257,7 +2300,6 @@ body.mode-option .index-strip { display: flex; }
   .mts { gap: 14px; }
   .mts-head-actions { width: 100%; }
   .mts-head-actions .mts-log-link { flex: 1; text-align: center; }
-  .mts-verdict-row { grid-template-columns: 1fr; }
   .mts-verdict-word { font-size: 15px; }
   .mts-ltp-box { flex-direction: row; align-items: baseline; gap: 8px; flex-wrap: wrap; }
   .mts-final { padding: 10px 12px; }
@@ -2312,14 +2354,6 @@ body.mode-option .index-strip { display: flex; }
 .mtc.bear { border-left-color: #ea3943; }
 .mtc.conflict { border-left-color: #a855f7; }
 .mtc.wait { border-left-color: var(--amber); }
-.mtc-levels { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
-.mtc-levels > div { background: var(--panel-2); border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.mtc-levels span { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
-.mtc-levels b { font-size: 13px; font-variant-numeric: tabular-nums; }
-/* Spot / price is the anchor value everything else is read against - lift it
-   visually above its four sibling level cells instead of five equal boxes. */
-.mtc-levels > div:nth-child(3) { background: var(--panel); border-color: var(--blue); }
-.mtc-levels > div:nth-child(3) b { font-size: 16px; color: var(--text); }
 .mtc-sec h5 { margin: 0 0 3px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); font-weight: 800; }
 .mtc-sec p { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--text); }
 .mtc-reasons { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.7; }
@@ -2353,12 +2387,9 @@ body.mode-option .index-strip { display: flex; }
 
 @media (max-width: 820px) {
   .mtc { padding: 12px; gap: 12px; }
-  .mtc-levels { grid-template-columns: repeat(2, 1fr); }
-  .mtc-levels > div:nth-child(3) { grid-column: 1 / -1; }
   .mtc-grid2 { grid-template-columns: 1fr; }
 }
 @media (max-width: 480px) {
-  .mtc-levels { grid-template-columns: 1fr 1fr; }
   .mts-table { font-size: 11px; }
 }
 

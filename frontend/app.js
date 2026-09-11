@@ -4371,26 +4371,77 @@ function oicPremiumBar(entry, stop, ltp, target) {
 // Intelligent Market Commentary card (pure Hindi) — renders the backend commentary engine
 // output: levels, situation, reasons, bull/bear cases, market path, aggressive writers,
 // writer battle, next confirmation, trader guidance and the system conclusion.
-function renderCommentaryHtml(C) {
+// Split from one big renderCommentaryHtml() into three focused cards
+// (levels / writer battle / analysis) so the Dashboard Grid layout can place
+// them as independent cards a trader scans side by side, instead of one long
+// vertical block. Same content as before, none of it dropped - the situation
+// text/reasons/scenario/guidance just now live together under one "Analysis"
+// card instead of being spread across an always-open column.
+
+function renderLevelsCardHtml(C) {
   if (!C) return "";
   const gN = (n) => (n == null ? "—" : Number(n).toLocaleString("en-IN"));
   const L = C.levels || {};
+  // Stacked rows, not the old 5-across box grid - this card is now a quarter
+  // of the row's width (Dashboard Grid), where 5 side-by-side boxes would be
+  // too cramped to read.
+  return `
+    <div class="mtg-card">
+      <h5>Key levels</h5>
+      <div class="o2-lv"><span class="down">Major resistance</span><b>${gN(L.majorResistance)}</b></div>
+      <div class="o2-lv"><span class="down">Immediate resistance</span><b>${gN(L.immResistance)}</b></div>
+      <div class="o2-lv mtc-lv-spot"><span>Spot / price</span><b>${gN(L.price)}</b></div>
+      <div class="o2-lv"><span class="up">Immediate support</span><b>${gN(L.immSupport)}</b></div>
+      <div class="o2-lv"><span class="up">Major support</span><b>${gN(L.majorSupport)}</b></div>
+    </div>`;
+}
+
+function renderWriterBattleHtml(C) {
+  if (!C) return "";
+  const gN = (n) => (n == null ? "—" : Number(n).toLocaleString("en-IN"));
   const wb = C.writerBattle || {};
-  const cCls = C.conclusion === "BULL_CONFIRM" ? "go" : C.conclusion === "BEAR_CONFIRM" ? "bear" : C.conclusion === "CONFLICT" ? "conflict" : "wait";
-  const reasons = (C.reasons || []).map((r) => `<li>${r}</li>`).join("");
   const callPct = wb.callPct != null ? wb.callPct : 50;
   const putPct = wb.putPct != null ? wb.putPct : 50;
   return `
-    <div class="mtc ${cCls}">
-      <div class="mtc-levels">
-        <div><span>Major resistance</span><b class="down">${gN(L.majorResistance)}</b></div>
-        <div><span>Immediate resistance</span><b class="down">${gN(L.immResistance)}</b></div>
-        <div><span>Spot / price</span><b>${gN(L.price)}</b></div>
-        <div><span>Immediate support</span><b class="up">${gN(L.immSupport)}</b></div>
-        <div><span>Major support</span><b class="up">${gN(L.majorSupport)}</b></div>
+    <div class="mtg-card">
+      <h5>Writer battle</h5>
+      <div class="mtc-writers">
+        <span class="mtc-agg call">🔥 CALL writer — ${gN(C.aggressiveCallWriter)}</span>
+        <span class="mtc-agg put">🔥 PUT writer — ${gN(C.aggressivePutWriter)}</span>
       </div>
+      <div class="mtc-battle">
+        <div class="mtc-battle-bar"><i class="call" style="width:${callPct}%"></i><i class="put" style="width:${putPct}%"></i></div>
+        <div class="mtc-battle-lab"><span class="down">CALL writers ${callPct}%</span><span class="up">PUT writers ${putPct}%</span></div>
+        ${wb.note ? `<div class="mtc-battle-note">${wb.note}</div>` : ""}
+      </div>
+    </div>`;
+}
 
-      <div class="mtc-sec"><h5>Market स्थिति</h5><p>${C.situation || "—"}</p></div>
+// OI walls quick-reference (from d.oiSummary, the same source the full OI
+// Details drawer uses) - a glanceable summary card; the toggleable drawer
+// right below the hero row still has the full chain/wall detail.
+function renderOiWallsCardHtml(d) {
+  const S = d.oiSummary || {};
+  const gN = (n) => (n == null ? "—" : Number(n).toLocaleString("en-IN"));
+  const biasCls = S.bias === "Bullish" ? "up" : S.bias === "Bearish" ? "down" : "";
+  return `
+    <div class="mtg-card">
+      <h5>OI walls</h5>
+      <div class="o2-lv"><span class="down">Call writing wall</span><b>${gN(S.callWall && S.callWall.strike)}</b></div>
+      <div class="o2-lv"><span class="up">Put writing wall</span><b>${gN(S.putWall && S.putWall.strike)}</b></div>
+      <div class="o2-lv"><span>Max pain / ATM</span><b>${gN(S.maxPain)}</b></div>
+      <div class="o2-lv"><span>Bias</span><b class="${biasCls}">${S.bias || "—"}</b></div>
+    </div>`;
+}
+
+function renderAnalysisHtml(C) {
+  if (!C) return "";
+  const cCls = C.conclusion === "BULL_CONFIRM" ? "go" : C.conclusion === "BEAR_CONFIRM" ? "bear" : C.conclusion === "CONFLICT" ? "conflict" : "wait";
+  const reasons = (C.reasons || []).map((r) => `<li>${r}</li>`).join("");
+  return `
+    <details class="mtc mtc-analysis ${cCls}" open>
+      <summary class="mtc-analysis-sum"><h5>Market स्थिति — analysis</h5><span class="mtc-scenario-caret">⌄</span></summary>
+      <div class="mtc-sec"><p>${C.situation || "—"}</p></div>
       ${reasons ? `<div class="mtc-sec"><h5>मुख्य कारण</h5><ul class="mtc-reasons">${reasons}</ul></div>` : ""}
 
       <details class="mtc-scenario">
@@ -4405,18 +4456,8 @@ function renderCommentaryHtml(C) {
         </div>
       </details>
 
-      <div class="mtc-writers">
-        <span class="mtc-agg call">🔥 Aggressive CALL writer — ${gN(C.aggressiveCallWriter)}</span>
-        <span class="mtc-agg put">🔥 Aggressive PUT writer — ${gN(C.aggressivePutWriter)}</span>
-      </div>
-      <div class="mtc-battle">
-        <div class="mtc-battle-bar"><i class="call" style="width:${callPct}%"></i><i class="put" style="width:${putPct}%"></i></div>
-        <div class="mtc-battle-lab"><span class="down">CALL writers ${callPct}%</span><span class="up">PUT writers ${putPct}%</span></div>
-        ${wb.note ? `<div class="mtc-battle-note">${wb.note}</div>` : ""}
-      </div>
-
       <div class="mtc-guidance">🧭 Trader निर्देश: ${C.guidance || "—"}</div>
-    </div>`;
+    </details>`;
 }
 
 // Live OI Details drawer — option chain (ATM ±5) + writing walls + bias + PCR.
@@ -4606,6 +4647,14 @@ function renderMasterSelector(d) {
 
   const regime = X.regime || "—";
   const risk = d.riskRadar || null;
+  const riskLvlCls = risk ? (risk.level === "High" ? "danger" : risk.level === "Elevated" ? "caution" : "low") : "";
+
+  // Dashboard Grid layout: a compact hero (verdict/CALL/PUT/risk) for a glance,
+  // then independent cards (full Risk Radar, Levels, Writer battle, OI walls)
+  // scanned side by side instead of one long vertical column, then the
+  // Analysis text collapsed by default (still one click away, nothing
+  // removed), then the full decision table - every one of its original
+  // columns kept exactly as before.
   box.innerHTML = `
     <div class="mts">
       <div class="mts-head">
@@ -4616,7 +4665,7 @@ function renderMasterSelector(d) {
         </div>
       </div>
 
-      <div class="mts-verdict-row">
+      <div class="mtg-hero">
         <div class="mts-verdict ${vcls}">
           <div class="mts-verdict-word">${vWord}</div>
           <div class="mts-verdict-sub">${C ? C.headline : (reason || "—")}</div>
@@ -4631,9 +4680,13 @@ function renderMasterSelector(d) {
           <b>${money(d.putLtp)}</b> <em class="${pctCls(d.putLtpChgPct)}">${pctTxt(d.putLtpChgPct)}</em>
           <small>day ${money(rng.putHi)} / ${money(rng.putLo)}</small>
         </div>
+        ${risk ? `
+        <div class="mtg-risk-hero rr-${riskLvlCls}">
+          <span>Risk</span>
+          <b>${risk.level}</b>
+          <small>${risk.spikeRisk}/100</small>
+        </div>` : `<div class="mtg-risk-hero"><span>Risk</span><b>—</b></div>`}
       </div>
-
-      ${risk ? `<div class="mts-risk-wrap">${riskRadarHtml(risk)}</div>` : ""}
 
       <div id="mts-oi" class="mts-oi ${state.mtsOiOpen ? "" : "hidden"}">${renderOiDetailsHtml(d)}</div>
 
@@ -4645,7 +4698,14 @@ function renderMasterSelector(d) {
         <span class="mts-chip">RR / Score gate</span>
       </div>
 
-      ${renderCommentaryHtml(C)}
+      <div class="mtg-grid">
+        ${risk ? riskRadarHtml(risk) : ""}
+        ${renderLevelsCardHtml(C)}
+        ${renderWriterBattleHtml(C)}
+        ${renderOiWallsCardHtml(d)}
+      </div>
+
+      ${renderAnalysisHtml(C)}
 
       <div class="mts-tablewrap">
         <table class="mts-table">
