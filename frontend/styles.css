@@ -887,10 +887,10 @@ body.oi-focus #panel-toppicks .tp-hide-outlook { display: none !important; }
 .oic-lesson-k em { font-style: normal; font-size: 10px; color: var(--muted); }
 .oic-lesson-t, .oic-candle { font-size: 11px; line-height: 1.35; color: var(--text); margin-top: 3px; }
 .oic-candle { color: var(--muted); }
-.oic-bull { background: #0b1220; border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; }
+.oic-bull { background: #0b1220; border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
 .oic-bull-lead { font-size: 12px; font-weight: 700; margin-bottom: 4px; }
-.oic-bull-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
-.oic-bull-card { border: 1px solid var(--border); border-radius: 7px; padding: 5px 7px; min-width: 0; }
+.oic-bull-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 10px; }
+.oic-bull-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px; min-width: 0; }
 .oic-bull-card.up { border-color: rgba(22,199,132,0.45); }
 .oic-bull-card.down { border-color: rgba(234,57,67,0.45); }
 .oic-bull-card > span { display: block; font-size: 9px; color: var(--muted); text-transform: uppercase; }
@@ -2304,6 +2304,7 @@ body.mode-option .index-strip { display: flex; }
   .mts-ltp-box { flex-direction: row; align-items: baseline; gap: 8px; flex-wrap: wrap; }
   .mts-final { padding: 10px 12px; }
   .mts-final-reason { min-width: 100%; order: 3; }
+  .oic-bull-row { grid-template-columns: 1fr; }
 }
 
 /* ============ OI Details drawer (inside Master Trade Selector) ============ */

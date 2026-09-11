@@ -4460,6 +4460,38 @@ function renderAnalysisHtml(C) {
     </details>`;
 }
 
+// Model-agreement bulletin: does the 5m scalp / 15m scalp / 1h directional
+// read all point the same way? d.bulletin was already computed server-side
+// (buildMoveBulletin, used internally to gate auto-trade ideas) but had no UI
+// anywhere - it only ever existed in a dead, never-called render function
+// left over from before this screen's last rewrite. Restored here using the
+// same .oic-bull-* styling that was already sitting unused in styles.css.
+function renderBulletinHtml(d) {
+  const B = d.bulletin;
+  if (!B) return "";
+  const card = (x, title) => {
+    if (!x) return `<div class="oic-bull-card"><span>${title}</span><b class="neu">—</b></div>`;
+    const cls = x.dir === "UP" ? "up" : x.dir === "DOWN" ? "down" : "neu";
+    const src = (x.sources || []).map((s) => `<i class="${s.dir === "UP" ? "up" : s.dir === "DOWN" ? "down" : "neu"}">${s.name} ${s.dir}</i>`).join("");
+    return `<div class="oic-bull-card ${cls}">
+      <span>${title} · ${x.barTime || ""}</span>
+      <b class="${cls}">${x.dir} ${x.option || ""}</b>
+      <em>${x.agree}/${x.total} · conf ${x.conf}</em>
+      <div class="oic-bull-src">${src}</div>
+    </div>`;
+  };
+  const dirOf = (x) => (x ? x.dir : "—");
+  const arrow = (dir) => (dir === "UP" ? '<i class="up">▲</i>' : dir === "DOWN" ? '<i class="down">▼</i>' : '<i class="neu">–</i>');
+  const allAgree = B.scalp5 && B.scalp15 && B.dir1h && B.scalp5.dir === B.scalp15.dir && B.scalp15.dir === B.dir1h.dir && B.scalp5.dir !== "FLAT";
+  const summary = `5m ${arrow(dirOf(B.scalp5))} 15m ${arrow(dirOf(B.scalp15))} 1h ${arrow(dirOf(B.dir1h))} — ${allAgree ? "all agree" : "mixed"}`;
+  return `<div class="oic-bull">
+    <details class="oic-bull-collapse">
+      <summary><span class="oic-bull-lead">${B.lead || "Move bulletin"}</span><span class="oic-bull-sum">${summary}</span></summary>
+      <div class="oic-bull-row">${card(B.scalp5, "5m SCALP")}${card(B.scalp15, "15m SCALP")}${card(B.dir1h, "1h DIRECTIONAL")}</div>
+    </details>
+  </div>`;
+}
+
 // Live OI Details drawer — option chain (ATM ±5) + writing walls + bias + PCR.
 // Renders from d.oiChain / d.oiSummary, which refresh with every 15s poll.
 function renderOiDetailsHtml(d) {
@@ -4705,6 +4737,8 @@ function renderMasterSelector(d) {
         ${renderOiWallsCardHtml(d)}
       </div>
 
+      ${renderBulletinHtml(d)}
+
       ${renderAnalysisHtml(C)}
 
       <div class="mts-tablewrap">
@@ -4763,250 +4797,6 @@ function renderMasterSelector(d) {
   if (rel) { rel.textContent = "verdict: " + verdict; rel.className = "rel-badge " + (vcls === "go" ? "rel-high" : vcls === "conflict" ? "rel-est" : "rel-med"); }
   const clr = el("oic-clarity");
   if (clr) clr.textContent = "clarity: " + (X.setupQuality != null ? X.setupQuality : "—");
-}
-
-function renderOiCommand(d) {
-  const box = el("oicommand");
-  if (!box) return;
-  const money = (v) => (v == null ? "—" : "₹" + fmt(v));
-  const pts = (v) => (v == null ? "—" : (v >= 0 ? "+" : "") + v);
-  const dirCls = d.oiDirection === "UP" ? "up" : d.oiDirection === "DOWN" ? "down" : "neu";
-  const s = d.setup || {}, tr = d.tracker || {}, m = d.management || {};
-  const rec = d.recommendation || {};
-  const corr = d.correlate || {};
-  const plan = d.plan || {};
-  const W = d.walls || {};
-  const Lsn = d.lesson || {};
-  const gate = oicPaperGate(d);
-  const Q = d.quality || {};
-  const rel = el("oic-rel");
-  if (rel) {
-    rel.textContent = `rel ${Q.score != null ? Q.score : "—"}/100 ${Q.grade || ""}`;
-    rel.className = "rel-badge " + (Q.grade === "HIGH" ? "rel-high" : Q.grade === "LOW" ? "rel-est" : "rel-med");
-    rel.title = Q.notes || "OI data quality vs live Groww chain";
-  }
-  // ---- Sentiment/Liquidity/Risk extension read (surfaced, not just computed) ----
-  const X = d.ext || {};
-  // §2: premium DECAY is the one HARD VETO (distinct red); liq THIN is amber only.
-  if (X.premiumState) gate.chips.push({ ok: X.premiumState !== "Decaying", veto: X.premiumState === "Decaying", t: X.premiumState === "Decaying" ? "premium DECAY" : "premium OK" });
-  if (X.liquidityState) gate.chips.push({ ok: true, amber: X.liquidityState === "Thin", t: X.liquidityState === "Thin" ? "liq THIN" : "liq NORMAL" });
-  // §2: clarity (setupQuality) badge next to the rel badge.
-  const clarEl = el("oic-clarity");
-  if (clarEl) {
-    const q = X.setupQuality;
-    clarEl.textContent = `clarity ${q != null ? q : "—"}/100`;
-    clarEl.className = "rel-badge " + (q >= 60 ? "rel-high" : q >= 30 ? "rel-med" : "rel-est");
-    clarEl.title = (X.scoreBreakdown && X.scoreBreakdown.length) ? X.scoreBreakdown.join(" · ") : "setupQuality — setup clarity";
-  }
-  // Phase 3 arbiter — the SOLE gate before display. CONFLICT is a distinct state,
-  // never silently resolved to a guessed GO.
-  const A = X.arbitration || null;
-  const arbConflict = !!(A && A.verdict === "CONFLICT");
-  const arbGo = !arbConflict && gate.go && (!A || A.verdict === "GO");
-  const arbPrimary = A && A.primary ? A.primary : null;
-  // §C.1 per-card staleness: OI-sourced cards get a small amber dot when the OI
-  // chain fell back to a cached copy (stale flag / dataAgeSec from the payload).
-  // Only flag staleness during TRADING hours — after-hours the chain is legitimately
-  // from a saved snapshot (expected), not a rate-limited fallback, so no amber dot.
-  const marketOpenNow = !(d.refresh && d.refresh.marketOpen === false);
-  const staleDot = (marketOpenNow && d.stale) ? ` <i class="oic-stale" title="last good OI ${d.dataAgeSec != null ? d.dataAgeSec + "s" : "?"} old — provider rate limited"></i>` : "";
-  // §C.5 cold-start vs 429-fallback — distinct AMBER sub-states (expected/handled,
-  // not broken). Sourced only from existing payload flags.
-  const degraded = (() => {
-    if (d.refresh && d.refresh.marketOpen === false) return null; // closed = not degraded
-    if (d.available === false) return { cls: "cold", text: "seeding today's OI data…" };
-    if (d.hasBaseline === false) return { cls: "cold", text: "seeding today's OI data (waiting for OI baseline)…" };
-    if (d.stale) return { cls: "stale", text: `showing last good chain (${d.dataAgeSec != null ? d.dataAgeSec + "s" : "?"} old) — provider rate limited` };
-    return null;
-  })();
-  const oiN = (n) => {
-    if (n == null || !(Number(n) >= 0)) return "—";
-    const v = Number(n);
-    if (v >= 1e5) return (v / 1e5).toFixed(1) + "L";
-    if (v >= 1e3) return Math.round(v / 1e3) + "k";
-    return String(Math.round(v));
-  };
-  const wallCard = (w, title, cls) => !w
-    ? `<div class="oic-wcard ${cls}"><span>${title}${staleDot}</span><b>—</b></div>`
-    : `<div class="oic-wcard ${cls}"><span>${title}${staleDot}</span><b>${w.strike}</b><em>${w.side} · ${oiN(w.oi)}</em></div>`;
-  const when = d.asOf ? new Date(d.asOf * 1000).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) : "-";
-  const vsCls = (v) => (v === "agree" ? "ag" : v === "against" ? "agst" : v === "ref" ? "ref" : "fl");
-  const score = Number(d.oiMoveScore) || 0;
-  const cap = Math.max(0, Math.min(100, tr.capturedPct || 0));
-  const recMini = (leg, title) => {
-    if (!leg) return "";
-    const take = !!leg.take;
-    const note = take ? (leg.reasons || []).slice(0, 2).join(" · ") : (leg.skipReasons || []).slice(0, 2).join(" · ");
-    return `<div class="oic-rmini ${take ? "take" : "skip"}">
-      <div class="oic-rmini-h"><span>${title}</span><b class="${take ? "up" : "neu"}">${take ? (leg.algoReady ? "TAKE" : "WATCH") : "WAIT"}</b></div>
-      <div class="oic-rmini-a ${take ? (leg.optionType === "PE" ? "down" : "up") : "neu"}">${leg.action}</div>
-      ${take ? `<div class="oic-rmini-n">${leg.strike} ${leg.optionType} · ${money(leg.ltp)} · tgt ${money(leg.target)} · sl ${money(leg.stop)} · ${leg.confidence}</div>
-        ${oicPremiumBar(leg.ltp, leg.stop, leg.ltp, leg.target)}` : `<div class="oic-rmini-n">${note || "blocked"}</div>`}
-    </div>`;
-  };
-  box.innerHTML = `
-  <div class="oic-dash">
-    <div class="oic-go ${arbConflict ? "conflict" : arbGo ? "go" : "wait"} ${Lsn.blink ? "blink" : ""}">
-      <div class="oic-go-main">${Lsn.live ? "LIVE " + (Lsn.kind || "") : arbConflict ? "CONFLICT" : arbGo ? "PAPER GO" : "WAIT"}${arbGo && arbPrimary ? ` · ${arbPrimary.mode}` : ""}</div>
-      <div class="oic-go-sub">${d.name} · ${fmt(d.spot)} · ${(d.refresh && d.refresh.provider) || ""} ${d.oiSource ? "· OI " + d.oiSource : ""} · rel ${Q.score != null ? Q.score : "—"}/100 · refresh ${ (d.refresh && d.refresh.atIst) || when } · OI ${d.refresh && d.refresh.oiAgeMs != null ? Math.round(d.refresh.oiAgeMs/1000)+"s" : (d.dataAgeSec != null ? d.dataAgeSec+"s" : "—")} · 5m ${d.refresh && d.refresh.c5AgeMs != null ? Math.round(d.refresh.c5AgeMs/1000)+"s" : "—"} · 15m ${d.refresh && d.refresh.c15AgeMs != null ? Math.round(d.refresh.c15AgeMs/1000)+"s" : "—"} · 1h ${d.refresh && d.refresh.c1hAgeMs != null ? Math.round(d.refresh.c1hAgeMs/1000)+"s" : "—"}${d.lastBarDate ? " · bars " + d.lastBarDate : ""}${degraded ? `<span class="oic-go-degraded ${degraded.cls}">${degraded.text}</span>` : ""}</div>
-      <div class="oic-chips">${gate.chips.map((c) => `<span class="${c.veto ? "veto" : c.amber ? "amber" : c.ok ? "ok" : "no"}">${c.veto ? "⛔ " : ""}${c.t}${c.veto ? " · VETO" : ""}</span>`).join("")}</div>
-    </div>
-    <div class="oic-plan">
-      <div class="oic-pc take${arbConflict ? " conflict" : ""}"><span>${arbConflict ? "No single trade" : "Take trade at"}${arbGo && arbPrimary ? " · " + arbPrimary.mode + " " + arbPrimary.direction : ""}</span><b>${arbConflict ? "CONFLICT" : (plan.takeSpot != null ? fmt(plan.takeSpot) : fmt(d.spot))}</b><em>${arbConflict ? (A.reason || "opposing setups — waiting") : `${plan.strike || s.strike || "—"} ${plan.side || s.optionType || ""} · ${money(plan.takeOpt != null ? plan.takeOpt : s.ltp)}`}</em></div>
-      <div class="oic-pc hi"><span>Higher / target</span><b class="up">${plan.highSpot != null ? fmt(plan.highSpot) : "—"}</b><em>opt ${money(plan.highOpt)}</em></div>
-      <div class="oic-pc lo"><span>Lower / stop</span><b class="down">${plan.lowSpot != null ? fmt(plan.lowSpot) : "—"}</b><em>opt ${money(plan.lowOpt)}</em></div>
-      ${wallCard(W.bestR, "Best resistance", "r")}
-      ${wallCard(W.immR, "Immediate R", "r2")}
-      ${wallCard(W.immS, "Immediate S", "g2")}
-      ${wallCard(W.bestS, "Best support", "g")}
-      ${(() => {
-        const R = X.riskComment;
-        const heat = R ? R.currentHeat.split(" ")[0] : "—";
-        const pnl = R ? R.dailyPnL.split(" ")[0] : "—";
-        const dd = R ? R.drawdownFromPeak.split(" ")[0] : "—";
-        const title = R ? `heat ${R.currentHeat} · headroom ${R.headroomToHeatCap} · daily P&L ${R.dailyPnL} · drawdown ${R.drawdownFromPeak} · suggested size ${R.suggestedSize}` : "advisory only — start a paper run to populate risk numbers";
-        return `<div class="oic-pc risk" title="${title}"><span>Risk · advisory</span><b>${heat}</b><em>P&L ${pnl} · DD ${dd}</em></div>`;
-      })()}
-    </div>
-    <div class="oic-lesson ${Lsn.mode || "UNCLEAR"} ${Lsn.blink ? "blink" : ""}">
-      <div class="oic-lesson-k">
-        <div><span>Kind</span><b>${Lsn.kind || "WATCH"}</b></div>
-        <div><span>Strike</span><b>${Lsn.strike != null ? Lsn.strike : "—"} ${Lsn.side || ""}</b></div>
-        <div><span>Stop loss</span><b class="down">${money(Lsn.stopLoss)}</b><em>spot ${Lsn.spotStop != null ? fmt(Lsn.spotStop) : "—"}</em></div>
-        <div><span>Stop high</span><b class="up">${money(Lsn.stopHigh)}</b><em>spot ${Lsn.spotHigh != null ? fmt(Lsn.spotHigh) : "—"}</em></div>
-        <div class="oic-lesson-mode"><span>Money vs reverse</span><b>${Lsn.modeLabel || "Unclear"}</b></div>
-      </div>
-    </div>
-    ${(() => {
-      const B = d.bulletin || {};
-      const card = (x, title) => {
-        if (!x) return `<div class="oic-bull-card"><span>${title}</span><b class="neu">—</b></div>`;
-        const cls = x.dir === "UP" ? "up" : x.dir === "DOWN" ? "down" : "neu";
-        const src = (x.sources || []).map((s) => `<i class="${s.dir === "UP" ? "up" : s.dir === "DOWN" ? "down" : "neu"}">${s.name} ${s.dir}</i>`).join("");
-        return `<div class="oic-bull-card ${cls}">
-          <span>${title} · ${x.barTime || ""}</span>
-          <b class="${cls}">${x.dir} ${x.option}</b>
-          <em>${x.agree}/${x.total} · conf ${x.conf}</em>
-          <div class="oic-bull-src">${src}</div>
-        </div>`;
-      };
-      const dirOf = (x) => (x ? x.dir : "—");
-      const arrow = (dir) => (dir === "UP" ? '<i class="up">▲</i>' : dir === "DOWN" ? '<i class="down">▼</i>' : '<i class="neu">–</i>');
-      const allAgree = B.scalp5 && B.scalp15 && B.dir1h && B.scalp5.dir === B.scalp15.dir && B.scalp15.dir === B.dir1h.dir && B.scalp5.dir !== "FLAT";
-      const summary = `5m ${arrow(dirOf(B.scalp5))} 15m ${arrow(dirOf(B.scalp15))} 1h ${arrow(dirOf(B.dir1h))} — ${allAgree ? "all agree" : "mixed"}`;
-      // §5: collapsed by default (context, not the verdict). Click to expand the 3 cards.
-      return `<div class="oic-bull">
-        <details class="oic-bull-collapse">
-          <summary><span class="oic-bull-lead">${B.lead || "Move bulletin"}</span><span class="oic-bull-sum">${summary}</span></summary>
-          <div class="oic-bull-row">${card(B.scalp5, "5m SCALP")}${card(B.scalp15, "15m SCALP")}${card(B.dir1h, "1h DIRECTIONAL")}</div>
-          <div class="oic-hours-why">${d.message ? d.message + " · " : ""}${(d.moodReview && (d.moodReview.mood15 + " · " + d.moodReview.mood1h + " · Excel rows " + d.moodReview.rows)) || "OI Excel saves in market hours (data/oi-log). After hours: Groww historical bars vs last Groww save."}</div>
-        </details>
-      </div>`;
-    })()}
-    <div class="oic-kpis">
-      <div class="oic-kpi"><span>Spot</span><b>${fmt(d.spot)}</b></div>
-      <div class="oic-kpi"><span>OI${staleDot}</span><b class="${dirCls}">${d.oiDirection}</b></div>
-      <div class="oic-kpi oic-kpi-score"><span>Score ${score}</span><div class="oic-score"><i style="width:${score}%"></i></div></div>
-      <div class="oic-kpi"><span>VWAP</span><b class="${corr.vwapPts > 0 ? "up" : corr.vwapPts < 0 ? "down" : "neu"}">${corr.vwap != null ? fmt(corr.vwap) : "—"}</b><em>${corr.vwapPts != null ? pts(corr.vwapPts) + "p" : ""}</em></div>
-      <div class="oic-kpi"><span>PCR${staleDot}</span><b>${d.pcr ?? "—"}</b></div>
-      <div class="oic-kpi"><span>Futures${staleDot}</span><b>${d.futBuildup || "—"}</b></div>
-      <div class="oic-kpi"><span>ADX</span><b>${corr.adx ?? "—"}</b></div>
-      <div class="oic-kpi"><span>Move</span><b class="${(tr.currentMove || 0) >= 0 ? "up" : "down"}">${pts(tr.currentMove)}p</b></div>
-    </div>
-    ${(() => {
-      const V = d.volume || {};
-      if (!V.available) {
-        return `<div class="oic-vol na">
-          <div class="oic-vol-h"><span>Volume · Groww-style</span><b class="neu na-badge" title="No volume feed for indices — expected, not a data outage or a stale fetch.">N/A</b><em>${V.note || "no volume feed (index) — use FUTURES or a stock"}</em></div>
-        </div>`;
-      }
-      const bars = (V.bars || []).map((b) =>
-        `<i class="${b.up ? "up" : "dn"}${b.breakout ? " brk" : ""}" style="height:${Math.max(6, Math.round((b.rel || 0) * 100))}%" title="rvol ${b.rvol}x${b.breakout ? " · breakout bar" : ""}"></i>`
-      ).join("");
-      const stCls = V.state === "SURGING" ? "vhigh" : V.state === "ACTIVE" ? "high" : V.state === "QUIET" ? "low" : "normal";
-      const brkTxt = V.breakout
-        ? ` · ${V.breakout} breakout ${V.breakoutConfirmed ? "✓ volume active" : "(weak vol)"}`
-        : "";
-      return `<div class="oic-vol">
-        <div class="oic-vol-h">
-          <span>Volume · Groww-style</span>
-          <b class="v-${stCls}">${V.state}</b>
-          <em>rvol ${V.rvol}x · ${V.flow} · OBV ${V.obvTrend}${brkTxt}</em>
-        </div>
-        <div class="oic-vol-body">
-          <div class="oic-vol-bars">${bars}</div>
-          <div class="oic-vol-side">
-            <div class="oic-vol-meter"><i class="v-${stCls}" style="width:${V.activity || 0}%"></i></div>
-            <div class="wl-sub">${V.note || ""}</div>
-          </div>
-        </div>
-      </div>`;
-    })()}
-    <div class="oic-mid">
-      <div class="oic-pane">
-        <div class="oic-pane-t">OI fever · PUT vs CALL${staleDot}</div>
-        <div class="oic-feverbar"><i class="pe" style="width:${W.putPct || 0}%"></i><i class="ce" style="width:${W.callPct || 0}%"></i></div>
-        <div class="oic-feverlab"><span class="up">PUT ${W.putPct ?? "—"}%</span><span class="down">CALL ${W.callPct ?? "—"}%</span></div>
-        <div class="wl-sub">${W.fever || "chain loading"}${W.maxPain != null ? " · max pain " + W.maxPain : ""}</div>
-        <div class="oic-lad">${(W.ladder || []).map((row) => `
-          <div class="oic-lad-row ${row.atm ? "atm" : ""}">
-            <b>${row.strike}</b>
-            <div class="oic-split"><i class="pe" style="width:${row.peShare}%"></i><i class="ce" style="width:${row.ceShare}%"></i></div>
-            <em>P ${oiN(row.peOi)} C ${oiN(row.ceOi)}</em>
-          </div>`).join("")}</div>
-      </div>
-      <div class="oic-pane">
-        <div class="oic-pane-t">Setup · ${s.strike || "—"} ${s.optionType || ""}${staleDot}</div>
-        <div class="oic-action ${s.optionType === "PE" ? "down" : s.optionType === "CE" ? "up" : "neu"}">${s.action || "WAIT"}</div>
-        <div class="oic-stats">
-          <div><span>LTP</span><b>${money(s.ltp)}</b></div>
-          <div><span>OI Δ</span><b class="${s.oiHelpful ? "up" : "down"}">${s.strikeOiPct == null ? "—" : fmt(s.strikeOiPct, 1) + "%"}</b></div>
-          <div><span>Px Δ</span><b class="${s.pxHelpful ? "up" : "down"}">${s.pricePct == null ? "—" : fmt(s.pricePct, 1) + "%"}</b></div>
-          <div><span>Vol</span><b>${s.volume == null ? "—" : fmt(s.volume, 0)}</b></div>
-        </div>
-        <div class="oic-pane-t">Premium · take / high / low</div>
-        ${oicPremiumBar(m.entry, m.stopLoss, s.ltp, m.targetHi || m.targetLo)}
-        <div class="oic-stats">
-          <div><span>Entry</span><b>${money(m.entry)}</b></div>
-          <div><span>Target</span><b class="up">${money(m.targetLo)}–${money(m.targetHi)}</b></div>
-          <div><span>Stop</span><b class="down">${money(m.stopLoss)}</b></div>
-          <div><span>Inv</span><b>${m.invalidation ?? "—"}</b></div>
-        </div>
-        <div class="oic-status-pill ${m.statusCls || "neu"}">${m.status || ""}</div>
-        <div class="oic-pane-t">Captured ${cap}%</div>
-        <div class="oic-score cap"><i style="width:${cap}%"></i></div>
-        <div class="wl-sub">${pts(d.expectedMove && d.expectedMove.low)} → ${pts(d.expectedMove && d.expectedMove.high)} · pend ${tr.pending ?? "—"}p</div>
-        ${X.dedupSuppressed ? `<div class="oic-dedup" title="${X.dedupReason || ""}">🔁 same setup — no re-entry until exit or an ATR move-and-return</div>` : ""}
-        ${(X.scoreBreakdown && X.scoreBreakdown.length) ? `<details class="oic-why-score"><summary>Why this score · ${X.finalScore != null ? X.finalScore : "—"}/62 · clarity ${X.setupQuality != null ? X.setupQuality : "—"}</summary><div class="oic-why-lines">${X.scoreBreakdown.map((r) => `<span>${r}</span>`).join("")}</div></details>` : ""}
-      </div>
-      <div class="oic-pane">
-        <div class="oic-pane-t">Models · ${corr.consensus || "—"} · ${corr.agree || 0}✓ ${corr.against || 0}✗</div>
-        <div class="oic-models">${(corr.models || []).map((md) => `
-          <div class="oic-md ${vsCls(md.vsOi)}">
-            <span>${({ "OI Command": "OI", "GainzAlgo v2": "Gainz", "4-Layer": "4L", "5m bar": "5m", "Futures": "Fut" }[md.name] || md.name)}</span>
-            <b class="${md.dir === "UP" ? "up" : md.dir === "DOWN" ? "down" : "neu"}">${md.dir}</b>
-          </div>`).join("")}</div>
-        ${recMini(rec.directional, "Directional")}
-        ${recMini(rec.scalp, "Scalp 5–15m")}
-      </div>
-    </div>
-    <div class="oic-bot">
-      <div id="oic-review" class="oic-review"></div>
-      <div class="oic-why">${(d.oiReasons || []).slice(0, 5).map((r) => `<span>${r}</span>`).join("")}</div>
-    </div>
-    <div class="oic-log-dock-wrap">
-      <div class="oic-log-dock-head"><b>🧾 Decision Log</b><span class="wl-sub">every GO/WAIT flip, module state change &amp; trade emit / veto / dedup</span></div>
-      <div id="oic-log-filters-dock" class="oic-log-filters"></div>
-      <div id="oic-log-dock" class="oic-log-body"></div>
-    </div>
-    <div class="oic-narr-wrap">
-      <div class="oic-narr-head"><b>💬 Guide</b><span class="wl-sub">plain-language narration of state changes — a friendlier front door to the same Decision Log data (market hours)</span></div>
-      <div id="oic-narration" class="oic-narr-body"></div>
-    </div>
-  </div>`;
-  loadOiReview();
-  loadDecisionLog();
-  loadNarration();
 }
 
 // ---------- Guidance agent narration feed (read-only, event-driven server-side) ----------
