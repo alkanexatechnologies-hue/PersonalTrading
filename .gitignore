@@ -5,5 +5,5 @@ dist/
 .DS_Store
 .groww_token
 .groww_creds.ps1
-data/
+/data/
 .truedata_creds
