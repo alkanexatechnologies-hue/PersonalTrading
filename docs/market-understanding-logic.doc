@@ -1,0 +1,201 @@
+<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8"/>
+<style>
+  body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1a1a1a;line-height:1.4}
+  h1{font-size:20pt;color:#1b2a44;border-bottom:2px solid #2b3d5c;padding-bottom:4px}
+  h2{font-size:15pt;color:#1b2a44;margin-top:16px}
+  h3{font-size:12.5pt;color:#2b3d5c}
+  code{background:#eef;padding:1px 3px;font-family:Consolas,monospace;font-size:10pt}
+  table{margin:8px 0}
+  th,td{border:1px solid #bbb}
+</style></head><body><h1>How the System Understands Market Movement - Full Process</h1>
+<p>This document explains, end to end, how the assistant reads the market and turns</p>
+<p>raw price data into a directional call and an option trade. It covers the five</p>
+<p>inputs you asked about - **price movement, technical indicators, candles, market</p>
+<p>sentiment (OI/futures), and time period (timeframe + expiry/theta)** - and how</p>
+<p>they are combined.</p>
+<p>Source of truth (code): <code>src/signals/engine.ts</code>, <code>src/signals/score.ts</code>,</p>
+<p><code>src/predict/dayOutlook.ts</code>, <code>src/data/growwProvider.ts</code>, <code>src/routes/api.ts</code>.</p>
+<blockquote style="border-left:4px solid #2b3d5c;margin:6px 0;padding:4px 12px;color:#444">Everything here is a <b>model-based, probabilistic</b> read - not a guaranteed</blockquote>
+<blockquote style="border-left:4px solid #2b3d5c;margin:6px 0;padding:4px 12px;color:#444">forecast. Markets are uncertain; the system quantifies odds, it does not</blockquote>
+<blockquote style="border-left:4px solid #2b3d5c;margin:6px 0;padding:4px 12px;color:#444">promise outcomes.</blockquote>
+<hr/>
+<h2>1. The pipeline at a glance</h2>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">Live candles (Groww)                 Option chain (Groww)
+        |                                    |
+        v                                    v
+  6 technical indicators            OI / PCR / max-pain / futures buildup
+  -&gt; weighted -100..+100 score      -&gt; sentiment bias (Bullish/Bearish)
+        |                                    |
+        +---------------+--------------------+
+                        v
+             directionFrom(): weighted vote
+             = signal x2 + OI x1.5 + futures x1.5
+                        |
+                        v
+        Direction (Bull/Bear/Neutral) + Confidence
+                        |
+             + Market alignment (NIFTY/BANKNIFTY correlation)
+             + Regime gate (ADX trend vs range)
+             + Timeframe &amp; expiry/theta adjustment
+                        v
+        Best-strike option play + realistic target + safety gates</pre>
+<hr/>
+<h2>2. Input 1 - Price movement &amp; candles</h2>
+<p>All analysis is built on <b>OHLCV candles</b> (open, high, low, close, volume) from</p>
+<p>the live Groww feed. The chosen <b>timeframe</b> decides the candle size:</p>
+<ul style="margin:4px 0">
+<li>Intraday models use <b>15-minute</b> candles (the core "15-min model").</li>
+<li>Some views use 5m/30m/60m; swing and long-term use <b>daily</b> candles.</li>
+</ul>
+<p>From the candle series the engine also derives the <b>current session high/low</b></p>
+<p>(intraday support/resistance) which anchor CALL/PUT level decisions.</p>
+<p>Candle patterns are read *indirectly* through indicators computed on those</p>
+<p>candles (e.g. Supertrend and Bollinger react to candle range/close position),</p>
+<p>rather than as named single-candle patterns. This keeps the read objective and</p>
+<p>backtestable.</p>
+<hr/>
+<h2>3. Input 2 - Technical indicators (the signal score)</h2>
+<p>Six indicators each cast a <b>signed vote</b>. Votes are summed and normalised to a</p>
+<p><b>-100..+100 score</b>. The weights (shared with the backtester so live and</p>
+<p>historical scores match) are:</p>
+<table border="1" cellspacing="0" cellpadding="5" style="border-collapse:collapse;font-size:10.5pt"><tr><th style="background:#2b3d5c;color:#fff;text-align:left">Indicator</th><th style="background:#2b3d5c;color:#fff;text-align:left">Weight</th><th style="background:#2b3d5c;color:#fff;text-align:left">What it measures</th><th style="background:#2b3d5c;color:#fff;text-align:left">Bullish when...</th></tr><tr><td>EMA 9/21 cross</td><td>22</td><td>Short-term trend</td><td>Fast EMA above slow EMA (scaled by spread)</td></tr><tr><td>Supertrend (10,3)</td><td>22</td><td>Trend-following</td><td>Price above the Supertrend line</td></tr><tr><td>VWAP</td><td>18</td><td>Intraday fair value</td><td>Price above VWAP (buyers in control)</td></tr><tr><td>MACD histogram</td><td>18</td><td>Momentum</td><td>Histogram &gt; 0 (MACD above signal)</td></tr><tr><td>RSI (14)</td><td>12</td><td>Over-bought/sold</td><td>&lt;30 oversold (bounce) / &gt;55 momentum up</td></tr><tr><td>Bollinger (20,2)</td><td>8</td><td>Stretch/mean-revert</td><td>At/below lower band (stretched down)</td></tr></table>
+<p><b>Scaling:</b> trend/momentum votes scale with strength (e.g. a wider EMA spread or</p>
+<p>larger VWAP distance = a bigger vote, capped), so a strong trend counts more than</p>
+<p>a marginal one.</p>
+<p><b>Score to label:</b></p>
+<table border="1" cellspacing="0" cellpadding="5" style="border-collapse:collapse;font-size:10.5pt"><tr><th style="background:#2b3d5c;color:#fff;text-align:left">Score</th><th style="background:#2b3d5c;color:#fff;text-align:left">Label</th></tr><tr><td>&gt;= +50</td><td>STRONG BUY</td></tr><tr><td>+15 to +49</td><td>BUY</td></tr><tr><td>-14 to +14</td><td>HOLD</td></tr><tr><td>-15 to -49</td><td>SELL</td></tr><tr><td>&lt;= -50</td><td>STRONG SELL</td></tr></table>
+<p><b>Technical confidence</b> blends how big the score is with how much the</p>
+<p>indicators agree:</p>
+<p><code>confidence = |score| x 0.6 + agreement x 100 x 0.4</code>, where agreement =</p>
+<p><code>|bullVotes - bearVotes| / totalDirectionalVotes</code>. So six indicators all pointing</p>
+<p>one way scores far more confidently than a 4-2 split.</p>
+<p><b>Stops/targets</b> are volatility-aware from <b>ATR(14)</b>: in the signal's</p>
+<p>direction, stop ~1.5x ATR and target ~2.5x ATR from price.</p>
+<hr/>
+<h2>4. Input 3 - Market sentiment (option chain + futures)</h2>
+<p>Real sentiment comes from the <b>live Groww option chain</b> (never synthetic):</p>
+<ul style="margin:4px 0">
+<li><b>PCR (Put/Call OI ratio):</b> &gt;= 1.2 = put writing = support building (bullish</li>
+</ul>
+<p>  lean); &lt;= 0.7 = call writing = resistance building (bearish lean).</p>
+<ul style="margin:4px 0">
+<li><b>Support / Resistance:</b> strikes with the max PUT OI (support) and max CALL OI</li>
+</ul>
+<p>  (resistance).</p>
+<ul style="margin:4px 0">
+<li><b>Max pain:</b> the strike where option buyers lose most - price often gravitates</li>
+</ul>
+<p>  there near expiry.</p>
+<ul style="margin:4px 0">
+<li><b>Futures buildup</b> (from futures OI + price day-change):</li>
+<li>Price up + OI up = <b>Long buildup</b> (bullish)</li>
+<li>Price down + OI up = <b>Short buildup</b> (bearish)</li>
+<li>Price up + OI down = <b>Short covering</b> (bullish)</li>
+<li>Price down + OI down = <b>Long unwinding</b> (bearish)</li>
+</ul>
+<p>These produce an <b>OI verdict</b> (Bullish / Bearish / Neutral) plus a futures</p>
+<p>direction, used as the sentiment inputs below.</p>
+<hr/>
+<h2>5. Combining everything - the directional call</h2>
+<p><code>directionFrom()</code> fuses technicals + sentiment into one call with a **weighted</p>
+<p>vote**:</p>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">net = signalDir x 2  +  oiDir x 1.5  +  futuresDir x 1.5
+dir = Bullish if net &gt;= +1.5,  Bearish if net &lt;= -1.5,  else Neutral</pre>
+<ul style="margin:4px 0">
+<li><code>signalDir</code> = +1 if score &gt;= 12, -1 if score &lt;= -12, else 0.</li>
+<li><code>oiDir</code> / <code>futuresDir</code> from Section 4.</li>
+</ul>
+<p><b>Blended confidence</b> starts from the technical confidence and is boosted when</p>
+<p>factors agree, cut when they conflict:</p>
+<p><code>confidence = techConfidence x 0.6 + (agreeing factors x 12) - (conflicting factors x 14)</code>,</p>
+<p>clamped 10-94 (and capped at 35 when direction is Neutral).</p>
+<hr/>
+<h2>6. Market alignment (index correlation)</h2>
+<p>A stock rarely moves against its index. The system computes each stock's **beta</p>
+<p>and correlation** vs NIFTY and BANK NIFTY (from daily returns) and picks the</p>
+<p>benchmark it tracks most:</p>
+<ul style="margin:4px 0">
+<li><b>Aligned</b> (stock direction agrees with its index): confidence <b>+8</b>.</li>
+<li><b>Conflict</b> (index pushing the other way): confidence <b>-18</b> and a headwind</li>
+</ul>
+<p>  warning - fighting the index is the single biggest loss driver.</p>
+<ul style="margin:4px 0">
+<li><b>Low correlation</b> (|corr| &lt; 0.3): treated as independent, no adjustment.</li>
+</ul>
+<p>This is how "if NIFTY moves the opposite way, the stock may reverse" is handled</p>
+<p>directly in the conviction.</p>
+<hr/>
+<h2>7. Input 4 - Time period (timeframe, regime, expiry &amp; theta)</h2>
+<p>Time enters the model in three ways:</p>
+<p><b>a) Timeframe</b> - 15m candles for intraday decisions, daily for swing/long-term.</p>
+<p>The same scoring logic runs on whichever timeframe the view uses.</p>
+<p><b>b) Regime gate (trend vs range)</b> - ADX(14) on NIFTY 15m classifies the market:</p>
+<p>Trending (ADX &gt;= 25), Weak trend, or Range-bound (ADX &lt; 18). In a <b>range-bound</b></p>
+<p>market the engine avoids buying options (they only bleed theta with no move) -</p>
+<p>this feeds the header <b>trade-zone verdict</b> (NO-TRADE / SELECTIVE / TRADE-ON).</p>
+<p><b>c) Expiry &amp; theta (time decay)</b> - options lose value as expiry approaches:</p>
+<ul style="margin:4px 0">
+<li><b>Theta %/day</b> is read from the chain; decay is labelled Low / Moderate / High.</li>
+<li>Near expiry (DTE &lt;= 1) decay is "brutal" - flagged intraday-only, and the</li>
+</ul>
+<p>  confirmation bar is raised (only &gt;= 80% conviction trades are allowed there).</p>
+<ul style="margin:4px 0">
+<li>Targets are made <b>expiry-aware</b>: a realistic fraction of the daily range</li>
+</ul>
+<p>  (~50% intraday, ~35% near expiry) rather than a full ATR move, so trades are</p>
+<p>  actually reachable before decay eats them.</p>
+<hr/>
+<h2>8. From call to option trade - best-strike selection</h2>
+<p>Once a direction exists, the system does <b>not</b> blindly take ATM. Among</p>
+<p>near-money strikes (delta 0.35-0.75 with a live premium) it scores each on:</p>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">strikeScore = liquidity x 0.5  +  deltaFit x 0.3  -  decayPenalty x 0.2</pre>
+<ul style="margin:4px 0">
+<li><b>liquidity</b> = strike OI / max OI (higher OI = tighter fills).</li>
+<li><b>deltaFit</b> = best near delta ~0.55 (strong directional capture without paying</li>
+</ul>
+<p>  full ATM theta).</p>
+<ul style="margin:4px 0">
+<li><b>decayPenalty</b> = higher theta %/day is worse.</li>
+</ul>
+<p>It records a plain-English <code>strikeReason</code> (e.g. "Chose 290 PE (ATM): PUT OI 438,</p>
+<p>delta 0.45, theta 1.7%/day - balances liquidity + capture against decay").</p>
+<p><b>Premium projection</b> is delta-approximated: <code>dPremium ~= delta x dSpot</code>. From</p>
+<p>the chosen strike it computes today's premium target/stop and a **next-day</p>
+<p>continuation** target *net of one day's theta*, with its own probability.</p>
+<hr/>
+<h2>9. Quality score and safety gates</h2>
+<p>Each option play gets a <b>quality score (0-100)</b> combining conviction, market</p>
+<p>alignment, decay level, reward:risk, and delta. Then hard <b>safety gates</b> remove</p>
+<p>loss-makers from the curated list:</p>
+<ul style="margin:4px 0">
+<li><b>Index headwind</b> (Conflict alignment) - filtered.</li>
+<li><b>Decay trap</b> (theta &gt; 60%/day - near-worthless option) - filtered.</li>
+<li><b>Premium too thin</b> (&lt; 1) - filtered.</li>
+<li><b>Reward:risk below 1:1</b> - filtered.</li>
+</ul>
+<p>Only plays passing every gate are shown as tradeable / eligible for paper trades.</p>
+<hr/>
+<h2>10. What is model-driven vs where human judgement helps</h2>
+<ul style="margin:4px 0">
+<li><b>Model-driven (objective, repeatable):</b> indicator scoring, OI/futures</li>
+</ul>
+<p>  sentiment, index alignment, regime gate, strike selection, theta-aware targets,</p>
+<p>  safety gates, position sizing.</p>
+<ul style="margin:4px 0">
+<li><b>Human judgement still adds value for:</b> unscheduled news/events, unusual</li>
+</ul>
+<p>  volatility spikes, gap-open days, and confirming that live price action agrees</p>
+<p>  with the model before acting. The system flags these conditions but cannot</p>
+<p>  fully predict event-driven moves.</p>
+<hr/>
+<h2>11. One-line summary of the logic</h2>
+<blockquote style="border-left:4px solid #2b3d5c;margin:6px 0;padding:4px 12px;color:#444">Read live candles -&gt; score six weighted indicators into a -100..+100 signal -&gt;</blockquote>
+<blockquote style="border-left:4px solid #2b3d5c;margin:6px 0;padding:4px 12px;color:#444">confirm with real option-chain OI + futures buildup -&gt; fuse into a direction &amp;</blockquote>
+<blockquote style="border-left:4px solid #2b3d5c;margin:6px 0;padding:4px 12px;color:#444">confidence -&gt; adjust for index correlation, trend regime, and time</blockquote>
+<blockquote style="border-left:4px solid #2b3d5c;margin:6px 0;padding:4px 12px;color:#444">decay/expiry -&gt; pick the best-liquidity, best-delta, low-theta strike with a</blockquote>
+<blockquote style="border-left:4px solid #2b3d5c;margin:6px 0;padding:4px 12px;color:#444">realistic target -&gt; and only surface it if it clears the safety gates.</blockquote>
+<hr/>
+<p>*Disclaimer: This is decision-support software using statistical/technical models</p>
+<p>on delayed-to-live data. It is not investment advice and does not guarantee</p>
+<p>profit. Always confirm with your own judgement and manage risk.*</p></body></html>

@@ -1,0 +1,2 @@
+﻿health=True
+range html: <span class="ask-range">📊 आज की रेंज: <b>1305</b> – <b>1317</b> · spot 1308 (रेंज के 21% पर, निचले हिस्से में (Low के पास))</span>

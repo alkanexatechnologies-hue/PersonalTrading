@@ -1,0 +1,141 @@
+<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8"/>
+<style>
+  body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1a1a1a;line-height:1.4}
+  h1{font-size:20pt;color:#1b2a44;border-bottom:2px solid #2b3d5c;padding-bottom:4px}
+  h2{font-size:15pt;color:#1b2a44;margin-top:16px}
+  h3{font-size:12.5pt;color:#2b3d5c}
+  code{background:#eef;padding:1px 3px;font-family:Consolas,monospace;font-size:10pt}
+  table{margin:8px 0}
+  th,td{border:1px solid #bbb}
+</style></head><body><h1>F&amp;O Strategy Modes - ORB Breakout &amp; Option Selling</h1>
+<p>Two algo-strategy features built on top of the live Groww feed. Both are</p>
+<p>decision-support + paper simulation only - no real orders are ever placed.</p>
+<p>Source: <code>src/orb/orb.ts</code>, <code>src/options/sellStrategies.ts</code>,</p>
+<p><code>src/paper/sellEngine.ts</code>, wired in <code>src/routes/api.ts</code>.</p>
+<hr/>
+<h2>1. Opening Range Breakout (ORB)</h2>
+<h3>What it does</h3>
+<p>Marks the <b>high/low of the opening range</b> (the first N minutes from 09:15 IST,</p>
+<p>default 30 = the first two 15-minute candles), then signals a break of that</p>
+<p>range and suggests the option to buy:</p>
+<ul style="margin:4px 0">
+<li>Price breaks <b>above</b> the range high -&gt; <b>Long</b> -&gt; buy <b>CE</b>.</li>
+<li>Price breaks <b>below</b> the range low -&gt; <b>Short</b> -&gt; buy <b>PE</b>.</li>
+<li>Inside the range -&gt; no trade yet.</li>
+<li>Range still forming (not enough bars) -&gt; wait.</li>
+</ul>
+<h3>How each signal is built (<code>computeORB</code>)</h3>
+<ul style="margin:4px 0">
+<li><b>Opening range:</b> high/low of the first <code>orMinutes/15</code> bars of today's session.</li>
+<li><b>Breakout:</b> current price beyond the range edge by a small buffer (2% of the</li>
+</ul>
+<p>  range width) so a mere touch doesn't fire.</p>
+<ul style="margin:4px 0">
+<li><b>Volume confirmation:</b> breakout-bar volume vs the day's average bar volume.</li>
+</ul>
+<p>  Indices have no volume on the feed, so this is shown as *n/a* (neutral).</p>
+<ul style="margin:4px 0">
+<li><b>Plan:</b> entry at current price; <b>stop at the other end of the range</b>;</li>
+</ul>
+<p>  target 1 = one range-width beyond the break; target 2 = two range-widths;</p>
+<p>  reward:risk computed to target 1.</p>
+<ul style="margin:4px 0">
+<li><b>Confidence (0-100):</b> breakout strength (how far beyond the range) + volume</li>
+</ul>
+<p>  confirmation + a sane range width (0.3-2.5%) + a decent R:R.</p>
+<h3>Endpoint &amp; tab</h3>
+<ul style="margin:4px 0">
+<li><code>GET /api/orb?minutes=30</code> - scans NIFTY, BANK NIFTY (+ up to 12 liquid F&amp;O</li>
+</ul>
+<p>  stocks); cached 60s; breakouts ranked first by confidence.</p>
+<ul style="margin:4px 0">
+<li><b>ORB Breakout</b> tab: range selector (15/30/45m), breakouts-only filter, live</li>
+</ul>
+<p>  status; auto-refreshes on view.</p>
+<h3>Honest notes</h3>
+<p>ORB breakouts <b>fail often</b> (false breaks, especially in choppy/range days).</p>
+<p>The stop at the opposite end of the range is essential. Late in the session the</p>
+<p>range is far away, so R:R degrades - the table shows this honestly.</p>
+<hr/>
+<h2>2. Option Selling (premium / theta)</h2>
+<h3>What it does</h3>
+<p>From the <b>live Groww option chain</b>, builds the three common Indian index</p>
+<p>premium-selling structures on NIFTY / BANK NIFTY / FIN NIFTY / MIDCAP NIFTY, and</p>
+<p>can paper-trade them:</p>
+<ul style="margin:4px 0">
+<li><b>Short Straddle</b> - sell ATM CE + ATM PE. Max credit, narrowest safety.</li>
+<li><b>Short Strangle</b> - sell ~0.2-delta OTM CE + PE. Wider safety, less credit.</li>
+<li><b>Iron Condor</b> - short strangle + protective wings (defined risk).</li>
+</ul>
+<h3>Metrics per structure (<code>buildSellStrategies</code>)</h3>
+<ul style="margin:4px 0">
+<li><b>Net credit</b> (per share and per lot), <b>max profit</b> (= credit), <b>max loss</b></li>
+</ul>
+<p>  (condor: defined = wing width - credit; naked: undefined -&gt; rely on the stop).</p>
+<ul style="margin:4px 0">
+<li><b>Breakevens</b> (short strike +/- credit).</li>
+<li><b>Probability of profit (POP)</b> estimate = `1 - (|short-call delta| +</li>
+</ul>
+<p>  |short-put delta|)` (delta ~ prob ITM).</p>
+<ul style="margin:4px 0">
+<li><b>Rough margin</b> (naked ~12% of notional; condor ~ max loss).</li>
+<li><b>Net delta / net theta-per-day</b> (theta = the decay you collect, in your</li>
+</ul>
+<p>  favour).</p>
+<ul style="margin:4px 0">
+<li><b>Management levels:</b> profit target ~50% of credit, tail stop ~2x credit loss,</li>
+</ul>
+<p>  and an adjust/exit note (short-strike breach).</p>
+<p>Strikes are chosen by <b>value</b> (shorts ~1.2% OTM, wings 3 steps beyond), with</p>
+<p>the strike step inferred from the chain - robust to non-uniform spacing. The</p>
+<p>chain window was widened to +/-12 strikes so strangles and condor wings fit.</p>
+<h3>Paper simulator (<code>src/paper/sellEngine.ts</code>)</h3>
+<ul style="margin:4px 0">
+<li><b>Open</b> a chosen structure (<code>/api/option-sell/start?symbol=&amp;type=&amp;capital=</code>).</li>
+<li><b>Mark</b> live (<code>/api/option-sell/mark</code>, polled ~3s on the tab): recomputes the</li>
+</ul>
+<p>  cost-to-close from the current chain; P&amp;L = (credit received - cost to close) x</p>
+<p>  lot. Missing far strikes fall back to intrinsic value.</p>
+<ul style="margin:4px 0">
+<li><b>Exits:</b> profit target (&gt;= 50% of credit), <b>tail stop</b> (loss &gt;= 2x credit),</li>
+</ul>
+<p>  <b>adjust</b> (a short strike is breached -&gt; defensive exit in this paper model,</p>
+<p>  not full rolling), or <b>EOD</b> (not held overnight).</p>
+<ul style="margin:4px 0">
+<li>Costs: brokerage per leg + STT + exchange + GST + slippage (<code>sellFriction</code>).</li>
+<li>Persists to <code>data/paper-sell-state.json</code> and <code>data/paper-sell-trades.csv</code>.</li>
+</ul>
+<h3>Endpoints &amp; tab</h3>
+<ul style="margin:4px 0">
+<li><code>GET /api/option-sell</code> - recommended structures for the indices.</li>
+<li><code>GET /api/option-sell/start | mark | state | stop | reset</code>.</li>
+<li><b>Option Selling</b> tab: structure cards (legs, credit, breakevens, max P/L,</li>
+</ul>
+<p>  POP, margin, delta/theta, target/stop) with a "Paper trade this" button, plus a</p>
+<p>  live paper panel (running P&amp;L, closed trades, stop/reset).</p>
+<h3>Honest notes</h3>
+<ul style="margin:4px 0">
+<li>Selling options is <b>HIGH RISK</b>: naked straddle/strangle have **undefined</li>
+</ul>
+<p>  loss** - a gap can far exceed the credit. Always use the tail stop.</p>
+<ul style="margin:4px 0">
+<li>POP, margin and credit are <b>estimates</b> from the chain, not broker-exact.</li>
+<li>The iron condor is <b>defined-risk</b> and the safest of the three.</li>
+<li>"Adjustment" here is a <b>defensive exit</b>, not the full rolling/hedging a live</li>
+</ul>
+<p>  trader might do - kept honest rather than pretending to model complex rolls.</p>
+<ul style="margin:4px 0">
+<li>Requires the <b>live Groww</b> feed (option greeks/OI); unavailable on Yahoo.</li>
+</ul>
+<hr/>
+<h2>3. Where these fit</h2>
+<ul style="margin:4px 0">
+<li><b>ORB</b> and the buy-side paper engine suit <b>trending</b> conditions (the</li>
+</ul>
+<p>  trade-zone pill / ADX regime tells you when).</p>
+<ul style="margin:4px 0">
+<li><b>Option selling</b> suits <b>range-bound / high-IV</b> conditions where the buy</li>
+</ul>
+<p>  side bleeds theta - the two are complementary. Running the sell paper alongside</p>
+<p>  the buy paper lets you compare which side is working in the current regime.</p></body></html>

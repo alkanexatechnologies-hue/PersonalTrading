@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BC Data Status</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+  </head>
+  <body class="oi-focus">
+    <!-- ============ Local access gate (paper desk login) ============ -->
+    <div id="login-gate" class="login-gate">
+      <!-- Bull mascot (left) -->
+      <div class="lg-mascot lg-bull-wrap">
+        <svg viewBox="0 0 260 260" class="lg-animal" aria-hidden="true">
+          <defs>
+            <radialGradient id="bullFace" cx="42%" cy="34%" r="72%">
+              <stop offset="0" stop-color="#54d99b"/><stop offset="1" stop-color="#178a5c"/>
+            </radialGradient>
+          </defs>
+          <g fill="#1f9c69">
+            <ellipse cx="70" cy="52" rx="16" ry="42" transform="rotate(-32 70 52)"/>
+            <ellipse cx="190" cy="52" rx="16" ry="42" transform="rotate(32 190 52)"/>
+          </g>
+          <ellipse cx="46" cy="132" rx="20" ry="30" fill="#178a5c"/>
+          <ellipse cx="214" cy="132" rx="20" ry="30" fill="#178a5c"/>
+          <circle cx="130" cy="132" r="82" fill="url(#bullFace)"/>
+          <ellipse cx="130" cy="176" rx="46" ry="34" fill="#3fbf87"/>
+          <circle cx="112" cy="184" r="6" fill="#0d3a28"/>
+          <circle cx="148" cy="184" r="6" fill="#0d3a28"/>
+          <g><circle cx="104" cy="126" r="15" fill="#fff"/><circle cx="107" cy="129" r="7" fill="#0c1a14"/><circle cx="103" cy="124" r="2.4" fill="#fff"/></g>
+          <g><circle cx="156" cy="126" r="15" fill="#fff"/><circle cx="153" cy="129" r="7" fill="#0c1a14"/><circle cx="149" cy="124" r="2.4" fill="#fff"/></g>
+          <polyline points="60,222 100,196 130,214 176,150 208,168" fill="none" stroke="#22e08a" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+          <polygon points="208,168 190,150 210,146" fill="#22e08a"/>
+        </svg>
+        <span class="lg-mascot-label lg-bull-label">BULL</span>
+      </div>
+
+      <!-- Center: logo + form -->
+      <div class="lg-center">
+        <div class="lg-logo"><span class="lg-mkt">Market</span><span class="lg-pil">Pil</span></div>
+        <h1 class="lg-tag">Read the tape.<br/>Pilot the move.</h1>
+        <p class="lg-sub">Bull and bear on one screen — sign in to open your paper desk.</p>
+        <form class="lg-card" id="login-form" autocomplete="on">
+          <label class="lg-label" for="lg-user">USERNAME</label>
+          <input id="lg-user" class="lg-input" type="text" value="Alkasrivastava" autocomplete="username" spellcheck="false" autocapitalize="off" />
+          <label class="lg-label" for="lg-pass">PASSWORD</label>
+          <div class="lg-passwrap">
+            <input id="lg-pass" class="lg-input" type="password" value="Alkasrivastava" autocomplete="current-password" />
+            <button type="button" id="lg-show" class="lg-show">SHOW</button>
+          </div>
+          <button type="submit" id="lg-submit" class="lg-enter">Enter desk</button>
+          <div id="lg-error" class="lg-error"></div>
+          <p class="lg-session">Session ends daily at 7:00 AM IST</p>
+        </form>
+      </div>
+
+      <!-- Bear mascot (right) -->
+      <div class="lg-mascot lg-bear-wrap">
+        <svg viewBox="0 0 260 260" class="lg-animal" aria-hidden="true">
+          <defs>
+            <radialGradient id="bearFace" cx="42%" cy="34%" r="72%">
+              <stop offset="0" stop-color="#e8615b"/><stop offset="1" stop-color="#a5231f"/>
+            </radialGradient>
+          </defs>
+          <circle cx="66" cy="70" r="30" fill="#c23a34"/><circle cx="66" cy="70" r="15" fill="#8f1f1b"/>
+          <circle cx="194" cy="70" r="30" fill="#c23a34"/><circle cx="194" cy="70" r="15" fill="#8f1f1b"/>
+          <circle cx="130" cy="134" r="84" fill="url(#bearFace)"/>
+          <ellipse cx="130" cy="172" rx="44" ry="34" fill="#e07b76"/>
+          <ellipse cx="130" cy="158" rx="15" ry="12" fill="#4a100e"/>
+          <g><circle cx="102" cy="122" r="13" fill="#fff"/><circle cx="105" cy="125" r="6.5" fill="#160a09"/><circle cx="101" cy="120" r="2.2" fill="#fff"/></g>
+          <g><circle cx="158" cy="122" r="13" fill="#fff"/><circle cx="155" cy="125" r="6.5" fill="#160a09"/><circle cx="151" cy="120" r="2.2" fill="#fff"/></g>
+          <polyline points="58,150 100,168 130,150 176,210 208,228" fill="none" stroke="#f0524b" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+          <polygon points="208,228 188,224 206,208" fill="#f0524b"/>
+        </svg>
+        <span class="lg-mascot-label lg-bear-label">BEAR</span>
+      </div>
+
+      <p class="lg-footer">Paper desk only · local access gate</p>
+    </div>
+
+    <!-- ============ Desk selector (shown after login) ============ -->
+    <div id="mode-gate" class="mode-gate hidden">
+      <div class="mg-inner">
+        <div class="lg-logo"><span class="lg-mkt">Market</span><span class="lg-pil">Pil</span></div>
+        <p class="mg-sub">Choose your desk</p>
+        <div class="mg-btns">
+          <button type="button" class="mg-btn mg-option" data-mode="option">
+            <span class="mg-ico">🎯</span>
+            <span class="mg-t">Option Trading</span>
+            <span class="mg-d">OI Command · AI Paper Desk · Option Top Pick · Early Moves</span>
+          </button>
+          <button type="button" class="mg-btn mg-swing" data-mode="swing">
+            <span class="mg-ico">📈</span>
+            <span class="mg-t">Stock Swing Trading</span>
+            <span class="mg-d">Market News · Bull % Rank · Today Big Movers · Selected Stock · Big Move · Move Timing</span>
+          </button>
+        </div>
+        <button type="button" id="mg-close" class="mg-close hidden">✕ Close</button>
+      </div>
+    </div>
+
+    <header class="topbar">
+      <div class="topbar-right">
+        <!-- Consolidated status row: one pill per distinct fact (no repeated market/provider). -->
+        <span id="market-status" class="pill market-status" title="Market session + last data refresh (IST). Groww historical only when closed.">market: -</span>
+        <button type="button" id="feed-groww" class="pill-btn feed-tog on" title="Groww is the ONLY market-data source (quotes, candles, historical, option chain, OI). Click to turn the feed on/off.">Groww · single source · ON</button>
+        <span id="best-trade" class="pill best-trade" title="Best option trade right now on the 15-min model (safety-gated). Shown across all sections.">best 15m: —</span>
+        <span id="regime-ind" class="pill" title="Market regime from NIFTY 15m ADX. Range-bound = avoid buying options (theta bleed).">regime: -</span>
+        <span id="success-ind" class="pill" title="Measured track record from the autonomous paper-trading run">success: -</span>
+        <span id="early-ind" class="pill early-ind" title="Early-Move alert: a move in its INITIAL stage (fresh momentum + volume, not extended, potential still to run). Click to open it.">⚡ early: -</span>
+        <button id="mode-switch" class="pill-btn" title="Switch between Option Trading and Stock Swing Trading desks">⇄ Desk</button>
+        <button id="connect-btn" class="pill-btn">Connect data</button>
+        <span id="clock" class="clock"></span>
+      </div>
+
+      <!-- Groww Connection settings card (desktop + mobile) -->
+      <div id="connect-panel" class="connect-panel gc-panel hidden">
+        <div class="cp-head">
+          <h4>Groww Connection</h4>
+          <button id="connect-close" class="cp-close" aria-label="Close">&times;</button>
+        </div>
+
+        <div class="gc-source">MARKET DATA SOURCE&nbsp; <b>🟢 GROWW</b> <span class="wl-sub">single source</span></div>
+
+        <label class="cp-label" for="conn-apikey">API Key</label>
+        <div class="gc-field">
+          <input id="conn-apikey" type="password" inputmode="text" placeholder="Groww API key" autocomplete="off" autocapitalize="off" spellcheck="false" />
+          <button type="button" class="gc-eye" data-target="conn-apikey" aria-label="Show/hide">👁</button>
+        </div>
+
+        <label class="cp-label" for="conn-secret">API Secret</label>
+        <div class="gc-field">
+          <input id="conn-secret" type="password" placeholder="Groww API secret" autocomplete="off" autocapitalize="off" spellcheck="false" />
+          <button type="button" class="gc-eye" data-target="conn-secret" aria-label="Show/hide">👁</button>
+        </div>
+
+        <button id="conn-saveconnect" class="gc-primary">GENERATE TOKEN &amp; SAVE</button>
+        <div id="conn-status" class="conn-status"></div>
+
+        <div id="gc-token-current" class="gc-token-current hidden">Saved token: <b id="gc-token-mask">—</b> <span class="wl-sub">— saved locally for all sessions</span> <button type="button" id="gc-update-token" class="ghost">Remove saved token</button></div>
+
+        <div id="gc-status" class="gc-status"></div>
+        <div id="gc-signals" class="gc-signals"></div>
+
+        <button id="conn-test" class="gc-test">TEST CONNECTION</button>
+        <div id="gc-test-result" class="gc-test-result"></div>
+
+        <details class="gc-advanced">
+          <summary>Advanced — paste an existing token</summary>
+          <label class="cp-label" for="conn-token">Access Token <span class="wl-sub">(optional — normally auto-minted from key + secret)</span></label>
+          <div class="gc-field">
+            <input id="conn-token" type="password" placeholder="Paste a Groww access token" autocomplete="off" autocapitalize="off" spellcheck="false" />
+            <button type="button" class="gc-eye" data-target="conn-token" aria-label="Show/hide">👁</button>
+          </div>
+        </details>
+
+        <p class="wl-sub cp-note">
+          Enter your API Key + API Secret (Groww &rarr; Settings &rarr; Trading APIs; needs an active subscription + today's approval) and press
+          <b>GENERATE TOKEN &amp; SAVE</b> — the server mints the access token and stores it <b>securely server-side (.groww_token), so it persists across every session</b>
+          (the full token is never shown or logged). Tokens expire daily ~6 AM IST — just press the button again to re-mint. No manual restart; the provider reconnects automatically.
+        </p>
+      </div>
+    </header>
+
+    <div class="disclaimer" id="disclaimer" hidden></div>
+
+    <main class="layout">
+      <!-- Watchlist -->
+      <aside class="watchlist" id="watchlist">
+        <div class="brand">
+          <span class="logo">NSE</span>
+          <div><h1>Intraday Assistant</h1></div>
+        </div>
+        <h2>Watchlist <span id="wl-refresh" class="wl-sub" style="font-weight:400;font-size:10px">-</span></h2>
+        <div id="watchlist-items" class="watchlist-items"></div>
+        <!-- 1-Hour Breakout Watch (all F&O indices near crossing prior-hour high/low) -->
+        <div id="tp-breakout"></div>
+      </aside>
+
+      <!-- Main content -->
+      <section class="content">
+        <!-- Consolidated cockpit strip: [status] | [Trader Mind] | [risk disclaimer ▾] -->
+        <div id="cockpit-strip" class="cockpit-strip">
+          <div id="signal-block-banner" class="cs-seg cs-status"><span class="cs-dot"></span>—</div>
+          <div id="mind-bar" class="cs-seg mind-bar mind-neutral">
+            <span id="mind-state" class="mind-state">🧠 Trader Mind</span>
+            <div id="mind-best" class="mind-best"><span class="wl-sub">Best directional win-case loading…</span></div>
+            <span id="mind-hindi" class="mind-hindi" hidden></span>
+          </div>
+          <details id="cs-risk" class="cs-seg cs-risk">
+            <summary><span class="cs-risk-icon">⚠</span> <span class="cs-risk-short">Not a guarantee of profit</span><span class="cs-risk-caret">⌄</span></summary>
+            <div class="cs-risk-full">Signals are generated from market data and predefined rules. They are <b>NOT</b> a guarantee of profit or future performance. Market conditions can change rapidly. You are responsible for the final trading decision.</div>
+          </details>
+        </div>
+        <!-- App-level: ASK bar — type a question, answered from the selected stock's LIVE data -->
+        <div id="ask-bar" class="ask-bar">
+          <div class="ask-row">
+            <span class="ask-title">🤖 Ask</span>
+            <select id="ask-symbol" class="ask-symbol"><option value="">stock चुनें…</option></select>
+            <input id="ask-input" class="ask-input" type="text" placeholder="सवाल: kya buy karu? · market kis range me? · takat kitni? · OI kis side? · CE/PE strike? · target? · stop?" />
+            <button id="ask-btn" class="ask-btn">पूछें</button>
+          </div>
+          <div id="ask-answer" class="ask-answer" style="display:none"></div>
+        </div>
+
+        <!-- App-level: best 2 OPTION opportunities (always visible, live) -->
+        <div id="opp-bar" class="opp-bar">
+          <span class="opp-bar-title">🏆 Best option plays <button id="opp-min" class="opp-min" title="Minimize / expand">–</button></span>
+          <div id="opp-bar-items" class="opp-bar-items"><span class="wl-sub">loading...</span></div>
+        </div>
+        <div class="tabs" id="tabs">
+          <button class="tab active grp-option" data-tab="oicommand" data-group="option">🎯 OI Command</button>
+          <button class="tab grp-option" data-tab="paper" data-group="option">AI Paper Desk</button>
+          <button class="tab grp-option" data-tab="toppicks" data-group="option">Option Top Pick</button>
+          <button class="tab grp-option" data-tab="earlymoves" data-group="option">⚡ Early Moves</button>
+          <button class="tab grp-swing" data-tab="news" data-group="swing">Market News</button>
+          <button class="tab grp-swing" data-tab="bullrank" data-group="swing">Bull % Rank</button>
+
+          <button class="tab grp-swing" data-tab="todaymovers" data-group="swing">Today Big Movers</button>
+
+          <button class="tab grp-swing" data-tab="stock" data-group="swing">Selected Stock</button>
+          <button class="tab grp-swing" data-tab="bigmove" data-group="swing">Big Move 20-100%</button>
+
+          <button class="tab grp-swing" data-tab="movetiming" data-group="swing">Move Timing</button>
+        </div>
+        <div id="tab-flow-wrap">
+          <button id="tab-flow-toggle" class="pill-btn">🔍 How this tab works — logic flow ▾</button>
+          <div id="tab-flow" class="tab-flow" hidden></div>
+        </div>
+
+        <!-- ================= TAB: Early Moves (initial-stage signals) ================= -->
+        <div class="tab-panel" id="panel-earlymoves">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h3>⚡ Early Moves &mdash; move ke SHURUAAT me signal</h3>
+                <span class="rel-badge rel-med" title="Fresh momentum (squeeze fire / expansion) + volume + kam progress (typical day range ka <45% used) + not extended. Move jaldi pakadne ke liye — 50% hone ka intezaar nahi.">Reliability: MEDIUM &mdash; initial-stage signal</span>
+                <div class="wl-sub">Ye tab un stocks/indices ko flag karta hai jinka move <b>abhi shuru</b> ho raha hai (IGNITING = squeeze abhi fire, EARLY = young trend, extended nahi) &mdash; <b>fresh momentum + volume</b> ke saath aur <b>day range ka kam hissa</b> use hua (potential baaki). Directional trade me late (&gt;50% move) ho jaane se bachne ke liye. Har ~60 sec auto-refresh (market hours).</div>
+              </div>
+              <div class="swing-filters">
+                <label>Show <select id="em-filter"><option value="all">All</option><option value="igniting">Igniting only</option><option value="index">Index only</option><option value="equity">Stocks only</option><option value="ce">CE only</option><option value="pe">PE only</option></select></label>
+                <button id="load-earlymoves" class="ghost">Refresh</button>
+              </div>
+            </div>
+            <div id="earlymoves-status" class="wl-sub" style="margin-bottom:6px"></div>
+            <div id="earlymoves">Market hours me kholein &mdash; abhi-shuru-hote moves yahan aayenge.</div>
+          </div>
+        </div><!-- /panel-earlymoves -->
+
+        <!-- ================= TAB: OI Command (single-symbol OI-change command screen) ================= -->
+        <div class="tab-panel active" id="panel-oicommand">
+          <div class="oic-cockpit">
+            <div class="oic-toolbar">
+              <b>OI Command</b>
+              <select id="oic-symbol"><option value="">लोड…</option></select>
+              <button id="oic-refresh" class="ghost">↻</button>
+              <span id="oic-rel" class="rel-badge rel-med">rel: —</span>
+              <span id="oic-clarity" class="rel-badge rel-med" title="setupQuality — clarity of the current setup (regime + liquidity + wall + sentiment agreement)">clarity: —</span>
+              <span id="oic-status" class="wl-sub"></span>
+              <button id="oic-log-btn" class="ghost" title="Decision Log — every GO/WAIT flip, module state change, and trade emit / veto / dedup">🧾 Log</button>
+            </div>
+            <div id="oic-backtest"></div>
+            <div id="oicommand">OI Command लोड हो रहा…</div>
+            <!-- Decision Log slide-out drawer (opens over the live view) -->
+            <div id="oic-log-drawer" class="oic-log-drawer hidden">
+              <div class="oic-log-drawer-head">
+                <b>🧾 Decision Log</b>
+                <button id="oic-log-close" class="ghost">✕</button>
+              </div>
+              <div id="oic-log-filters-drawer" class="oic-log-filters"></div>
+              <div id="oic-log-drawer-body" class="oic-log-body"></div>
+            </div>
+          </div>
+        </div><!-- /panel-oicommand -->
+
+        <!-- ================= TAB: Market News ================= -->
+        <div class="tab-panel" id="panel-news">
+          <div class="content-head">
+            <div>
+              <h2>Market News</h2>
+              <div class="wl-sub">India-focused market headlines with keyword sentiment + high-impact event tags. Informational only &mdash; NOT used by the trade engine.</div>
+            </div>
+            <button id="news-refresh" class="pill-btn">&#8635; Refresh</button>
+          </div>
+          <div id="news-summary" class="card"></div>
+          <div id="news-list" class="news-list"></div>
+        </div>
+
+        <!-- ================= TAB 1: Live Trade Alerts ================= -->
+        <!-- ================= TAB 2: Selected Stock ================= -->
+        <div class="tab-panel" id="panel-stock">
+        <div class="content-head">
+          <div>
+            <button id="stock-back" class="pill-btn" style="margin-bottom:6px">&larr; Back</button>
+            <h2 id="sym-name">-</h2>
+            <div class="quote-line">
+              <span id="sym-price" class="price">-</span>
+              <span id="sym-change" class="change">-</span>
+            </div>
+          </div>
+          <div class="interval-picker">
+            <label>Interval</label>
+            <select id="interval">
+              <option value="1m">1m</option>
+              <option value="5m" selected>5m</option>
+              <option value="15m">15m</option>
+              <option value="30m">30m</option>
+              <option value="60m">1h</option>
+              <option value="1d">1d</option>
+            </select>
+            <button id="refresh">Refresh</button>
+          </div>
+        </div>
+
+        <!-- Broker-style full option chain (Open OI) — at the TOP of Selected Stock -->
+        <div class="card oi-card">
+          <div class="card-head">
+            <h3>Open OI &mdash; live option chain</h3>
+            <span class="wl-sub">Call OI% · Call LTP% · Strike · Put LTP% · Put OI% + build-up verdict</span>
+          </div>
+          <div id="oic-chainbox-stock" class="oic-chainbox">Select an F&amp;O symbol to load the live option chain (open OI, LTP, build-up).</div>
+        </div>
+
+        <!-- Day stats + market direction -->
+        <div class="card stock-summary">
+          <div class="ss-item"><span>Day High</span><b id="ss-high" class="up">-</b></div>
+          <div class="ss-item"><span>Day Low</span><b id="ss-low" class="down">-</b></div>
+          <div class="ss-item"><span>LTP</span><b id="ss-ltp">-</b></div>
+          <div class="ss-item"><span>Change</span><b id="ss-change">-</b></div>
+          <div class="ss-item"><span>Volume</span><b id="ss-vol">-</b></div>
+          <div class="ss-item ss-dir"><span>Market Direction</span><b id="ss-dir" class="verdict neutral">-</b></div>
+        </div>
+
+        <!-- 4-Layer Direction Engine -->
+        <div class="card final-card">
+          <div class="card-head">
+            <div><h3>Direction Engine &mdash; 4-Layer weighted model</h3>
+            <span class="rel-badge rel-est" title="Market Structure 40% + Trend 25% + Derivatives 20% + Momentum 15%. Each layer averages its sub-signals into a weighted contribution. Futures basis + option volume aren't on this feed, so Layer 3 uses OI/OI-change/futures-buildup/IV-skew.">Reliability: ESTIMATE &mdash; layered weighted direction</span></div>
+            <span id="dir4l-action" class="verdict neutral">-</span>
+          </div>
+          <div id="dir4l-body" class="final-body">Select a symbol to see the layered direction breakdown.</div>
+        </div>
+
+        <!-- Final combined suggestion (signal + OI/PCR) -->
+        <div class="card final-card">
+          <div class="card-head">
+            <div><h3>Final Suggestion &mdash; Signal + OI/PCR</h3>
+            <span class="rel-badge rel-est" title="The direction call is a projection; the OI levels (support/resistance/max-pain) and bluff detection are the more reliable parts. Confirm on entry, use the stop.">Reliability: ESTIMATE &mdash; direction projected; OI levels reliable</span></div>
+            <span id="final-action" class="verdict neutral">-</span>
+          </div>
+          <div id="final-body" class="final-body">Loading combined view...</div>
+        </div>
+
+        <!-- Trade Minder: test vs reversal (helps you not get shaken out) -->
+        <div class="card final-card">
+          <div class="card-head">
+            <div><h3>Trade Minder &mdash; hold through the test?</h3>
+            <span class="rel-badge rel-med" title="Distinguishes a normal pullback/test (HOLD) from a real reversal (EXIT) using VWAP + swing structure + volume, for the current signal direction. Reduces premature exits - not a guarantee.">Reliability: MEDIUM &mdash; structure-based, not a guarantee</span></div>
+            <span id="minder-state" class="verdict neutral">-</span>
+          </div>
+          <div id="minder-body" class="final-body">Select a symbol to see whether the current move is a test or a reversal.</div>
+        </div>
+
+        <div class="grid">
+          <!-- Chart -->
+          <div class="card chart-card">
+            <div class="card-head">
+              <h3>Price &amp; Overlays</h3>
+              <div class="legend" id="chart-toggles">
+                <span class="lg lg-ema9 toggle off" data-series="ema9">EMA9</span>
+                <span class="lg lg-ema21 toggle" data-series="ema21">EMA21</span>
+                <span class="lg lg-ema50 toggle" data-series="ema50">EMA50</span>
+                <span class="lg lg-vwap toggle" data-series="vwap">VWAP</span>
+                <span class="lg lg-st toggle off" data-series="st">Supertrend</span>
+                <span class="lg lg-bb toggle off" data-series="bb">Bollinger</span>
+                <span class="lg lg-kc toggle off" data-series="kc">Keltner</span>
+                <span class="lg lg-vol toggle" data-series="vol">Volume</span>
+                <span class="lg lg-sig toggle" data-series="markers">Signals</span>
+              </div>
+            </div>
+            <div class="levels-bar" id="levels-bar">
+              <div class="lv lv-call" id="lv-call">
+                <span class="lv-tag call">CALL &#9650;</span>
+                <span title="Buy CALL on break above the day high">Above Day High <b id="lv-call-entry">-</b></span>
+                <span>Target <b id="lv-call-tgt">-</b></span>
+                <span>Stop (Day Low) <b id="lv-call-stop">-</b></span>
+              </div>
+              <div class="lv lv-put" id="lv-put">
+                <span class="lv-tag put">PUT &#9660;</span>
+                <span title="Buy PUT on break below the day low">Below Day Low <b id="lv-put-entry">-</b></span>
+                <span>Target <b id="lv-put-tgt">-</b></span>
+                <span>Stop (Day High) <b id="lv-put-stop">-</b></span>
+              </div>
+            </div>
+            <div class="chart-toolbar">
+              <div class="tf-chips" id="tf-chips">
+                <button data-tf="1m">1m</button>
+                <button data-tf="5m" class="active">5m</button>
+                <button data-tf="15m">15m</button>
+                <button data-tf="30m">30m</button>
+                <button data-tf="60m">1h</button>
+                <button data-tf="1d">1d</button>
+              </div>
+              <div class="chart-tools">
+                <button id="day-toggle" class="ghost active" title="Show only the current trading day">Today</button>
+                <select id="chart-type" title="Chart type">
+                  <option value="candles">Candles</option>
+                  <option value="line">Line</option>
+                  <option value="area">Area</option>
+                </select>
+                <button id="chart-fit" class="ghost">Fit</button>
+              </div>
+            </div>
+            <div class="chart-wrap">
+              <div id="chart-legend" class="chart-legend"></div>
+              <div id="chart" class="chart"></div>
+            </div>
+            <div class="rsi-label">RSI (14)</div>
+            <div id="rsi-chart" class="rsi-chart"></div>
+            <div class="rsi-label">MACD (12, 26, 9)</div>
+            <div id="macd-chart" class="rsi-chart"></div>
+          </div>
+
+          <!-- Signal -->
+          <div class="card signal-card">
+            <div class="card-head"><h3>Signal</h3></div>
+            <div class="signal-body">
+              <div id="signal-label" class="signal-label hold">HOLD</div>
+              <div class="gauge">
+                <div class="gauge-track">
+                  <div id="gauge-fill" class="gauge-fill"></div>
+                  <div class="gauge-mid"></div>
+                </div>
+                <div class="gauge-labels"><span>-100</span><span>0</span><span>+100</span></div>
+              </div>
+              <div class="signal-stats">
+                <div><span>Score</span><b id="signal-score">-</b></div>
+                <div><span>Confidence</span><b id="signal-conf">-</b></div>
+                <div><span>Stop-loss</span><b id="signal-sl">-</b></div>
+                <div><span>Target</span><b id="signal-target">-</b></div>
+              </div>
+              <h4>Indicator breakdown</h4>
+              <ul id="votes" class="votes"></ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Scalp / momentum radar -->
+        <div class="card scalp-card">
+          <div class="card-head">
+            <h3>Scalp / Momentum Radar</h3>
+            <span id="scalp-state" class="verdict neutral">-</span>
+          </div>
+          <div id="scalp-body" class="scalp-body">Select a symbol to see squeeze / big-movement status.</div>
+        </div>
+
+        <!-- Volume & big players -->
+        <div class="card volume-card">
+          <div class="card-head">
+            <h3>Volume &amp; Big Players (smart-money proxy)</h3>
+            <span id="vol-verdict" class="verdict neutral">-</span>
+          </div>
+          <div id="volume-body" class="volume-body">Select a symbol to see volume &amp; institutional-activity proxies.</div>
+        </div>
+
+        <!-- Open interest -->
+        <div class="card oi-card">
+          <div class="card-head">
+            <h3>Open Interest (OI) &mdash; option chain</h3>
+            <span id="oi-verdict" class="verdict neutral">-</span>
+          </div>
+          <div id="oi-body" class="oi-body">Select an F&amp;O symbol to load OI levels (support/resistance, PCR, max pain).</div>
+        </div>
+
+        <!-- Options trade setup -->
+        <div class="card options-card">
+          <div class="card-head">
+            <h3>Options trade setup (CALL / PUT)</h3>
+            <div class="opt-controls">
+              <label>Capital ₹ <input id="opt-capital" type="number" step="10000" value="100000" /></label>
+              <label>Risk % <input id="opt-risk" type="number" step="0.5" value="2" /></label>
+              <label>Premium/LTP <input id="opt-premium" type="number" step="0.05" placeholder="optional" /></label>
+              <button id="get-option">Get option trade</button>
+            </div>
+          </div>
+          <div id="option-body" class="option-body">
+            Enter capital and risk, then click "Get option trade" for a CALL/PUT idea with strike, stop-loss and quantity.
+          </div>
+        </div>
+
+        <!-- Backtest -->
+        <div class="card backtest-card">
+          <div class="card-head">
+            <h3>Backtest (this symbol &amp; interval)</h3>
+            <div class="bt-controls">
+              <label>SL% <input id="bt-sl" type="number" step="0.1" value="0.5" /></label>
+              <label>Target% <input id="bt-target" type="number" step="0.1" value="1.0" /></label>
+              <label>Threshold <input id="bt-threshold" type="number" step="5" value="30" /></label>
+              <label class="chk"><input id="bt-short" type="checkbox" checked /> Allow short</label>
+              <button id="run-backtest">Run backtest</button>
+              <button id="compare-bt" class="ghost">Compare 5m vs 15m</button>
+            </div>
+          </div>
+          <div id="bt-summary" class="bt-summary">Run a backtest to see historical performance of these signals.</div>
+          <div id="equity" class="equity"></div>
+          <p class="backtest-disclaimer">BACKTEST / SIMULATION — Past performance is not indicative of future results. Backtest results may differ materially from actual trading because of slippage, liquidity, brokerage, taxes, latency, execution quality, market impact and other factors. Simulated results are not actual investor returns.</p>
+        </div>
+
+        </div><!-- /panel-stock -->
+
+        <!-- ================= Paper Trading (autonomous, 20 days) ================= -->
+        <div class="tab-panel" id="panel-paper">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h3>AI Paper Desk &mdash; win-win only, any moment in the NSE session</h3>
+                <span class="rel-badge rel-high" title="Self-verifying: live data, real costs/slippage, honest P&amp;L. Not a zero-loss promise.">Reliability: HIGH &mdash; measured P&amp;L</span>
+                <span class="wl-sub">No 9:20 / lunch / 3pm clocks. Directional = OI TAKE + 1h bulletin. Scalp = 5m+15m agree (or aligned burst). Opens only when calibrated win-prob clears the floor. Losses still possible; losers are not relabelled as wins. Groww ON in hours for OI. Simulated only.</span>
+              </div>
+              <div class="swing-filters">
+                <label>Index opt ₹ <input id="pp-index" type="number" step="10000" value="40000" style="width:90px" /></label>
+                <label>Stock opt ₹ <input id="pp-stockopt" type="number" step="10000" value="40000" style="width:90px" /></label>
+                <label>Intraday ₹ <input id="pp-intraday" type="number" step="10000" value="40000" style="width:90px" /></label>
+                <label>Days <input id="pp-days" type="number" step="1" value="20" style="width:60px" /></label>
+                <button id="pp-auto" class="btn-sm" style="font-weight:700">🤖 Auto-Trade: —</button>
+                <button id="pp-start" class="ghost">Start run</button>
+                <button id="pp-tick" class="btn-sm">Run tick now</button>
+                <button id="pp-stop" class="btn-sm">Stop</button>
+                <button id="pp-reset" class="btn-sm">Reset</button>
+              </div>
+            </div>
+            <!-- Compliance: automated-trading controls (simulated engine) + emergency stop. -->
+            <div class="autotrade-controls" id="autotrade-controls">
+              <div class="atc-head">
+                <span class="atc-title">AUTO TRADING <b id="atc-state" class="atc-off">OFF</b></span>
+                <span class="wl-sub">Simulated paper engine — no live broker orders are placed.</span>
+                <button type="button" id="emergency-stop" class="atc-estop">■ STOP TRADING</button>
+              </div>
+              <div class="atc-grid">
+                <label>Max daily loss ₹ <input id="rc-maxloss" type="number" step="500" value="3000" /></label>
+                <label>Max trades/day <input id="rc-maxtrades" type="number" step="1" value="10" /></label>
+                <label>Max position size ₹ <input id="rc-maxpos" type="number" step="5000" value="40000" /></label>
+                <label>Max consecutive losses <input id="rc-maxcl" type="number" step="1" value="3" /></label>
+              </div>
+              <p class="wl-sub atc-note">Emergency stop immediately prevents new automated (simulated) orders. Risk-control values are advisory limits for the simulated desk.</p>
+            </div>
+            <div class="sub-tabs" id="paper-subtabs">
+              <button class="sub-tab active" data-ptab="current">📌 Current Trade</button>
+              <button class="sub-tab" data-ptab="manual">✍️ Manual Trading</button>
+              <button class="sub-tab" data-ptab="history">📜 History</button>
+            </div>
+            <div id="paper">Loading paper-trading state...</div>
+          </div>
+        </div><!-- /panel-paper -->
+
+        <!-- ================= TAB 3: Short-Term Movers ================= -->
+        <div class="tab-panel" id="panel-swing">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h3>Short-Term Movers &mdash; catch it early</h3>
+                <span class="wl-sub">Stocks starting a multi-day move (breakout + volume + fresh momentum). Ranked by EARLY-entry score; extended movers sink to the bottom.</span>
+              </div>
+              <div class="swing-filters">
+                <label>Sort by
+                  <select id="sw-sort">
+                    <option value="opportunity">Opportunity (best)</option>
+                    <option value="week">Biggest 1W move</option>
+                    <option value="volsurge">Volume surge</option>
+                    <option value="revgrowth">Revenue growth</option>
+                    <option value="early">Early score (technical)</option>
+                    <option value="rsi">RSI</option>
+                  </select>
+                </label>
+                <label>Sector
+                  <select id="sw-sector"><option value="">All</option></select>
+                </label>
+                <label>Cap
+                  <select id="sw-cap">
+                    <option value="">Any</option>
+                    <option value="Small">Small</option>
+                    <option value="Mid">Mid</option>
+                    <option value="Large">Large</option>
+                  </select>
+                </label>
+                <label>Min Rev% <input id="sw-minrev" type="number" step="5" placeholder="any" /></label>
+                <label>Min Opp <input id="sw-minopp" type="number" step="5" placeholder="any" /></label>
+                <button id="load-swing" class="ghost">Scan</button>
+              </div>
+            </div>
+            <div id="swing" class="swing">Click "Scan" to find stocks beginning a short-term move.</div>
+          </div>
+        </div><!-- /panel-swing -->
+
+        <!-- ================= TAB 5: Frequent Movers ================= -->
+        <div class="tab-panel" id="panel-frequent">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h3>Frequent Movers &mdash; who moves big, most often</h3>
+                <span class="wl-sub">From ~1 year of daily history: how often each stock makes a big move (and how wide it ranges). Ranked by frequency. High mover = repeated tradeable swings, higher risk.</span>
+              </div>
+              <div class="swing-filters">
+                <label>Big move =
+                  <select id="fm-threshold">
+                    <option value="2">&ge; 2%</option>
+                    <option value="3" selected>&ge; 3%</option>
+                    <option value="5">&ge; 5%</option>
+                  </select>
+                </label>
+                <label>Sort by
+                  <select id="fm-sort">
+                    <option value="freq">Frequency (most often)</option>
+                    <option value="range">Avg daily range</option>
+                    <option value="avgchg">Avg daily change</option>
+                    <option value="max">Biggest 1-day move</option>
+                    <option value="atr">Current ATR%</option>
+                  </select>
+                </label>
+                <label>Sector
+                  <select id="fm-sector"><option value="">All</option></select>
+                </label>
+                <label>Options
+                  <select id="fm-options">
+                    <option value="">Any</option>
+                    <option value="yes">F&amp;O only</option>
+                    <option value="no">Cash only</option>
+                  </select>
+                </label>
+                <button id="load-frequent" class="ghost">Scan</button>
+              </div>
+            </div>
+            <div id="frequent" class="swing">Click "Scan" to rank stocks by how often they make big moves.</div>
+          </div>
+        </div><!-- /panel-frequent -->
+
+        <!-- ================= TAB 8: Monthly Swing 20-50% (high risk) ================= -->
+        <div class="tab-panel" id="panel-monthly">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h3>Monthly Swing 20-50% &mdash; <span style="color:var(--down)">HIGH RISK</span></h3>
+                <span class="wl-sub">Stocks with a real shot at +20-50% in ~1 month. Probability is grounded in each stock's own history (how often it actually gained 20%+ in a month) plus its current setup. Targets this big carry matching downside &mdash; always use the stop.</span>
+              </div>
+              <div class="swing-filters">
+                <label>Sort by
+                  <select id="mo-sort">
+                    <option value="probability">Probability (best)</option>
+                    <option value="baseRate20">History (20% months)</option>
+                    <option value="rr">Reward:risk</option>
+                    <option value="expmove">Expected move</option>
+                    <option value="setup">Setup score</option>
+                  </select>
+                </label>
+                <label>Sector <select id="mo-sector"><option value="">All</option></select></label>
+                <label>Min prob % <input id="mo-minprob" type="number" step="5" placeholder="any" style="width:70px" /></label>
+                <label>Options <select id="mo-options"><option value="">Any</option><option value="yes">F&amp;O only</option><option value="no">Cash only</option></select></label>
+                <button id="load-monthly" class="ghost">Scan</button>
+              </div>
+            </div>
+            <div id="monthly" class="swing">Click "Scan" to find high-risk 20-50% monthly swing candidates.</div>
+          </div>
+        </div><!-- /panel-monthly -->
+
+        <!-- ================= Today's Big Movers (intraday) ================= -->
+        <div class="tab-panel" id="panel-todaymovers">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h3>Today's Big Movers &mdash; who's likely to move BIG today</h3>
+                <span class="rel-badge rel-med" title="Intraday activity scan: gap, relative volume, range expansion and 15m momentum are factual/real-time; direction can still reverse intraday.">Reliability: MEDIUM &mdash; live activity, direction can flip</span>
+                <span class="wl-sub">Live intraday scan ranked by a mover score built from the opening gap, relative volume (participation), how far today's range has expanded vs a typical day, and 15m momentum. Highlights the stocks in play right now &mdash; not a guaranteed direction.</span>
+              </div>
+              <div class="swing-filters">
+                <label>Direction <select id="tm-dir"><option value="">Any</option><option value="Up">Up</option><option value="Down">Down</option></select></label>
+                <label>Options <select id="tm-options"><option value="">Any</option><option value="yes">F&amp;O only</option><option value="no">Cash only</option></select></label>
+                <button id="load-todaymovers" class="ghost">Refresh</button>
+                <button id="tm-export" class="ghost">Export CSV</button>
+              </div>
+            </div>
+            <div id="tm-status" class="wl-sub" style="margin-bottom:6px"></div>
+            <div id="tm-openhigh"></div>
+            <div id="todaymovers" class="swing">Open this tab during market hours to see today's big movers.</div>
+          </div>
+        </div><!-- /panel-todaymovers -->
+
+        <!-- ================= TAB 9: Big Move Radar 20-100% ================= -->
+        <div class="tab-panel" id="panel-bigmove">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h3>Big Move Radar 20-100% &mdash; <span style="color:var(--down)">HIGH RISK</span></h3>
+                <span class="rel-badge rel-med" title="Setup detection (tight base + volume dry-up) is a legitimate pattern. The +100% odds are the softest number in the app - most setups never double.">Reliability: MEDIUM &mdash; good setup, odds are estimates</span>
+                <span class="wl-sub">Catches the SETUP that precedes a big run: tight base (volatility contraction), volume dry-up (accumulation), breakout proximity, strong long-term trend &mdash; grounded in the stock's own history of 20/50/100% moves over ~6 months. Most setups do NOT double; treat as high-risk positional bets.</span>
+              </div>
+              <div class="swing-filters">
+                <label>Sort by
+                  <select id="bm-sort">
+                    <option value="rank">Move rank (breakout + potential)</option>
+                    <option value="breakout">Nearest to breakout</option>
+                    <option value="pot1w">Potential · 1 week</option>
+                    <option value="pot15d">Potential · 15 days</option>
+                    <option value="pot30d">Potential · 30 days</option>
+                    <option value="readiness">Readiness (best setup)</option>
+                    <option value="prob50">Odds of +50%</option>
+                    <option value="prob100">Odds of +100%</option>
+                    <option value="base50">History (+50% in 6m)</option>
+                    <option value="contraction">Tightest base</option>
+                  </select>
+                </label>
+                <label>Stage
+                  <select id="bm-stage">
+                    <option value="">Any</option>
+                    <option value="Breaking out">Breaking out</option>
+                    <option value="Coiled base">Coiled base</option>
+                    <option value="Neutral">Neutral</option>
+                    <option value="Extended">Extended</option>
+                  </select>
+                </label>
+                <label>Sector <select id="bm-sector"><option value="">All</option></select></label>
+                <label>Options <select id="bm-options"><option value="">Any</option><option value="yes">F&amp;O only</option><option value="no">Cash only</option></select></label>
+                <button id="load-bigmove" class="ghost">Scan</button>
+              </div>
+            </div>
+            <div id="bigmove" class="swing">Click "Scan" to radar stocks set up for a 20-100% move.</div>
+          </div>
+        </div><!-- /panel-bigmove -->
+
+        <!-- ================= Top Picks (multi-timeframe) ================= -->
+        <div class="tab-panel" id="panel-toppicks">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h3 style="margin:0">Top Pick — leftover move, one screen</h3>
+                <div class="wl-sub">Move start · S/R · SOD 15m H/L · last 5m candle · CE vs PE theta</div>
+              </div>
+              <div class="swing-filters">
+                <button id="load-toppicks" class="ghost">Refresh</button>
+              </div>
+            </div>
+            <div id="toppicks-status" class="wl-sub" style="margin-bottom:6px"></div>
+            <div id="hour-outlook" class="ho-wrap tp-hide-outlook"></div>
+            <div id="tp-universe" class="sub-tabs tp-uni" style="margin-bottom:2px">
+              <button class="sub-tab" data-tpuni="stock">📈 Stocks</button>
+              <button class="sub-tab active" data-tpuni="index">📊 Indices</button>
+            </div>
+            <div id="tp-subtabs" class="sub-tabs">
+              <button class="sub-tab" data-tpsub="5m">⚡ 5m</button>
+              <button class="sub-tab active" data-tpsub="15m">🎯 15m</button>
+              <button class="sub-tab" data-tpsub="1d">📅 Day</button>
+            </div>
+            <div id="toppicks">Scanning the best multi-timeframe picks...</div>
+          </div>
+        </div><!-- /panel-toppicks -->
+
+
+
+        <!-- ================= Bull % Rank (historical up-day bias) ================= -->
+        <div class="tab-panel" id="panel-bullrank">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h3>Bull % Rank &mdash; historical upward bias</h3>
+                <div class="wl-sub">Share of UP days (close &gt; previous close) over the chosen daily-history window. High = persistent upward bias. Historical tendency, not a prediction.</div>
+              </div>
+              <div class="swing-filters">
+                <label class="wl-sub">Window</label>
+                <select id="br-days">
+                  <option value="60">60 days</option>
+                  <option value="120" selected>120 days</option>
+                  <option value="250">250 days (~1y)</option>
+                </select>
+                <button id="load-bullrank" class="ghost">Refresh</button>
+              </div>
+            </div>
+            <div id="bullrank-status" class="wl-sub" style="margin-bottom:6px"></div>
+            <div id="bullrank">Ranking stocks by historical bull %...</div>
+          </div>
+        </div><!-- /panel-bullrank -->
+
+
+        <!-- ================= Move Timing (when the market moves most) ================= -->
+        <div class="tab-panel" id="panel-movetiming">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h3>Move Timing &mdash; when does it move most, and how it shifts</h3>
+                <span class="rel-badge rel-high" title="Descriptive stats from ~45 days of 15m history: average bar range% by time of day, and how the most-active window / daily volatility trends weekly or monthly.">Reliability: HIGH &mdash; descriptive volatility profile</span>
+                <span class="wl-sub">From the last ~45 days of 15-minute data (<b>9:30 AM&ndash;3:00 PM</b> only): which <b>time of day</b> the market moves the most (biggest average range), the quietest window, and how the peak-move window &amp; daily volatility <b>change week-to-week or month-to-month</b>. Use it to time entries into the most active windows.</span>
+              </div>
+              <div class="swing-filters">
+                <label>Symbol <select id="mt-symbol" style="min-width:180px"></select></label>
+                <label>Basis
+                  <select id="mt-period"><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select>
+                </label>
+                <button id="mt-apply" class="ghost">Analyze</button>
+              </div>
+            </div>
+            <div id="movetiming">Pick a symbol and basis, then Analyze.</div>
+          </div>
+        </div><!-- /panel-movetiming -->
+
+      </section>
+    </main>
+
+    <!-- ============ Compliance: mandatory risk-warning footer (always visible) ============ -->
+    <footer id="risk-footer" class="risk-footer">
+      <span class="rf-warn">⚠️ Investment in securities market are subject to market risks. Read all the related documents carefully before investing.</span>
+      <span class="rf-links">
+        <button type="button" id="open-risk-disclosure" class="rf-link">Risk Disclosure</button>
+        <button type="button" id="open-reg-disclosure" class="rf-link">SEBI/Regulatory Disclosure</button>
+      </span>
+    </footer>
+
+    <!-- Mobile bottom navigation (visible only on small screens). Maps to existing tabs
+         + a watchlist overlay + a "More" sheet listing every tab. No data is removed. -->
+    <nav id="mobile-nav" aria-label="Primary">
+      <button type="button" data-nav="oicommand" class="active"><span class="mn-ico">🎯</span>Home</button>
+      <button type="button" data-nav="watchlist"><span class="mn-ico">📋</span>Watchlist</button>
+      <button type="button" data-nav="toppicks"><span class="mn-ico">📈</span>Signals</button>
+      <button type="button" data-nav="news"><span class="mn-ico">📰</span>News</button>
+      <button type="button" data-nav="more"><span class="mn-ico">☰</span>More</button>
+    </nav>
+
+    <!-- ============ Compliance: first-use consent modal (blocks app until acknowledged) ============ -->
+    <div id="consent-modal" class="cmp-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="consent-title">
+      <div class="cmp-box">
+        <h2 id="consent-title">TRADING RISK DISCLOSURE</h2>
+        <p>Before using this application, please understand that:</p>
+        <ul class="cmp-list">
+          <li>Trading involves financial risk.</li>
+          <li>Options and derivatives can result in substantial losses.</li>
+          <li>Market data can be delayed, interrupted or incorrect.</li>
+          <li>Technical failures can affect signals and orders.</li>
+          <li>Backtested results do not guarantee future results.</li>
+          <li>No trading strategy can guarantee profits.</li>
+          <li>You are responsible for your trading decisions.</li>
+        </ul>
+        <p class="cmp-sebi">Investment in securities market are subject to market risks. Read all the related documents carefully before investing.</p>
+        <label class="cmp-check"><input type="checkbox" id="consent-check" /> I have read and understood the above.</label>
+        <button id="consent-continue" class="cmp-primary" disabled>CONTINUE</button>
+        <p class="cmp-note">This software is a market-analysis tool. It does not represent itself as SEBI-approved, SEBI-certified or SEBI-registered, and does not guarantee profits.</p>
+      </div>
+    </div>
+
+    <!-- ============ Compliance: full Risk / Regulatory disclosure modal ============ -->
+    <div id="disclosure-modal" class="cmp-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="disclosure-title">
+      <div class="cmp-box cmp-box-scroll">
+        <div class="cmp-head">
+          <h2 id="disclosure-title">Risk &amp; Regulatory Disclosure</h2>
+          <button type="button" id="disclosure-close" class="cp-close" aria-label="Close">&times;</button>
+        </div>
+
+        <h3>Mandatory Risk Warning</h3>
+        <p class="cmp-sebi">Investment in securities market are subject to market risks. Read all the related documents carefully before investing.</p>
+
+        <h3>Trading Application Disclaimer</h3>
+        <p>This application is a trading and market-analysis software tool. It does not guarantee profits or returns. Trading in securities, derivatives and options involves substantial risk of loss. Past performance, backtests, simulations or historical results do not guarantee future performance. Users are solely responsible for their trading decisions and should independently assess the risks before placing any order.</p>
+
+        <h3>Algorithmic / Automated Trading</h3>
+        <p>Algorithmic or automated trading can result in rapid losses. Signals generated by this application are not a guarantee of execution price, profitability or successful trading. This application does not place live orders — the automated desk is a simulation only.</p>
+
+        <h3 id="reg-disclosure-anchor">Regulatory Disclosure</h3>
+        <p>This software does not represent itself as SEBI-approved, SEBI-certified or SEBI-registered unless such status has been independently verified and is legally applicable. Displaying these disclosures does not by itself make the application compliant with SEBI, exchange or broker requirements; those require independent professional review.</p>
+
+        <h3>Backtest / Simulation</h3>
+        <p>Past performance is not indicative of future results. Backtest results may differ materially from actual trading because of slippage, liquidity, brokerage, taxes, latency, execution quality, market impact and other factors. Simulated results are not actual investor returns.</p>
+
+        <h3>Market Data</h3>
+        <p>The sole market-data source is Groww. Live trading signals are blocked when Groww data is disconnected, stale, invalid or unavailable.</p>
+
+        <p class="cmp-note" id="disclosure-versions">Loading version…</p>
+      </div>
+    </div>
+
+    <!-- ============ Compliance: automated-trading acknowledgement modal (simulated engine) ============ -->
+    <div id="autotrade-modal" class="cmp-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="autotrade-title">
+      <div class="cmp-box">
+        <div class="cmp-head">
+          <h2 id="autotrade-title">⚠️ AUTOMATED TRADING RISK</h2>
+          <button type="button" id="autotrade-close" class="cp-close" aria-label="Close">&times;</button>
+        </div>
+        <p>Automated trading can result in rapid losses, including losses caused by market volatility, technical failures, stale data, connectivity issues, incorrect configuration or unexpected market conditions.</p>
+        <p class="cmp-note">Note: this application does not place live broker orders. The automated desk runs on <b>simulated</b> paper trades only.</p>
+        <label class="cmp-check"><input type="checkbox" id="autotrade-check" /> I understand the risks and want to enable automated trading.</label>
+        <button id="autotrade-enable" class="cmp-primary" disabled>ENABLE AUTOMATED TRADING</button>
+      </div>
+    </div>
+
+    <!-- Option premium chart modal (opens when a strike's CE/PE price is clicked in the chain) -->
+    <div id="optchart-modal" class="optchart-modal" style="display:none">
+      <div class="optchart-box optchart-box-dual">
+        <div class="optchart-head">
+          <span id="optchart-title">Option chart</span>
+          <div>
+            <select id="optchart-tf" class="ask-symbol" style="min-width:70px">
+              <option value="5">5m</option>
+              <option value="15" selected>15m</option>
+              <option value="60">1h</option>
+            </select>
+            <button id="optchart-close" class="cp-close">&times;</button>
+          </div>
+        </div>
+        <div id="optchart-verdict" class="optchart-verdict">विश्लेषण हो रहा…</div>
+        <div class="optchart-dual">
+          <div class="optchart-pane">
+            <div class="optchart-pane-head"><span class="oc-side ce">CALL (CE)</span> <span id="optchart-ce-sub" class="wl-sub"></span></div>
+            <div id="optchart-ce-canvas" class="optchart-cv"></div>
+          </div>
+          <div class="optchart-pane">
+            <div class="optchart-pane-head"><span class="oc-side pe">PUT (PE)</span> <span id="optchart-pe-sub" class="wl-sub"></span></div>
+            <div id="optchart-pe-canvas" class="optchart-cv"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

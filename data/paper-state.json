@@ -1,0 +1,414 @@
+{
+  "version": 2,
+  "active": true,
+  "days": 20,
+  "startEpoch": 1789029928,
+  "startDate": "2026-09-10",
+  "tradingDaysElapsed": 2,
+  "lastDayCounted": "2026-09-11",
+  "lastEntry": {
+    "indexOption": 0,
+    "stockOption": 0,
+    "stockIntraday": 0
+  },
+  "tradesToday": 0,
+  "tradesTodayDate": "2026-09-11",
+  "indexOption": {
+    "startCapital": 40000,
+    "cash": 40000
+  },
+  "stockOption": {
+    "startCapital": 40000,
+    "cash": 40000
+  },
+  "stockIntraday": {
+    "startCapital": 40000,
+    "cash": 40000
+  },
+  "open": [],
+  "closed": [],
+  "peakEquity": 120000,
+  "lastCheck": {
+    "at": 1789108233,
+    "istDate": "2026-09-11",
+    "minutesIST": 720,
+    "marketOpen": true,
+    "active": true,
+    "tradesToday": 0,
+    "opened": 0,
+    "notes": [
+      "Clock windows off — win-win setup पर किसी भी समय entry (NSE session)",
+      "कोई scalp win-win नहीं (5m+15m / OI TAKE नहीं मिला)",
+      "कोई index option idea नहीं (OI TAKE + 1h bulletin नहीं)",
+      "कोई stock-intraday idea नहीं"
+    ],
+    "ideas": [
+      {
+        "kind": "stockOption",
+        "symbol": "MARUTI.NS",
+        "optionType": "PE",
+        "confidence": 89,
+        "reason": "reward:risk कम (1.3<1.5)"
+      }
+    ],
+    "window": "session"
+  },
+  "checkLog": [
+    {
+      "at": 1789108233,
+      "istDate": "2026-09-11",
+      "minutesIST": 720,
+      "marketOpen": true,
+      "active": true,
+      "tradesToday": 0,
+      "opened": 0,
+      "notes": [
+        "Clock windows off — win-win setup पर किसी भी समय entry (NSE session)",
+        "कोई scalp win-win नहीं (5m+15m / OI TAKE नहीं मिला)",
+        "कोई index option idea नहीं (OI TAKE + 1h bulletin नहीं)",
+        "कोई stock-intraday idea नहीं"
+      ],
+      "ideas": [
+        {
+          "kind": "stockOption",
+          "symbol": "MARUTI.NS",
+          "optionType": "PE",
+          "confidence": 89,
+          "reason": "reward:risk कम (1.3<1.5)"
+        }
+      ],
+      "window": "session"
+    },
+    {
+      "at": 1789107933,
+      "istDate": "2026-09-11",
+      "minutesIST": 715,
+      "marketOpen": true,
+      "active": true,
+      "tradesToday": 0,
+      "opened": 0,
+      "notes": [
+        "Clock windows off — win-win setup पर किसी भी समय entry (NSE session)",
+        "कोई scalp win-win नहीं (5m+15m / OI TAKE नहीं मिला)",
+        "कोई index option idea नहीं (OI TAKE + 1h bulletin नहीं)",
+        "कोई stock-intraday idea नहीं"
+      ],
+      "ideas": [
+        {
+          "kind": "stockOption",
+          "symbol": "MARUTI.NS",
+          "optionType": "PE",
+          "confidence": 89,
+          "reason": "reward:risk कम (1.3<1.5)"
+        }
+      ],
+      "window": "session"
+    },
+    {
+      "at": 1789107633,
+      "istDate": "2026-09-11",
+      "minutesIST": 710,
+      "marketOpen": true,
+      "active": true,
+      "tradesToday": 0,
+      "opened": 0,
+      "notes": [
+        "Clock windows off — win-win setup पर किसी भी समय entry (NSE session)",
+        "कोई scalp win-win नहीं (5m+15m / OI TAKE नहीं मिला)",
+        "कोई index option idea नहीं (OI TAKE + 1h bulletin नहीं)",
+        "कोई stock-intraday idea नहीं"
+      ],
+      "ideas": [],
+      "window": "session"
+    },
+    {
+      "at": 1789107333,
+      "istDate": "2026-09-11",
+      "minutesIST": 705,
+      "marketOpen": true,
+      "active": true,
+      "tradesToday": 0,
+      "opened": 0,
+      "notes": [
+        "Clock windows off — win-win setup पर किसी भी समय entry (NSE session)",
+        "कोई scalp win-win नहीं (5m+15m / OI TAKE नहीं मिला)"
+      ],
+      "ideas": [
+        {
+          "kind": "indexOption",
+          "symbol": "^CNXFIN",
+          "optionType": "PE",
+          "confidence": 70,
+          "reason": "VETO — premium Decaying (कम range + EMA9 गिर रहा), trade suppress"
+        }
+      ],
+      "window": "session"
+    },
+    {
+      "at": 1789107033,
+      "istDate": "2026-09-11",
+      "minutesIST": 700,
+      "marketOpen": true,
+      "active": true,
+      "tradesToday": 0,
+      "opened": 0,
+      "notes": [
+        "Clock windows off — win-win setup पर किसी भी समय entry (NSE session)",
+        "कोई scalp win-win नहीं (5m+15m / OI TAKE नहीं मिला)",
+        "कोई index option idea नहीं (OI TAKE + 1h bulletin नहीं)"
+      ],
+      "ideas": [],
+      "window": "session"
+    },
+    {
+      "at": 1789106733,
+      "istDate": "2026-09-11",
+      "minutesIST": 695,
+      "marketOpen": true,
+      "active": true,
+      "tradesToday": 0,
+      "opened": 0,
+      "notes": [
+        "Clock windows off — win-win setup पर किसी भी समय entry (NSE session)",
+        "कोई scalp win-win नहीं (5m+15m / OI TAKE नहीं मिला)",
+        "कोई index option idea नहीं (OI TAKE + 1h bulletin नहीं)"
+      ],
+      "ideas": [],
+      "window": "session"
+    },
+    {
+      "at": 1789106433,
+      "istDate": "2026-09-11",
+      "minutesIST": 690,
+      "marketOpen": true,
+      "active": true,
+      "tradesToday": 0,
+      "opened": 0,
+      "notes": [
+        "Clock windows off — win-win setup पर किसी भी समय entry (NSE session)",
+        "कोई scalp win-win नहीं (5m+15m / OI TAKE नहीं मिला)",
+        "कोई index option idea नहीं (OI TAKE + 1h bulletin नहीं)"
+      ],
+      "ideas": [],
+      "window": "session"
+    },
+    {
+      "at": 1789106133,
+      "istDate": "2026-09-11",
+      "minutesIST": 685,
+      "marketOpen": true,
+      "active": true,
+      "tradesToday": 0,
+      "opened": 0,
+      "notes": [
+        "Clock windows off — win-win setup पर किसी भी समय entry (NSE session)",
+        "कोई scalp win-win नहीं (5m+15m / OI TAKE नहीं मिला)",
+        "कोई index option idea नहीं (OI TAKE + 1h bulletin नहीं)"
+      ],
+      "ideas": [],
+      "window": "session"
+    },
+    {
+      "at": 1789105833,
+      "istDate": "2026-09-11",
+      "minutesIST": 680,
+      "marketOpen": true,
+      "active": true,
+      "tradesToday": 0,
+      "opened": 0,
+      "notes": [
+        "Clock windows off — win-win setup पर किसी भी समय entry (NSE session)",
+        "कोई scalp win-win नहीं (5m+15m / OI TAKE नहीं मिला)",
+        "कोई index option idea नहीं (OI TAKE + 1h bulletin नहीं)"
+      ],
+      "ideas": [],
+      "window": "session"
+    },
+    {
+      "at": 1789105533,
+      "istDate": "2026-09-11",
+      "minutesIST": 675,
+      "marketOpen": true,
+      "active": true,
+      "tradesToday": 0,
+      "opened": 0,
+      "notes": [
+        "Clock windows off — win-win setup पर किसी भी समय entry (NSE session)",
+        "कोई scalp win-win नहीं (5m+15m / OI TAKE नहीं मिला)",
+        "कोई index option idea नहीं (OI TAKE + 1h bulletin नहीं)"
+      ],
+      "ideas": [],
+      "window": "session"
+    },
+    {
+      "at": 1789105233,
+      "istDate": "2026-09-11",
+      "minutesIST": 670,
+      "marketOpen": true,
+      "active": true,
+      "tradesToday": 0,
+      "opened": 0,
+      "notes": [
+        "Clock windows off — win-win setup पर किसी भी समय entry (NSE session)",
+        "कोई scalp win-win नहीं (5m+15m / OI TAKE नहीं मिला)",
+        "कोई index option idea नहीं (OI TAKE + 1h bulletin नहीं)"
+      ],
+      "ideas": [],
+      "window": "session"
+    },
+    {
+      "at": 1789103965,
+      "istDate": "2026-09-11",
+      "minutesIST": 649,
+      "marketOpen": true,
+      "active": true,
+      "tradesToday": 0,
+      "opened": 0,
+      "notes": [
+        "Clock windows off — win-win setup पर किसी भी समय entry (NSE session)",
+        "कोई scalp win-win नहीं (5m+15m / OI TAKE नहीं मिला)",
+        "कोई index option idea नहीं (OI TAKE + 1h bulletin नहीं)",
+        "कोई stock option idea नहीं (clean directional नहीं)",
+        "कोई stock-intraday idea नहीं"
+      ],
+      "ideas": [],
+      "window": "session"
+    },
+    {
+      "at": 1789103665,
+      "istDate": "2026-09-11",
+      "minutesIST": 644,
+      "marketOpen": true,
+      "active": true,
+      "tradesToday": 0,
+      "opened": 0,
+      "notes": [
+        "Clock windows off — win-win setup पर किसी भी समय entry (NSE session)",
+        "कोई scalp win-win नहीं (5m+15m / OI TAKE नहीं मिला)",
+        "कोई index option idea नहीं (OI TAKE + 1h bulletin नहीं)",
+        "कोई stock option idea नहीं (clean directional नहीं)",
+        "कोई stock-intraday idea नहीं"
+      ],
+      "ideas": [],
+      "window": "session"
+    },
+    {
+      "at": 1789103365,
+      "istDate": "2026-09-11",
+      "minutesIST": 639,
+      "marketOpen": true,
+      "active": true,
+      "tradesToday": 0,
+      "opened": 0,
+      "notes": [
+        "Clock windows off — win-win setup पर किसी भी समय entry (NSE session)",
+        "कोई scalp win-win नहीं (5m+15m / OI TAKE नहीं मिला)",
+        "कोई index option idea नहीं (OI TAKE + 1h bulletin नहीं)",
+        "कोई stock option idea नहीं (clean directional नहीं)",
+        "कोई stock-intraday idea नहीं"
+      ],
+      "ideas": [],
+      "window": "session"
+    },
+    {
+      "at": 1789103065,
+      "istDate": "2026-09-11",
+      "minutesIST": 634,
+      "marketOpen": true,
+      "active": true,
+      "tradesToday": 0,
+      "opened": 0,
+      "notes": [
+        "Clock windows off — win-win setup पर किसी भी समय entry (NSE session)",
+        "कोई scalp win-win नहीं (5m+15m / OI TAKE नहीं मिला)",
+        "कोई index option idea नहीं (OI TAKE + 1h bulletin नहीं)",
+        "कोई stock option idea नहीं (clean directional नहीं)",
+        "कोई stock-intraday idea नहीं"
+      ],
+      "ideas": [],
+      "window": "session"
+    },
+    {
+      "at": 1789102765,
+      "istDate": "2026-09-11",
+      "minutesIST": 629,
+      "marketOpen": true,
+      "active": true,
+      "tradesToday": 0,
+      "opened": 0,
+      "notes": [
+        "Clock windows off — win-win setup पर किसी भी समय entry (NSE session)",
+        "कोई scalp win-win नहीं (5m+15m / OI TAKE नहीं मिला)",
+        "कोई index option idea नहीं (OI TAKE + 1h bulletin नहीं)"
+      ],
+      "ideas": [],
+      "window": "session"
+    },
+    {
+      "at": 1789102465,
+      "istDate": "2026-09-11",
+      "minutesIST": 624,
+      "marketOpen": true,
+      "active": true,
+      "tradesToday": 0,
+      "opened": 0,
+      "notes": [
+        "Clock windows off — win-win setup पर किसी भी समय entry (NSE session)",
+        "कोई scalp win-win नहीं (5m+15m / OI TAKE नहीं मिला)",
+        "कोई index option idea नहीं (OI TAKE + 1h bulletin नहीं)"
+      ],
+      "ideas": [],
+      "window": "session"
+    },
+    {
+      "at": 1789102165,
+      "istDate": "2026-09-11",
+      "minutesIST": 619,
+      "marketOpen": true,
+      "active": true,
+      "tradesToday": 0,
+      "opened": 0,
+      "notes": [
+        "Clock windows off — win-win setup पर किसी भी समय entry (NSE session)",
+        "कोई scalp win-win नहीं (5m+15m / OI TAKE नहीं मिला)",
+        "कोई index option idea नहीं (OI TAKE + 1h bulletin नहीं)"
+      ],
+      "ideas": [],
+      "window": "session"
+    },
+    {
+      "at": 1789101865,
+      "istDate": "2026-09-11",
+      "minutesIST": 614,
+      "marketOpen": true,
+      "active": true,
+      "tradesToday": 0,
+      "opened": 0,
+      "notes": [
+        "Clock windows off — win-win setup पर किसी भी समय entry (NSE session)",
+        "कोई scalp win-win नहीं (5m+15m / OI TAKE नहीं मिला)",
+        "कोई index option idea नहीं (OI TAKE + 1h bulletin नहीं)"
+      ],
+      "ideas": [],
+      "window": "session"
+    },
+    {
+      "at": 1789101565,
+      "istDate": "2026-09-11",
+      "minutesIST": 609,
+      "marketOpen": true,
+      "active": true,
+      "tradesToday": 0,
+      "opened": 0,
+      "notes": [
+        "Clock windows off — win-win setup पर किसी भी समय entry (NSE session)",
+        "कोई scalp win-win नहीं (5m+15m / OI TAKE नहीं मिला)",
+        "कोई index option idea नहीं (OI TAKE + 1h bulletin नहीं)"
+      ],
+      "ideas": [],
+      "window": "session"
+    }
+  ],
+  "extDedup": [],
+  "scalpsToday": 0
+}

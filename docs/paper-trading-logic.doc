@@ -1,0 +1,342 @@
+<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8"/>
+<style>
+  body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1a1a1a;line-height:1.4}
+  h1{font-size:20pt;color:#1b2a44;border-bottom:2px solid #2b3d5c;padding-bottom:4px}
+  h2{font-size:15pt;color:#1b2a44;margin-top:16px}
+  h3{font-size:12.5pt;color:#2b3d5c}
+  code{background:#eef;padding:1px 3px;font-family:Consolas,monospace;font-size:10pt}
+  table{margin:8px 0}
+  th,td{border:1px solid #bbb}
+</style></head><body><h1>Autonomous Paper-Trading Engine - Logic Document</h1>
+<p>This document describes how the built-in <b>paper-trading engine</b> works: how it</p>
+<p>opens and closes simulated trades automatically, how it sizes positions, and</p>
+<p>every rule that protects capital. It is a *simulation* - no real orders are ever</p>
+<p>placed. Source: <code>src/paper/engine.ts</code>. Wiring / data feeds: <code>src/routes/api.ts</code>.</p>
+<hr/>
+<h2>1. Purpose</h2>
+<p>You define two starting amounts in the morning - one for <b>options (FNO)</b> and</p>
+<p>one for <b>swing</b> trades. For N trading days (default 20) the engine runs</p>
+<p>completely autonomously during market hours:</p>
+<p>1. Pulls fresh trade "ideas" from the same models that power the dashboard.</p>
+<p>2. Applies safety gates, opens trades that pass, sizes them by risk.</p>
+<p>3. Marks every open position to market each second (with theta decay).</p>
+<p>4. Exits on target / stop / decay / stall / trend-reversal / OI-flip / EOD.</p>
+<p>5. Records realised &amp; unrealised P&amp;L, writes a per-trade "why" remark.</p>
+<p>6. Persists everything to disk (<code>data/paper-state.json</code> + CSVs).</p>
+<p>No human input is needed after you press <b>Start</b> with your capital.</p>
+<hr/>
+<h2>2. Capital, pools and run length</h2>
+<ul style="margin:4px 0">
+<li>Two independent pools: <code>option</code> and <code>swing</code>, each with <code>startCapital</code> and</li>
+</ul>
+<p>  live <code>cash</code>.</p>
+<ul style="margin:4px 0">
+<li><code>days</code> = number of trading days the run lasts (default 20). A day is counted</li>
+</ul>
+<p>  once per unique IST calendar date the engine ticks on.</p>
+<ul style="margin:4px 0">
+<li>The run ends (sets <code>active=false</code>) when <code>tradingDaysElapsed &gt; days</code>, or when</li>
+</ul>
+<p>  the total-profit target is hit (see 7).</p>
+<hr/>
+<h2>3. Data feeds (dependency injection)</h2>
+<p>The engine itself is pure logic. All live data is injected via <code>TickDeps</code> from</p>
+<p><code>api.ts</code>, so the engine never calls the network directly. Key providers:</p>
+<table border="1" cellspacing="0" cellpadding="5" style="border-collapse:collapse;font-size:10.5pt"><tr><th style="background:#2b3d5c;color:#fff;text-align:left">Dependency</th><th style="background:#2b3d5c;color:#fff;text-align:left">What it supplies</th></tr><tr><td><code>getSpot(symbol)</code></td><td>Current underlying price (Groww live).</td></tr><tr><td><code>getOptionIdeas()</code></td><td>Safety-gated option plays from the 15-min hourly model.</td></tr><tr><td><code>getSwingIdeas()</code></td><td>Breakout/swing candidates.</td></tr><tr><td><code>getZeroHeroIdeas()</code></td><td>Deep-OTM index lottery ideas (expiry only, Groww only).</td></tr><tr><td><code>getOiBias(symbol)</code></td><td>Live OI verdict: Bullish / Bearish / Neutral.</td></tr><tr><td><code>getRegime(symbol)</code></td><td>Trend vs Range + direction + ADX (from 15m ADX).</td></tr><tr><td><code>marketOpen</code>, <code>minutesIST</code>, <code>istDate</code>, <code>nowEpoch</code></td><td>Time / session context.</td></tr></table>
+<p>Each option idea carries: strike, premium, premium target/stop, spot</p>
+<p>target/stop, lot size, expected move %, <b>confidence</b> (0-100), theta %/day,</p>
+<p>DTE, and a human <code>strikeReason</code> (why that strike - OI liquidity + delta + theta).</p>
+<hr/>
+<h2>4. Two engine entry points</h2>
+<ul style="margin:4px 0">
+<li><b><code>markPaper(deps)</code></b> - fast mark-to-market, called ~every second by the UI.</li>
+</ul>
+<p>  Refreshes open-position prices and processes <b>target/stop exits only</b>. No new</p>
+<p>  entries, no day counting. Safe to call at high frequency.</p>
+<ul style="margin:4px 0">
+<li><b><code>tickPaper(deps)</code></b> - the full cycle (default hourly + on demand): day</li>
+</ul>
+<p>  counting, all exit rules, then new entries. This is where trades are opened.</p>
+<hr/>
+<h2>5. Entry rules (when a new trade is opened)</h2>
+<h3>5.1 Timing and frequency gates</h3>
+<ul style="margin:4px 0">
+<li><b>Options open from 9:20 AM IST</b>; <b>swing from 9:30 AM IST</b></li>
+</ul>
+<p>  (<code>OPT_START_MIN</code> / <code>SW_START_MIN</code>). Analysis is visible earlier on the tabs,</p>
+<p>  but the engine won't *open* before these times.</p>
+<ul style="margin:4px 0">
+<li><b>Max 3 new trades per day</b> (<code>MAX_TRADES_PER_DAY</code>), shared across options +</li>
+</ul>
+<p>  swing. Zero-hero is a separate bucket (see 8) and is NOT counted here.</p>
+<ul style="margin:4px 0">
+<li><b>30-minute throttle</b> between entries of the same vertical</li>
+</ul>
+<p>  (<code>lastOptEntryEpoch</code> / <code>lastSwEntryEpoch</code>), and the throttle only arms after a</p>
+<p>  *real* entry.</p>
+<ul style="margin:4px 0">
+<li>Max concurrent positions: <b>2 options</b> (<code>MAX_OPT</code>), <b>3 swing</b> (<code>MAX_SW</code>).</li>
+<li>No new entries at/after EOD (<code>minutesIST &gt;= 920</code> -&gt; ~15:20 IST).</li>
+</ul>
+<h3>5.2 Option quality gates (each idea must pass ALL)</h3>
+<p>1. <b>Not already held</b> for that symbol.</p>
+<p>2. <b>Near-expiry filter:</b> skip if <code>dte &lt;= 1</code> *unless* <code>confidence &gt;= 80</code></p>
+<p>   (only a very high-conviction, fast move can beat brutal expiry-day theta).</p>
+<p>3. <b>Range-bound gate:</b> if <code>getRegime</code> says the underlying is <code>Range</code>, skip -</p>
+<p>   a bought option in a choppy market just bleeds theta.</p>
+<p>4. <b>Confirmation floor:</b> <code>confidence &gt;= 55</code>. Below that the multi-factor</p>
+<p>   signal (technicals + OI + futures + index alignment) is treated as a possible</p>
+<p>   bluff/trap and skipped.</p>
+<p>5. <b>Clean-move gate</b> (<code>CLEAN_MIN = 45</code>): options are only bought on stocks that</p>
+<p>   trend <b>cleanly</b>. Each idea carries a clean-move rating (Kaufman efficiency +</p>
+<p>   ADX + move size + follow-through, minus choppiness/whipsaw); anything below 45</p>
+<p>   is skipped because a choppy underlying bleeds theta even when it moves. Ideas</p>
+<p>   arrive sorted cleanest-and-highest-conviction first (blend of clean rating,</p>
+<p>   confidence and expected move), so the best clean movers are taken first within</p>
+<p>   the per-day cap. The chosen grade is recorded on the position/strike note.</p>
+<p>6. <b>Reward:risk floor</b> (<code>OPT_RR_MIN = 1.3</code>): an option trade is only taken if</p>
+<p>   its target payoff is at least 1.3x the risk to its stop. Poor-payoff setups</p>
+<p>   are skipped.</p>
+<p>7. <b>Portfolio-heat cap</b> (<code>HEAT_CAP_PCT = 6%</code>): the sum of open risk across ALL</p>
+<p>   positions may not exceed 6% of combined starting capital. New trades that</p>
+<p>   would breach this are skipped, so total exposure stays bounded.</p>
+<h3>5.3 Option position sizing (risk-based, confidence-scaled)</h3>
+<ul style="margin:4px 0">
+<li>Risk per trade = <code>1% of option startCapital</code> (<code>RISK_PER_TRADE</code>) times a</li>
+</ul>
+<p>  <b>confidence scale</b> <code>confScale = clamp(confidence / 75, 0.6, 1.3)</code>.</p>
+<p>  Weaker (55-65%) signals get smaller size; strong (85%+) get larger.</p>
+<ul style="margin:4px 0">
+<li><code>lossPerLot = (premium - premiumStop) * lotSize</code>.</li>
+<li><code>lots = floor(risk / lossPerLot)</code>. If that rounds to 0 but a single lot's risk</li>
+</ul>
+<p>  is <code>&lt;= 5% of the pool</code>, allow <b>1 lot</b> (one index lot often exceeds a strict</p>
+<p>  1% cap on a modest account).</p>
+<ul style="margin:4px 0">
+<li>Reject if the premium outlay exceeds available <code>cash</code>.</li>
+</ul>
+<h3>5.4 Swing quality gates and sizing</h3>
+<ul style="margin:4px 0">
+<li>Enter at the <b>current</b> market price (not the stale breakout trigger).</li>
+<li>Reject if price is already at/through the stop or past the target.</li>
+<li>Require <b>reward:risk &gt;= 1.5:1</b> from the current price.</li>
+<li><code>riskPerShare = max(0.05, price - stop)</code>; `qty = floor(1% of swing capital /</li>
+</ul>
+<p>  riskPerShare)<code>; reject if </code>qty &lt; 1` or cost exceeds cash.</p>
+<hr/>
+<h3>5.5 Realistic execution costs</h3>
+<p>Paper P&amp;L is booked <b>net of costs and slippage</b> so it isn't rosier than live:</p>
+<ul style="margin:4px 0">
+<li><b>Slippage:</b> ~0.4% of premium per side on options (<code>OPT_SLIP</code>), ~0.05% on</li>
+</ul>
+<p>  equities (<code>EQ_SLIP</code>).</p>
+<ul style="margin:4px 0">
+<li><b>Charges:</b> brokerage (~Rs 20/leg), STT, exchange transaction fee, GST, and</li>
+</ul>
+<p>  stamp duty - a simplified but representative Indian F&amp;O / equity cost model</p>
+<p>  (<code>tradeFriction</code>).</p>
+<p>Each closed trade records <code>grossPnl</code>, <code>costs</code>, and net <code>pnl</code>; the summary shows</p>
+<p>total costs paid, and the CSV export includes gross vs net.</p>
+<h2>6. Exit rules (how a trade is closed)</h2>
+<p>Every tick, each open position is marked and evaluated. Options use</p>
+<p><code>evalOptionExit</code>, checked in this order:</p>
+<p>1. <b>Target</b> - spot reaches <code>spotTarget</code> -&gt; exit at <code>premiumTarget</code>.</p>
+<p>2. <b>Stop</b> - spot reaches <code>spotStop</code> -&gt; exit at <code>premiumStop</code>.</p>
+<p>3. <b>Trailing profit-protect</b> - once the mark ran to <code>&gt;= +40%</code> (<code>TRAIL_ARM</code>)</p>
+<p>   then gave back to <code>+12%</code> (<code>TRAIL_GIVE</code>), lock the win (<code>reason: trail</code>).</p>
+<p>4. <b>Decay cut</b> - if the marked premium bleeds to <code>&lt;= 80%</code> of entry</p>
+<p>   (<code>DECAY_CUT</code>, i.e. -20%), cut it early rather than waiting for the spot stop.</p>
+<p>5. <b>Stall</b> - after <code>30 min</code> (<code>STALL_MIN</code>) if spot has moved <code>&lt; 25%</code></p>
+<p>   (<code>STALL_PROGRESS</code>) of the way toward target, exit before theta eats more.</p>
+<p>6. <b>OI flip</b> (in <code>tickPaper</code>) - if live OI bias flips <b>against</b> the position</p>
+<p>   and price isn't following (favourable move &lt; 50% of expected), cut it.</p>
+<p>7. <b>Trend reversal</b> (in <code>tickPaper</code>, non-zero-hero) - if <code>getRegime</code> direction</p>
+<p>   flips against the position and the trade is <b>not in profit</b>, cut it</p>
+<p>   (<code>reason: reversal</code>). This is the "extra check on a reversed direction."</p>
+<p>8. <b>EOD</b> - intraday options are flattened near close; never held overnight.</p>
+<p>9. <b>End</b> - run finished.</p>
+<p><b>Option mark-to-market</b> (<code>optionMark</code>): premium is interpolated linearly</p>
+<p>between entry and the target anchor as spot moves, <b>minus theta decay</b> scaled</p>
+<p>to the fraction of the trading day held (<code>thetaPctPerDay</code> x heldFraction). Floor</p>
+<p>of 0.05 so a premium never goes negative.</p>
+<p><b>Swing exits:</b> target hit, stop hit, or max hold of <b>10 trading days</b></p>
+<p>(<code>SWING_MAX_HOLD</code>), or run end.</p>
+<hr/>
+<h2>7. Portfolio-level profit target</h2>
+<p>After exits each tick, <code>bookIfProfitTarget</code> checks total equity (cash + marked</p>
+<p>open positions across both pools). If it reaches <b>+15%</b> of combined starting</p>
+<p>capital (<code>PROFIT_TARGET_PCT</code>), the engine <b>books every open position</b> at its</p>
+<p>current mark and <b>stops the run</b> (<code>reason: profit</code>). This locks the gain</p>
+<p>rather than risking a give-back.</p>
+<h3>7.1 Loss circuit breakers (symmetric capital protection)</h3>
+<p>Two downside breakers mirror the profit target:</p>
+<ul style="margin:4px 0">
+<li><b>Max-drawdown kill switch</b> (<code>bookIfMaxDrawdown</code>, <code>MAX_DRAWDOWN_PCT = 10%</code>):</li>
+</ul>
+<p>  if total equity falls to <b>-10%</b> of combined starting capital, the engine</p>
+<p>  books every open position at its mark and <b>stops the run</b> (<code>reason: risk</code>).</p>
+<p>  Checked every tick *and* every 1-second mark-to-market, so it fires promptly.</p>
+<ul style="margin:4px 0">
+<li><b>Per-day loss cap</b> (<code>dailyLossCapHit</code>, <code>DAILY_LOSS_CAP_PCT = 3%</code>): once the</li>
+</ul>
+<p>  day's <b>realised</b> loss (sum of trades closed today) breaches <b>-3%</b> of</p>
+<p>  starting capital, the engine <b>halts all new entries</b> for the rest of that day</p>
+<p>  (options, swing and zero-hero). Open positions are still managed and exited</p>
+<p>  normally - it stops digging, it doesn't abandon existing trades.</p>
+<p>Both thresholds are surfaced in the summary (<code>todayRealisedPnl</code>,</p>
+<p><code>dailyLossCapHit</code>, <code>maxDrawdownPct</code>) and shown on the Paper Trading tab as a</p>
+<p>"Capital guard" line.</p>
+<hr/>
+<h2>8. Zero-Hero lottery (separate bucket)</h2>
+<p>Once per day (<code>zeroHeroToday</code>), from 9:20 AM, the engine may take <b>one</b> small</p>
+<p>deep-OTM index bet (NIFTY/BANKNIFTY/SENSEX), expiry-only, with a directional</p>
+<p>bias. Rules:</p>
+<ul style="margin:4px 0">
+<li><b>Stake = 2% of option capital</b> (<code>ZH_BUDGET_PCT</code>) - this is the *max loss*,</li>
+</ul>
+<p>  since a zero-hero can expire near zero. Lots scale up with account size.</p>
+<ul style="margin:4px 0">
+<li><b>Hard cap 5%</b> of the pool (<code>ZH_HARD_CAP_PCT</code>) and available cash.</li>
+<li><b>Not counted</b> against the 3-trades/day cap.</li>
+<li>Held to <b>target / -60% / expiry</b> - deliberately NOT cut on small decay,</li>
+</ul>
+<p>  because a lottery needs room. Exception: if after ~2 hours the index has moved</p>
+<p>  <code>&lt; 15%</code> toward the strike, it's cut early (<code>stall</code>) to stop pure theta bleed.</p>
+<hr/>
+<h2>9. Why-it-won/lost remarks</h2>
+<p>Every closed trade gets a plain-English <code>remark</code> (<code>buildRemark</code>) describing the</p>
+<p>spot move, whether direction was right, and which rule closed it (target, stop,</p>
+<p>decay, stall, trail, profit, reversal, eod, time, end). It also records</p>
+<p><code>capturedPct</code> = realised P&amp;L as a % of the projected potential - how much of the</p>
+<p>expected move you actually captured.</p>
+<hr/>
+<h2>10. Persistence and daily review</h2>
+<p>On every <code>save()</code>:</p>
+<ul style="margin:4px 0">
+<li><b><code>data/paper-state.json</code></b> - full engine state (pools, open, closed, counters).</li>
+<li><b><code>data/paper-trades.csv</code></b> - every closed trade: entry/exit IST timestamps,</li>
+</ul>
+<p>  entry-&gt;exit price, P&amp;L, P&amp;L %, exit reason, remark.</p>
+<ul style="margin:4px 0">
+<li><b><code>data/paper-daily.csv</code></b> - per-day summary: trades, wins/losses, gross</li>
+</ul>
+<p>  profit, gross loss, net P&amp;L, worst trade, win rate.</p>
+<p><code>dailyReview()</code> (API <code>/api/paper/daily</code>) groups closed trades by the IST date</p>
+<p>they closed on and reports per-day gross loss, net, worst single trade, and</p>
+<p>overall totals (net, total loss, loss-day count, worst day). This answers "how</p>
+<p>much loss happened daily" and feeds evening backtesting.</p>
+<hr/>
+<h2>11. Key constants (tuning knobs)</h2>
+<table border="1" cellspacing="0" cellpadding="5" style="border-collapse:collapse;font-size:10.5pt"><tr><th style="background:#2b3d5c;color:#fff;text-align:left">Constant</th><th style="background:#2b3d5c;color:#fff;text-align:left">Value</th><th style="background:#2b3d5c;color:#fff;text-align:left">Meaning</th></tr><tr><td><code>MAX_TRADES_PER_DAY</code></td><td>3</td><td>New trades/day (ex zero-hero).</td></tr><tr><td><code>MAX_OPT</code> / <code>MAX_SW</code></td><td>2 / 3</td><td>Max concurrent option / swing positions.</td></tr><tr><td><code>OPT_START_MIN</code> / <code>SW_START_MIN</code></td><td>9:20 / 9:30</td><td>Earliest entry times (IST).</td></tr><tr><td><code>RISK_PER_TRADE</code></td><td>1%</td><td>Risk per trade of that pool.</td></tr><tr><td>Confirmation floor</td><td>55 (80 if dte&lt;=1)</td><td>Min confidence to trade.</td></tr><tr><td><code>CLEAN_MIN</code></td><td>45</td><td>Min clean-move rating of the underlying for an option buy.</td></tr><tr><td><code>OPT_RR_MIN</code></td><td>1.3</td><td>Min reward:risk for an option entry.</td></tr><tr><td><code>HEAT_CAP_PCT</code></td><td>6%</td><td>Max total open risk across all positions.</td></tr><tr><td><code>OPT_SLIP</code> / <code>EQ_SLIP</code></td><td>0.4% / 0.05%</td><td>Per-side slippage (option / equity).</td></tr><tr><td><code>DECAY_CUT</code></td><td>80%</td><td>Cut option at -20% premium.</td></tr><tr><td><code>STALL_MIN</code> / <code>STALL_PROGRESS</code></td><td>30 min / 25%</td><td>Cut a non-progressing trade.</td></tr><tr><td><code>TRAIL_ARM</code> / <code>TRAIL_GIVE</code></td><td>+40% / +12%</td><td>Trailing profit-protect band.</td></tr><tr><td><code>PROFIT_TARGET_PCT</code></td><td>15%</td><td>Book-all &amp; stop target.</td></tr><tr><td><code>DAILY_LOSS_CAP_PCT</code></td><td>3%</td><td>Halt new entries once day's realised loss breaches this.</td></tr><tr><td><code>MAX_DRAWDOWN_PCT</code></td><td>10%</td><td>Book-all &amp; stop the run (kill switch).</td></tr><tr><td><code>SWING_MAX_HOLD</code></td><td>10 days</td><td>Max swing hold.</td></tr><tr><td><code>ZH_BUDGET_PCT</code> / <code>ZH_HARD_CAP_PCT</code></td><td>2% / 5%</td><td>Zero-hero stake / hard cap.</td></tr></table>
+<hr/>
+<h2>12. End-to-end flow (per tick)</h2>
+<pre style="background:#f4f4f4;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap">tickPaper:
+  if !active or market closed -&gt; return
+  count new trading day; reset per-day counters on date change
+  for each open position:
+     mark to market (option: interpolate premium - theta; swing: spot)
+     evaluate exits: target/stop/trail/decay/stall/OI-flip/reversal/EOD/end
+     close if any rule fires (record P&amp;L + remark)
+  if total equity &gt;= +15% -&gt; book all, stop (profit target)
+  if total equity &lt;= -10% -&gt; book all, stop (drawdown kill switch)
+  if run finished -&gt; stop
+  if day's realised loss &lt;= -3% -&gt; HALT new entries (manage open only)
+  else open new trades (options &gt;=9:20, swing &gt;=9:30):
+     apply timing, frequency, quality, range, confidence gates
+     size by risk x confidence; push position
+  maybe take ONE zero-hero lottery (&gt;=9:20, once/day)
+  save() -&gt; json + CSVs</pre>
+<hr/>
+<h2>13. Failure &amp; degraded-data handling</h2>
+<p>The engine is defensive: a single bad data call never aborts the whole tick.</p>
+<ul style="margin:4px 0">
+<li><b><code>getSpot</code> returns null / times out:</b> that position is <b>skipped</b> for the</li>
+</ul>
+<p>  tick (<code>if (spot == null) continue</code>) - it is NOT marked with stale data and no</p>
+<p>  exit is evaluated for it. Other positions still process. It re-marks on the</p>
+<p>  next successful tick.</p>
+<ul style="margin:4px 0">
+<li><b><code>getOptionIdeas</code> / <code>getSwingIdeas</code> / <code>getZeroHeroIdeas</code> throw:</b> wrapped in</li>
+</ul>
+<p>  try/catch - that vertical simply opens nothing this tick; exits still run.</p>
+<ul style="margin:4px 0">
+<li><b><code>getOiBias</code> / <code>getRegime</code> throw:</b> caught per position; the extra OI-flip /</li>
+</ul>
+<p>  reversal check is skipped, the base target/stop/decay/stall logic still runs.</p>
+<ul style="margin:4px 0">
+<li><b>Non-Groww feed:</b> live option OI is returned as *unavailable* (options are</li>
+</ul>
+<p>  Groww-only), so option ideas don't build and no option entries are taken;</p>
+<p>  existing positions keep marking from <code>getSpot</code>.</p>
+<ul style="margin:4px 0">
+<li><b>Restart mid-run:</b> state is reloaded from <code>data/paper-state.json</code> and the run</li>
+</ul>
+<p>  resumes. Open positions are re-marked against <b>current</b> live spot on the next</p>
+<p>  tick. There is no separate re-validation pass beyond that re-mark.</p>
+<h2>14. Idea selection &amp; prioritization</h2>
+<ul style="margin:4px 0">
+<li>Option ideas come from <code>runHourlyScan()</code>, which returns safety-gated plays</li>
+</ul>
+<p>  <b>sorted by <code>expectedPremiumMovePct x confidence</code> (descending)</b>. The engine</p>
+<p>  consumes them in that order, so the highest expected-move-x-conviction play is</p>
+<p>  taken first until the per-day / concurrent caps are hit.</p>
+<ul style="margin:4px 0">
+<li><b>Position uniqueness is per <code>kind + symbol</code>.</b> The engine will not open a</li>
+</ul>
+<p>  second option on a symbol it already holds - so it never runs two different</p>
+<p>  strikes on the same underlying at once. The same applies to swing.</p>
+<ul style="margin:4px 0">
+<li><b>Zero-hero is a separate bucket</b> and is not deduped against a regular option</li>
+</ul>
+<p>  on the same index symbol - it is possible (though capped at one zero-hero/day)</p>
+<p>  to hold both a normal index option and a zero-hero lottery on the same index.</p>
+<ul style="margin:4px 0">
+<li><b>Confidence</b> (the number that gates and sizes almost everything) is not a</li>
+</ul>
+<p>  black box: it is defined in <code>market-understanding-logic.md</code> (technical</p>
+<p>  confidence <code>|score| x 0.6 + agreement x 0.4</code>, then blended with OI + futures</p>
+<p>  agreement/conflict). The engine treats it as a calibrated input.</p>
+<h2>15. Controls, capital and operations</h2>
+<ul style="margin:4px 0">
+<li><b>Start / Stop / Reset:</b> <code>startPaper</code> begins a fresh run (overwrites state);</li>
+</ul>
+<p>  <code>stopPaper</code> sets <code>active=false</code> but <b>keeps</b> the state/history; <code>resetPaper</code></p>
+<p>  clears everything. There is no distinct "pause &amp; resume to active" - to</p>
+<p>  continue you start a new run.</p>
+<ul style="margin:4px 0">
+<li><b>No mid-run capital add/withdraw:</b> starting capital is fixed for the run.</li>
+<li><b><code>startCapital = 0</code> for a pool:</b> sizing yields 0 lots (and cost &gt; cash), so</li>
+</ul>
+<p>  that pool simply sits idle - no error, no trades.</p>
+<ul style="margin:4px 0">
+<li><b>No authentication / access control on the API routes.</b> The server is meant</li>
+</ul>
+<p>  to run locally; do not expose it to a network without adding auth.</p>
+<h2>16. Known gaps (not yet implemented)</h2>
+<p>Called out honestly, since the engine's stated goal is protecting capital:</p>
+<ul style="margin:4px 0">
+<li><b>Swing is long-only</b> - no short swing trades.</li>
+<li><b>No corporate-action handling</b> - splits/dividends during a multi-day swing</li>
+</ul>
+<p>  hold are not adjusted in the stop/target.</p>
+<ul style="margin:4px 0">
+<li><b>No unit tests</b> yet on <code>evalOptionExit</code>, <code>optionMark</code>, or the sizing math;</li>
+</ul>
+<p>  correctness currently rests on the backtester and live paper results, not on a</p>
+<p>  dedicated test suite. (Candidate improvement: add tests that assert each exit</p>
+<p>  rule fires on crafted inputs.)</p>
+<h2>17. Honest limitations</h2>
+<ul style="margin:4px 0">
+<li><b>Simulation only</b> - no slippage, no real fills, no partial fills; premiums</li>
+</ul>
+<p>  are modelled (linear-to-target + theta), not tick-by-tick option quotes.</p>
+<ul style="margin:4px 0">
+<li>Lot sizes for some F&amp;O stocks are approximate (indices are accurate).</li>
+<li>Option decisions depend on live Groww OI/greeks; quality degrades without the</li>
+</ul>
+<p>  live feed.</p>
+<ul style="margin:4px 0">
+<li>Past paper results do not guarantee live performance. Use it to study the</li>
+</ul>
+<p>  logic and win-rate, not as a promise of profit.</p></body></html>

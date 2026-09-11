@@ -1,0 +1,8 @@
+﻿OK   TopPicks(tab1)     21776ms  resp
+OK   Early Moves         1224ms  resp
+OK   Paper state            9ms  1 days
+OK   Paper daily            4ms  2 days
+OK   Paper hindi            3ms  2 days
+OK   Paper gate           876ms  resp
+OK   BT underlyings         7ms  resp
+OK   BT meta                7ms  18 expiries

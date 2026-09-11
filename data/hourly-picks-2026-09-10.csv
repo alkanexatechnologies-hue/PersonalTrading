@@ -1,0 +1,2 @@
+﻿date,slot,snapshotEpoch,symbol,name,direction,optionType,strike,spot,spotTarget,spotStop,premium,premiumTarget,premiumStop,expectedPremiumMovePct,confidence,qualityScore,marketAlignment,relVolume,thetaPctPerDay,decayLevel,dte,hourlyScore,expiry,result,hitTime,spotAfter
+2026-09-10,14:30,1789030837,HCLTECH.NS,HCL Technologies,Bearish,PE,1200,1205.8,1189.17,1217.44,25.3,32.56,20.22,28.7,68,58,Neutral,1.77,3.08,Low,19,72,2026-09-29,,,

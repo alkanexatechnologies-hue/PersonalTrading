@@ -1,0 +1,2 @@
+﻿health=True
+option-candles: ^NSEI 24250 CE 2026-09-08 -> available=True candles=104 
