@@ -58,7 +58,10 @@ export interface Trade {
   exitTime: number;
   exitPrice: number;
   pnl: number; // absolute per unit
-  pnlPercent: number; // NET of costs (what you actually keep)
+  // Same concept as PaperTrade.pnlPct (paper/engine.ts) under a different name -
+  // this is the backtest engine's trade record, a separate system from paper
+  // trading, not a naming bug. NET of costs (what you actually keep).
+  pnlPercent: number;
   grossPnlPercent?: number; // before costs
   costPercent?: number; // round-trip cost charged to this trade (% of entry)
   exitReason: "target" | "stop" | "signal" | "eod";

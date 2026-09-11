@@ -69,6 +69,8 @@ export interface PaperTrade extends PaperPosition {
   exitEpoch: number;
   exitReason: "target" | "stop" | "eod" | "time" | "end" | "decay" | "stall" | "trail" | "profit" | "reversal" | "risk";
   pnl: number; // NET of costs + slippage
+  // Same concept as Trade.pnlPercent (types.ts, the backtest engine's trade
+  // record) under a different name - a separate system, not a naming bug.
   pnlPct: number;
   grossPnl?: number;
   costs?: number;
@@ -317,6 +319,12 @@ const SCALP_COST_MULT = 2; // a scalp's gross target profit must be >= 2x round-
 function scalpRupeeCaps(symbol: string): { maxProfit: number; maxLoss: number } {
   return symbol === "^NSEI" ? { maxProfit: 700, maxLoss: 350 } : { maxProfit: 1000, maxLoss: 350 };
 }
+// Per-leg slippage assumptions, used by tradeFriction() below. Intentionally a
+// different, more itemized cost model than the backtest engine's single
+// BacktestParams.roundTripCostPercent (types.ts): paper trading breaks costs
+// into slippage + brokerage + STT + exchange + stamp duty for realism, while
+// the backtest keeps one flat round-trip % for simplicity. Not a naming bug -
+// the two systems deliberately model costs at different fidelity.
 const OPT_SLIP = 0.004;
 const EQ_SLIP = 0.0005;
 
