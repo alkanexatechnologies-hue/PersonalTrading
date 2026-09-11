@@ -390,7 +390,15 @@ button.ghost.on { background: var(--green); border-color: var(--green); color: #
 .risk-radar.rr-danger { border-color: #5a1a1e; background: #241012; }
 .risk-radar.rr-caution { border-color: #4a3a12; background: #221c0c; }
 .risk-radar.rr-low { border-color: #14402c; background: #0e1f18; }
-.rr-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px; }
+/* .risk-radar is a <details> element (foldable) - .rr-head is its <summary>. */
+.rr-head {
+  display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px;
+  cursor: pointer; list-style: none;
+}
+.rr-head::-webkit-details-marker { display: none; }
+.rr-caret { color: var(--muted); font-size: 12px; transition: transform 0.15s ease; margin-left: 4px; }
+.risk-radar[open] .rr-caret { transform: rotate(180deg); }
+.risk-radar:not([open]) .rr-head { margin-bottom: 0; }
 .rr-title { font-weight: 800; letter-spacing: 0.5px; }
 .rr-level { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 20px; }
 .rr-level.rr-danger { background: #331416; color: var(--red); }

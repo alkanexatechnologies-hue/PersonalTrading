@@ -2290,18 +2290,23 @@ function riskRadarHtml(risk, extraHtml = "") {
       </li>`
     )
     .join("");
+  // <details>/<summary> so the whole card can be collapsed - open by default
+  // so nothing changes visually until the trader chooses to fold it away.
   return `
-    <div class="risk-radar rr-${lvlCls}">
-      <div class="rr-head">
+    <details class="risk-radar rr-${lvlCls}" open>
+      <summary class="rr-head">
         <span class="rr-title">⚠ Risk Radar</span>
         <span class="rr-level rr-${lvlCls}">Spike risk: ${risk.level} (${risk.spikeRisk}/100)</span>
+        <span class="rr-caret">⌄</span>
+      </summary>
+      <div class="rr-body">
+        <div class="rr-meter"><div class="rr-fill rr-${lvlCls}" style="width:${risk.spikeRisk}%"></div></div>
+        <div class="rr-sub">ATR ${risk.atrPct ?? "-"}%${risk.atrRatio ? " · " + risk.atrRatio + "x normal" : ""}${risk.adx != null ? " · ADX " + risk.adx : ""}${risk.premiumSwingPct != null ? " · 1 ATR ≈ " + risk.premiumSwingPct + "% of premium" : ""}</div>
+        <ul class="rr-list">${items}</ul>
+        <p class="opt-disclaimer">${risk.note}</p>
+        ${extraHtml}
       </div>
-      <div class="rr-meter"><div class="rr-fill rr-${lvlCls}" style="width:${risk.spikeRisk}%"></div></div>
-      <div class="rr-sub">ATR ${risk.atrPct ?? "-"}%${risk.atrRatio ? " · " + risk.atrRatio + "x normal" : ""}${risk.adx != null ? " · ADX " + risk.adx : ""}${risk.premiumSwingPct != null ? " · 1 ATR ≈ " + risk.premiumSwingPct + "% of premium" : ""}</div>
-      <ul class="rr-list">${items}</ul>
-      <p class="opt-disclaimer">${risk.note}</p>
-      ${extraHtml}
-    </div>`;
+    </details>`;
 }
 
 // Market-situation read (situation text, reasons, bull/bear scenario, trader
