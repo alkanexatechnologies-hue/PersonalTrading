@@ -1,86 +1,25 @@
-import fs from "fs";
-import path from "path";
 import { OiAnalysis } from "../types";
-import { istDateStr, istTimeStr } from "../util/istTime";
+import { istTimeStr } from "../util/istTime";
+import { Baseline, getBaseline, recordOiBaseline, oiBaselineStrike, oiBaselineUnderlying } from "./baselineStore";
+
+// Re-exported so existing callers (routes/api.ts) importing these from this
+// module keep working unchanged - the persistence itself now lives in
+// baselineStore.ts, split out so it isn't interleaved with the classification
+// logic below (see the comment in baselineStore.ts for why).
+export { recordOiBaseline, oiBaselineStrike, oiBaselineUnderlying };
 
 // ---- OI-change tracker (ITM / ATM / OTM, same strike, both sides) ----
 // The feed gives LIVE per-strike OI + premium but not the day's CHANGE. So we
-// capture a per-strike BASELINE (OI + LTP) at the first reading of the day and
-// diff live values against it. We surface THREE strikes - one below spot, the
-// ATM, one above spot - and at EACH strike both the Call (CE) and Put (PE), with
-// their OI change AND price (premium) change. At a strike below spot the CE is
-// ITM and the PE is OTM; above spot it flips; at ATM both are ATM.
+// diff live values against a per-strike BASELINE (OI + LTP) captured at the
+// first reading of the day (see baselineStore.ts). We surface THREE strikes -
+// one below spot, the ATM, one above spot - and at EACH strike both the Call
+// (CE) and Put (PE), with their OI change AND price (premium) change. At a
+// strike below spot the CE is ITM and the PE is OTM; above spot it flips; at
+// ATM both are ATM.
 //   CE OI rising = call WRITING  -> resistance (bearish);  falling = covering (bullish)
 //   PE OI rising = put  WRITING  -> support    (bullish);  falling = unwinding (bearish)
 // Price is coloured by its BULLISH-for-underlying implication so calls & puts read
 // in the same directional frame (CE up = bullish, PE up = bearish).
-//
-// Baseline is persisted to disk so a server restart mid-session does NOT reset
-// "first reading of the day" (that would zero out ΔOI and flip the command).
-
-interface StrikeBase { ceOi: number; peOi: number; ceLtp: number | null; peLtp: number | null; }
-interface Baseline { date: string; underlying: number | null; strikes: Map<number, StrikeBase>; }
-const baselines = new Map<string, Baseline>();
-const FILE = path.join(process.cwd(), "data", "oi-baselines.json");
-let loaded = false;
-
-function istDate(): string { return istDateStr(); }
-function istTime(): string { return istTimeStr(); }
-
-function loadBaselines(): void {
-  if (loaded) return;
-  loaded = true;
-  try {
-    const raw = JSON.parse(fs.readFileSync(FILE, "utf-8")) as Record<string, { date: string; underlying: number | null; strikes: Record<string, StrikeBase> }>;
-    const today = istDate();
-    for (const [sym, b] of Object.entries(raw || {})) {
-      if (!b || b.date !== today || !b.strikes) continue;
-      const strikes = new Map<number, StrikeBase>();
-      for (const [k, v] of Object.entries(b.strikes)) strikes.set(Number(k), v);
-      if (strikes.size) baselines.set(sym, { date: b.date, underlying: b.underlying ?? null, strikes });
-    }
-  } catch { /* first run / corrupt file */ }
-}
-
-function persistBaselines(): void {
-  try {
-    const today = istDate();
-    const out: Record<string, { date: string; underlying: number | null; strikes: Record<string, StrikeBase> }> = {};
-    for (const [sym, b] of baselines) {
-      if (b.date !== today) continue;
-      const strikes: Record<string, StrikeBase> = {};
-      for (const [k, v] of b.strikes) strikes[String(k)] = v;
-      out[sym] = { date: b.date, underlying: b.underlying, strikes };
-    }
-    fs.mkdirSync(path.dirname(FILE), { recursive: true });
-    fs.writeFileSync(FILE, JSON.stringify(out), "utf-8");
-  } catch { /* best-effort */ }
-}
-
-// Capture the EARLIEST chain of the day as the baseline (only the first per day sticks).
-export function recordOiBaseline(symbol: string, oi: OiAnalysis): void {
-  if (!oi || !oi.available || !oi.topStrikes || !oi.topStrikes.length) return;
-  loadBaselines();
-  const date = istDate();
-  const existing = baselines.get(symbol);
-  if (existing && existing.date === date) return;
-  const strikes = new Map<number, StrikeBase>();
-  for (const s of oi.topStrikes) strikes.set(s.strike, { ceOi: s.ceOi || 0, peOi: s.peOi || 0, ceLtp: s.ceLtp ?? null, peLtp: s.peLtp ?? null });
-  baselines.set(symbol, { date, underlying: oi.underlying, strikes });
-  persistBaselines();
-}
-
-// Baseline accessors (used by the full option-chain view for % change).
-export function oiBaselineStrike(symbol: string, strike: number): { ceOi: number; peOi: number; ceLtp: number | null; peLtp: number | null } | null {
-  const b = baselines.get(symbol);
-  if (!b || b.date !== istDate()) return null;
-  return b.strikes.get(strike) || null;
-}
-export function oiBaselineUnderlying(symbol: string): number | null {
-  const b = baselines.get(symbol);
-  if (!b || b.date !== istDate()) return null;
-  return b.underlying ?? null;
-}
 
 export interface OiLeg {
   type: "CE" | "PE";
@@ -134,11 +73,10 @@ function actionFor(type: "CE" | "PE", oiChg: number | null): { action: string; b
 
 export function computeOiChange(symbol: string, name: string, type: "index" | "equity", oi: OiAnalysis | null): OiChangeResult | null {
   if (!oi || !oi.available || !oi.topStrikes || !oi.topStrikes.length || oi.underlying == null) return null;
-  loadBaselines();
   const spot = oi.underlying;
   const rows = oi.topStrikes;
-  const base = baselines.get(symbol);
-  const hasBaseline = !!(base && base.date === istDate());
+  const base: Baseline | null = getBaseline(symbol);
+  const hasBaseline = !!base;
 
   // ATM = strike closest to spot; plus the nearest strike below and above.
   let atmRow = rows[0];
@@ -308,7 +246,7 @@ export function computeOiChange(symbol: string, name: string, type: "index" | "e
     baselineSpot, spotChg, spotChgPct, levels, chain, best, maxCeBuildup, maxPeBuildup, netCeChg, netPeChg, bias, note, moveRead,
     oiDirScore, oiVerdict, oiConfidence, oiReasons,
     major, majorReason: major ? reasons.join(" · ") : null,
-    hasBaseline, baselineNote: hasBaseline ? "since first reading today" : `baseline forming (${istTime()} IST)`,
+    hasBaseline, baselineNote: hasBaseline ? "since first reading today" : `baseline forming (${istTimeStr()} IST)`,
     asOf: Math.floor(Date.now() / 1000),
   };
 }

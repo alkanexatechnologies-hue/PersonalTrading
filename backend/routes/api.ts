@@ -1127,7 +1127,7 @@ router.get("/index-desk", async (_req: Request, res: Response) => {
             buildHot, buildText,
             netCe: oc?.netCeChg ?? null, netPe: oc?.netPeChg ?? null,
           });
-        } catch { /* skip one index */ }
+        } catch (e) { console.error(`[api] skipped ${def.symbol}:`, e instanceof Error ? e.message : e); }
       }
       return { rows };
     });
@@ -2880,7 +2880,7 @@ router.get("/hour-outlook", async (_req: Request, res: Response) => {
           ]);
           const o = computeHourOutlook(def.symbol, def.name, c15 as any, c60 as any);
           if (o) out.push(o);
-        } catch { /* skip one index */ }
+        } catch (e) { console.error(`[api] skipped ${def.symbol}:`, e instanceof Error ? e.message : e); }
       }
       return { generatedAt: Math.floor(Date.now() / 1000), marketOpen: isTradingTimeIST(), outlook: out, disclaimer: DISCLAIMER };
     });
@@ -3822,7 +3822,7 @@ async function scanOiGridsForPing(): Promise<any[]> {
     try {
       const g = await cached(`oi-command:${def.symbol}`, 15_000, () => buildOiCommand(def));
       if (g) out.push(g);
-    } catch { /* skip one index */ }
+    } catch (e) { console.error(`[api] skipped ${def.symbol}:`, e instanceof Error ? e.message : e); }
   }
   return out;
 }
@@ -5666,7 +5666,7 @@ export function startHourlyScheduler() {
               expLow: Math.abs(d.expectedMove.low), expHigh: Math.abs(d.expectedMove.high),
             });
           }
-        } catch { /* skip one index */ }
+        } catch (e) { console.error(`[api] skipped ${def.symbol}:`, e instanceof Error ? e.message : e); }
       }
     } catch { /* scheduler best-effort */ }
   }, 5 * 60 * 1000);

@@ -1,10 +1,8 @@
-import fs from "fs";
-import path from "path";
 import { Candle } from "../types";
 import { findSymbolDef } from "../config";
 import { GrowwProvider, growwOptionCandles, growwSpotCandles } from "../data/growwProvider";
 import { findOption, optionStrikes, optionExpiries } from "../data/growwInstruments";
-import { OiSignal, Horizon, HORIZONS } from "../oi/oiCommandLog";
+import { OiSignal, Horizon, HORIZONS, loadOiSignalLog } from "../oi/oiCommandLog";
 
 // ---- OI Command Back-Test engine ------------------------------------------
 // The OI Command grid's DIRECTION read comes from LIVE intraday open-interest
@@ -221,10 +219,9 @@ export interface LogReplayResult {
   option: { trades: number; targets: number; stops: number; open: number; wins: number; winPct: number; avgPnlPct: number; sumPnlPct: number };
 }
 
-function readLog(): OiSignal[] {
-  const file = path.join(process.cwd(), "data", "oi-command-log.json");
-  try { return JSON.parse(fs.readFileSync(file, "utf-8")); } catch { return []; }
-}
+// Reads the same log oi/oiCommandLog.ts writes - delegated there instead of
+// duplicating the file path + read logic in this module.
+const readLog = loadOiSignalLog;
 
 export async function backtestOiCommandLog(
   provider: GrowwProvider,

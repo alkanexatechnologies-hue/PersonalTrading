@@ -30,6 +30,9 @@ const FILE = path.join(process.cwd(), "data", "oi-command-log.json");
 function loadAll(): OiSignal[] {
   try { return JSON.parse(fs.readFileSync(FILE, "utf-8")); } catch { return []; }
 }
+// Exported read accessor so other modules (e.g. backtest/oiCommand.ts, which
+// replays this log) don't each duplicate the file path + read logic.
+export const loadOiSignalLog = loadAll;
 function saveAll(rows: OiSignal[]) {
   try { fs.mkdirSync(path.dirname(FILE), { recursive: true }); fs.writeFileSync(FILE, JSON.stringify(rows.slice(-800), null, 2), "utf-8"); } catch { /* best-effort */ }
 }
