@@ -2183,10 +2183,16 @@ body.mode-option .index-strip { display: flex; }
 .mtg-risk-hero.rr-caution { border-color: rgba(240,166,58,0.5); } .mtg-risk-hero.rr-caution b { color: #f0a63a; }
 .mtg-risk-hero.rr-low { border-color: rgba(22,199,132,0.5); } .mtg-risk-hero.rr-low b { color: #16c784; }
 
-/* Dashboard Grid secondary row: Risk Radar detail, Levels, Writer battle, OI
-   walls - independent cards scanned side by side instead of one long column. */
-.mtg-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; align-items: start; }
-.mtg-grid > .risk-radar { margin-bottom: 0; }
+/* Risk Radar gets its own full-width row rather than sharing a grid row with
+   the compact stat cards below - its warnings list is variable-length and
+   often much taller than Levels/Writer/OI-walls, which with a shared grid row
+   left a block of dead space under the shorter cards up to Risk Radar's
+   height. Full width lets it size to its own content instead. */
+.mts > .risk-radar { margin-bottom: 0; }
+
+/* Dashboard Grid secondary row: Levels, Writer battle, OI walls - similar,
+   compact heights, so a shared row works well for these three. */
+.mtg-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; align-items: start; }
 .mtg-card { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
 .mtg-card h5 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--muted); font-weight: 800; }
 .o2-lv { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }

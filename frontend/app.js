@@ -4730,8 +4730,9 @@ function renderMasterSelector(d) {
         <span class="mts-chip">RR / Score gate</span>
       </div>
 
+      ${risk ? riskRadarHtml(risk) : ""}
+
       <div class="mtg-grid">
-        ${risk ? riskRadarHtml(risk) : ""}
         ${renderLevelsCardHtml(C)}
         ${renderWriterBattleHtml(C)}
         ${renderOiWallsCardHtml(d)}
