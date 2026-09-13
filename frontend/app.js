@@ -24,10 +24,10 @@ let rsiChart, rsiSeries;
 let equityChart, equitySeries;
 let rangeSyncing = false;
 
-// Fetches /api/symbols and renders the watchlist. Split out of init() so it
-// can be retried after a successful login: init() itself fires at page load
-// before any session token exists, so this first attempt 401s for a brand
-// new session (no cached token yet) - see the retry in enterByRole().
+// Fetches /api/symbols and renders the watchlist. Called from init(), which
+// only ever runs after enterByRole() confirms a valid session (see the bottom
+// of this file) - so this always has a real Authorization token attached by
+// installAuthFetch() by the time it runs.
 async function loadSymbolsAndWatchlist() {
   let res;
   try {
@@ -35,7 +35,7 @@ async function loadSymbolsAndWatchlist() {
   } catch (_) {
     return; // offline/network error - leave state.symbols as-is, don't crash init()
   }
-  if (!res || !Array.isArray(res.symbols)) return; // e.g. {"error":"Unauthorized..."} before login
+  if (!res || !Array.isArray(res.symbols)) return; // e.g. a transient server error
   state.symbols = res.symbols;
   if (el("provider-badge")) el("provider-badge").textContent = "provider: " + res.provider;
   if (el("disclaimer")) el("disclaimer").textContent = res.disclaimer;
@@ -4948,6 +4948,13 @@ async function loadOiCommand() {
   if (st) st.textContent = "लोड हो रहा…";
   try {
     const d = await fetchJSON("/api/oi-command?symbol=" + encodeURIComponent(sym), 25000);
+    // A stray 401 here (session expired mid-session, or a request that raced
+    // login) is a session problem, not a "no data available" one - rendering
+    // the server's raw {error:"Unauthorized..."} into the panel as if it were
+    // a normal message is exactly what made a transient auth hiccup look like
+    // a permanent, stuck "invalid login" screen. Leave the panel as it was
+    // and let the next 15s auto-refresh (startOiCommandLive) retry instead.
+    if (d && d.error === "Unauthorized. Please log in.") { if (st) st.textContent = ""; return; }
     // Liquidity detection for the same symbol (observation only; no trading gate).
     await loadLiquidityStatus(sym);
     if (!d.available && !d.bulletin) { if (box) box.innerHTML = `<div class="wl-sub">${d.message || d.error || "उपलब्ध नहीं"}</div>`; if (st) st.textContent = ""; return; }
@@ -8704,11 +8711,19 @@ function enterByRole(role, permissions, username) {
   state.permissions = permissions || [];
   state.session = { role: state.role, permissions: state.permissions, username: username || null };
   applyPermissionGating();
-  // init() (bottom of this file) fires at page load before any session token
-  // exists, so its one and only /api/symbols fetch 401s on a brand new
-  // session and never repopulates the watchlist. Retry now that we actually
-  // have a validated session/token.
-  if (!state.symbols || !state.symbols.length) loadSymbolsAndWatchlist();
+  // The dashboard's data loaders (init(), bottom of this file) must not fire
+  // any /api/* call until a session token is confirmed valid - every one of
+  // them previously ran unconditionally at page load, before login, so each
+  // 401'd once and (unlike a periodic auto-refresh) most never got a second
+  // chance until a full page reload. enterByRole() is the single place both
+  // the "already logged in" and "just logged in" paths funnel through
+  // (setupLoginGate() below), so it's the only safe place to start loading
+  // dashboard data. Guarded so a stray second call (there shouldn't be one)
+  // can't re-run every timer/listener setup in init() twice.
+  if (!state.dashboardInited) {
+    state.dashboardInited = true;
+    init();
+  }
   if (state.role === "admin") enterAdminMode();
   else enterApp();
 }
@@ -8745,8 +8760,19 @@ async function setupLoginGate() {
     try {
       const r = await fetch("/api/session", { headers: { Authorization: "Bearer " + token } }).then((x) => x.json());
       if (r && r.valid) { gate.remove(); enterByRole(r.role, r.permissions, r.username); return; }
-    } catch (_) { /* fall through to login */ }
-    localStorage.removeItem(LG_TOKEN_KEY);
+      // Server actually answered and said this token is no longer valid
+      // (expired/logged out elsewhere) - safe to forget it.
+      localStorage.removeItem(LG_TOKEN_KEY);
+    } catch (_) {
+      // The /api/session request itself failed (network blip, or - on Render's
+      // free tier - the server still cold-starting). That is NOT the same as
+      // "the server confirmed this session is invalid", so the token must be
+      // kept: wiping it here forced a real, previously-logged-in user back to
+      // the login screen on a transient hiccup instead of just retrying. Fall
+      // through to showing the login form for now; the token stays in
+      // localStorage so a page reload once the server responds recovers the
+      // session normally instead of demanding a fresh login.
+    }
   }
 
   if (form) form.addEventListener("submit", async (e) => {
@@ -9595,5 +9621,9 @@ async function loadLiquidityStatus(symbol) {
 
 setupMobileNav();
 setupModeGate();
+// init() is intentionally NOT called here. It fires ~10 authenticated /api/*
+// calls (OI Command, watchlist, top picks, ...); calling it before login is
+// confirmed was the root cause of the post-login dashboard showing stale
+// "Unauthorized" errors that only cleared on a full page reload. setupLoginGate()
+// calls init() itself, from enterByRole(), once a session is actually valid.
 setupLoginGate();
-init();
