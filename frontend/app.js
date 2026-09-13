@@ -8845,10 +8845,18 @@ async function setupLoginGate() {
 
   // Admin/User mode card selector - a UI hint only; the server independently
   // verifies the real role from the matched account and never trusts this.
+  // Switching cards clears username/password: they're two different accounts
+  // (admin vs a userStore user), so carrying one card's typed-in credentials
+  // over to the other card is never correct - only ever leftover text.
+  const userInput = el("lg-user");
   document.querySelectorAll(".lg-mode-card").forEach((card) => {
     card.addEventListener("click", () => {
       lgSelectedMode = card.getAttribute("data-mode");
       document.querySelectorAll(".lg-mode-card").forEach((c) => c.classList.toggle("selected", c === card));
+      if (userInput) userInput.value = "";
+      if (pass) pass.value = "";
+      if (errEl) errEl.textContent = "";
+      if (userInput) userInput.focus();
     });
   });
 
