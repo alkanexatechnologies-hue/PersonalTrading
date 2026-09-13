@@ -1,6 +1,6 @@
 // Covers the 16 required scenarios for admin-only connection management.
 // Isolates its effect on data/users.json the same way session.test.ts does.
-// No real Groww/Dhan/WhatsApp network calls are made - these test the
+// No real Groww/Dhan/Telegram network calls are made - these test the
 // AUTHORIZATION boundary and the NO-SECRET-LEAK guarantee, not live
 // connectivity (that's what the manual "Test Connection" button is for).
 import { test, before, after } from "node:test";
@@ -57,10 +57,10 @@ test("1. Admin can view the Connections summary", () => {
   requireAdmin(fakeReq(adminToken()), res, () => { called = true; });
   assert.equal(called, true);
   const summary = buildConnectionsSummary();
-  assert.ok("groww" in summary && "dhan" in summary && "whatsapp" in summary);
+  assert.ok("groww" in summary && "dhan" in summary && "telegram" in summary);
 });
 
-// 2/3/4. Admin can test Groww/Dhan/WhatsApp — verified via requireAdmin
+// 2/3/4. Admin can test Groww/Dhan/Telegram — verified via requireAdmin
 // admitting the admin session to those routes (the routes themselves are
 // thin wrappers around already-tested provider functions; the security
 // boundary, not live network connectivity, is what's under test here).
@@ -74,9 +74,9 @@ test("3. Admin is admitted to the Dhan test route", () => {
   requireAdmin(fakeReq(adminToken(), "/dhan/test"), res, () => { called = true; });
   assert.equal(called, true);
 });
-test("4. Admin is admitted to the WhatsApp test route", () => {
+test("4. Admin is admitted to the Telegram test route", () => {
   const res = fakeRes(); let called = false;
-  requireAdmin(fakeReq(adminToken(), "/whatsapp/test"), res, () => { called = true; });
+  requireAdmin(fakeReq(adminToken(), "/telegram/test"), res, () => { called = true; });
   assert.equal(called, true);
 });
 
@@ -103,10 +103,10 @@ test("7. A plain USER is rejected from the Connections summary with ADMIN_ACCESS
   assert.equal(res.body.error, "ADMIN_ACCESS_REQUIRED");
 });
 
-// 8/9/10. User cannot retrieve Groww/Dhan/WhatsApp tokens
-test("8/9/10. A USER is rejected from every provider status/config/test route (Groww, Dhan, WhatsApp)", () => {
+// 8/9/10. User cannot retrieve Groww/Dhan/Telegram tokens
+test("8/9/10. A USER is rejected from every provider status/config/test route (Groww, Dhan, Telegram)", () => {
   const token = userToken("test_conn_user2");
-  for (const p of ["/groww/config", "/dhan/status", "/whatsapp/status", "/groww/test", "/dhan/test", "/whatsapp/test"]) {
+  for (const p of ["/groww/config", "/dhan/status", "/telegram/status", "/groww/test", "/dhan/test", "/telegram/test"]) {
     const res = fakeRes(); let called = false;
     requireAdmin(fakeReq(token, p), res, () => { called = true; });
     assert.equal(called, false, `expected ${p} to reject a plain user`);
@@ -139,7 +139,7 @@ test("12. Every /api/admin/* path is rejected for a plain USER, not just some of
 // 13. User cannot modify connection settings
 test("13. A USER is rejected from POST routes that modify connection settings", () => {
   const token = userToken("test_conn_user5");
-  for (const p of ["/dhan/config", "/whatsapp/config", "/connect", "/dhan/disconnect", "/whatsapp/disconnect", "/groww/forget-token"]) {
+  for (const p of ["/dhan/config", "/telegram/config", "/connect", "/dhan/disconnect", "/telegram/disconnect", "/groww/forget-token"]) {
     const res = fakeRes(); let called = false;
     requireAdmin(fakeReq(token, p), res, () => { called = true; });
     assert.equal(called, false, `expected ${p} to reject a plain user`);

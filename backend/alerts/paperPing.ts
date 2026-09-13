@@ -1,14 +1,15 @@
 import fs from "fs";
 import path from "path";
-import { loadWhatsappConfig, saveWhatsappConfig, sendWhatsapp, whatsappReady } from "./whatsapp";
+import { notify, notificationsReady, notificationStatus } from "../integrations/notificationService";
 
-// Monday / any session: when the market is live, ping WhatsApp with a detailed
+// Monday / any session: when the market is live, ping the notification channel
+// (Telegram since the migration) with a detailed
 // paper-trade brief. Two message types:
 //   open  — once per IST day shortly after 09:15 (market is online)
 //   take  — when OI Command + correlated models say it is a good paper entry
 
-const SENT = path.join(process.cwd(), "data", "whatsapp-sent.json");
-const LOG = path.join(process.cwd(), "data", "whatsapp-log.json");
+const SENT = path.join(process.cwd(), "data", "alerts-sent.json");
+const LOG = path.join(process.cwd(), "data", "alerts-log.json");
 const TAKE_COOLDOWN_SEC = 20 * 60;
 
 interface SentState {
@@ -158,7 +159,7 @@ function formatOpenMessage(grids: any[], ctx: { weekday: string; hhmm: string; d
     lines.push(`${g.name}  ${g.spot}  OI ${g.oiDirection} (${g.oiMoveScore})  VWAP ${c.vwap ?? "—"}  ${c.consensus || "—"}  ${take ? "TAKE" : "WAIT"}`);
   }
   lines.push("");
-  lines.push("You will get another WhatsApp when consensus is AGREE (or MIXED + algo-ready) with a concrete CE/PE, target and stop.");
+  lines.push("You will get another Telegram message when consensus is AGREE (or MIXED + algo-ready) with a concrete CE/PE, target and stop.");
   lines.push("Keep the NSA server running on this Mac through the session.");
   lines.push("Paper only — no live broker order.");
   return lines.join("\n");
@@ -170,9 +171,11 @@ export interface PingDeps {
   scan: () => Promise<any[]>;
 }
 
-export async function tickPaperWhatsApp(deps: PingDeps): Promise<{ sent: string[]; skipped: string }> {
-  const cfg = loadWhatsappConfig();
-  const ready = whatsappReady(cfg);
+// Renamed from tickPaperWhatsApp during the Telegram migration. The scan, the
+// timing windows, the cooldown and the message bodies are unchanged - only the
+// delivery channel moved.
+export async function tickPaperAlerts(deps: PingDeps): Promise<{ sent: string[]; skipped: string }> {
+  const ready = notificationsReady();
   if (!ready.ok) return { sent: [], skipped: ready.reason };
   if (deps.provider !== "groww") return { sent: [], skipped: "Groww feed required" };
   if (!deps.marketOpen) return { sent: [], skipped: "market closed" };
@@ -188,8 +191,8 @@ export async function tickPaperWhatsApp(deps: PingDeps): Promise<{ sent: string[
   // Once per day after 09:16: market-online briefing (Monday called out).
   if (t.mins >= 556 && t.mins <= 600 && state.lastOpenDate !== t.date) {
     const msg = formatOpenMessage(grids, t);
-    const r = await sendWhatsapp(msg, cfg);
-    appendLog({ at: Date.now(), type: "open", ok: r.ok, via: r.via, error: r.error, preview: msg.slice(0, 180) });
+    const r = await notify("MARKET_OPEN", msg);
+    appendLog({ at: Date.now(), type: "open", ok: r.ok, via: r.channel, error: r.error, preview: msg.slice(0, 180) });
     if (r.ok) { state.lastOpenDate = t.date; sent.push("open"); }
   }
 
@@ -202,8 +205,8 @@ export async function tickPaperWhatsApp(deps: PingDeps): Promise<{ sent: string[
     const now = Math.floor(Date.now() / 1000);
     if (now - last < TAKE_COOLDOWN_SEC) continue;
     const msg = formatTakeMessage(grid, { ...t, why: g.why });
-    const r = await sendWhatsapp(msg, cfg);
-    appendLog({ at: Date.now(), type: "take", symbol: grid.symbol, ok: r.ok, via: r.via, error: r.error, preview: msg.slice(0, 180) });
+    const r = await notify("TRADE_TAKE", msg);
+    appendLog({ at: Date.now(), type: "take", symbol: grid.symbol, ok: r.ok, via: r.channel, error: r.error, preview: msg.slice(0, 180) });
     if (r.ok) { state.lastTake[key] = now; sent.push(key); }
   }
 
@@ -211,41 +214,40 @@ export async function tickPaperWhatsApp(deps: PingDeps): Promise<{ sent: string[
   return { sent, skipped: sent.length ? "" : "no TAKE window yet (waiting for OI + model AGREE)" };
 }
 
-export async function sendWhatsappTest(): Promise<any> {
+export async function sendAlertsTest(): Promise<any> {
   const t = istNow();
   const msg = [
-    `NSA TEST · WhatsApp linked`,
+    `NSA TEST · Telegram linked`,
     `${t.date} ${t.hhmm} IST ${t.weekday}`,
     `When the market is online (Mon–Fri 09:15–15:30 IST) you will get:`,
     `1) Market-online briefing after 09:16`,
     `2) A detailed PAPER TRADE ping when OI Command + VWAP + 4-Layer + GainzAlgo v2 agree.`,
     `Keep the NSA app running. Paper / education only.`,
   ].join("\n");
-  const r = await sendWhatsapp(msg);
-  appendLog({ at: Date.now(), type: "test", ok: r.ok, via: r.via, error: r.error });
+  const r = await notify("TEST", msg);
+  appendLog({ at: Date.now(), type: "test", ok: r.ok, via: r.channel, error: r.error });
   return { ...r, message: msg };
 }
 
-export function whatsappStatus(): any {
-  const cfg = loadWhatsappConfig();
-  const ready = whatsappReady(cfg);
+// Renamed from whatsappStatus(). Channel details now come from the notification
+// service; the ping-state fields (lastOpenDate / lastTakeKeys) are unchanged.
+export function alertsStatus(): any {
+  const ch = notificationStatus();
   let log: any[] = [];
   try { log = JSON.parse(fs.readFileSync(LOG, "utf-8")); } catch { log = []; }
   const sent = loadSent();
   return {
-    enabled: cfg.enabled,
-    phone: cfg.phone ? cfg.phone.replace(/.(?=.{4})/g, "•") : "",
-    hasCallmebot: !!cfg.callmebotKey,
-    hasGreen: !!(cfg.greenId && cfg.greenToken),
-    hasMeta: !!(cfg.metaToken && cfg.metaPhoneId),
-    hasWebhook: !!cfg.webhookUrl,
-    ready: ready.ok,
-    via: ready.via,
-    reason: ready.reason,
+    channel: ch.channel,
+    enabled: ch.enabled,
+    configured: ch.configured,
+    ready: ch.ready,
+    reason: ch.reason,
+    botTokenMasked: ch.botTokenMasked,
+    chatId: ch.chatId,
+    lastSuccessAt: ch.lastSuccessAt,
+    lastError: ch.lastError,
     lastOpenDate: sent.lastOpenDate,
     lastTakeKeys: Object.keys(sent.lastTake || {}),
     log: log.slice(0, 8),
   };
 }
-
-export { saveWhatsappConfig, loadWhatsappConfig };

@@ -1,6 +1,6 @@
 // ============================ Local access gate (paper desk) ============================
 // Now a two-tier gate: ONE admin account (unchanged - auth/credentials.ts,
-// still plaintext-at-rest for its existing email/WhatsApp resend feature) plus
+// still plaintext-at-rest for its existing email/Telegram resend feature) plus
 // admin-managed USER accounts (auth/userStore.ts, properly hashed). This is
 // still NOT a multi-tenant SaaS auth system - it protects a personal,
 // admin-controlled dashboard - but every /api route (see routes/api.ts)

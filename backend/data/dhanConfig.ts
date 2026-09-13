@@ -41,7 +41,7 @@ export function saveDhanConfig(patch: Partial<DhanConfig>): DhanConfig {
     fs.mkdirSync(path.dirname(FILE), { recursive: true });
     fs.writeFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
     fs.chmodSync(FILE, 0o600);
-  } catch { /* best-effort, matches whatsapp-config.json's own error handling */ }
+  } catch { /* best-effort, matches telegram-config.json's own error handling */ }
   return next;
 }
 

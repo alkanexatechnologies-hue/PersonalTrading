@@ -962,12 +962,12 @@ function styleBadge(node, score) {
 }
 
 // ---------- connect / data source ----------
-// Groww, WhatsApp, and Dhan each get their own top-bar button + panel (no
+// Groww, Telegram, and Dhan each get their own top-bar button + panel (no
 // longer bundled into one "Connect data" panel). All three share the same
 // fixed-position panel styling, so only one is ever shown at a time.
 let _growwPollTimer = null;
 function closeAllConnectPanels() {
-  ["connect-panel", "whatsapp-panel", "dhan-panel"].forEach((id) => {
+  ["connect-panel", "telegram-panel", "dhan-panel"].forEach((id) => {
     const p = el(id);
     if (p) p.classList.add("hidden");
   });
@@ -982,14 +982,14 @@ function setupConnect() {
   });
   el("connect-close").addEventListener("click", closeAllConnectPanels);
 
-  const waPanel = el("whatsapp-panel");
+  const waPanel = el("telegram-panel");
   if (waPanel) {
-    el("whatsapp-btn").addEventListener("click", () => {
+    el("telegram-btn").addEventListener("click", () => {
       const wasHidden = waPanel.classList.contains("hidden");
       closeAllConnectPanels();
-      if (wasHidden) { waPanel.classList.remove("hidden"); loadWhatsappLoginStatus(); }
+      if (wasHidden) { waPanel.classList.remove("hidden"); loadTelegramStatus(); }
     });
-    el("whatsapp-close").addEventListener("click", closeAllConnectPanels);
+    el("telegram-close").addEventListener("click", closeAllConnectPanels);
   }
 
   const dhanPanel = el("dhan-panel");
@@ -1026,10 +1026,12 @@ function setupConnect() {
   const saveEmail = el("auth-email-save");
   if (saveEmail) saveEmail.addEventListener("click", doSaveAuthEmail);
 
-  const saveWa = el("wa-save");
-  if (saveWa) saveWa.addEventListener("click", doSaveWhatsappLogin);
-  const testWa = el("wa-test");
-  if (testWa) testWa.addEventListener("click", doTestWhatsappLogin);
+  const saveTg = el("tg-save");
+  if (saveTg) saveTg.addEventListener("click", doSaveTelegram);
+  const testTg = el("tg-test");
+  if (testTg) testTg.addEventListener("click", doTestTelegram);
+  const inviteTg = el("tg-invite");
+  if (inviteTg) inviteTg.addEventListener("click", doTelegramInvite);
 
   const saveDhan = el("dhan-save");
   if (saveDhan) saveDhan.addEventListener("click", doSaveDhan);
@@ -1081,54 +1083,99 @@ async function doSaveAuthEmail() {
   }
 }
 
-// ---------- WhatsApp login-notification (credential rotation, second channel) ----------
-async function loadWhatsappLoginStatus() {
-  const phoneInp = el("wa-phone");
-  const status = el("wa-status");
+// ---------- Telegram alerts (replaced the former WhatsApp channel) ----------
+// Messaging layer only. The bot token is write-only from this form: the backend
+// returns a masked value and never the real token.
+function renderTelegramStatus(d) {
+  const box = el("tg-conn-status");
+  if (!box) return;
+  const state = d.ready ? "CONNECTED" : d.configured ? "ERROR" : "DISCONNECTED";
+  const cls = d.ready ? "ok" : d.configured ? "err" : "";
+  const icon = d.ready ? "🟢" : d.configured ? "⚠️" : "🔴";
+  const row = (k, v) => `<div class="cb-row"><span>${k}</span><b>${v == null || v === "" ? "—" : v}</b></div>`;
+  const when = (ts) => (ts ? new Date(ts).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—");
+  box.className = `conn-badge-block ${cls}`;
+  box.innerHTML =
+    `<div class="cb-head">${icon} TELEGRAM ${state}</div>` +
+    row("Bot", d.botUsername ? "@" + d.botUsername : (d.configured ? "configured" : "not configured")) +
+    row("Group", d.groupTitle || (d.chatId ? "chat " + d.chatId : "not set")) +
+    row("Bot token", d.botTokenMasked || "not set") +
+    row("Last successful message", when(d.lastSuccessAt)) +
+    row("Last error", d.lastError || "none");
+}
+
+async function loadTelegramStatus() {
+  const status = el("tg-status");
   try {
-    const d = await fetch("/api/whatsapp/status").then((r) => r.json());
-    if (phoneInp && d.phone) phoneInp.placeholder = d.phone + " (saved)";
+    // Live probe (getMe + getChat) so Bot and Group are reported separately.
+    const d = await fetch("/api/telegram/status/live").then((r) => r.json());
+    renderTelegramStatus(d);
     if (status) {
-      status.textContent = d.ready ? `Linked via ${d.via}.` : (d.phone ? d.reason || "" : "");
-      status.className = "conn-status" + (d.phone && !d.ready ? " warn" : d.ready ? " ok" : "");
+      status.textContent = d.ready ? "" : (d.probeError || d.reason || "");
+      status.className = "conn-status" + (d.ready ? " ok" : d.configured ? " warn" : "");
     }
   } catch (_) { /* best-effort */ }
 }
-async function doSaveWhatsappLogin() {
-  const phoneInp = el("wa-phone");
-  const keyInp = el("wa-key");
-  const status = el("wa-status");
-  const phone = (phoneInp?.value || "").trim();
-  const callmebotKey = (keyInp?.value || "").trim();
+
+async function doSaveTelegram() {
+  const tokenInp = el("tg-token");
+  const chatInp = el("tg-chatid");
+  const status = el("tg-status");
+  const botToken = (tokenInp?.value || "").trim();
+  const chatId = (chatInp?.value || "").trim();
+  if (!botToken && !chatId) {
+    if (status) { status.textContent = "Enter a bot token and/or the group chat ID."; status.className = "conn-status err"; }
+    return;
+  }
   try {
-    const r = await fetch("/api/whatsapp/config", {
+    const r = await fetch("/api/telegram/config", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: true, phone, callmebotKey }),
+      body: JSON.stringify({ enabled: true, botToken, chatId }),
     }).then((res) => res.json());
     if (!r.ok) { if (status) { status.textContent = "Could not save."; status.className = "conn-status err"; } return; }
-    if (phoneInp) phoneInp.value = "";
-    if (keyInp) keyInp.value = "";
+    // SECURITY: never leave the token in the DOM after saving.
+    if (tokenInp) tokenInp.value = "";
+    if (chatInp) chatInp.value = "";
     if (status) {
-      status.textContent = r.ready ? `Saved. Future rotations (08:00 IST) will also go to WhatsApp via ${r.via}.` : (r.reason || "Saved.");
+      status.textContent = r.ready ? "Saved. Alerts and credential rotations will go to the Telegram group." : (r.reason || "Saved.");
       status.className = "conn-status" + (r.ready ? " ok" : " warn");
     }
-    loadWhatsappLoginStatus();
+    loadTelegramStatus();
   } catch (e) {
     if (status) { status.textContent = "Could not save: " + e.message; status.className = "conn-status err"; }
   }
 }
-async function doTestWhatsappLogin() {
-  const status = el("wa-status");
-  if (status) { status.textContent = "Sending test message..."; status.className = "conn-status"; }
+
+async function doTestTelegram() {
+  const status = el("tg-status");
+  if (status) { status.textContent = "Sending test message…"; status.className = "conn-status"; }
   try {
-    const r = await fetch("/api/whatsapp/test", { method: "POST" }).then((res) => res.json());
+    const r = await fetch("/api/telegram/test", { method: "POST" }).then((res) => res.json());
     if (status) {
-      status.textContent = r.ok ? `Test sent via ${r.via}.` : (r.error || "Test failed.");
+      status.textContent = r.ok ? "Test message sent to the Telegram group." : (r.error || "Test failed.");
       status.className = "conn-status" + (r.ok ? " ok" : " err");
     }
+    loadTelegramStatus();
   } catch (e) {
     if (status) { status.textContent = "Test failed: " + e.message; status.className = "conn-status err"; }
+  }
+}
+
+// The Bot API cannot add a person to a group, so the correct flow is an invite
+// link the person uses themselves.
+async function doTelegramInvite() {
+  const out = el("tg-invite-out");
+  if (out) { out.textContent = "Creating invite link…"; out.className = "conn-status"; }
+  try {
+    const r = await fetch("/api/telegram/invite", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }).then((res) => res.json());
+    if (!r.ok) { if (out) { out.textContent = r.error || "Could not create an invite link."; out.className = "conn-status err"; } return; }
+    if (out) {
+      out.innerHTML = `Send this link to the person — they join themselves:<br><code>${r.inviteLink}</code>`;
+      out.className = "conn-status ok";
+    }
+  } catch (e) {
+    if (out) { out.textContent = "Could not create an invite link: " + e.message; out.className = "conn-status err"; }
   }
 }
 
@@ -1175,18 +1222,18 @@ async function doTestDhan() {
 }
 
 // Immediately rotate the dashboard login password (instead of waiting for the
-// daily 08:00 IST schedule) and push it out via email/WhatsApp, whichever is
+// daily 08:00 IST schedule) and push it out via email/Telegram, whichever is
 // configured (see POST /api/auth/rotate). Current session stays logged in —
 // only the password for a FUTURE login changes.
 async function doRotateLoginNow() {
-  if (!confirm("Login password abhi rotate karein? Naya password turant email/WhatsApp par bhej diya jayega (jo bhi configured hai) — aap abhi logged-in rahenge.")) return;
+  if (!confirm("Login password abhi rotate karein? Naya password turant email/Telegram par bhej diya jayega (jo bhi configured hai) — aap abhi logged-in rahenge.")) return;
   const btn = el("rotate-login-btn");
   if (btn) btn.disabled = true;
   try {
     const r = await fetch("/api/auth/rotate", { method: "POST" }).then((res) => res.json());
     if (!r.ok) { alert(r.error || "Rotation failed."); return; }
-    const via = [r.emailed ? "email" : null, r.whatsapped ? "WhatsApp" : null].filter(Boolean).join(" + ");
-    alert(via ? `Naya password bhej diya gaya (${via}).` : "Naya password ban gaya, par koi delivery channel (email/WhatsApp) configured nahi hai — server console check karein.");
+    const via = [r.emailed ? "email" : null, r.telegramSent ? "Telegram" : null].filter(Boolean).join(" + ");
+    alert(via ? `Naya password bhej diya gaya (${via}).` : "Naya password ban gaya, par koi delivery channel (email/Telegram) configured nahi hai — server console check karein.");
   } catch (e) {
     alert("Rotation failed: " + e.message);
   } finally {
@@ -1497,6 +1544,7 @@ async function doTestConnection() {
       line(c.auth, "Authentication", m.auth) +
       line(c.api, "Groww API reachable", m.api) +
       line(c.data, "Market data received", m.data) +
+      line(c.optionChain, "Option chain / OI reachable", m.optionChain) +
       line(c.freshness, "Data freshness", m.freshness);
 
     if (r.ok) {
@@ -1817,7 +1865,7 @@ function switchTab(name) {
   if (name === "dhanbacktest" && !state.dhanBacktestInit) { state.dhanBacktestInit = true; initDhanBacktest(); }
   document.body.classList.toggle("oi-focus", name === "oicommand");
   renderWatchlist();
-  if (name === "oicommand") { initOiCommand(); startOiCommandLive(); }
+  if (name === "oicommand") { initOiCommand(); startOiCommandLive(); startAdvisoryTracking(); loadAdvisoryAccuracy(15); }
   if (name === "earlymoves") { loadEarlyMoves(); startEarlyMovesTab(); }
   if (name === "tradermind") { initTraderMindTab(); startTraderMindLive(); }
   if (name === "strategylab") initStrategyLab();
@@ -4900,6 +4948,8 @@ async function loadOiCommand() {
   if (st) st.textContent = "लोड हो रहा…";
   try {
     const d = await fetchJSON("/api/oi-command?symbol=" + encodeURIComponent(sym), 25000);
+    // Liquidity detection for the same symbol (observation only; no trading gate).
+    await loadLiquidityStatus(sym);
     if (!d.available && !d.bulletin) { if (box) box.innerHTML = `<div class="wl-sub">${d.message || d.error || "उपलब्ध नहीं"}</div>`; if (st) st.textContent = ""; return; }
     renderLive("oicommand", () => renderMasterSelector(d));
     // Freshness: the OI/candle data behind this screen is cached server-side
@@ -5047,6 +5097,117 @@ function renderOiWallsCardHtml(d) {
 // Macro Setup card (NIFTY only) - global markets / morning sector leader /
 // Bank Nifty / IT-majors votes, from backend/paper/ext/macroSetup.ts's
 // computeNiftyMacroSetup (attached server-side as d.macroSetup, NIFTY only).
+// ---------- Liquidity Status card (development display) ----------
+// Sits in the same .mtg-grid as Macro Setup, filling the slot next to it (and the
+// blank that Macro Setup leaves on non-NIFTY symbols). Same .mtg-card/.o2-lv
+// classes as the neighbouring cards — the dashboard layout is not redesigned.
+//
+// DETECTION DISPLAY ONLY. No value here gates an entry: the backend route is not
+// read by tryOpenOption() or the Master Trade Selector.
+function renderLiquidityCardHtml() {
+  const L = state.liquidity;
+  const shell = (inner) => `<div class="mtg-card liq-card liq-wide">
+      <div class="liq-head"><h5>Liquidity Status</h5><span class="liq-advisory">DETECTION ONLY · NO TRADING GATE</span></div>
+      ${inner}</div>`;
+  if (!L) return shell('<div class="wl-sub">लोड हो रहा…</div>');
+  if (L.error) return shell(`<div class="wl-sub">${L.error}</div>`);
+
+  const n = (v) => (v == null ? "—" : Math.round(Number(v) * 100) / 100);
+  const det = L.detection || {};
+  const or = L.openingRange || {};
+  const byType = {};
+  for (const lv of L.levels || []) byType[lv.type] = lv;
+
+  // A level cell: shows the price, or NOT DEFINED (with the reason on hover) for
+  // the items whose definition was never supplied.
+  const lvVal = (t) => {
+    const lv = byType[t];
+    if (!lv) return '<b>—</b>';
+    if (lv.price == null) {
+      return lv.note ? `<b class="liq-undef" title="${lv.note}">NOT DEFINED</b>` : "<b>—</b>";
+    }
+    return `<b>${n(lv.price)}</b>`;
+  };
+  const pair = (label, t) => `<div class="liq-pair"><span>${label}</span>${lvVal(t)}</div>`;
+  const tile = (label, t) => `<div class="liq-tile"><span>${label}</span>${lvVal(t)}</div>`;
+
+  const ev = det.eventType || "NONE";
+  const evCls = ev === "SWEEP" ? "sweep" : ev === "REAL_BREAK" ? "break" : ev === "TRAP" ? "trap" : "none";
+  const evTxt = ev === "REAL_BREAK" ? "REAL BREAK" : ev;
+  const dir = det.direction && det.direction !== "NONE" ? det.direction : "NONE";
+  const dirTxt = dir === "UP" ? "BULLISH" : dir === "DOWN" ? "BEARISH" : dir === "BOTH" ? "BOTH" : "NONE";
+  const dirCls = dir === "UP" ? "up" : dir === "DOWN" ? "down" : "";
+
+  // Detail chips — only rendered when the detector actually produced them.
+  const chips = [
+    det.sweep ? `<span class="liq-chip">Sweep <b>${n(det.sweep.sweepPrice)}</b> · wick <b>${n(det.sweep.wickPct)}%</b></span>` : "",
+    det.sweep ? `<span class="liq-chip">Reclaim <b>${n(det.sweep.reclaimPrice)}</b></span>` : "",
+    det.realBreak ? `<span class="liq-chip">Break <b>${n(det.realBreak.closePrice)}</b> · body <b>${n(det.realBreak.bodyPct)}%</b></span>` : "",
+    `<span class="liq-chip">ATR(14) <b>${n(det.atr14)}</b></span>`,
+    `<span class="liq-chip">Buffer <b>${n(det.bufferUsed)} pts</b></span>`,
+    det.sweepCount != null ? `<span class="liq-chip">Sweeps today <b>${det.sweepCount}</b></span>` : "",
+    L.entryConcept && L.entryConcept.direction !== "NONE"
+      ? `<span class="liq-chip concept" title="${(L.entryConcept.slConcept || "").replace(/"/g, "&quot;")}">Entry concept <b>${L.entryConcept.direction}</b> · not connected</span>`
+      : "",
+  ].filter(Boolean).join("");
+
+  const C = L.confirmations || {};
+
+  return shell(`
+      <div class="liq-top">
+        <section class="liq-box">
+          <h6>Opening Range <span class="liq-win">${or.window || "—"}</span></h6>
+          <div class="liq-pair"><span>High</span><b>${n(or.high)}</b></div>
+          <div class="liq-pair"><span>Low</span><b>${n(or.low)}</b></div>
+          <div class="liq-pair"><span>Established</span><b class="${or.established ? "up" : ""}">${or.established ? "YES" : "NO"}</b></div>
+        </section>
+
+        <section class="liq-box">
+          <h6>Liquidity Levels</h6>
+          <div class="liq-pairgrid">
+            ${pair("PDH", "PDH")}
+            ${pair("PDL", "PDL")}
+            ${pair("OR High", "OR_HIGH")}
+            ${pair("OR Low", "OR_LOW")}
+            ${pair("Week High", "PREV_WEEK_HIGH")}
+            ${pair("Week Low", "PREV_WEEK_LOW")}
+          </div>
+        </section>
+
+        <section class="liq-box liq-eventbox">
+          <h6>Current Event</h6>
+          <div class="liq-event ${evCls}">${evTxt}</div>
+          <div class="liq-pair"><span>Direction</span><b class="${dirCls}">${dirTxt}</b></div>
+          <div class="liq-pair"><span>Reclaim</span><b>${det.reclaimed ? "YES" : "NO"}</b></div>
+          <div class="liq-pair"><span>Trap flag</span><b class="${det.trapFlag ? "down" : ""}">${det.trapFlag ? "TRAP" : "NO"}</b></div>
+        </section>
+      </div>
+
+      <div class="liq-strip">
+        <h6>Key Liquidity</h6>
+        <div class="liq-tiles">
+          ${tile("Swing High 5m", "SWING_HIGH_5M")}
+          ${tile("Swing Low 5m", "SWING_LOW_5M")}
+          ${tile("Max OI CALL", "MAX_OI_CALL_STRIKE")}
+          ${tile("Max OI PUT", "MAX_OI_PUT_STRIKE")}
+          ${tile("Round Number", "ROUND_NUMBER")}
+          ${tile("Equal High", "EQUAL_HIGH")}
+          ${tile("Equal Low", "EQUAL_LOW")}
+          ${tile("Trendline", "TRENDLINE_TOUCH")}
+        </div>
+      </div>
+
+      ${det.skipReason ? `<div class="wl-sub liq-skip">${det.skipReason}</div>` : ""}
+      <div class="liq-chips">${chips}</div>
+
+      <div class="liq-conf-row">
+        <span class="liq-conf"><i>OI</i> ${C.oiNote || "—"}</span>
+        <span class="liq-conf"><i>VWAP</i> ${C.vwapNote || "—"}</span>
+        <span class="liq-conf"><i>EMA</i> ${C.emaNote || "—"}</span>
+        <span class="liq-conf"><i>VIX</i> UNAVAILABLE — not present in this application</span>
+      </div>`);
+}
+
 // Renders "" for any other symbol (BankNifty/FinNifty/etc, where d.macroSetup
 // is absent) so the Dashboard Grid layout is unaffected there - same .mtg-card/
 // .o2-lv classes as the cards above, no new CSS needed.
@@ -5245,6 +5406,118 @@ function renderMasterSelector(d) {
     return `<td class="mts-reason">${outHtml}<div class="mts-rev-pre">${preTrade || "—"}</div></td>`;
   };
 
+  // ---------- ADVISORY: where did the suggestion come from, and what happened? ----------
+  // A layer that is take-able is a CANDIDATE, not a trade. Only the Master
+  // Selector promotes a candidate into a suggestion. These helpers mirror
+  // backend/advisory/suggestionBuilder.ts so the table and the recorded
+  // measurements always describe the same thing.
+  const LAYER_STATE_UI = {
+    CANDIDATE: { txt: "CANDIDATE", cls: "cand" },
+    PASS: { txt: "PASS", cls: "pass" },
+    WAIT: { txt: "WAIT", cls: "wait" },
+    BLOCK: { txt: "BLOCK", cls: "block" },
+    NO_EDGE: { txt: "NO EDGE", cls: "noedge" },
+  };
+  const layerStateOf = (leg) => {
+    if (!leg) return "NO_EDGE";
+    if (leg.take) return "CANDIDATE";
+    const skips = leg.skipReasons || [];
+    if (!skips.length) return "NO_EDGE";
+    return skips.some((x) => /wall|room|AVOID|invalidated|stale|baseline/i.test(x)) ? "BLOCK" : "WAIT";
+  };
+  const layerStates = {
+    SETUP: layerStateOf(s),
+    DIRECTIONAL: layerStateOf(dir),
+    SCALP: layerStateOf(sc),
+  };
+  const layerCell = (key) => {
+    const st = LAYER_STATE_UI[layerStates[key]] || LAYER_STATE_UI.NO_EDGE;
+    return `<td><span class="mts-layer ${st.cls}">${st.txt}</span></td>`;
+  };
+
+  // The promoted leg, per the engine's own arbitration. Never inferred.
+  const primaryMode = (arb.primary && arb.primary.mode) ? String(arb.primary.mode).toUpperCase() : null;
+  const chosenLeg = verdict !== "GO" ? null
+    : primaryMode === "SCALP" ? sc
+    : primaryMode === "DIRECTIONAL" ? dir
+    : (dir || sc);
+
+  // Advisory suggestion. The engine's WAIT/CONFLICT can never become a BUY.
+  const allSkipText = [...(dir.skipReasons || []), ...(sc.skipReasons || [])].join(" ");
+  const suggestionOf = () => {
+    if (verdict === "GO" && chosenLeg && chosenLeg.optionType && chosenLeg.optionType !== "—") {
+      return chosenLeg.optionType === "CE" ? "BUY CE" : "BUY PE";
+    }
+    if (/AVOID|invalidated vs OI wall|too close/i.test(allSkipText)) return "AVOID";
+    if (/pullback|extended/i.test(allSkipText)) return "WAIT FOR PULLBACK";
+    if (verdict === "CONFLICT") return "WAIT";
+    return (dir.take || sc.take || s.take) ? "WAIT" : "NO EDGE";
+  };
+  const suggestion = suggestionOf();
+  const sugCls = suggestion.startsWith("BUY") ? (suggestion === "BUY CE" ? "buyce" : "buype")
+    : suggestion === "AVOID" ? "avoid" : suggestion === "NO EDGE" ? "noedge" : "wait";
+
+  // Complete source path, e.g. "DIRECTIONAL + SCALP" or "MASTER (held)".
+  const sourcePath = (() => {
+    const cands = Object.keys(layerStates).filter((k) => layerStates[k] === "CANDIDATE");
+    if (verdict !== "GO") return cands.length ? cands.join(" + ") + " → MASTER (held)" : "NONE";
+    const head = primaryMode || "MASTER";
+    const agree = cands.filter((k) => k !== primaryMode);
+    return agree.length ? head + " + " + agree.join(" + ") : head;
+  })();
+
+  // Recorded outcome for this symbol, if the resolver has measured one.
+  const outcome = (state.advisoryBySymbol || {})[d.symbol] || null;
+  const resultChip = (r) => {
+    const m = { CORRECT: ["✓ CORRECT", "ok"], WRONG: ["✗ WRONG", "bad"], NEUTRAL: ["~ NEUTRAL", "neu"], UNRESOLVED: ["⏳ UNRESOLVED", "pend"] };
+    const [t, c] = m[r] || m.UNRESOLVED;
+    return `<span class="mts-res ${c}">${t}</span>`;
+  };
+  const win = (mins) => {
+    if (!outcome) return null;
+    return (outcome.windows || []).find((w) => w.minutes === mins) || null;
+  };
+  // ACTUAL MOVE — spot in points and premium in percent, never merged.
+  const actualMoveCell = () => {
+    const w = win(15) || win(5);
+    if (!w || w.spotMovePts == null) return `<td class="mts-actual"><span class="wl-sub">⏳ awaiting</span></td>`;
+    const sp = w.spotMovePts;
+    const pm = w.premiumMovePct;
+    return `<td class="mts-actual">
+      <div class="mts-sp ${sp > 0 ? "up" : sp < 0 ? "down" : ""}">Spot ${sp > 0 ? "+" : ""}${sp} pts</div>
+      <div class="mts-pm ${pm == null ? "" : pm > 0 ? "up" : "down"}">${pm == null ? "Option — ABSTAIN (no premium history)" : "Option " + (pm > 0 ? "+" : "") + pm + "%"}</div>
+    </td>`;
+  };
+  // TRADE DIFFERENCE — system expectation vs actual, per window.
+  const tradeDiffCell = () => {
+    const exp = suggestion === "BUY CE" ? "UP" : suggestion === "BUY PE" ? "DOWN" : null;
+    if (!outcome) return `<td class="mts-diff"><span class="wl-sub">not recorded yet</span></td>`;
+    if (!exp) {
+      const we = outcome.waitEval || "UNRESOLVED";
+      const wm = { CORRECT_WAIT: ["✓ CORRECT WAIT", "ok"], MISSED_OPPORTUNITY: ["⚠ MISSED OPPORTUNITY", "bad"], NEUTRAL: ["~ NEUTRAL", "neu"], UNRESOLVED: ["⏳ UNRESOLVED", "pend"] };
+      const [t, c] = wm[we] || wm.UNRESOLVED;
+      return `<td class="mts-diff"><div class="mts-exp">Expected: no entry</div><span class="mts-res ${c}">${t}</span></td>`;
+    }
+    const rows = [5, 15, 30].map((m) => {
+      const w = win(m);
+      const mv = w && w.spotMovePts != null ? `${w.spotMovePts > 0 ? "+" : ""}${w.spotMovePts}` : "—";
+      return `<div class="mts-diffrow"><b>${m}M</b> ${mv} pts ${resultChip(w ? w.dirResult : "UNRESOLVED")}</div>`;
+    }).join("");
+    return `<td class="mts-diff"><div class="mts-exp">Expected: ${exp}</div>${rows}</td>`;
+  };
+  // RESULT — directional verdict at 15M, plus the premium outcome separately.
+  const resultCell = () => {
+    if (!outcome) return `<td class="mts-outcome"><span class="wl-sub">⏳ unresolved</span></td>`;
+    const w = win(15);
+    const to = outcome.tradeOutcome || "UNRESOLVED";
+    const tm = { TARGET_HIT: ["🎯 TARGET HIT", "ok"], STOP_HIT: ["🛑 STOP HIT", "bad"], PARTIAL: ["◐ PARTIAL", "neu"], LOSS: ["▼ LOSS", "bad"], FLAT: ["— FLAT", "neu"], UNRESOLVED: ["⏳ —", "pend"] };
+    const [tt, tc] = tm[to] || tm.UNRESOLVED;
+    return `<td class="mts-outcome">
+      <div>Direction ${resultChip(w ? w.dirResult : "UNRESOLVED")}</div>
+      <div class="mts-tradeout ${tc}">${tt}</div>
+    </td>`;
+  };
+
   const rowFor = (name, cls, leg, mode, modeKey) => {
     const isSel = selectedMode === mode;
     const opt = leg.optionType && leg.optionType !== "—" ? leg.optionType : setupOpt;
@@ -5264,6 +5537,12 @@ function renderMasterSelector(d) {
       <td>${money(ltp)} · ${money(legLow(opt))}</td>
       <td>${num(d.spot)}</td>
       <td>${conf}</td>
+      ${layerCell(name)}
+      <td class="mts-src">${isSel ? sourcePath : "—"}</td>
+      <td>${isSel ? `<span class="mts-sug ${sugCls}">${suggestion}</span>${chosenLeg && chosenLeg.strike ? `<div class="mts-sug-strike">${num(chosenLeg.strike)} ${chosenLeg.optionType || ""}</div>` : ""}` : "—"}</td>
+      ${isSel ? actualMoveCell() : '<td class="wl-sub">—</td>'}
+      ${isSel ? tradeDiffCell() : '<td class="wl-sub">—</td>'}
+      ${isSel ? resultCell() : '<td class="wl-sub">—</td>'}
       ${decayCell()}
       ${reviewCell(modeKey, preTrade)}
     </tr>`;
@@ -5283,6 +5562,12 @@ function renderMasterSelector(d) {
       <td>${money(ltpSetup)} · ${money(legLow(setupOpt))}</td>
       <td>${num(d.spot)}</td>
       <td>${s.confidence != null ? s.confidence : "—"}</td>
+      ${layerCell("SETUP")}
+      <td class="mts-src wl-sub">not an arbiter candidate</td>
+      <td class="wl-sub">—</td>
+      <td class="wl-sub">—</td>
+      <td class="wl-sub">—</td>
+      <td class="wl-sub">—</td>
       ${decayCell()}
       ${reviewCell(null, setupReason)}
     </tr>`;
@@ -5337,6 +5622,7 @@ function renderMasterSelector(d) {
         ${renderWriterBattleHtml(C)}
         ${renderOiWallsCardHtml(d)}
         ${renderMacroSetupCardHtml(d)}
+        ${renderLiquidityCardHtml()}
       </div>
 
       ${renderBulletinHtml(d)}
@@ -5346,7 +5632,8 @@ function renderMasterSelector(d) {
           <thead><tr>
             <th>Strategy</th><th>Date</th><th>Time</th><th>Dir</th><th>Strike</th>
             <th>Entry</th><th>SL</th><th>Target</th><th>LTP · day high</th><th>LTP · day low</th>
-            <th>Spot</th><th>Conf%</th><th>Decay</th><th>Market review</th>
+            <th>Spot</th><th>Conf%</th><th>Layer state</th><th>Signal source</th><th>Trade suggestion</th>
+            <th>Actual move</th><th>Trade difference</th><th>Result</th><th>Decay</th><th>Market review</th>
           </tr></thead>
           <tbody>
             ${rowSetup}
@@ -5362,7 +5649,73 @@ function renderMasterSelector(d) {
         <span class="mts-final-reason">— ${reason || "—"}</span>
         <span class="mts-next">Next check: auto · <b id="mts-next">15s</b></span>
       </div>
+
+      <!-- ADVISORY suggestion panel. Shows WHERE the suggestion came from and,
+           once the observation windows elapse, what the market actually did.
+           ADVISORY ONLY — nothing here places or routes an order. -->
+      <div class="mts-advisory ${suggestion.startsWith("BUY") ? "act" : "hold"}">
+        <div class="mts-adv-head">
+          <span class="mts-adv-lab">Trade suggestion</span>
+          <span class="mts-sug ${sugCls} big">${suggestion}</span>
+          ${suggestion.startsWith("BUY") && chosenLeg && chosenLeg.strike
+            ? `<span class="mts-adv-strike">${num(chosenLeg.strike)} ${chosenLeg.optionType || ""}</span>` : ""}
+          <span class="mts-adv-advisory">ADVISORY ONLY · no order is placed</span>
+        </div>
+        <div class="mts-adv-grid">
+          <div class="mts-adv-row"><span>Source</span><b>${sourcePath}</b></div>
+          <div class="mts-adv-row"><span>Layer states</span><b>SETUP ${layerStates.SETUP.replace("_", " ")} · DIRECTIONAL ${layerStates.DIRECTIONAL.replace("_", " ")} · SCALP ${layerStates.SCALP.replace("_", " ")}</b></div>
+          ${suggestion.startsWith("BUY") ? `
+            <div class="mts-adv-row"><span>Entry</span><b>${money(chosenLeg && chosenLeg.ltp)}</b></div>
+            <div class="mts-adv-row"><span>SL</span><b class="down">${money(chosenLeg && chosenLeg.stop)}</b></div>
+            <div class="mts-adv-row"><span>Target</span><b class="up">${money(chosenLeg && chosenLeg.target)}</b></div>
+            <div class="mts-adv-row"><span>Confidence at signal</span><b>${finalScore != null ? finalScore : (chosenLeg && chosenLeg.confidence != null ? chosenLeg.confidence : "—")}<span class="wl-sub"> — a score, not a success rate</span></b></div>
+          ` : `
+            <div class="mts-adv-row"><span>Trade suggestion</span><b>NONE</b></div>
+            <div class="mts-adv-row wide"><span>Reason</span><b>${
+              (() => {
+                const rs = [];
+                if (reason) rs.push(reason);
+                for (const leg of [dir, sc]) for (const x of (leg.skipReasons || [])) if (!rs.includes(x)) rs.push(x);
+                return rs.length ? rs.slice(0, 6).map((x) => `<div class="mts-adv-reason">• ${x}</div>`).join("") : "—";
+              })()
+            }</b></div>
+            <div class="mts-adv-row"><span>Opportunity</span><b class="mts-opp">${
+              /wall|room/i.test(allSkipText) ? "MONITORING · breakout watch" : "MONITORING"
+            }</b></div>
+          `}
+          ${outcome ? `<div class="mts-adv-row"><span>Measured outcome</span><b>${
+            (() => {
+              const w = (outcome.windows || []).find((x) => x.minutes === 15);
+              if (!w || w.spotMovePts == null) return "⏳ observation window still open";
+              return `15M spot ${w.spotMovePts > 0 ? "+" : ""}${w.spotMovePts} pts · ${w.dirResult}` +
+                (w.premiumMovePct != null ? ` · option ${w.premiumMovePct > 0 ? "+" : ""}${w.premiumMovePct}%` : " · option ABSTAIN");
+            })()
+          }</b></div>` : `<div class="mts-adv-row"><span>Measured outcome</span><b class="wl-sub">⏳ not yet measured — outcomes appear after the 5/15/30-minute windows elapse</b></div>`}
+        </div>
+      </div>
+
+      <!-- SIGNAL ACCURACY — measured from recorded outcomes only, never CONF%. -->
+      <div class="mtg-card adv-acc-card">
+        <div class="adv-acc-head">
+          <h5>Signal accuracy &mdash; measured, not predicted</h5>
+          <label class="wl-sub">Window
+            <select id="adv-acc-window" class="adv-acc-sel">
+              <option value="5">5 min</option>
+              <option value="15" selected>15 min</option>
+              <option value="30">30 min</option>
+            </select>
+          </label>
+        </div>
+        <div id="adv-accuracy"><span class="wl-sub">Loading measured outcomes…</span></div>
+      </div>
     </div>`;
+
+  // The accuracy card is re-created on every render, so re-bind and refill it.
+  if (typeof wireAdvisoryWindowPicker === "function") wireAdvisoryWindowPicker();
+  if (typeof loadAdvisoryAccuracy === "function") {
+    const selWin = el("adv-acc-window");
+    loadAdvisoryAccuracy(selWin ? Number(selWin.value) : 15);
+  }
 
   // Connect to the decision log (arbiter verdicts are already written there).
   const logBtn = el("mts-log");
@@ -8431,7 +8784,7 @@ const DESK_PERMISSION_MAP = { option: "oiAnalysis", stockOption: "tradingDashboa
 // server-side (requireAdmin on every /api/admin/* and provider route,
 // routes/api.ts) - a USER cannot retrieve any of this by typing the URL,
 // calling the API directly, or editing frontend JS, regardless of what this
-// function hides. (Groww/Dhan/WhatsApp buttons are handled separately - they
+// function hides. (Groww/Dhan/Telegram buttons are handled separately - they
 // stay permanently hidden in index.html and are only ever reachable via the
 // Admin Control Center's Connections card - see enterAdminMode().)
 const ADMIN_ONLY_BUTTON_IDS = ["rotate-login-btn"];
@@ -8497,11 +8850,11 @@ function enterAdminMode() {
   loadAdminConnectionsSummary();
 }
 
-// Renders the read-only Groww/Dhan/WhatsApp status summary in the Admin
+// Renders the read-only Groww/Dhan/Telegram status summary in the Admin
 // Control Center's Connections card. Each "Manage" button just clicks the
 // corresponding (permanently topbar-hidden) legacy button to reuse the
 // existing open/save/test logic in setupConnect() rather than duplicating it.
-const CONNECTION_MANAGE_BTN = { groww: "connect-btn", dhan: "dhan-btn", whatsapp: "whatsapp-btn" };
+const CONNECTION_MANAGE_BTN = { groww: "connect-btn", dhan: "dhan-btn", telegram: "telegram-btn" };
 function manageConnection(provider) {
   const btnId = CONNECTION_MANAGE_BTN[provider];
   if (btnId) el(btnId)?.click();
@@ -8515,7 +8868,7 @@ async function loadAdminConnectionsSummary() {
     const rows = [
       { key: "groww", label: "Groww", info: d.groww },
       { key: "dhan", label: "Dhan", info: d.dhan },
-      { key: "whatsapp", label: "WhatsApp", info: d.whatsapp },
+      { key: "telegram", label: "Telegram", info: d.telegram },
     ];
     body.innerHTML = rows.map(({ key, label, info }) => {
       const connected = info?.status === "CONNECTED";
@@ -9132,6 +9485,112 @@ function mslOpenDetail(id) {
      </div>` +
     `<div class="msl-modal-sec"><h5>Raw engine output</h5><pre class="msl-pre">${mslEsc(JSON.stringify(ev.engineRaw, null, 2))}</pre></div>`;
   modal.classList.remove("hidden");
+}
+
+// ============================ ADVISORY outcome tracking ============================
+// Pulls recorded suggestions + measured outcomes so the Master Selector table can
+// compare what the system SUGGESTED against what the market ACTUALLY DID.
+// ADVISORY ONLY. Nothing here triggers or routes a trade.
+//
+// Accuracy figures come from /api/advisory/accuracy, which computes them from
+// resolved measurements only and returns null (rendered NOT RUN) when nothing has
+// been measured. They are never derived from CONF%.
+
+state.advisoryBySymbol = state.advisoryBySymbol || {};
+
+async function loadAdvisoryOutcomes() {
+  try {
+    const d = await fetch("/api/advisory/suggestions?limit=300").then((r) => r.json());
+    const bySym = {};
+    // Newest first from the API — keep the most recent record per symbol.
+    for (const rec of d.suggestions || []) if (!bySym[rec.symbol]) bySym[rec.symbol] = rec;
+    state.advisoryBySymbol = bySym;
+  } catch (_) { /* best-effort — the table renders "not yet measured" */ }
+}
+
+// Asks the backend to measure any suggestion whose window has elapsed, then
+// refreshes the cache. Safe to call repeatedly; it no-ops when nothing is due.
+async function resolveAdvisoryOutcomes() {
+  try {
+    await fetch("/api/advisory/resolve").then((r) => r.json());
+    await loadAdvisoryOutcomes();
+  } catch (_) { /* best-effort */ }
+}
+
+function wireAdvisoryWindowPicker() {
+  const sel = el("adv-acc-window");
+  if (!sel || sel.dataset.wired) return;
+  sel.dataset.wired = "1";
+  sel.addEventListener("change", () => loadAdvisoryAccuracy(Number(sel.value)));
+}
+
+function startAdvisoryTracking() {
+  wireAdvisoryWindowPicker();
+  if (state._advisoryTimer) return;
+  loadAdvisoryOutcomes();
+  // Resolve on a slow cadence: the shortest window is 5 minutes, so polling
+  // faster than that cannot produce new measurements.
+  state._advisoryTimer = setInterval(resolveAdvisoryOutcomes, 150 * 1000);
+}
+
+const MSL_ACC_EMPTY = '<span class="wl-sub">⚪ NOT RUN — no outcome has been measured yet. Accuracy appears once suggestions have been recorded during market hours and their 5/15/30-minute windows have elapsed.</span>';
+
+async function loadAdvisoryAccuracy(windowMinutes) {
+  const box = el("adv-accuracy");
+  if (!box) return;
+  try {
+    const d = await fetch(`/api/advisory/accuracy?window=${windowMinutes || 15}`).then((r) => r.json());
+    if (d.noData) { box.innerHTML = MSL_ACC_EMPTY; return; }
+    const pctTxt = (v) => (v == null ? '<span class="wl-sub">NOT RUN</span>' : `${v}%`);
+    const rows = [...d.layers, d.master].map((l) => `<tr>
+      <td><b>${l.layer}</b></td><td>${l.signals}</td><td class="ok">${l.correct}</td>
+      <td class="err">${l.wrong}</td><td>${l.neutral}</td><td>${l.unresolved}</td><td><b>${pctTxt(l.accuracyPct)}</b></td>
+    </tr>`).join("");
+    box.innerHTML = `
+      <div class="wl-sub adv-acc-note">Measured at the <b>${d.windowMinutes}-minute</b> window, from ${d.resolvedRecords} resolved of ${d.totalRecords} recorded. NEUTRAL and UNRESOLVED are excluded from the accuracy denominator — this is measured outcome, not CONF%.</div>
+      <div class="ac-table-wrap"><table class="ac-table adv-acc-table"><thead><tr>
+        <th>Strategy</th><th>Signals</th><th>Correct</th><th>Wrong</th><th>Neutral</th><th>Unresolved</th><th>Accuracy</th>
+      </tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="adv-sub">
+        <div class="adv-sub-card"><h5>WAIT decisions</h5>
+          <div class="cb-row"><span>Total WAITs</span><b>${d.wait.waits}</b></div>
+          <div class="cb-row"><span>Correct wait</span><b class="ok">${d.wait.correctWait}</b></div>
+          <div class="cb-row"><span>Missed opportunity</span><b class="err">${d.wait.missedOpportunity}</b></div>
+          <div class="cb-row"><span>Correct-wait rate</span><b>${pctTxt(d.wait.correctWaitPct)}</b></div>
+        </div>
+        <div class="adv-sub-card"><h5>Wall behaviour</h5>
+          <div class="cb-row"><span>Wall-blocked setups</span><b>${d.wall.wallBlocked}</b></div>
+          <div class="cb-row"><span>Wall held</span><b class="ok">${d.wall.wallHeld}</b></div>
+          <div class="cb-row"><span>Confirmed breakout</span><b class="err">${d.wall.breakoutConfirmed}</b></div>
+          <div class="cb-row"><span>False breakout</span><b>${d.wall.falseBreakout}</b></div>
+          <div class="cb-row"><span>Broke after block</span><b>${pctTxt(d.wall.breakoutAfterBlockPct)}</b></div>
+        </div>
+        <div class="adv-sub-card"><h5>Premium vs direction</h5>
+          <div class="cb-row"><span>BUY suggestions</span><b>${d.premium.buySuggestions}</b></div>
+          <div class="cb-row"><span>Target hit</span><b class="ok">${d.premium.targetHit}</b></div>
+          <div class="cb-row"><span>Stop hit</span><b class="err">${d.premium.stopHit}</b></div>
+          <div class="cb-row"><span>Partial / flat / loss</span><b>${d.premium.partial} / ${d.premium.flat} / ${d.premium.loss}</b></div>
+          <div class="cb-row"><span>Right direction, premium lost</span><b class="err">${d.premium.correctDirectionButPremiumLoss}</b></div>
+        </div>
+      </div>
+      <div class="cs-risk-full adv-disclaimer">Directional accuracy is <b>not</b> profitability. An option can lose value on a correct spot call through IV, theta and spread — that is why premium outcome is reported separately above.</div>`;
+  } catch (e) {
+    box.innerHTML = `<span class="wl-sub">Could not load accuracy: ${e.message}</span>`;
+  }
+}
+
+// ---------- Liquidity detection loader (observation only) ----------
+// Fetches GET /api/liquidity/status for the symbol the Trader Dashboard is on.
+// The result is displayed and logged server-side; it is NOT read by any entry or
+// exit path (see §13 — no trading gate).
+async function loadLiquidityStatus(symbol) {
+  if (!symbol) return;
+  try {
+    const d = await fetch(`/api/liquidity/status?symbol=${encodeURIComponent(symbol)}`).then((r) => r.json());
+    state.liquidity = d.error ? { error: d.error } : d;
+  } catch (e) {
+    state.liquidity = { error: "Liquidity detection unavailable: " + e.message };
+  }
 }
 
 setupMobileNav();

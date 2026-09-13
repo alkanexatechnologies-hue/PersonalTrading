@@ -264,29 +264,46 @@
 
     </div>
 
-    <!-- WhatsApp login-alerts panel (separate from Groww Connection) -->
-    <div id="whatsapp-panel" class="connect-panel gc-panel hidden">
+    <!-- Telegram alerts panel (replaced the former WhatsApp panel) -->
+    <div id="telegram-panel" class="connect-panel gc-panel hidden">
       <div class="cp-head">
-        <h4>WhatsApp login alerts</h4>
-        <button id="whatsapp-close" class="cp-close" aria-label="Close">&times;</button>
+        <h4>Telegram alerts</h4>
+        <button id="telegram-close" class="cp-close" aria-label="Close">&times;</button>
       </div>
-      <label class="cp-label" for="wa-phone">WhatsApp number <span class="wl-sub">(with country code, e.g. 91XXXXXXXXXX)</span></label>
+      <div id="tg-conn-status" class="conn-badge-block"></div>
+
+      <label class="cp-label" for="tg-token">Bot token <span class="wl-sub">(from @BotFather — stored server-side, never shown again)</span></label>
       <div class="gc-field">
-        <input id="wa-phone" type="text" placeholder="91XXXXXXXXXX" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        <input id="tg-token" type="password" placeholder="123456789:ABCdef..." autocomplete="off" autocapitalize="off" spellcheck="false" />
+        <button type="button" class="gc-eye" data-target="tg-token" aria-label="Show/hide">👁</button>
       </div>
-      <label class="cp-label" for="wa-key">CallMeBot API key <span class="wl-sub">(free — message CallMeBot on WhatsApp to get one)</span></label>
+
+      <label class="cp-label" for="tg-chatid">Group chat ID <span class="wl-sub">(negative number, e.g. -1001234567890)</span></label>
       <div class="gc-field">
-        <input id="wa-key" type="password" placeholder="CallMeBot API key" autocomplete="off" autocapitalize="off" spellcheck="false" />
-        <button type="button" class="gc-eye" data-target="wa-key" aria-label="Show/hide">👁</button>
+        <input id="tg-chatid" type="text" placeholder="-1001234567890" autocomplete="off" autocapitalize="off" spellcheck="false" />
       </div>
+
       <div class="gc-field">
-        <button id="wa-save" type="button" class="auth-email-save" aria-label="Save">💾 SAVE</button>
-        <button id="wa-test" type="button" class="gc-test">SEND TEST</button>
+        <button id="tg-save" type="button" class="auth-email-save" aria-label="Save">💾 SAVE</button>
+        <button id="tg-test" type="button" class="gc-test">TEST TELEGRAM</button>
       </div>
-      <div id="wa-status" class="conn-status"></div>
+      <div id="tg-status" class="conn-status"></div>
+
+      <div class="gc-field">
+        <button id="tg-invite" type="button" class="ghost">Create group invite link</button>
+      </div>
+      <div id="tg-invite-out" class="conn-status"></div>
+
       <p class="wl-sub cp-note">
-        Same rotation (daily 08:00 IST, or "rotate now") also sends the new username/password here once a number + key are saved. Green-API / Meta Cloud API /
-        a custom webhook also work — set those via server env vars (see backend/alerts/whatsapp.ts) instead of this form.
+        <b>Setup:</b> create a bot with <b>@BotFather</b> &rarr; create a Telegram group &rarr; add the bot to the group &rarr;
+        paste the bot token and the group's chat ID here. A <b>phone number cannot be used</b> — the Telegram Bot API addresses
+        a destination only by numeric chat ID, and a bot can neither message someone first nor look anyone up by phone.
+        To find the chat ID, add <b>@RawDataBot</b> to the group briefly and read the <code>chat.id</code> it prints, then remove it.
+        <br><br>
+        <b>Adding a member:</b> use "Create group invite link" above (the bot must be a group admin with the invite-users right),
+        then send that link to the person — they join themselves. The Bot API has no method to add someone to a group directly.
+        <br><br>
+        Credentials may also be supplied as server env vars <code>TELEGRAM_BOT_TOKEN</code> and <code>TELEGRAM_CHAT_ID</code> instead of this form.
       </p>
     </div>
 
@@ -324,16 +341,16 @@
         <span id="success-ind" class="pill" title="Measured track record from the autonomous paper-trading run">success: -</span>
         <span id="early-ind" class="pill early-ind" title="Early-Move alert: a move in its INITIAL stage (fresh momentum + volume, not extended, potential still to run). Click to open it.">⚡ early: -</span>
         <button id="mode-switch" class="pill-btn" title="Switch between Option Trading, Stock Option Trading and Stock Swing Trading desks">⇄ Desk</button>
-        <!-- Groww/Dhan/WhatsApp connection management now lives in the Admin
+        <!-- Groww/Dhan/Telegram connection management now lives in the Admin
              Control Center's "Connections" card only - these three legacy
              trigger buttons stay in the DOM (existing JS still targets them
              to open/close the same panels) but are permanently hidden from
              the topbar; the Admin Control Center's "Manage" buttons click
              them programmatically instead of duplicating the open/close logic. -->
         <button id="connect-btn" class="pill-btn hidden">Groww</button>
-        <button id="whatsapp-btn" class="pill-btn hidden">WhatsApp</button>
+        <button id="telegram-btn" class="pill-btn hidden">Telegram</button>
         <button id="dhan-btn" class="pill-btn hidden">Dhan</button>
-        <button id="rotate-login-btn" class="pill-btn" title="Turant naya login password generate karke email/WhatsApp par bhej do (agar configured hai) — 08:00 IST ka wait nahi karna padega">🔄 Rotate Login</button>
+        <button id="rotate-login-btn" class="pill-btn" title="Turant naya login password generate karke email/Telegram par bhej do (agar configured hai) — 08:00 IST ka wait nahi karna padega">🔄 Rotate Login</button>
         <button id="logout-btn" class="pill-btn" title="Session band karke wapas login screen par jayein">🚪 Logout</button>
         <span id="clock" class="clock"></span>
       </div>

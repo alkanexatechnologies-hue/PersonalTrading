@@ -80,9 +80,10 @@ import { saveOiSnapshot, priorDaySnapshot, latestSnapshot } from "../oi/snapshot
 import { recordOiBaseline, computeOiChange, oiBaselineStrike } from "../oi/oiChange";
 import { recommendOiTrades, correlateOiModels, buildOiWalls, buildOiLesson } from "../oi/oiTrade";
 import { buildMoveBulletin } from "../oi/bulletin";
-import { tickPaperWhatsApp, sendWhatsappTest, whatsappStatus, saveWhatsappConfig } from "../alerts/paperPing";
+import { tickPaperAlerts, sendAlertsTest, alertsStatus } from "../alerts/paperPing";
 import { loadDhanConfig, saveDhanConfig, dhanConfigured, testDhanConnection, disconnectDhan } from "../data/dhanConfig";
-import { disconnectWhatsapp } from "../alerts/whatsapp";
+import { saveTelegramConfig, disconnectTelegram, createInviteLink } from "../integrations/telegramProvider";
+import { notificationStatusLive } from "../integrations/notificationService";
 import { recordConnectionTest, recordConnectionSuccess, getConnectionStatus } from "../data/connectionStatusTracker";
 import { lookupDhanSecurity } from "../data/dhanInstruments";
 import { fetchDhanCandles, DhanBacktestInterval } from "../data/dhanHistorical";
@@ -137,6 +138,18 @@ import { appendHourlyPicks, readHourlyPicks, writeResolvedPicks, picksFilePath, 
 import { getFundamentals } from "../fundamentals/fundamentals";
 import { validateGrowwToken, classifyGrowwError } from "../data/growwAuth";
 import { buildLabState, runScenarios, scenarioCatalogue, readRun as readQaRun } from "../qa/masterStrategyLab";
+import { buildSuggestionRecord as buildAdvisoryRecord } from "../advisory/suggestionBuilder";
+import { recordAdvisorySuggestion } from "../advisory/recorder";
+import { readSuggestions, rewriteSuggestions, WINDOWS_MIN } from "../advisory/suggestionLog";
+import { resolveRecord } from "../advisory/outcomeResolver";
+import { buildAccuracyReport } from "../advisory/accuracy";
+import { LIQUIDITY_CONFIG, NOT_DEFINED } from "../liquidity/liquidityConfig";
+import { buildLiquidityLevels, nearestLevel } from "../liquidity/liquidityLevels";
+import { detectLiquidity, atr14Of, entryAfterSweepConcept } from "../liquidity/sweepDetector";
+import {
+  logLiquidityEventOnce, readLiquidityEvents, buildConfirmations,
+  oiStateFrom, vwapStateFrom, VIX_UNAVAILABLE,
+} from "../liquidity/liquidityAudit";
 import { writeBaseline as writeStrategyBaseline, checkStrategyIntegrity } from "../qa/strategyIntegrity";
 import { getMarketNews } from "../news/news";
 import fs from "fs";
@@ -636,7 +649,7 @@ router.get("/groww/config", requireAdmin, (_req: Request, res: Response) => {
 // is never sufficient. Returns a credential-free summary the UI renders
 // directly: Connection / Authentication / Data Status / Last Successful Check.
 router.get("/groww/test", requireAdmin, async (req: Request, res: Response) => {
-  const checks = { auth: false, api: false, data: false, freshness: false };
+  const checks = { auth: false, api: false, data: false, optionChain: false, freshness: false };
   const messages: Record<string, string> = {};
   const admin = getSession(bearerToken(req));
 
@@ -665,6 +678,35 @@ router.get("/groww/test", requireAdmin, async (req: Request, res: Response) => {
   if (v.ok) { recordGrowwOk(v.latencyMs); recordConnectionSuccess("groww"); }
   else recordGrowwFail();
 
+  // OPTION-CHAIN PROBE (pre-market validation). The quote check above proves the
+  // token authenticates; this proves the OI/option-chain path the trading screens
+  // actually depend on is reachable too. Read-only: it calls the existing chain
+  // reader and inspects nothing but the row count. No OI analysis, no scoring,
+  // no calculation is performed or altered here.
+  if (v.ok) {
+    try {
+      const chainDef = findSymbolDef("^NSEI") || DEFAULT_SYMBOLS.find((d) => d.type === "index");
+      const prov = growwProviderForOi();
+      if (!chainDef || !prov) {
+        messages.optionChain = "Skipped — no index symbol or Groww provider available.";
+      } else {
+        const chain: any = await withTimeout(growwChainForExpiry(prov, chainDef, 0), 12_000, "groww option-chain probe");
+        const rows = Array.isArray(chain?.rows) ? chain.rows.length
+          : Array.isArray(chain?.strikes) ? chain.strikes.length
+          : Array.isArray(chain) ? chain.length : 0;
+        checks.optionChain = rows > 0;
+        messages.optionChain = rows > 0
+          ? `Option chain reachable — ${rows} strikes for ${chainDef.symbol}${chain?.expiry ? ` (expiry ${chain.expiry})` : ""}.`
+          : "Option chain returned no strikes.";
+      }
+    } catch (e: any) {
+      const { message } = classifyGrowwError(e);
+      messages.optionChain = `Option chain not reachable: ${message}`;
+    }
+  } else {
+    messages.optionChain = "Not attempted — authentication failed first.";
+  }
+
   const g = computeGrowwStatus();
   checks.freshness = g.status === "GREEN";
   messages.freshness = g.status === "GREEN" ? "Data freshness healthy (live)."
@@ -689,6 +731,7 @@ router.get("/groww/test", requireAdmin, async (req: Request, res: Response) => {
     connection: v.ok ? "CONNECTED" : "DISCONNECTED",
     authentication: v.ok ? "VALID" : (v.code === "INVALID_TOKEN" || v.code === "AUTH_FAILED" ? "INVALID" : "UNKNOWN"),
     dataStatus: v.ok ? "RECEIVING" : "NOT RECEIVING",
+    optionChainStatus: checks.optionChain ? "REACHABLE" : (v.ok ? "UNAVAILABLE" : "NOT ATTEMPTED"),
     lastSuccessfulCheck: getConnectionStatus("groww").lastConnectedAt || null,
     latencyMs: v.latencyMs,
     tokenMasked: getGrowwTokenMasked(),
@@ -3899,6 +3942,34 @@ router.get("/oi-command", requirePermission("oiAnalysis"), async (req: Request, 
         });
       }
     } catch (e) { console.error("[liveSnapshotRecorder] failed:", e instanceof Error ? e.message : e); }
+
+    // ADVISORY suggestion recorder — PASSIVE OBSERVER, same contract as the
+    // snapshot recorder above: it reads only what was already computed, never
+    // calls arbitrate(), never mutates `data`/`ext`, and never affects the
+    // response. It exists so the UI can later compare what the system SUGGESTED
+    // against what the market ACTUALLY DID. It places no orders.
+    try {
+      recordAdvisorySuggestion(buildAdvisoryRecord({
+        at: data.asOf ?? Math.floor(Date.now() / 1000),
+        istDate: istDateStr(),
+        istTime: new Date(Date.now() + 19800000).toISOString().slice(11, 19),
+        symbol: def.symbol,
+        name: def.name,
+        spot: data.spot ?? null,
+        expiry: data.expiry ?? null,
+        masterVerdict: ext?.arbitration?.verdict ?? null,
+        primaryMode: ext?.arbitration?.primary?.mode ?? null,
+        masterReason: ext?.arbitration?.reason ?? null,
+        directional: data.recommendation?.directional ?? null,
+        scalp: data.recommendation?.scalp ?? null,
+        setup: (data as any).setup ?? null,
+        finalScore: ext?.finalScore ?? null,
+        support: data.oi?.support ?? null,
+        resistance: data.oi?.resistance ?? null,
+        expLow: (data as any).expLow ?? null,
+      }));
+    } catch (e) { console.error("[advisoryRecorder] failed:", e instanceof Error ? e.message : e); }
+
     res.json(ext ? { ...data, ext } : data);
   } catch (e: any) {
     res.status(502).json({ error: e?.message || "oi-command failed" });
@@ -4101,7 +4172,7 @@ router.get("/admin/permissions", requireAdmin, (_req: Request, res: Response) =>
   res.json({ permissions: ALL_PERMISSIONS });
 });
 
-// ---- Admin: unified Connections summary (Groww/Dhan/WhatsApp) ----
+// ---- Admin: unified Connections summary (Groww/Dhan/Telegram) ----
 // Every value here is either a boolean/status/timestamp or an ALREADY-MASKED
 // string - never a raw token/secret. This route (and every /admin/* route) is
 // requireAdmin-gated; a plain USER account cannot reach this even by typing
@@ -4113,8 +4184,8 @@ export function buildConnectionsSummary() {
   const growwSt = getConnectionStatus("groww");
   const dhanCfg = loadDhanConfig();
   const dhanSt = getConnectionStatus("dhan");
-  const wa = whatsappStatus();
-  const waSt = getConnectionStatus("whatsapp");
+  const tg = alertsStatus();
+  const tgSt = getConnectionStatus("telegram");
 
   const maskToken = (t: string) => (t ? "••••••••••••" + t.slice(-4) : null);
 
@@ -4134,12 +4205,14 @@ export function buildConnectionsSummary() {
       lastTestedAt: dhanSt.lastTestedAt,
       lastTestOk: dhanSt.lastTestOk,
     },
-    whatsapp: {
-      status: wa.ready ? "CONNECTED" : (wa.hasCallmebot || wa.hasGreen || wa.hasMeta ? "ERROR" : "DISCONNECTED"),
-      phoneMasked: wa.phone || null, // whatsappStatus() already masks this
-      lastConnectedAt: waSt.lastConnectedAt,
-      lastTestedAt: waSt.lastTestedAt,
-      lastTestOk: waSt.lastTestOk,
+    telegram: {
+      status: tg.ready ? "CONNECTED" : (tg.configured ? "ERROR" : "DISCONNECTED"),
+      // Masked only - the bot token never leaves the backend.
+      botTokenMasked: tg.botTokenMasked || null,
+      chatId: tg.chatId || null,
+      lastConnectedAt: tgSt.lastConnectedAt,
+      lastTestedAt: tgSt.lastTestedAt,
+      lastTestOk: tgSt.lastTestOk,
     },
   };
 }
@@ -4158,7 +4231,7 @@ router.get("/system-status", (_req: Request, res: Response) => {
   const feed = syncSessionProvider();
   res.json({
     marketData: feed.growwOn && feed.configured ? "AVAILABLE" : "UNAVAILABLE",
-    notifications: whatsappStatus().ready ? "AVAILABLE" : "UNAVAILABLE",
+    notifications: alertsStatus().ready ? "AVAILABLE" : "UNAVAILABLE",
   });
 });
 
@@ -4193,7 +4266,7 @@ router.post("/auth/rotate", requireAdmin, async (_req: Request, res: Response) =
       ok: true,
       username: creds.username,
       emailed: !!creds.notifyEmail && emailConfigured(),
-      whatsapped: whatsappStatus().ready,
+      telegramSent: alertsStatus().ready,
       smtpConfigured: emailConfigured(),
     });
   } catch (e: any) {
@@ -4271,50 +4344,81 @@ router.get("/log/verify", (req: Request, res: Response) => {
   res.json({ ok: true, entry });
 });
 
-router.get("/whatsapp/status", requireAdmin, (_req: Request, res: Response) => {
-  res.json({ ...whatsappStatus(), marketOpen: isTradingTimeIST(), provider: getProvider().name });
+// ======================= Telegram notifications (messaging only) =======================
+// Replaces the former /whatsapp/* routes. Messaging layer only - no trading,
+// OI, indicator or decision logic is reachable from here, and a Telegram failure
+// cannot propagate into one.
+router.get("/telegram/status", requireAdmin, (_req: Request, res: Response) => {
+  res.json({ ...alertsStatus(), marketOpen: isTradingTimeIST(), provider: getProvider().name });
 });
-router.post("/whatsapp/config", requireAdmin, (req: Request, res: Response) => {
+
+// Live probe: getMe + getChat (read-only, sends nothing). Confirms the bot token
+// is valid AND that the bot can actually see the configured group.
+router.get("/telegram/status/live", requireAdmin, async (_req: Request, res: Response) => {
+  try {
+    const live = await notificationStatusLive();
+    recordConnectionTest("telegram", !!(live.botOk && live.groupOk));
+    res.json({ ...live, marketOpen: isTradingTimeIST() });
+  } catch (e: any) {
+    res.status(502).json({ error: e?.message || "telegram probe failed" });
+  }
+});
+
+router.post("/telegram/config", requireAdmin, (req: Request, res: Response) => {
   const b = req.body || {};
-  const next = saveWhatsappConfig({
-    enabled: b.enabled,
-    phone: b.phone,
-    callmebotKey: b.callmebotKey,
-    greenId: b.greenId,
-    greenToken: b.greenToken,
-    webhookUrl: b.webhookUrl,
-  });
+  saveTelegramConfig({ enabled: b.enabled, botToken: b.botToken, chatId: b.chatId });
   const admin = getSession(bearerToken(req));
-  logAuditEvent({ type: "WHATSAPP_CREDENTIAL_UPDATED", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "whatsapp", result: "success" });
-  res.json({ ok: true, ...whatsappStatus(), savedPhone: !!next.phone });
+  // The token is NEVER written to the audit log - only that it was updated.
+  logAuditEvent({ type: "TELEGRAM_CREDENTIAL_UPDATED", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "telegram", result: "success" });
+  res.json({ ok: true, ...alertsStatus() });
 });
-router.post("/whatsapp/test", requireAdmin, async (req: Request, res: Response) => {
+
+router.post("/telegram/test", requireAdmin, async (req: Request, res: Response) => {
   const admin = getSession(bearerToken(req));
   try {
-    const r = await sendWhatsappTest();
-    recordConnectionTest("whatsapp", !!r.ok);
-    logAuditEvent({ type: "WHATSAPP_CONNECTION_TEST", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "whatsapp", result: r.ok ? "success" : "failure" });
+    const r = await sendAlertsTest();
+    recordConnectionTest("telegram", !!r.ok);
+    if (r.ok) recordConnectionSuccess("telegram");
+    logAuditEvent({ type: "TELEGRAM_CONNECTION_TEST", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "telegram", result: r.ok ? "success" : "failure" });
     res.json(r);
   } catch (e: any) {
-    recordConnectionTest("whatsapp", false);
-    logAuditEvent({ type: "WHATSAPP_CONNECTION_TEST", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "whatsapp", result: "failure" });
+    recordConnectionTest("telegram", false);
+    logAuditEvent({ type: "TELEGRAM_CONNECTION_TEST", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "telegram", result: "failure" });
     res.status(502).json({ ok: false, error: e?.message || "test failed" });
   }
 });
-router.post("/whatsapp/disconnect", requireAdmin, (req: Request, res: Response) => {
-  disconnectWhatsapp();
+
+router.post("/telegram/disconnect", requireAdmin, (req: Request, res: Response) => {
+  disconnectTelegram();
   const admin = getSession(bearerToken(req));
-  logAuditEvent({ type: "WHATSAPP_DISCONNECTED", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "whatsapp", result: "success" });
+  logAuditEvent({ type: "TELEGRAM_DISCONNECTED", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "telegram", result: "success" });
   res.json({ ok: true });
 });
-router.post("/whatsapp/tick", requireAdmin, async (_req: Request, res: Response) => {
+
+// Invite link so the owner can add another member. The Bot API has no method to
+// add a person to a group, and none that accepts a phone number - the invitee
+// must join through a link themselves. Requires the bot to be a group admin with
+// the invite-users right.
+router.post("/telegram/invite", requireAdmin, async (req: Request, res: Response) => {
   try {
-    const r = await tickPaperWhatsApp({
+    const r = await createInviteLink(String(req.body?.name || "Trading Alerts invite"));
+    if (!r.ok) return res.status(502).json({ ok: false, code: r.code, error: r.error, detail: r.detail });
+    const admin = getSession(bearerToken(req));
+    logAuditEvent({ type: "admin_action", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", result: "success", detail: "created a Telegram group invite link" });
+    res.json({ ok: true, inviteLink: r.result?.invite_link ?? null });
+  } catch (e: any) {
+    res.status(502).json({ ok: false, error: e?.message || "invite failed" });
+  }
+});
+
+router.post("/telegram/tick", requireAdmin, async (_req: Request, res: Response) => {
+  try {
+    const r = await tickPaperAlerts({
       marketOpen: isTradingTimeIST(),
       provider: getProvider().name,
       scan: scanOiGridsForPing,
     });
-    res.json({ ok: true, ...r, ...whatsappStatus(), marketOpen: isTradingTimeIST() });
+    res.json({ ok: true, ...r, ...alertsStatus(), marketOpen: isTradingTimeIST() });
   } catch (e: any) {
     res.status(502).json({ ok: false, error: e?.message || "tick failed" });
   }
@@ -6360,21 +6464,22 @@ export function startHourlyScheduler() {
     finally { oiScalpBusy = false; }
   }, 90 * 1000);
 
-  // WhatsApp: market-online briefing after 09:16 + detailed paper-trade ping
-  // when OI Command + correlated models agree. 90s cadence; 20 min cooldown per setup.
+  // Telegram: market-online briefing after 09:16 + detailed paper-trade ping
+  // when OI Command + correlated models agree. 90s cadence; 20 min cooldown per
+  // setup - frequency UNCHANGED by the WhatsApp -> Telegram migration.
   let waBusy = false;
   const runWa = async () => {
     if (waBusy || getProvider().name !== "groww") return;
     waBusy = true;
     try {
-      // Background-only WhatsApp ping scan - LOW priority (dev priority
-      // mechanism, growwProvider.ts). Nothing else about this changed.
-      const r = await runAsBackgroundGroww(() => tickPaperWhatsApp({
+      // Background-only ping scan - LOW priority (dev priority mechanism,
+      // growwProvider.ts). Only the delivery channel changed.
+      const r = await runAsBackgroundGroww(() => tickPaperAlerts({
         marketOpen: isTradingTimeIST(),
         provider: getProvider().name,
         scan: scanOiGridsForPing,
       }));
-      if (r.sent.length) console.log(`[whatsapp] sent ${r.sent.join(", ")}`);
+      if (r.sent.length) console.log(`[telegram] sent ${r.sent.join(", ")}`);
     } catch { /* ignore */ }
     finally { waBusy = false; }
   };
@@ -6936,6 +7041,220 @@ router.post("/qa/baseline", requireAdmin, (req: Request, res: Response) => {
   } catch (e: any) {
     res.status(500).json({ error: e?.message || "Could not record baseline." });
   }
+});
+
+// ======================= Liquidity sweep detection (observation only) =======================
+// DETECTION + LOGGING + UI ONLY. Per §13 this is deliberately NOT wired into
+// tryOpenOption() or the Master Trade Selector, and no entry or exit path reads
+// it. It reuses the application's existing candles, ATR(14), VWAP, EMA and OI
+// rather than recomputing any of them.
+router.get("/liquidity/status", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  const symbol = String(req.query.symbol || "").trim();
+  const def = findSymbolDef(symbol);
+  if (!def) return res.status(400).json({ error: "valid F&O symbol चाहिए" });
+
+  try {
+    // 1m for detection (3m is not a supported Interval here), 5m for EMA21/50 +
+    // VWAP, daily for PDH/PDL and the previous week.
+    const [c1, c5, daily] = await Promise.all([
+      getCandlesCached(def.symbol, "1m"),
+      getCandlesCached(def.symbol, "5m"),
+      getDailyCached(def.symbol, 40),
+    ]);
+    let oi: any = null;
+    try { oi = (await getOiCached(def)) as OiAnalysis; } catch { oi = null; }
+
+    // Reused, not recomputed: PDH/PDL/VWAP/5m swings come from levelContext().
+    const lv = levelContext(c5 || [], daily || [], oi);
+    const closes5 = (c5 || []).map((c: any) => c.close);
+    const ema21 = closes5.length >= 21 ? last(ema(closes5, 21)) : null;
+    const ema50 = closes5.length >= 50 ? last(ema(closes5, 50)) : null;
+    const spot = c5 && c5.length ? c5[c5.length - 1].close : null;
+
+    const levelSet = buildLiquidityLevels({
+      intraday: c1 || [],
+      daily: daily || [],
+      pdh: lv.pdh, pdl: lv.pdl,
+      swingHigh5m: lv.swingHigh, swingLow5m: lv.swingLow,
+      oi,
+      nowEpoch: Math.floor(Date.now() / 1000),
+    });
+
+    const atr14 = atr14Of(c1 || []);
+    const detection = detectLiquidity({
+      symbol: def.symbol,
+      candles: c1 || [],
+      rangeHigh: levelSet.openingRange.high,
+      rangeLow: levelSet.openingRange.low,
+      atr14,
+    });
+
+    const entryConcept = entryAfterSweepConcept(detection.sweep);
+    const nearest = spot != null ? nearestLevel(levelSet.levels, spot) : null;
+    const confirmations = buildConfirmations({
+      direction: detection.direction,
+      ceBuildup: oi?.ceBuildup ?? null,
+      peBuildup: oi?.peBuildup ?? null,
+      spot, vwap: lv.vwap, ema21, ema50,
+    });
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    const event = {
+      timestamp: nowSec,
+      istDate: istDateStr(),
+      istTime: new Date(Date.now() + 19800000).toISOString().slice(11, 19),
+      symbol: def.symbol,
+      rangeHigh: levelSet.openingRange.high,
+      rangeLow: levelSet.openingRange.low,
+      liquidityLevel: nearest?.price ?? null,
+      liquidityLevelType: (nearest?.type ?? "NONE") as any,
+      eventType: detection.eventType,
+      sweepDirection: detection.direction,
+      sweepPrice: detection.sweep?.sweepPrice ?? detection.realBreak?.closePrice ?? null,
+      reclaimPrice: detection.sweep?.reclaimPrice ?? null,
+      candleTimeframe: LIQUIDITY_CONFIG.detectionInterval,
+      ATR14: detection.atr14,
+      wickPercentage: detection.sweep?.wickPct ?? null,
+      bodyPercentage: detection.sweep?.bodyPct ?? detection.realBreak?.bodyPct ?? null,
+      OIState: oiStateFrom(oi?.ceBuildup ?? null, oi?.peBuildup ?? null),
+      VWAPState: vwapStateFrom(spot, lv.vwap),
+      EMA21: ema21, EMA50: ema50,
+      VIX: VIX_UNAVAILABLE,
+      trapFlag: detection.trapFlag,
+      confirmations,
+      entryConcept,
+      skipReason: detection.skipReason,
+    };
+    // Logged once per symbol/event/direction/session; NONE is never logged.
+    const logged = logLiquidityEventOnce(event);
+
+    res.json({
+      symbol: def.symbol, name: def.name, spot,
+      openingRange: levelSet.openingRange,
+      levels: levelSet.levels,
+      detection: {
+        eventType: detection.eventType,
+        direction: detection.direction,
+        reclaimed: detection.reclaimed,
+        trapFlag: detection.trapFlag,
+        sweep: detection.sweep,
+        realBreak: detection.realBreak,
+        sweepCount: detection.allSweeps.length,
+        atr14: detection.atr14,
+        bufferUsed: detection.bufferUsed,
+        skipReason: detection.skipReason,
+      },
+      confirmations,
+      entryConcept,
+      notDefined: NOT_DEFINED,
+      config: {
+        openingRangeWindow: LIQUIDITY_CONFIG.openingRange.label,
+        sweepBufferPts: detection.bufferUsed,
+        trapWindow: LIQUIDITY_CONFIG.trapWindow.label,
+        detectionInterval: LIQUIDITY_CONFIG.detectionInterval,
+      },
+      loggedThisCall: logged,
+      tradingGateConnected: false,
+    });
+  } catch (e: any) {
+    res.status(502).json({ error: e?.message || "liquidity detection failed" });
+  }
+});
+
+// Recorded liquidity events, for the §14 observation period.
+router.get("/liquidity/events", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
+  const limit = Math.min(Number(req.query.limit) || 200, 1000);
+  const rows = readLiquidityEvents(limit);
+  const count = (t: string) => rows.filter((r) => r.eventType === t).length;
+  res.json({
+    events: rows,
+    summary: {
+      total: rows.length,
+      sweeps: count("SWEEP"),
+      realBreaks: count("REAL_BREAK"),
+      traps: count("TRAP"),
+      sessions: [...new Set(rows.map((r) => r.istDate))].length,
+    },
+  });
+});
+
+// ======================= Advisory suggestion tracking =======================
+// ADVISORY ONLY. These routes read what the system suggested and measure what
+// the market actually did. None of them can place an order, and none of them is
+// consulted by the decision path.
+
+router.get("/advisory/suggestions", (req: Request, res: Response) => {
+  const limit = Math.min(Number(req.query.limit) || 200, 1000);
+  const symbol = (req.query.symbol as string) || "";
+  let rows = readSuggestions(limit * 3);
+  if (symbol) rows = rows.filter((r) => r.symbol === symbol);
+  res.json({ windowsMin: WINDOWS_MIN, suggestions: rows.slice(-limit).reverse() });
+});
+
+// Measures outcomes for records whose observation windows have elapsed. Spot
+// candles come from the active provider; option-premium candles are fetched per
+// distinct option symbol and ABSTAIN (rather than guess) when unavailable.
+router.get("/advisory/resolve", async (_req: Request, res: Response) => {
+  const all = readSuggestions(1000);
+  if (!all.length) return res.json({ resolved: 0, pending: 0, total: 0, message: "No advisory suggestions recorded yet." });
+
+  const now = Math.floor(Date.now() / 1000);
+  const maxWindow = Math.max(...WINDOWS_MIN) * 60;
+  const due = all.filter((r) => !r.resolved && now >= r.at + Math.min(...WINDOWS_MIN) * 60);
+  if (!due.length) return res.json({ resolved: 0, pending: all.filter((r) => !r.resolved).length, total: all.length, message: "Nothing due for resolution yet." });
+
+  // One spot-candle fetch per symbol.
+  const spotBySymbol = new Map<string, any[]>();
+  for (const sym of [...new Set(due.map((r) => r.symbol))]) {
+    try { spotBySymbol.set(sym, await getProvider().getCandles(sym, "5m", 5)); }
+    catch { spotBySymbol.set(sym, []); }
+  }
+
+  // One option-candle fetch per distinct option contract, best-effort.
+  const optByKey = new Map<string, any[] | null>();
+  const provider: any = growwProviderForOi();
+  for (const r of due) {
+    if (!r.suggestion.startsWith("BUY") || r.strike == null || !r.optionType || !r.expiry) continue;
+    const key = `${r.symbol}|${r.optionType}|${r.strike}|${r.expiry}`;
+    if (optByKey.has(key)) continue;
+    if (!provider) { optByKey.set(key, null); continue; }
+    try {
+      const inst = await findOption(r.symbol, r.optionType, r.strike, r.expiry);
+      if (!inst) { optByKey.set(key, null); continue; }
+      const candles = await growwOptionCandles(provider, inst.tradingSymbol, r.at - 300, r.at + maxWindow + 600, 5);
+      optByKey.set(key, candles);
+    } catch { optByKey.set(key, null); }
+  }
+
+  const byId = new Map(due.map((r) => [r.id, r]));
+  let resolvedCount = 0;
+  const updated = all.map((rec) => {
+    if (!byId.has(rec.id)) return rec;
+    const key = `${rec.symbol}|${rec.optionType}|${rec.strike}|${rec.expiry}`;
+    const out = resolveRecord(rec, {
+      spotCandles: spotBySymbol.get(rec.symbol) || [],
+      optionCandles: optByKey.get(key) ?? null,
+      now,
+    });
+    if (out.resolved && !rec.resolved) resolvedCount++;
+    return out;
+  });
+  rewriteSuggestions(updated);
+
+  res.json({
+    resolved: resolvedCount,
+    pending: updated.filter((r) => !r.resolved).length,
+    total: updated.length,
+    windowsMin: WINDOWS_MIN,
+  });
+});
+
+// Per-layer accuracy, computed ONLY from resolved measurements. Returns nulls
+// (rendered as NOT RUN) rather than 0% when nothing has been measured.
+router.get("/advisory/accuracy", (req: Request, res: Response) => {
+  const win = Number(req.query.window);
+  const windowMinutes = WINDOWS_MIN.includes(win) ? win : 15;
+  res.json(buildAccuracyReport(readSuggestions(1000), windowMinutes));
 });
 
 export default router;

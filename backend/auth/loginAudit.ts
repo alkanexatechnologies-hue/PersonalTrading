@@ -11,7 +11,7 @@ export type AuditEventType =
   | "ADMIN_LOGIN"
   | "GROWW_CONNECTION_TEST" | "GROWW_CREDENTIAL_UPDATED" | "GROWW_DISCONNECTED"
   | "DHAN_CONNECTION_TEST" | "DHAN_CREDENTIAL_UPDATED" | "DHAN_DISCONNECTED"
-  | "WHATSAPP_CONNECTION_TEST" | "WHATSAPP_CREDENTIAL_UPDATED" | "WHATSAPP_DISCONNECTED"
+  | "TELEGRAM_CONNECTION_TEST" | "TELEGRAM_CREDENTIAL_UPDATED" | "TELEGRAM_DISCONNECTED"
   | "USER_CREATED" | "USER_DISABLED" | "USER_ENABLED" | "USER_PASSWORD_RESET" | "USER_REVOKED" | "USER_DELETED"
   | "CONNECTION_DISCONNECTED" | "ADMIN_ACCESS_DENIED";
 
@@ -21,7 +21,7 @@ export interface AuditEvent {
   userId: string | null;
   username: string | null;
   mode: "admin" | "user" | null;
-  provider?: "groww" | "dhan" | "whatsapp"; // which external provider, when relevant
+  provider?: "groww" | "dhan" | "telegram"; // which external provider, when relevant
   result?: "success" | "failure";
   detail?: string; // e.g. "created user X", "disabled user Y", "invalid password" - NEVER a token/password/secret value
 }

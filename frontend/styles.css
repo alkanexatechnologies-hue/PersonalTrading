@@ -2872,3 +2872,230 @@ body.oi-focus .cockpit-strip #mind-bar {
   .msl-modal-box { max-width: 100%; min-height: 100%; border-radius: 0; border: none; }
   .msl-pre { font-size: 10.5px; }
 }
+
+/* ================== Advisory: signal source + measured outcome ==================
+   Extends the existing Master Trade Selector table. Reuses .mts-*/.mtg-card
+   language rather than introducing a second design system. ADVISORY ONLY — no
+   element here triggers a trade. */
+
+/* Layer state chips: a CANDIDATE is not a trade. */
+.mts-layer {
+  display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+  padding: 2px 7px; border-radius: 10px; white-space: nowrap;
+  background: rgba(255,255,255,0.07); color: var(--muted);
+}
+.mts-layer.cand { background: rgba(59,130,246,0.16); color: var(--blue); }
+.mts-layer.pass { background: rgba(34,197,94,0.16); color: var(--green); }
+.mts-layer.wait { background: rgba(245,158,11,0.16); color: var(--amber); }
+.mts-layer.block { background: rgba(239,68,68,0.16); color: var(--red); }
+.mts-layer.noedge { background: rgba(255,255,255,0.06); color: var(--muted); }
+
+.mts-src { font-size: 11px; color: var(--ink-2, var(--muted)); max-width: 18ch; line-height: 1.4; }
+
+/* Trade suggestion chip. */
+.mts-sug {
+  display: inline-block; font-size: 11px; font-weight: 800; letter-spacing: 0.4px;
+  padding: 3px 9px; border-radius: 4px; white-space: nowrap;
+}
+.mts-sug.buyce { background: rgba(34,197,94,0.18); color: var(--green); }
+.mts-sug.buype { background: rgba(239,68,68,0.18); color: var(--red); }
+.mts-sug.wait { background: rgba(245,158,11,0.16); color: var(--amber); }
+.mts-sug.avoid { background: rgba(239,68,68,0.2); color: var(--red); }
+.mts-sug.noedge { background: rgba(255,255,255,0.07); color: var(--muted); }
+.mts-sug.big { font-size: 16px; padding: 5px 13px; }
+.mts-sug-strike { font-size: 10.5px; color: var(--muted); margin-top: 3px; white-space: nowrap; }
+
+/* Actual move: spot points and option percent stay on separate lines. */
+.mts-actual { font-size: 11.5px; line-height: 1.5; white-space: nowrap; }
+.mts-actual .mts-sp { font-weight: 700; }
+.mts-actual .mts-pm { font-size: 10.5px; color: var(--muted); }
+.mts-actual .up { color: var(--green); }
+.mts-actual .down { color: var(--red); }
+
+/* Trade difference: expected vs actual, per window. */
+.mts-diff { font-size: 11px; line-height: 1.55; min-width: 17ch; }
+.mts-exp { font-weight: 700; color: var(--muted); margin-bottom: 2px; }
+.mts-diffrow { white-space: nowrap; }
+.mts-diffrow b { display: inline-block; min-width: 3.4ch; color: var(--muted); }
+
+/* Result chips. */
+.mts-res { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 9px; white-space: nowrap; }
+.mts-res.ok { background: rgba(34,197,94,0.16); color: var(--green); }
+.mts-res.bad { background: rgba(239,68,68,0.16); color: var(--red); }
+.mts-res.neu { background: rgba(255,255,255,0.07); color: var(--muted); }
+.mts-res.pend { background: rgba(245,158,11,0.12); color: var(--amber); }
+.mts-outcome { font-size: 11px; line-height: 1.6; white-space: nowrap; }
+.mts-tradeout { font-weight: 700; font-size: 10.5px; margin-top: 2px; }
+.mts-tradeout.ok { color: var(--green); }
+.mts-tradeout.bad { color: var(--red); }
+.mts-tradeout.neu { color: var(--muted); }
+.mts-tradeout.pend { color: var(--amber); }
+
+/* Advisory suggestion panel under the Final Master Decision. */
+.mts-advisory {
+  margin-top: 10px; border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 14px; background: rgba(255,255,255,0.02);
+}
+.mts-advisory.act { border-color: var(--green); background: rgba(34,197,94,0.05); }
+.mts-advisory.hold { border-color: var(--amber); background: rgba(245,158,11,0.04); }
+.mts-adv-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 10px; }
+.mts-adv-lab {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--muted);
+}
+.mts-adv-strike { font-size: 14px; font-weight: 800; }
+.mts-adv-advisory {
+  margin-left: auto; font-size: 10px; font-weight: 700; letter-spacing: 0.6px;
+  text-transform: uppercase; color: var(--amber);
+  border: 1px solid var(--amber); border-radius: 10px; padding: 2px 8px;
+}
+.mts-adv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 2px 20px; }
+.mts-adv-row { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; padding: 3px 0; border-bottom: 1px solid var(--border); }
+.mts-adv-row span { color: var(--muted); white-space: nowrap; }
+.mts-adv-row b { text-align: right; }
+.mts-adv-row.wide { grid-column: 1 / -1; }
+.mts-adv-reason { font-weight: 400; font-size: 11.5px; color: var(--ink-2, var(--muted)); text-align: left; line-height: 1.5; }
+.mts-opp { color: var(--amber); }
+
+/* Signal accuracy card. */
+.adv-acc-card { margin-top: 12px; }
+.adv-acc-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.adv-acc-head h5 { margin: 0; }
+.adv-acc-head label { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.adv-acc-sel {
+  background: var(--panel); color: var(--text, var(--ink)); border: 1px solid var(--border);
+  border-radius: 6px; padding: 4px 8px; font-size: 12px; min-height: 32px;
+}
+.adv-acc-note { margin: 8px 0 10px; line-height: 1.5; }
+.adv-acc-table td, .adv-acc-table th { white-space: nowrap; }
+.adv-sub { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin-top: 12px; }
+.adv-sub-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: rgba(255,255,255,0.02); }
+.adv-sub-card h5 {
+  margin: 0 0 7px; font-size: 10.5px; letter-spacing: 0.8px; text-transform: uppercase; color: var(--muted);
+}
+.adv-disclaimer { margin-top: 12px; }
+
+/* Mobile: the widened table collapses to labelled cards. */
+@media (max-width: 900px) {
+  .mts-adv-advisory { margin-left: 0; }
+  .mts-adv-row b { text-align: left; }
+  .mts-adv-row { flex-direction: column; gap: 1px; }
+}
+
+/* ================== Liquidity Status — horizontal band ==================
+   UI ONLY. Spans the full width of .mtg-grid so the panel reads left-to-right
+   instead of as one long vertical list. No detection value or rule is affected
+   by anything in this block. */
+.liq-card.liq-wide { grid-column: 1 / -1; font-size: 12px; }
+
+.liq-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.liq-head h5 { margin: 0; }
+.liq-advisory {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase;
+  color: var(--amber); border: 1px solid var(--amber); border-radius: 9px;
+  padding: 2px 7px; white-space: nowrap;
+}
+
+/* --- top row: Opening Range | Liquidity Levels | Current Event --- */
+.liq-top {
+  display: grid; gap: 10px;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(260px, 1.6fr) minmax(170px, 1fr);
+  align-items: stretch;
+}
+.liq-box {
+  border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px;
+  background: rgba(255, 255, 255, 0.02); min-width: 0;
+}
+.liq-box h6 {
+  margin: 0 0 7px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.8px;
+  text-transform: uppercase; color: var(--muted);
+  display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+}
+.liq-win { font-weight: 400; letter-spacing: 0; text-transform: none; font-size: 10px; }
+
+.liq-pair {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  padding: 2px 0; line-height: 1.5; min-width: 0;
+}
+.liq-pair span { color: var(--muted); white-space: nowrap; }
+.liq-pair b {
+  text-align: right; font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.liq-pair b.up { color: var(--green); }
+.liq-pair b.down { color: var(--red); }
+
+/* Liquidity Levels reads as two columns of pairs rather than one tall list. */
+.liq-pairgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
+
+.liq-undef { color: var(--muted); font-weight: 400; font-size: 10px; cursor: help; }
+
+/* --- current event --- */
+.liq-eventbox { display: flex; flex-direction: column; }
+.liq-event {
+  margin: 2px 0 7px; padding: 9px 10px; border-radius: 6px; text-align: center;
+  font-size: 15px; font-weight: 800; letter-spacing: 1px; line-height: 1.15;
+  border: 1px solid var(--border); color: var(--muted);
+}
+.liq-event.sweep { border-color: var(--amber); color: var(--amber); background: rgba(245, 158, 11, 0.1); }
+.liq-event.break { border-color: var(--green); color: var(--green); background: rgba(34, 197, 94, 0.1); }
+.liq-event.trap { border-color: var(--red); color: var(--red); background: rgba(239, 68, 68, 0.12); }
+.liq-event.none { background: rgba(255, 255, 255, 0.03); }
+
+/* --- Key Liquidity strip --- */
+.liq-strip { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--border); }
+.liq-strip h6 {
+  margin: 0 0 7px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.8px;
+  text-transform: uppercase; color: var(--muted);
+}
+.liq-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 7px; }
+.liq-tile {
+  border: 1px solid var(--border); border-radius: 7px; padding: 7px 9px;
+  background: rgba(255, 255, 255, 0.02); min-width: 0;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.liq-tile span {
+  font-size: 9.5px; letter-spacing: 0.4px; text-transform: uppercase; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.liq-tile b { font-size: 13px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.liq-tile b.liq-undef { font-size: 10px; }
+
+/* --- detail chips --- */
+.liq-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.liq-chip {
+  font-size: 10.5px; padding: 2px 8px; border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06); color: var(--muted); white-space: nowrap;
+}
+.liq-chip b { color: var(--text, var(--ink)); font-variant-numeric: tabular-nums; }
+.liq-chip.concept { border: 1px dashed var(--amber); color: var(--amber); cursor: help; }
+.liq-chip.concept b { color: var(--amber); }
+
+/* --- confirmation reads (recorded, not scored) --- */
+.liq-conf-row {
+  margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--border);
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 3px 16px;
+}
+.liq-conf { font-size: 10.5px; color: var(--muted); line-height: 1.45; min-width: 0; }
+.liq-conf i {
+  font-style: normal; font-weight: 700; letter-spacing: 0.5px; color: var(--muted);
+  margin-right: 5px; text-transform: uppercase; font-size: 9.5px;
+}
+.liq-skip { margin-top: 7px; line-height: 1.45; font-size: 10.5px; }
+
+/* --- tablet: event drops under the two level groups --- */
+@media (max-width: 1100px) {
+  .liq-top { grid-template-columns: minmax(140px, 0.9fr) minmax(240px, 1.4fr); }
+  .liq-eventbox { grid-column: 1 / -1; }
+  .liq-eventbox .liq-event { font-size: 16px; }
+}
+
+/* --- mobile: single column, larger event badge, 2-up tiles --- */
+@media (max-width: 760px) {
+  .liq-top { grid-template-columns: 1fr; }
+  .liq-eventbox { grid-column: auto; }
+  .liq-pairgrid { grid-template-columns: 1fr; }
+  .liq-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .liq-event { font-size: 17px; padding: 11px 10px; }
+  .liq-pair { font-size: 13px; }
+  .liq-tile b { font-size: 14px; }
+}

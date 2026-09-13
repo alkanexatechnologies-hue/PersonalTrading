@@ -6,7 +6,7 @@ import crypto from "crypto";
 // alone isn't warranted when Node already ships a real, salted, slow KDF).
 // The existing single ADMIN credential (auth/credentials.ts) is untouched by
 // this file - it keeps its own already-approved plaintext-at-rest design
-// (needed to re-send by email/WhatsApp on rotation). This module is only for
+// (needed to re-send by email/Telegram on rotation). This module is only for
 // the new admin-managed USER accounts, which must never be re-sendable in
 // plaintext - only a fresh temporary password the admin sets and hands over
 // once.

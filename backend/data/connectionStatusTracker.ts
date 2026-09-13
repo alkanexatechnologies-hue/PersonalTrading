@@ -3,7 +3,7 @@
 // last get tested" for the Admin Connections panel. Never stores a
 // credential, token, or secret - only timestamps and a boolean outcome.
 
-export type ProviderName = "groww" | "dhan" | "whatsapp";
+export type ProviderName = "groww" | "dhan" | "telegram";
 
 interface ProviderStatus {
   lastConnectedAt: number | null; // last time a real, successful connection/action happened
@@ -14,7 +14,7 @@ interface ProviderStatus {
 const state: Record<ProviderName, ProviderStatus> = {
   groww: { lastConnectedAt: null, lastTestedAt: null, lastTestOk: null },
   dhan: { lastConnectedAt: null, lastTestedAt: null, lastTestOk: null },
-  whatsapp: { lastConnectedAt: null, lastTestedAt: null, lastTestOk: null },
+  telegram: { lastConnectedAt: null, lastTestedAt: null, lastTestOk: null },
 };
 
 export function recordConnectionTest(provider: ProviderName, ok: boolean): void {

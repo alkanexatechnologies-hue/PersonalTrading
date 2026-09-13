@@ -2,7 +2,7 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { sendCredentialsEmail } from "./mailer";
-import { sendWhatsapp, whatsappReady } from "../alerts/whatsapp";
+import { notify, notificationsReady } from "../integrations/notificationService";
 
 // ============================ Persisted, rotating login credentials ============================
 // The dashboard's login used to regenerate a brand-new random password every
@@ -15,8 +15,8 @@ import { sendWhatsapp, whatsappReady } from "../alerts/whatsapp";
 // If a notification email is configured (setNotifyEmail, exposed via
 // POST /api/auth/email), each rotation also emails the new username/password
 // there (see mailer.ts) instead of only printing to the server console. If a
-// WhatsApp sender is configured (POST /api/whatsapp/config - phone + one of
-// CallMeBot/Green-API/Meta Cloud, see alerts/whatsapp.ts), each rotation is
+// Telegram channel is configured (POST /api/telegram/config - bot token + group
+// chat id, see integrations/telegramProvider.ts), each rotation is
 // also sent there.
 
 export interface StoredCredentials {
@@ -84,9 +84,9 @@ function announce(creds: StoredCredentials, justRotated: boolean): void {
       : `  Set a notification email (Connect panel -> Login notifications) to have new credentials emailed to you instead of checking this log.`
   );
   console.log(
-    whatsappReady().ok
-      ? `  New credentials are also sent via WhatsApp on each rotation.\n`
-      : `  Set a WhatsApp number + key (Connect panel -> WhatsApp login alerts) to also get new credentials on WhatsApp.\n`
+    notificationsReady().ok
+      ? `  New credentials are also sent via Telegram on each rotation.\n`
+      : `  Configure Telegram (Connect panel -> Telegram alerts) to also get new credentials on Telegram.\n`
   );
 }
 
@@ -154,18 +154,20 @@ export async function rotateCredentials(): Promise<StoredCredentials> {
       console.error("[auth] failed to email rotated credentials:", e instanceof Error ? e.message : e);
     }
   }
-  // Same rotated credentials, second delivery channel - reuses the personal
-  // WhatsApp sender already built for trade alerts (alerts/whatsapp.ts), so this
-  // needs no new integration, only a phone number + provider key configured via
-  // POST /api/whatsapp/config (see the Connect panel's WhatsApp section).
-  if (whatsappReady().ok) {
+  // Same rotated credentials, second delivery channel - reuses the notification
+  // service already built for trade alerts (integrations/notificationService.ts),
+  // so this needs no new integration, only a bot token + group chat id configured
+  // via POST /api/telegram/config (see the Connect panel's Telegram section).
+  // Message body unchanged by the WhatsApp -> Telegram migration.
+  if (notificationsReady().ok) {
     try {
-      const r = await sendWhatsapp(
+      const r = await notify(
+        "CREDENTIAL_ROTATION",
         `NSA Dashboard login (today):\nuser: ${current.username}\npass: ${current.password}\n\nRotates again tomorrow ~08:00 IST.`
       );
-      if (!r.ok) console.error("[auth] failed to WhatsApp rotated credentials:", r.error);
+      if (!r.ok) console.error("[auth] failed to send rotated credentials:", r.error);
     } catch (e) {
-      console.error("[auth] failed to WhatsApp rotated credentials:", e instanceof Error ? e.message : e);
+      console.error("[auth] failed to send rotated credentials:", e instanceof Error ? e.message : e);
     }
   }
   return current;
