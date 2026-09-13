@@ -1,6 +1,8 @@
 import { SymbolDef, nearestStrike } from "../config";
 import { Candle, DayIndexOutlook, DayOpportunity, OiAnalysis, SignalResult } from "../types";
 import { buyContextFromCandles, evaluateBuyAlgo } from "../options/highProbAlgo";
+import { computeOiChange } from "../oi/oiChange";
+import { DIRECTION_THRESHOLD } from "../signals/score";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
@@ -35,16 +37,21 @@ export function betaCorrVsNifty(stockDaily: Candle[], niftyDaily: Candle[]): { b
  * single directional call with a confidence. This is a MODEL-BASED projection
  * (statistical/technical), NOT a guaranteed forecast - markets are uncertain.
  */
-function directionFrom(signal: SignalResult, oi: OiAnalysis | null): { dir: 1 | -1 | 0; confidence: number; reasons: string[] } {
+function directionFrom(signal: SignalResult, oi: OiAnalysis | null, def: { symbol: string; name: string; type: "index" | "equity" }): { dir: 1 | -1 | 0; confidence: number; reasons: string[] } {
   const reasons: string[] = [];
-  const sigDir = signal.score >= 12 ? 1 : signal.score <= -12 ? -1 : 0;
+  const sigDir = signal.score >= DIRECTION_THRESHOLD ? 1 : signal.score <= -DIRECTION_THRESHOLD ? -1 : 0;
   if (sigDir !== 0) reasons.push(`Technical ${sigDir > 0 ? "bullish" : "bearish"} (${signal.label}, score ${signal.score})`);
   else reasons.push(`Technical neutral (score ${signal.score})`);
 
+  // Phase 1.2 (OIAnalysisEngine): the ±100 oiChange.ts score, not oi.verdict.bias's
+  // ±1-ish read — the one OI bias number this app uses everywhere now.
   let oiDir = 0;
   if (oi && oi.available) {
-    oiDir = oi.verdict.bias === "Bullish" ? 1 : oi.verdict.bias === "Bearish" ? -1 : 0;
-    reasons.push(`Option OI ${oi.verdict.bias} (PCR ${oi.pcr})`);
+    const oc = computeOiChange(def.symbol, def.name, def.type, oi);
+    if (oc) {
+      oiDir = oc.oiVerdict === "Bullish" ? 1 : oc.oiVerdict === "Bearish" ? -1 : 0;
+      reasons.push(`OI (oiDirScore ${oc.oiDirScore >= 0 ? "+" : ""}${oc.oiDirScore}): ${oc.oiVerdict} (PCR ${oi.pcr})`);
+    }
   }
   let futDir = 0;
   if (oi && oi.available && oi.futBuildup) {
@@ -70,7 +77,7 @@ function directionFrom(signal: SignalResult, oi: OiAnalysis | null): { dir: 1 | 
 /** Index-level outlook (NIFTY / BANK NIFTY): direction + expected day range. */
 export function buildIndexOutlook(def: SymbolDef, signal: SignalResult, oi: OiAnalysis | null, atrDaily: number | null): DayIndexOutlook {
   const spot = signal.price;
-  const { dir, confidence, reasons } = directionFrom(signal, oi);
+  const { dir, confidence, reasons } = directionFrom(signal, oi, def);
 
   // Expected day move = daily ATR (typical range), floored to a sane minimum.
   const expectedMovePts = round2(atrDaily && atrDaily > 0 ? atrDaily : spot * 0.006);
@@ -126,7 +133,7 @@ export function buildDayOpportunity(
   }
 ): DayOpportunity | null {
   if (!def.fno || !oi || !oi.available || !oi.topStrikes.length) return null;
-  const { dir, confidence, reasons } = directionFrom(signal, oi);
+  const { dir, confidence, reasons } = directionFrom(signal, oi, def);
   if (dir === 0) return null;
 
   // ---- Market alignment (NIFTY / BANK NIFTY) ----

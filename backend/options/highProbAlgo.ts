@@ -2,6 +2,7 @@ import { Candle, OiAnalysis } from "../types";
 import { adx, last, vwap } from "../indicators";
 import { computeDirection4L } from "../signals/direction4L";
 import { directionNoMomentum, levelContext, srRoomOk } from "../paper/entryRules";
+import { CONFIG } from "../config/arbitration";
 
 /**
  * High-probability option filter (buy + sell).
@@ -88,10 +89,13 @@ export function evaluateBuyAlgo(i: HighProbBuyInput): HighProbResult {
   }
 
   if (i.pcr != null) {
-    if (i.direction === "Bullish" && i.pcr <= 0.7) failed.push(`PCR ${i.pcr} = heavy call writing (CE trap)`);
-    if (i.direction === "Bearish" && i.pcr >= 1.2) failed.push(`PCR ${i.pcr} = heavy put writing (PE trap)`);
-    if (i.direction === "Bullish" && i.pcr >= 1.1) score += 6;
-    if (i.direction === "Bearish" && i.pcr <= 0.85) score += 6;
+    // Trap-fail veto: intentionally MORE extreme than CONFIG.pcr (see arbitration.ts) —
+    // only veto when PCR strongly contradicts the idea's direction, not merely unsupportive.
+    if (i.direction === "Bullish" && i.pcr <= CONFIG.pcrTrapFail.bullishFailBelow) failed.push(`PCR ${i.pcr} = heavy call writing (CE trap)`);
+    if (i.direction === "Bearish" && i.pcr >= CONFIG.pcrTrapFail.bearishFailAbove) failed.push(`PCR ${i.pcr} = heavy put writing (PE trap)`);
+    // Score bonus: the canonical supportive threshold (Phase 1.3).
+    if (i.direction === "Bullish" && i.pcr >= CONFIG.pcr.bullish) score += 6;
+    if (i.direction === "Bearish" && i.pcr <= CONFIG.pcr.bearish) score += 6;
   }
 
   if (i.adx != null) {

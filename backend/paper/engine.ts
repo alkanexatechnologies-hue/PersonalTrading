@@ -1,6 +1,8 @@
 import fs from "fs";
 import path from "path";
 import { CONFIG } from "../config/arbitration";
+import { RiskRadar } from "../types";
+import { ATR_SPIKE_DANGER, PREMIUM_SWING_DANGER } from "../options/riskRadar";
 // SENTIMENT / LIQUIDITY / RISK EXTENSION (additive). Pure modules composed by
 // runExtPipeline() below in the exact Step-11 order. Nothing here edits Setup
 // (entryRules.ts), the exit stack, or the capital-guard MATH.
@@ -62,6 +64,9 @@ export interface PaperPosition {
   wallReactionState?: WallReactionState;
   riskComment?: RiskComment;        // Step 8: advisory guard snapshot (never blocks)
   dedupFp?: string;                 // Step 9: fingerprint, released on exit
+  // --- ScalingEngine (Phase 2 / Decision 3) ---
+  scaleIns?: number;                 // number of add-ons filled so far (0 = original entry only)
+  originalQty?: number;              // qty at the ORIGINAL entry, before any add-on (exposure-cap base)
 }
 
 export interface PaperTrade extends PaperPosition {
@@ -108,6 +113,7 @@ export interface PaperState {
   manualClosed?: ManualTrade[];    // Manual Trading history (closed)
   extDedup?: DedupRecord[];        // Sentiment/Liquidity/Risk extension — dedup fingerprints
   peakEquity?: number;             // running peak total equity (for riskComment drawdown-from-peak)
+  stopOutCooldown?: Record<string, number>; // symbol -> epoch of last auto-trade "stop" exit (Phase 2.3 cooldown)
 }
 
 // MANUAL TRADING: a user-entered trade the system then tracks LIVE (real premium /
@@ -217,7 +223,9 @@ export interface TickDeps {
   getStockIntradayIdeas: () => Promise<IntradayIdea[]>;
   getOiBias?: (symbol: string) => Promise<string | null>;
   getOiModule?: (symbol: string) => Promise<{ dir: string; scalp5: string; scalp15: string; dir1h: string } | null>;
-  getRegime?: (symbol: string) => Promise<{ regime: string; dir: number; adx: number } | null>;
+  // Phase 1.1: regime comes from the ONE MarketRegimeEngine (fractal + ATR,
+  // paper/ext/marketRegime.ts). `adx` is diagnostic display-only, not decision-bearing.
+  getRegime?: (symbol: string) => Promise<{ regime: MarketRegime; dir: number; adx: number | null } | null>;
   getRelVol?: (symbol: string) => Promise<number | null>; // recent volume vs avg (null for indices)
   getScalpIdeas?: () => Promise<OptionIdea[]>; // momentum-burst scalps in the current direction
   // Index-aware stop: parent index's short-term direction for a stock (to tighten
@@ -231,6 +239,17 @@ export interface TickDeps {
   // (non-scalp) option candidate. When absent, the engine behaves exactly as before
   // (old sizing + hard heat-cap block), so existing callers/tests are unaffected.
   getExtInputs?: (idea: OptionIdea) => Promise<ExtInputs | null>;
+  // Phase 2.2 (RiskEngine): pre-trade Risk Radar read for this symbol/premium.
+  // Was previously display-only (attached to already-open positions in the route
+  // layer); tryOpenOption now also vetoes on its two danger-level reads.
+  getRiskRadar?: (symbol: string, premium: number) => Promise<RiskRadar | null>;
+  // Master Trade Selector EMA + Momentum-Burst confluence (session decision):
+  // blocks an idea only when EMA confluence (9/21 AND 21/50 must agree with
+  // each other) or Momentum Burst ACTIVELY OPPOSES the idea's direction.
+  // Applied to every option idea type (index/stock/scalp) — the first time
+  // index-option entries are gated by any technical indicator; previously
+  // they were purely OI Command-driven. Neutral/flat reads never block.
+  getConfluenceVeto?: (symbol: string, direction: "Bullish" | "Bearish") => Promise<{ blocked: boolean; reason: string } | null>;
 }
 
 const FILE = path.join(process.cwd(), "data", "paper-state.json");
@@ -292,7 +311,7 @@ const CLEAN_MIN = 40; // skip choppy stock underlyings — loss cluster
 // moves trade so the forward-test can actually collect data.
 const OPT_RR_MIN = 1.3; // reverted 1.15->1.3: the loose floor let in low-quality index PEs that were 0% win
 const INTRADAY_RR_MIN = 1.3; // intraday needs >= 1.3:1
-const HEAT_CAP_PCT = 0.06; // max total open risk = 6% of combined start
+const HEAT_CAP_PCT = CONFIG.heatCap.pct / 100; // max total open risk = 6% of combined start (Phase 2.1: centralized in config/arbitration.ts)
 const PROFIT_TARGET_PCT = 0.15; // reported target; does not freeze new win-win entries
 const DAILY_LOSS_CAP_PCT = 0.03; // halt new entries at -3% realised on the day
 const MAX_DRAWDOWN_PCT = 0.1; // book all & stop at -10% total equity
@@ -696,6 +715,13 @@ export function closePosition(s: PaperState, pos: PaperPosition, exitPrice: numb
   // EXTENSION: mark this trade's dedup fingerprint as exited (re-arm rules in
   // tradeDedup.ts then gate any re-entry at the same wall).
   if (pos.dedupFp && s.extDedup && s.extDedup.length) releaseOnExit(s.extDedup, pos.dedupFp);
+  // Phase 2.3: arm the per-symbol stop-out cooldown. Independent of tradeDedup's
+  // price-distance re-arm — this blocks ANY re-entry on the symbol for a fixed
+  // window regardless of strike/price, even a fresh setup at a different wall.
+  if (reason === "stop") {
+    s.stopOutCooldown = s.stopOutCooldown || {};
+    s.stopOutCooldown[pos.symbol] = nowEpoch;
+  }
 }
 
 function evalOptionExit(pos: PaperPosition, spot: number, nowEpoch: number, opts: { eod: boolean; finished: boolean }): { price: number; reason: ExitReason } | null {
@@ -823,7 +849,21 @@ export interface ExtDecision {
   scoreReasons: string[];
 }
 
-function runExtPipeline(inp: ExtInputs, idea: OptionIdea, dedupStore: DedupRecord[], nowEpoch: number): ExtDecision {
+export function runExtPipeline(inp: ExtInputs, idea: OptionIdea, dedupStore: DedupRecord[], nowEpoch: number): ExtDecision {
+  // Phase 3.3: stale-data veto, parity with the OI path's >90s chain-age check
+  // (oi/oiTrade.ts). Checked first, before scoring — a stale candles15m feed
+  // (served from the 30-min stale-but-usable fallback during a provider outage)
+  // means every downstream read (regime, wall reaction, premium trend) is
+  // computed off data the live market has already moved past.
+  if (inp.dataStale) {
+    return {
+      finalScore: 0, setupQuality: 0, regime: "Transitioning", wallReactionState: "UNCLEAR",
+      liquidityState: "Normal", rrFloorOverride: null, relaxTargetForBreak: false, inp,
+      scoreReasons: [`data stale (${inp.dataAgeSec}s > 90s)`],
+      displayed: false, vetoed: true, suppressed: false,
+      reason: `data stale (${inp.dataAgeSec}s > 90s)`, fp: "",
+    };
+  }
   // Steps 1–7 run as a single PURE function (shared with the OI Command cockpit).
   const baseConfidence = calibratedWinProb({ scalp: false, confidence: idea.confidence, strikeReason: idea.strikeReason });
   const ext = scoreExtension(inp, { direction: idea.direction, optionType: idea.optionType }, baseConfidence);
@@ -874,17 +914,102 @@ export function extDedupPeek(ctx: DedupContext): { suppressed: boolean; reason: 
   return { suppressed: !dd.allowed, reason: dd.reason };
 }
 
+// Phase 2.3: per-symbol cooldown after a stop-out, independent of price movement
+// (distinct from tradeDedup's price-distance re-arm, which only guards the SAME
+// fingerprint/wall — this blocks a fresh setup at a different strike too). Pure
+// function, no I/O, so it can be unit-tested without the engine's disk-backed state.
+export function stopOutCooldownCheck(
+  stopOutCooldown: Record<string, number> | undefined,
+  symbol: string,
+  nowEpoch: number,
+): { blocked: boolean; remainMin: number } {
+  const lastStopAt = stopOutCooldown?.[symbol];
+  if (lastStopAt == null) return { blocked: false, remainMin: 0 };
+  const cooldownSec = CONFIG.cooldown.afterStopOutMinutes * 60;
+  const elapsed = nowEpoch - lastStopAt;
+  if (elapsed >= cooldownSec) return { blocked: false, remainMin: 0 };
+  return { blocked: true, remainMin: Math.ceil((cooldownSec - elapsed) / 60) };
+}
+
+// Phase 2.4 (decided, then redefined to resolve the ScalingEngine conflict):
+// GLOBAL one-trade-at-a-time lock, scoped by SYMBOL/IDEA rather than literally
+// one row in s.open. Replaces the old per-(symbol, pool) scope that allowed up
+// to 6 concurrent positions across pools (1 index option + 2 stock option + 2
+// stock intraday + 1 scalp). The old MAX_INDEX_OPT/MAX_STOCK_OPT/MAX_INTRADAY/
+// MAX_SCALP constants below are now moot ceilings for FRESH entries — this lock
+// always binds first since it caps the whole account at one live symbol/idea.
+//
+// `symbol`, when passed, makes this SCALE-IN AWARE: an open position for that
+// EXACT symbol does not count as a lock violation (tryOpenOption routes that
+// case to ScalingEngine instead of a fresh entry), but an open position for any
+// OTHER symbol still blocks. Callers that don't support scaling (stockIntraday,
+// scalps) omit `symbol` and get the original strict "any open position blocks"
+// behavior.
+export function globalOneTradeLock(s: PaperState, symbol?: string): boolean {
+  if (symbol != null) return s.open.some((p) => p.symbol !== symbol);
+  return s.open.length > 0;
+}
+
 // Try to open one option position; returns "OPENED" or a Hindi skip reason.
 async function tryOpenOption(s: PaperState, deps: TickDeps, idea: OptionIdea, kind: PoolKind, requireClean: boolean, rivalScalp?: OptionIdea | null): Promise<string> {
   const r2v = (n: number) => Math.round(n * 100) / 100;
+  // Scalps are excluded from scaling (fast in/out, rupee-capped — doesn't fit
+  // "add-on requires improved confirmation"), so they keep the strict lock.
+  if (idea.scalp) {
+    if (globalOneTradeLock(s)) return `global lock — पहले से एक trade खुला है (${s.open[0].symbol}), एक साथ सिर्फ़ एक trade`;
+  } else if (globalOneTradeLock(s, idea.symbol)) {
+    return `global lock — ${idea.symbol} नहीं, पहले से किसी और symbol में trade खुला है (${s.open.find((p) => p.symbol !== idea.symbol)?.symbol})`;
+  }
+  const existingSame = s.open.find((p) => p.kind === kind && p.symbol === idea.symbol && !p.scalp);
+  if (existingSame && !idea.scalp) return tryScaleIn(s, deps, idea, kind, existingSame);
   if (s.open.some((p) => p.kind === kind && p.symbol === idea.symbol)) return `पहले से ${idea.symbol} में position खुला है`;
+  {
+    const cd = stopOutCooldownCheck(s.stopOutCooldown, idea.symbol, deps.nowEpoch);
+    if (cd.blocked) return `cooldown — ${idea.symbol} में stop-out के बाद ${cd.remainMin} min बाकी (re-entry रुका)`;
+  }
   if (idea.dte != null && idea.dte <= 1 && (idea.confidence ?? 0) < 80) return `expiry के करीब (dte=${idea.dte}) — conf ${idea.confidence ?? 0}<80 चाहिए`;
   if (requireClean && idea.cleanRating != null && idea.cleanRating < CLEAN_MIN) return `underlying choppy (clean ${idea.cleanRating}<${CLEAN_MIN})`;
   const oiMod = (idea.strikeReason || "").startsWith("OI-");
   const confNeed = oiMod ? 55 : CONFIRM_FLOOR;
   if ((idea.confidence ?? 0) < confNeed) return `confidence कम (${idea.confidence ?? 0}<${confNeed} floor)`;
-  if (!oiMod && !idea.scalp && deps.getRegime) {
-    try { const rg = await deps.getRegime(idea.symbol); if (rg && rg.regime === "Range") return `regime=Range (flat market — theta risk में buy नहीं)`; } catch { /* ignore */ }
+  // Phase 1.1: regime protection now applies to EVERY option idea — scalp and
+  // OI-tagged ideas used to bypass this check entirely (the "!oiMod && !idea.scalp"
+  // guard that used to live here), which meant a Compressed/flat market could still
+  // take scalp or OI-driven trades with no regime veto at all. "Compressed" is the
+  // MarketRegimeEngine's flat/coiled state — the direct successor to the old
+  // ADX<18 "Range" read this check used before Phase 1.1 unified the classifiers.
+  if (deps.getRegime) {
+    try { const rg = await deps.getRegime(idea.symbol); if (rg && rg.regime === "Compressed") return `regime=Compressed (flat/coiled market — theta risk में buy नहीं)`; } catch { /* ignore */ }
+  }
+  // Phase 2.2 (RiskEngine): Risk Radar was previously display-only, attached to
+  // already-OPEN positions at the route layer — it never actually blocked an
+  // entry. These are the plan's two named danger-level examples, exactly as
+  // riskRadar.ts's own "danger" severity is computed (ATR_SPIKE_DANGER /
+  // PREMIUM_SWING_DANGER) — no additional thresholds invented. Every other
+  // Risk Radar warning (chop, time-of-day, volume, sharp candle, theta) stays
+  // advisory-only via riskComment, unchanged.
+  if (deps.getRiskRadar) {
+    try {
+      const radar = await deps.getRiskRadar(idea.symbol, idea.premium);
+      if (radar) {
+        if (radar.atrRatio != null && radar.atrRatio >= ATR_SPIKE_DANGER) {
+          return `Risk Radar: danger — ATR ${radar.atrRatio}x normal (volatility spike, entry रोका गया)`;
+        }
+        if (radar.premiumSwingPct != null && radar.premiumSwingPct >= PREMIUM_SWING_DANGER) {
+          return `Risk Radar: danger — 1 ATR move ≈ ${radar.premiumSwingPct}% of premium (entry रोका गया)`;
+        }
+      }
+    } catch { /* ignore */ }
+  }
+  // Master Trade Selector EMA + Momentum-Burst confluence (session decision):
+  // applies to EVERY option idea (index/stock/scalp) — blocks only when EMA
+  // confluence or Momentum Burst ACTIVELY OPPOSES idea.direction. A Neutral/
+  // flat read on either signal never blocks (per the "flat = neutral" decision).
+  if (deps.getConfluenceVeto) {
+    try {
+      const cv = await deps.getConfluenceVeto(idea.symbol, idea.direction);
+      if (cv?.blocked) return `Master Selector confluence: ${cv.reason} (entry रोका गया)`;
+    } catch { /* ignore */ }
   }
 
   // ===== SENTIMENT/LIQUIDITY/RISK EXTENSION (directional, non-scalp options) =====
@@ -1026,6 +1151,7 @@ async function tryOpenOption(s: PaperState, deps: TickDeps, idea: OptionIdea, ki
     displayed: extDecision ? extDecision.displayed : undefined,
     wallReactionState: extDecision?.wallReactionState, riskComment, dedupFp: extDecision?.fp || undefined,
     lastSpot: idea.spot, lastPrice: idea.premium,
+    scaleIns: 0, originalQty: qty,
   });
   // Step 9 — arm the dedup fingerprint so this setup can't immediately re-fire.
   if (extDecision && extDecision.dedupRecord) s.extDedup = armDedup(s.extDedup || [], extDecision.dedupRecord);
@@ -1058,6 +1184,80 @@ async function tryOpenOption(s: PaperState, deps: TickDeps, idea: OptionIdea, ki
     confidence: idea.confidence, winProb: winP, netRR, timeframe: idea.timeframe, pattern: idea.candlePattern, scalp: idea.scalp, why,
     finalScore: extDecision?.finalScore, setupQuality: extDecision?.setupQuality,
     displayed: extDecision ? extDecision.displayed : undefined, riskComment,
+  }, ...(s.entryLog || [])].slice(0, 40);
+  return "OPENED";
+}
+
+// ============================ ScalingEngine (Phase 2, Decision 3) ============================
+// Add-on entries to an ALREADY-open position (called from tryOpenOption when an
+// incoming idea matches an open position's symbol+kind). Per the plan's spec:
+//   - add-on entries require IMPROVED confirmation — the new idea's confidence
+//     must beat the ORIGINAL entry's, not merely clear the normal floor again.
+//   - NEVER scale on adverse price movement — the underlying must have moved
+//     favourably since the original entry; this can never become "averaging
+//     down" into a loser.
+//   - its own max-entry cap (MAX_SCALE_INS): at most one add-on per position.
+//   - its own exposure cap (SCALE_EXPOSURE_MULT): total qty after the add-on is
+//     capped as a multiple of the ORIGINAL entry's qty — kept entirely separate
+//     from HEAT_CAP_PCT, which this function never reads or adjusts.
+const MAX_SCALE_INS = 1;          // at most ONE add-on per position (2 fills total, ever)
+// 2.0x (not e.g. 1.5x): add-ons are always whole lots, and most index-option
+// entries open at exactly 1 lot (see MAX_SINGLE_LOT_LOSS_PCT above) — any cap
+// below 2.0x would make a single full-lot add-on mathematically impossible for
+// the most common position size, silently turning the feature into dead code.
+const SCALE_EXPOSURE_MULT = 2.0;  // total qty after all add-ons <= 2x the ORIGINAL entry's qty
+
+export async function tryScaleIn(s: PaperState, deps: TickDeps, idea: OptionIdea, kind: PoolKind, pos: PaperPosition): Promise<string> {
+  const r2v = (n: number) => Math.round(n * 100) / 100;
+  if (pos.optionType !== idea.optionType || pos.direction !== idea.direction) {
+    return `scale-in अस्वीकृत — direction/optionType मेल नहीं खाता (खुला: ${pos.direction}/${pos.optionType}, नया: ${idea.direction}/${idea.optionType})`;
+  }
+  const priorScaleIns = pos.scaleIns ?? 0;
+  if (priorScaleIns >= MAX_SCALE_INS) return `scale-in cap पूरा (max ${MAX_SCALE_INS} add-on/position, already ${priorScaleIns})`;
+
+  // NEVER scale on adverse movement — must be favourable vs the ORIGINAL entry spot.
+  const favourable = pos.direction === "Bullish" ? idea.spot > pos.spotEntry : idea.spot < pos.spotEntry;
+  if (!favourable) return `scale-in अस्वीकृत — entry के बाद price favourable नहीं चला (कभी averaging-down नहीं)`;
+
+  // Improved confirmation required: beat the ORIGINAL entry's confidence, not
+  // just clear the normal entry floor again.
+  const origConf = pos.confidence ?? 0;
+  const newConf = idea.confidence ?? 0;
+  if (newConf <= origConf) return `scale-in अस्वीकृत — confirmation बेहतर नहीं (नया conf ${newConf} <= original ${origConf})`;
+
+  // Own exposure cap — independent of the 6% heat cap (HEAT_CAP_PCT untouched here).
+  const baseQty = pos.originalQty ?? pos.qty;
+  const maxQty = Math.floor(baseQty * SCALE_EXPOSURE_MULT);
+  const addQty = Math.min(idea.lotSize, maxQty - pos.qty);
+  if (addQty < idea.lotSize) return `scale-in अस्वीकृत — exposure cap (max ${SCALE_EXPOSURE_MULT}x original qty ${baseQty}) में 1 पूरा lot नहीं बचा`;
+
+  const pool = poolOf(s, kind);
+  const cost = idea.premium * addQty;
+  if (cost > pool.cash) return `scale-in अस्वीकृत — premium cost ₹${Math.round(cost)} > pool cash ₹${Math.round(pool.cash)}`;
+
+  // Weighted-average entry price across the original fill + this add-on. Target/
+  // stop levels are kept from the original entry (not recomputed) — they were
+  // calibrated to that entry's R:R and this stays a deliberately conservative,
+  // single, well-understood add-on rather than a re-derived trade.
+  const newQty = pos.qty + addQty;
+  const newEntryPrice = r2v((pos.entryPrice * pos.qty + idea.premium * addQty) / newQty);
+
+  pool.cash = round2(pool.cash - cost);
+  pos.qty = newQty;
+  pos.entryPrice = newEntryPrice;
+  pos.scaleIns = priorScaleIns + 1;
+  pos.confidence = idea.confidence; // reflect the improved confirmation that justified the add-on
+  if (pos.premiumTarget != null) pos.potentialPnl = round2((pos.premiumTarget - newEntryPrice) * newQty);
+
+  logDecision({
+    type: "emitted", mode: "Directional", symbol: idea.symbol,
+    text: `${idea.symbol} ${idea.optionType}: SCALE-IN +${addQty} qty @ ₹${r2v(idea.premium)} (favourable move + बेहतर confirmation ${origConf}→${newConf}) — नया avg entry ₹${newEntryPrice}, total qty ${newQty}`,
+  });
+  s.entryLog = [{
+    at: deps.nowEpoch, kind, symbol: idea.symbol, name: pos.name, optionType: pos.optionType,
+    strike: pos.strike, direction: pos.direction, entryPrice: round2(idea.premium), qty: addQty, lots: Math.round(addQty / idea.lotSize),
+    confidence: idea.confidence, winProb: pos.winProb ?? 0, netRR: 0, timeframe: idea.timeframe, pattern: idea.candlePattern,
+    why: `SCALE-IN: favourable move + बेहतर confirmation (${origConf}→${newConf}) — +${addQty} qty @ ₹${r2v(idea.premium)}, avg entry अब ₹${newEntryPrice}`,
   }, ...(s.entryLog || [])].slice(0, 40);
   return "OPENED";
 }
@@ -1181,7 +1381,7 @@ async function tickPaperImpl(deps: TickDeps): Promise<any> {
   // (scalpIdeasThisTick is hoisted so the Index-options block below can hand the
   // live Scalp candidate to the Master Selector arbitration in tryOpenOption.)
   let scalpIdeasThisTick: OptionIdea[] = [];
-  if (!eod && !lossCapHit && deps.getScalpIdeas &&
+  if (!eod && !lossCapHit && deps.getScalpIdeas && !globalOneTradeLock(s) &&
       s.open.filter((p) => p.scalp).length < MAX_SCALP &&
       deps.nowEpoch - (s.lastScalpEntry || 0) >= SCALP_THROTTLE) {
     try {
@@ -1189,7 +1389,7 @@ async function tickPaperImpl(deps: TickDeps): Promise<any> {
       scalpIdeasThisTick = scalpIdeas;
       if (!scalpIdeas.length) check.notes.push("कोई scalp win-win नहीं (5m+15m / OI TAKE नहीं मिला)");
       for (const idea of scalpIdeas) {
-        if (s.open.filter((p) => p.scalp).length >= MAX_SCALP) break;
+        if (globalOneTradeLock(s) || s.open.filter((p) => p.scalp).length >= MAX_SCALP) break;
         idea.scalp = true;
         const reason = await tryOpenOption(s, deps, idea, "indexOption", false);
         recIdea("indexOption", idea, reason === "OPENED" ? "OPENED (scalp)" : reason);
@@ -1200,14 +1400,23 @@ async function tickPaperImpl(deps: TickDeps): Promise<any> {
 
   if (!eod && !lossCapHit) {
     // 1) Index options
-    if (s.open.filter((p) => p.kind === "indexOption" && !p.scalp).length >= MAX_INDEX_OPT) check.notes.push(`Index option slot भरा (max ${MAX_INDEX_OPT} open)`);
-    else if (deps.nowEpoch - s.lastEntry.indexOption < THROTTLE_SEC) check.notes.push(`Index option: ${THROTTLE_SEC}s anti-spam gap`);
+    // Phase 2.4 (redefined per the ScalingEngine conflict resolution): the global
+    // lock blocks a DIFFERENT symbol while one is open, but a same-symbol idea is
+    // a potential SCALE-IN candidate and must still reach tryOpenOption (which
+    // routes it to ScalingEngine instead of treating it as blocked). So this outer
+    // gate no longer short-circuits on the lock alone — only the per-idea checks
+    // below do, and only for ideas that aren't a same-symbol scale-in candidate.
+    if (deps.nowEpoch - s.lastEntry.indexOption < THROTTLE_SEC) check.notes.push(`Index option: ${THROTTLE_SEC}s anti-spam gap`);
     else {
       try {
         const ideas = await deps.getIndexOptionIdeas();
         if (!ideas.length) check.notes.push("कोई index option idea नहीं (OI TAKE + 1h bulletin नहीं)");
         for (const idea of ideas) {
-          if (s.open.filter((p) => p.kind === "indexOption" && !p.scalp).length >= MAX_INDEX_OPT) break;
+          const scaleCandidate = s.open.some((p) => p.kind === "indexOption" && !p.scalp && p.symbol === idea.symbol);
+          if (!scaleCandidate) {
+            if (s.open.filter((p) => p.kind === "indexOption" && !p.scalp).length >= MAX_INDEX_OPT) break;
+            if (globalOneTradeLock(s, idea.symbol)) continue; // different symbol already open — skip, a later idea may match it
+          }
           const rivalScalp = scalpIdeasThisTick.find((si) => si.symbol === idea.symbol) || null;
           const reason = await tryOpenOption(s, deps, idea, "indexOption", false, rivalScalp);
           recIdea("indexOption", idea, reason);
@@ -1215,15 +1424,19 @@ async function tickPaperImpl(deps: TickDeps): Promise<any> {
         }
       } catch { /* ignore */ }
     }
-    // 2) Stock options
-    if (s.open.filter((p) => p.kind === "stockOption").length >= MAX_STOCK_OPT) check.notes.push(`Stock option slots भरे (max ${MAX_STOCK_OPT})`);
-    else if (deps.nowEpoch - s.lastEntry.stockOption < THROTTLE_SEC) check.notes.push(`Stock option: ${THROTTLE_SEC}s anti-spam gap`);
+    // 2) Stock options (same reasoning as Index options above — no outer lock
+    // short-circuit, so a same-symbol scale-in candidate still reaches tryOpenOption).
+    if (deps.nowEpoch - s.lastEntry.stockOption < THROTTLE_SEC) check.notes.push(`Stock option: ${THROTTLE_SEC}s anti-spam gap`);
     else {
       try {
         const ideas = await deps.getStockOptionIdeas();
         if (!ideas.length) check.notes.push("कोई stock option idea नहीं (clean directional नहीं)");
         for (const idea of ideas) {
-          if (s.open.filter((p) => p.kind === "stockOption").length >= MAX_STOCK_OPT) break;
+          const scaleCandidate = s.open.some((p) => p.kind === "stockOption" && p.symbol === idea.symbol);
+          if (!scaleCandidate) {
+            if (s.open.filter((p) => p.kind === "stockOption").length >= MAX_STOCK_OPT) break;
+            if (globalOneTradeLock(s, idea.symbol)) continue;
+          }
           const reason = await tryOpenOption(s, deps, idea, "stockOption", true);
           recIdea("stockOption", idea, reason);
           if (reason === "OPENED") { s.tradesToday += 1; s.lastEntry.stockOption = deps.nowEpoch; }
@@ -1231,13 +1444,17 @@ async function tickPaperImpl(deps: TickDeps): Promise<any> {
       } catch { /* ignore */ }
     }
     // 3) Stock intraday
-    if (s.open.filter((p) => p.kind === "stockIntraday").length >= MAX_INTRADAY) check.notes.push(`Stock intraday slots भरे (max ${MAX_INTRADAY})`);
+    // Phase 2.4: global one-trade-at-a-time lock also covers this inline opener
+    // (it doesn't go through tryOpenOption, so the lock there wouldn't apply to it).
+    if (globalOneTradeLock(s)) check.notes.push(`global lock — पहले से एक trade खुला है (${s.open[0].symbol})`);
+    else if (s.open.filter((p) => p.kind === "stockIntraday").length >= MAX_INTRADAY) check.notes.push(`Stock intraday slots भरे (max ${MAX_INTRADAY})`);
     else if (deps.nowEpoch - s.lastEntry.stockIntraday < THROTTLE_SEC) check.notes.push(`Stock intraday: ${THROTTLE_SEC}s anti-spam gap`);
     else {
       try {
         const intradayIdeas = await deps.getStockIntradayIdeas();
         if (!intradayIdeas.length) check.notes.push("कोई stock-intraday idea नहीं");
         for (const idea of intradayIdeas) {
+          if (globalOneTradeLock(s)) break;
           if (s.open.filter((p) => p.kind === "stockIntraday").length >= MAX_INTRADAY) break;
           if (s.open.some((p) => p.kind === "stockIntraday" && p.symbol === idea.symbol)) continue;
           if ((idea.confidence ?? 0) < CONFIRM_FLOOR) continue;
@@ -1298,13 +1515,14 @@ async function tickPaperScalpsImpl(deps: TickDeps): Promise<any> {
   const eod = deps.minutesIST >= EOD_FLATTEN_MIN;
   const lossCapHit = dailyLossCapHit(s, deps.istDate);
   if (eod || lossCapHit || !deps.getScalpIdeas) return getPaperSummary();
+  if (globalOneTradeLock(s)) return getPaperSummary(); // Phase 2.4: global one-trade-at-a-time lock
   if ((s.scalpsToday || 0) >= MAX_SCALPS_PER_DAY) return getPaperSummary();
   if (s.open.filter((p) => p.scalp).length >= MAX_SCALP) return getPaperSummary();
   if (deps.nowEpoch - (s.lastScalpEntry || 0) < SCALP_THROTTLE) return getPaperSummary();
   try {
     const scalpIdeas = await deps.getScalpIdeas();
     for (const idea of scalpIdeas) {
-      if ((s.scalpsToday || 0) >= MAX_SCALPS_PER_DAY || s.open.filter((p) => p.scalp).length >= MAX_SCALP) break;
+      if (globalOneTradeLock(s) || (s.scalpsToday || 0) >= MAX_SCALPS_PER_DAY || s.open.filter((p) => p.scalp).length >= MAX_SCALP) break;
       idea.scalp = true;
       const reason = await tryOpenOption(s, deps, idea, "indexOption", false);
       if (reason === "OPENED") { s.scalpsToday = (s.scalpsToday || 0) + 1; s.lastScalpEntry = deps.nowEpoch; break; }

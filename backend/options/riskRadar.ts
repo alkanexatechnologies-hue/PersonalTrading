@@ -8,6 +8,14 @@ export interface RiskRadarInput {
 
 const SEVERITY_WEIGHT = { danger: 35, caution: 18, info: 8 };
 
+// Phase 2.2 (RiskEngine): these are the ONLY two danger-level reads the entry
+// gate vetoes on (paper/engine.ts tryOpenOption), matching the plan's named
+// examples exactly — no additional thresholds invented. Exported so the gate
+// checks the SAME numbers this module already computes its own "danger" severity
+// from (RiskRadar.atrRatio / RiskRadar.premiumSwingPct), never a re-derived copy.
+export const ATR_SPIKE_DANGER = 1.8;
+export const PREMIUM_SWING_DANGER = 40;
+
 const RADAR_NOTE =
   "Risk Radar flags conditions that commonly cause sudden option losses (volatility spikes, " +
   "theta bleed in choppy markets, late-session decay, IV crush). It is derived from the underlying's " +
@@ -38,7 +46,7 @@ export function computeRiskRadar(candles: Candle[], input: RiskRadarInput = {}):
 
   if (atrRatio != null && atrRatio >= 1.4) {
     warnings.push({
-      severity: atrRatio >= 1.8 ? "danger" : "caution",
+      severity: atrRatio >= ATR_SPIKE_DANGER ? "danger" : "caution",
       title: `Volatility spike (ATR ${atrRatio.toFixed(1)}x normal)`,
       detail:
         "Price is swinging much wider than usual, so option premiums are moving fast in both " +
@@ -122,7 +130,7 @@ export function computeRiskRadar(candles: Candle[], input: RiskRadarInput = {}):
     premiumSwingPct = (swing / premium) * 100;
     if (premiumSwingPct >= 25) {
       warnings.push({
-        severity: premiumSwingPct >= 40 ? "danger" : "caution",
+        severity: premiumSwingPct >= PREMIUM_SWING_DANGER ? "danger" : "caution",
         title: `One ATR move ≈ ${Math.round(premiumSwingPct)}% of your premium`,
         detail:
           `A single average bar (~${atrNow.toFixed(2)} pts) can move the option premium by about ` +

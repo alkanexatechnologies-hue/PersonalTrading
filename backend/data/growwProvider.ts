@@ -1,8 +1,30 @@
+import { AsyncLocalStorage } from "async_hooks";
 import { MarketDataProvider } from "./provider";
 import { Candle, Interval, Quote, OiAnalysis, OiStrike } from "../types";
 import { findSymbolDef, SymbolDef } from "../config";
+import { CONFIG } from "../config/arbitration";
 
 const BASE = "https://api.groww.in";
+
+// ---- DEV-ONLY request-scheduling priority (does not touch concurrency, pacing,
+// or rate-limit protection - see the turnstile below) ----
+// Background jobs (warmCoreFeeds, the OI-change snapshot scheduler, WhatsApp
+// ticks) share this exact same throttle with user-facing dashboard requests.
+// Wrapping a background job's call in runAsBackgroundGroww() marks every Groww
+// call made anywhere underneath it (no matter how deeply nested - candles, OI
+// chain, quotes) as LOW priority, via Node's AsyncLocalStorage, WITHOUT
+// changing growwFetch's signature or any of its call sites, and WITHOUT
+// touching getCandlesCached/getOiCached/growwOiAnalysis/etc. at all. Anything
+// NOT wrapped (every existing user-facing route, unchanged) stays HIGH by
+// default - this is why zero route handlers needed to change.
+export type GrowwPriority = "high" | "low";
+const _growwPriorityContext = new AsyncLocalStorage<GrowwPriority>();
+export function runAsBackgroundGroww<T>(fn: () => Promise<T>): Promise<T> {
+  return _growwPriorityContext.run("low", fn);
+}
+function currentGrowwPriority(): GrowwPriority {
+  return _growwPriorityContext.getStore() ?? "high";
+}
 
 // ---- GLOBAL Groww request throttle + 429 back-off ----
 // Every Groww API call (candles, quotes, expiries, option-chain) goes through
@@ -50,45 +72,95 @@ export function growwRateLimitStats() {
 }
 const istDayKey = () => new Date(Date.now() + 19800000).toISOString().slice(0, 10);
 
+// ---- Priority-aware admission ordering ----
+// Decides, when more than one caller is waiting to enter acquireSlot at the
+// same moment, WHICH ONE goes next: HIGH before LOW, FIFO within each. This
+// changes DISPATCH ORDER ONLY. It does not change GROWW_MAX_CONCURRENT (still
+// enforced exactly as before, unchanged, around the actual fetch below), does
+// not change GROWW_MIN_GAP_MS / the per-minute window / the per-day cap /
+// backoff (all untouched, unchanged, inside acquireSlot's try block), and does
+// not add or remove a single Groww call - it only reorders who is allowed to
+// proceed through the SAME existing pacing logic next.
+//
+// Starvation check (per the "do not invent a threshold" instruction): this is
+// non-preemptive and only defers LOW behind the CURRENTLY queued HIGH items -
+// never behind hypothetical future ones. Every background job this applies to
+// already has its own busy-flag guard (warmBusy/oiChangeSnap.busy/waBusy) and
+// already tolerates being late by its own cache TTL (45s/3min/90s - see
+// warmCoreFeeds, refreshOiChangeSnapshot, runWa) - that existing tolerance is
+// what makes a numeric fairness timeout unnecessary here, not an invented one.
+const _highWaiters: Array<() => void> = [];
+const _lowWaiters: Array<() => void> = [];
+let _turnstileBusy = false;
+function requestTurn(priority: GrowwPriority): Promise<void> {
+  return new Promise((resolve) => {
+    (priority === "high" ? _highWaiters : _lowWaiters).push(resolve);
+    pumpTurnstile();
+  });
+}
+function releaseTurn(): void {
+  _turnstileBusy = false;
+  pumpTurnstile();
+}
+function pumpTurnstile(): void {
+  if (_turnstileBusy) return;
+  const next = _highWaiters.shift() || _lowWaiters.shift();
+  if (!next) return;
+  _turnstileBusy = true;
+  next();
+}
+
 // Reserve one call slot: enforces per-day (IST) counter + per-minute sliding window +
 // per-second pacing. Only called on the FIRST attempt so a retry isn't double-counted.
-async function acquireSlot(key: string): Promise<void> {
-  const dk = istDayKey();
-  if (dk !== _dayKey) { _dayKey = dk; _dayCount = 0; }
-  if (GROWW_MAX_PER_DAY && _dayCount >= GROWW_MAX_PER_DAY) {
-    console.warn(`[groww-rl] DAILY cap ${GROWW_MAX_PER_DAY} reached — blocking ${key} until IST midnight`);
-    throw new Error(`Groww daily call cap (${GROWW_MAX_PER_DAY}) reached — try again after IST midnight`);
-  }
-  // per-minute sliding window: wait until an old dispatch ages out of the 60s window.
-  for (;;) {
-    const now = Date.now();
-    while (_minuteWindow.length && now - _minuteWindow[0] > 60_000) _minuteWindow.shift();
-    if (_minuteWindow.length < GROWW_MAX_PER_MIN) break;
-    _rlTotals.throttleWaits++;
-    const waitMs = Math.min(2000, 60_000 - (now - _minuteWindow[0]) + 5);
-    console.warn(`[groww-rl] per-minute cap ${GROWW_MAX_PER_MIN} reached — throttling ${key} ${waitMs}ms`);
-    await _growwSleep(waitMs);
-  }
-  // per-second pacing.
-  const gap = _growwLast + GROWW_MIN_GAP_MS - Date.now();
-  if (gap > 0) await _growwSleep(gap);
-  _growwLast = Date.now();
-  _minuteWindow.push(_growwLast);
-  _dayCount++;
-  if (GROWW_MAX_PER_DAY && _dayCount === Math.floor(GROWW_MAX_PER_DAY * 0.8)) {
-    console.warn(`[groww-rl] reached 80% of daily cap (${_dayCount}/${GROWW_MAX_PER_DAY})`);
+// Body below this line is UNCHANGED from before the priority mechanism - only
+// wrapped with the turnstile acquire/release above.
+async function acquireSlot(key: string, priority: GrowwPriority): Promise<void> {
+  await requestTurn(priority);
+  try {
+    const dk = istDayKey();
+    if (dk !== _dayKey) { _dayKey = dk; _dayCount = 0; }
+    if (GROWW_MAX_PER_DAY && _dayCount >= GROWW_MAX_PER_DAY) {
+      console.warn(`[groww-rl] DAILY cap ${GROWW_MAX_PER_DAY} reached — blocking ${key} until IST midnight`);
+      throw new Error(`Groww daily call cap (${GROWW_MAX_PER_DAY}) reached — try again after IST midnight`);
+    }
+    // per-minute sliding window: wait until an old dispatch ages out of the 60s window.
+    for (;;) {
+      const now = Date.now();
+      while (_minuteWindow.length && now - _minuteWindow[0] > 60_000) _minuteWindow.shift();
+      if (_minuteWindow.length < GROWW_MAX_PER_MIN) break;
+      _rlTotals.throttleWaits++;
+      const waitMs = Math.min(2000, 60_000 - (now - _minuteWindow[0]) + 5);
+      console.warn(`[groww-rl] per-minute cap ${GROWW_MAX_PER_MIN} reached — throttling ${key} ${waitMs}ms`);
+      await _growwSleep(waitMs);
+    }
+    // per-second pacing.
+    const gap = _growwLast + GROWW_MIN_GAP_MS - Date.now();
+    if (gap > 0) await _growwSleep(gap);
+    _growwLast = Date.now();
+    _minuteWindow.push(_growwLast);
+    _dayCount++;
+    if (GROWW_MAX_PER_DAY && _dayCount === Math.floor(GROWW_MAX_PER_DAY * 0.8)) {
+      console.warn(`[groww-rl] reached 80% of daily cap (${_dayCount}/${GROWW_MAX_PER_DAY})`);
+    }
+  } finally {
+    releaseTurn();
   }
 }
 
-async function growwFetch(url: string, init?: any, _tries = 0): Promise<Response> {
+// _queuedAt is preserved across retries (not reset) so the dev diagnostic log
+// reports total time since the ORIGINAL call, not just the latest retry leg.
+async function growwFetch(url: string, init?: any, _tries = 0, _queuedAt = Date.now()): Promise<Response> {
   const key = epKey(url);
+  const priority = currentGrowwPriority();
   if (_tries === 0) {
-    await acquireSlot(key);
+    await acquireSlot(key, priority);
     const st = _rlStats.get(key) || { calls: 0, rateLimited: 0, retries: 0 };
     st.calls++; st.lastAt = Date.now(); _rlStats.set(key, st);
     _rlTotals.calls++;
   }
+  const dispatchStart = Date.now();
   // concurrency guard around the actual network call (applies to retries too).
+  // UNCHANGED - same GROWW_MAX_CONCURRENT, same polling loop, same 12s timeout.
   const waitStart = Date.now();
   while (_growwActive >= GROWW_MAX_CONCURRENT) {
     if (Date.now() - waitStart > 12_000) throw new Error("Groww queue timeout (12s) — skipped to avoid hang");
@@ -102,6 +174,12 @@ async function growwFetch(url: string, init?: any, _tries = 0): Promise<Response
   } finally {
     _growwActive--;
   }
+  // DEV-ONLY diagnostic (STEP 5): priority, queue wait (enqueue -> this attempt's
+  // dispatch), and this attempt's own request duration. No credentials/tokens -
+  // `key` is the sanitized URL path pattern from epKey(), never the full URL/query.
+  console.log(
+    `[GROWW][${priority.toUpperCase()}] ${key} queueWait=${dispatchStart - _queuedAt}ms request=${Date.now() - dispatchStart}ms`
+  );
   if ((res.status === 429 || res.status === 503) && _tries < GROWW_MAX_RETRIES) {
     // Exponential backoff with jitter: 1s, 2s, 4s, 8s, 16s (capped at 60s), honouring
     // a larger Retry-After if the server sent one.
@@ -114,7 +192,7 @@ async function growwFetch(url: string, init?: any, _tries = 0): Promise<Response
     _rlTotals.rateLimited++; _rlTotals.retries++; _rlTotals.lastRateLimitAt = Date.now();
     console.warn(`[groww-rl] ${res.status} on ${key} — retry ${_tries + 1}/${GROWW_MAX_RETRIES} after ${backoff}ms (retry-after=${Number.isFinite(ra) && ra > 0 ? ra + "s" : "none"})`);
     await _growwSleep(backoff);
-    return growwFetch(url, init, _tries + 1);
+    return growwFetch(url, init, _tries + 1, _queuedAt);
   }
   if (res.status === 429 || res.status === 503) {
     _rlTotals.gaveUp++;
@@ -555,8 +633,8 @@ export async function growwOiAnalysis(provider: GrowwProvider, def: SymbolDef): 
     const reasons: string[] = [];
     let score = 0;
     if (pcr != null) {
-      if (pcr >= 1.2) { score += 1; reasons.push(`PCR ${pcr.toFixed(2)} - put writing (support building, bullish lean)`); }
-      else if (pcr <= 0.7) { score -= 1; reasons.push(`PCR ${pcr.toFixed(2)} - call writing (resistance building, bearish lean)`); }
+      if (pcr >= CONFIG.pcr.bullish) { score += 1; reasons.push(`PCR ${pcr.toFixed(2)} - put writing (support building, bullish lean)`); }
+      else if (pcr <= CONFIG.pcr.bearish) { score -= 1; reasons.push(`PCR ${pcr.toFixed(2)} - call writing (resistance building, bearish lean)`); }
       else reasons.push(`PCR ${pcr.toFixed(2)} - balanced`);
     }
     reasons.push(`Max PUT OI at ${support.strike} (support)`);
@@ -564,7 +642,7 @@ export async function growwOiAnalysis(provider: GrowwProvider, def: SymbolDef): 
     if (maxPain != null) reasons.push(`Max pain ${maxPain}`);
 
     const bias: OiAnalysis["verdict"]["bias"] = score >= 1 ? "Bullish" : score <= -1 ? "Bearish" : "Neutral";
-    const pcrState: OiAnalysis["pcrState"] = pcr == null ? "neutral" : pcr >= 1.2 ? "bullish" : pcr <= 0.7 ? "bearish" : "neutral";
+    const pcrState: OiAnalysis["pcrState"] = pcr == null ? "neutral" : pcr >= CONFIG.pcr.bullish ? "bullish" : pcr <= CONFIG.pcr.bearish ? "bearish" : "neutral";
 
     // Futures OI day-change -> buildup type (genuine move vs bluff).
     let futOi: number | null = null;

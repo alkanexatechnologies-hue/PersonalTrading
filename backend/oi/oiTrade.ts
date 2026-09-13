@@ -210,6 +210,22 @@ function vsOi(oi: ModelDir, dir: ModelDir): ModelVote["vsOi"] {
   return dir === oi ? "agree" : "against";
 }
 
+// Phase 3.2 audit (consistency decision, documented here as intentional — kept
+// as two separate scorers, not merged): GainzAlgo (options/highProbAlgo.ts's
+// evaluateBuyAlgo) enters correlateOiModels below as ONE of six independent
+// votes (alongside VWAP, 4-Layer, 5m bar, Futures) that are compared against
+// the OI read to produce a read-only "consensus" (AGREE/MIXED/CONFLICT/NO EDGE).
+// That consensus does NOT gate paper/engine.ts's tryOpenOption — it only drives
+// the WhatsApp alert decision (alerts/paperPing.ts) and the hourly-readiness
+// display score (oi/hourlyReady.ts). tradeScore.ts (paper/ext/tradeScore.ts),
+// the score that DOES gate entries, never reads GainzAlgo at all.
+//
+// These answer genuinely different questions: tradeScore is "should THIS engine
+// open a position now" (a live risk gate); correlateOiModels is "do independent
+// models corroborate the OI read" (a human-facing consensus/alerting signal).
+// Merging them would conflate a live entry gate with a diagnostic ensemble
+// display, so the coupling stays as two scorers by design.
+
 export function correlateOiModels(p: {
   oiDir: ModelDir;
   oiScore: number;

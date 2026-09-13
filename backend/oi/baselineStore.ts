@@ -69,6 +69,17 @@ export function getBaseline(symbol: string): Baseline | null {
   return b && b.date === istDateStr() ? b : null;
 }
 
+/** In-memory baseline for tests. Does not write oi-baselines.json. */
+export function seedBaselineForTest(symbol: string, baseline: Baseline): void {
+  loadBaselines();
+  baselines.set(symbol, baseline);
+}
+
+export function clearBaselineForTest(symbol: string): void {
+  loadBaselines();
+  baselines.delete(symbol);
+}
+
 // Baseline accessors (used by the full option-chain view for % change).
 export function oiBaselineStrike(symbol: string, strike: number): StrikeBase | null {
   return getBaseline(symbol)?.strikes.get(strike) || null;

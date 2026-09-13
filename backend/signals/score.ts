@@ -13,6 +13,27 @@ export const WEIGHTS = {
 
 export const MAX_SCORE = Object.values(WEIGHTS).reduce((a, b) => a + b, 0);
 
+// Phase 3.1 audit (consistency decision, documented here as the intentional
+// design — not changed): EMA cross / VWAP / RSI / Bollinger / MACD all scale
+// their contribution by a "strength" in [0,1] derived from how far the signal
+// sits from a neutral reading. Supertrend does NOT — it contributes its full
+// weight the instant direction flips. This is kept as-is: Supertrend is a
+// binary trend-FLIP indicator (the ATR band the price is on), not a continuous
+// oscillator like the others — there is no equivalent "how strong is this flip"
+// reading without inventing a new, unvalidated heuristic (e.g. price-distance
+// from the ST line conflates trend strength with potential exhaustion, since a
+// big move away from a fresh flip can mean either continuation or a top/bottom).
+// Scaling it would be new strategy logic, not a bug fix.
+//
+// MACD's `Math.max(0.4, strength)` floor (below) is also kept as-is: its
+// strength is |histogram| / |macdLine|, a RATIO that gets noisy and can read
+// near-zero right as the MACD line itself crosses zero — exactly when the
+// histogram's SIGN is still a meaningful, real vote. The floor keeps MACD's
+// directional voice through that noisy crossover zone instead of letting a
+// denominator artifact silence it; it does not mean "any nonzero histogram
+// votes at 40%" (a flat/zero histogram contributes nothing either way — the
+// floor only raises weak-but-present momentum, never fabricates a direction).
+
 // Directional-bias cutoff on the shared -100..+100 score scale: at/above this is
 // Bullish/BUY, at/below its negative is Bearish/SELL, between is Neutral/HOLD.
 // Centralized here (was the same unexplained magic 15 repeated independently in
@@ -51,7 +72,8 @@ export function computeScoreSeries(candles: Candle[]): (number | null)[] {
       raw += (a > b ? 1 : -1) * WEIGHTS.emaCross * strength;
     }
 
-    // Supertrend
+    // Supertrend — intentionally binary (full weight, no strength scaling); see
+    // the Phase 3.1 note above WEIGHTS.
     if (st[i] && st[i].direction !== 0) {
       raw += st[i].direction * WEIGHTS.supertrend;
     }
@@ -64,7 +86,8 @@ export function computeScoreSeries(candles: Candle[]): (number | null)[] {
       raw += (price > v ? 1 : -1) * WEIGHTS.vwap * strength;
     }
 
-    // MACD
+    // MACD — the 0.4 floor is intentional (noisy ratio near a MACD-line zero
+    // crossing); see the Phase 3.1 note above WEIGHTS.
     if (m.histogram[i] != null && m.macd[i] != null) {
       const hist = m.histogram[i] as number;
       const macdLine = m.macd[i] as number;
@@ -72,19 +95,18 @@ export function computeScoreSeries(candles: Candle[]): (number | null)[] {
       raw += (hist > 0 ? 1 : -1) * WEIGHTS.macd * Math.max(0.4, strength);
     }
 
-    // RSI
+    // RSI — same conditions as signals/direction4L.ts (momentum, not 30/70 reversal).
     if (rsiS[i] != null) {
       const r = rsiS[i] as number;
-      if (r < 30) raw += WEIGHTS.rsi;
-      else if (r > 70) raw -= WEIGHTS.rsi;
-      else if (r >= 55) raw += WEIGHTS.rsi * 0.4;
-      else if (r <= 45) raw -= WEIGHTS.rsi * 0.4;
+      if (r >= 55) raw += WEIGHTS.rsi;
+      else if (r <= 45) raw -= WEIGHTS.rsi;
     }
 
-    // Bollinger
-    if (bb.upper[i] != null && bb.lower[i] != null) {
-      if (price >= (bb.upper[i] as number)) raw -= WEIGHTS.bollinger;
-      else if (price <= (bb.lower[i] as number)) raw += WEIGHTS.bollinger;
+    // Bollinger — same conditions as signals/direction4L.ts (price vs middle band).
+    if (bb.middle[i] != null) {
+      const mid = bb.middle[i] as number;
+      if (price > mid) raw += WEIGHTS.bollinger;
+      else if (price < mid) raw -= WEIGHTS.bollinger;
     }
 
     if (defined) {

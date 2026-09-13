@@ -1,6 +1,7 @@
 import { Candle, OiAnalysis } from "../types";
 import { atr, bollinger, ema, last, macd, rsi, supertrend, vwap } from "../indicators";
 import { DIRECTION_THRESHOLD } from "./score";
+import { computeOiChange } from "../oi/oiChange";
 
 /**
  * 4-Layer Direction Engine.
@@ -66,7 +67,7 @@ const layerScore = (sub: SubSignal[]): number => {
   return Math.round(s * 100) / 100;
 };
 
-export function computeDirection4L(symbol: string, name: string, c15: Candle[], daily: Candle[], oi: OiAnalysis | null): Direction4LResult | null {
+export function computeDirection4L(symbol: string, name: string, c15: Candle[], daily: Candle[], oi: OiAnalysis | null, type: "index" | "equity" = "equity"): Direction4LResult | null {
   if (!c15 || c15.length < 30 || !daily || daily.length < 2) return null;
   const closes = c15.map((c) => c.close);
   const price = closes[closes.length - 1];
@@ -116,20 +117,21 @@ export function computeDirection4L(symbol: string, name: string, c15: Candle[], 
     note: vw != null ? `Price ${price > vw ? "above" : "below"} VWAP ${round2(vw)}` : "VWAP unavailable" });
 
   // ---------------- Layer 3: Derivatives ----------------
+  // Phase 1.2 (OIAnalysisEngine): a single OI sub-signal sourced from oiChange.ts's
+  // ±100 five-factor score (net CE/PE writing, PCR, futures buildup, wall proximity,
+  // heavy-buildup concentration) — this is a strict superset of the two sub-signals
+  // this layer used to carry separately ("OI bias" from oi.ts's ±1-ish verdict.bias,
+  // and a hand-parsed "Change in OI" read off oi.ceBuildup/peBuildup). Collapsing
+  // them into one vote retires the ±1 score as a directional input here and means
+  // Layer 3 now averages 3 sub-signals instead of 4.
   const l3: SubSignal[] = [];
   const oiOk = !!(oi && oi.available);
-  const biasDir = oiOk ? (oi!.verdict.bias === "Bullish" ? 1 : oi!.verdict.bias === "Bearish" ? -1 : 0) : 0;
-  l3.push({ name: "OI bias (PCR/levels)", dir: biasDir as -1 | 0 | 1, note: oiOk ? `Option OI ${oi!.verdict.bias} (PCR ${oi!.pcr ?? "-"})` : "OI unavailable" });
-  // OI-change via CE/PE buildup
-  let ocDir: -1 | 0 | 1 = 0; let ocNote = "OI-change neutral / unavailable";
-  if (oiOk) {
-    const ce = oi!.ceBuildup, pe = oi!.peBuildup;
-    const bull = pe === "short buildup" || pe === "long unwinding" || ce === "long unwinding" || ce === "short covering";
-    const bear = ce === "short buildup" || ce === "long buildup" || pe === "short covering";
-    ocDir = bull && !bear ? 1 : bear && !bull ? -1 : 0;
-    ocNote = `CE ${ce}, PE ${pe}`;
-  }
-  l3.push({ name: "Change in OI (buildup)", dir: ocDir, note: ocNote });
+  const oc = oiOk ? computeOiChange(symbol, name, type, oi) : null;
+  const oiDir: -1 | 0 | 1 = oc ? (oc.oiVerdict === "Bullish" ? 1 : oc.oiVerdict === "Bearish" ? -1 : 0) : 0;
+  l3.push({
+    name: "OI (oiChange.ts 5-factor)", dir: oiDir,
+    note: oc ? `oiDirScore ${oc.oiDirScore >= 0 ? "+" : ""}${oc.oiDirScore} → ${oc.oiVerdict} (${oc.oiReasons[0] || "no dominant factor"})` : "OI unavailable",
+  });
   // Futures buildup
   let futDir: -1 | 0 | 1 = 0; let futNote = "Futures buildup unavailable";
   if (oiOk && oi!.futBuildup) {

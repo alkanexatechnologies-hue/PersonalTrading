@@ -1,6 +1,7 @@
 import { OiAnalysis } from "../types";
 import { istTimeStr } from "../util/istTime";
 import { Baseline, getBaseline, recordOiBaseline, oiBaselineStrike, oiBaselineUnderlying } from "./baselineStore";
+import { CONFIG } from "../config/arbitration";
 
 // Re-exported so existing callers (routes/api.ts) importing these from this
 // module keep working unchanged - the persistence itself now lives in
@@ -56,7 +57,7 @@ export interface OiChangeResult {
   moveRead: string;             // buildup interpreted vs the current market movement
   // Consolidated OI-based directional prediction (multi-factor):
   oiDirScore: number;           // -100..+100 (positive = bullish)
-  oiVerdict: "Bullish" | "Bearish" | "Neutral";
+  oiVerdict: "Bullish" | "Bearish" | "Neutral" | "TWO_SIDED";
   oiConfidence: number;         // 0..100
   oiReasons: string[];
   major: boolean; majorReason: string | null; // big move / big OI or price shift
@@ -69,6 +70,15 @@ function actionFor(type: "CE" | "PE", oiChg: number | null): { action: string; b
   if (oiChg > 0) return type === "CE" ? { action: "Call writing ↑", bullish: false } : { action: "Put writing ↑", bullish: true };
   if (oiChg < 0) return type === "CE" ? { action: "Call unwinding ↓", bullish: true } : { action: "Put unwinding ↓", bullish: false };
   return { action: "flat", bullish: null };
+}
+
+/** Canonical OI verdict. Bullish/Bearish bands are unchanged; TWO_SIDED only
+ *  replaces the Neutral bucket when both sides are heavily writing. */
+export function classifyOiVerdict(oiDirScore: number, bothHeavyWriting: boolean): OiChangeResult["oiVerdict"] {
+  if (oiDirScore >= 20) return "Bullish";
+  if (oiDirScore <= -20) return "Bearish";
+  if (bothHeavyWriting) return "TWO_SIDED";
+  return "Neutral";
 }
 
 export function computeOiChange(symbol: string, name: string, type: "index" | "equity", oi: OiAnalysis | null): OiChangeResult | null {
@@ -173,8 +183,8 @@ export function computeOiChange(symbol: string, name: string, type: "index" | "e
   if (bias === "Bullish") { oiDirScore += 25; oiReasons.push("Put writing > call writing near ATM (support building)"); }
   else if (bias === "Bearish") { oiDirScore -= 25; oiReasons.push("Call writing > put writing near ATM (resistance building)"); }
   if (oi.pcr != null) {
-    if (oi.pcr >= 1.2) { oiDirScore += 15; oiReasons.push(`PCR ${oi.pcr} (put-heavy → bullish lean)`); }
-    else if (oi.pcr <= 0.8) { oiDirScore -= 15; oiReasons.push(`PCR ${oi.pcr} (call-heavy → bearish lean)`); }
+    if (oi.pcr >= CONFIG.pcr.bullish) { oiDirScore += 15; oiReasons.push(`PCR ${oi.pcr} (put-heavy → bullish lean)`); }
+    else if (oi.pcr <= CONFIG.pcr.bearish) { oiDirScore -= 15; oiReasons.push(`PCR ${oi.pcr} (call-heavy → bearish lean)`); }
   }
   const fb = oi.futBuildup;
   if (fb === "Long buildup" || fb === "Short covering") { oiDirScore += 20; oiReasons.push(`Futures: ${fb}`); }
@@ -189,7 +199,11 @@ export function computeOiChange(symbol: string, name: string, type: "index" | "e
   if (maxPeBuildup?.veryHigh) { oiDirScore += 10; oiReasons.push(`Heavy PE writing @ ${maxPeBuildup.strike} (strong support)`); }
   if (maxCeBuildup?.veryHigh) { oiDirScore -= 10; oiReasons.push(`Heavy CE writing @ ${maxCeBuildup.strike} (strong resistance)`); }
   oiDirScore = Math.max(-100, Math.min(100, oiDirScore));
-  const oiVerdict: OiChangeResult["oiVerdict"] = oiDirScore >= 20 ? "Bullish" : oiDirScore <= -20 ? "Bearish" : "Neutral";
+  const bothHeavyWriting = !!(maxCeBuildup?.veryHigh && maxPeBuildup?.veryHigh);
+  const oiVerdict = classifyOiVerdict(oiDirScore, bothHeavyWriting);
+  if (oiVerdict === "TWO_SIDED") {
+    oiReasons.push("TWO_SIDED / CONFLICTED: heavy CE writing and heavy PE writing at the same time (not inactivity)");
+  }
   const oiConfidence = Math.min(100, Math.abs(oiDirScore));
   if (!oiReasons.length) oiReasons.push("No clear OI edge yet.");
 

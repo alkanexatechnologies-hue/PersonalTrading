@@ -9,6 +9,8 @@
 // CONSISTENCY: each technical term uses ONE fixed English form everywhere (support, not समर्थन;
 // resistance, not प्रतिरोध; PUT/CALL writing, not पुट/कॉल लेखन). Numbers stay as digits.
 
+import { CONFIG } from "../config/arbitration";
+
 export type Structure = "Bullish" | "Bearish" | "Range" | "Unclear";
 
 export interface CommentaryLeg {
@@ -183,8 +185,8 @@ export function buildMarketCommentary(inp: CommentaryInput): MarketCommentary {
 
   // ---------- §12/PCR ----------
   if (pcr != null) {
-    if (pcr >= 1.1) add("PCR", "bull", 1, `PCR ${pcr} है — PUT writing अपेक्षाकृत heavy है, जो support का संकेत देता है।`);
-    else if (pcr <= 0.7) add("PCR", "bear", 1, `PCR ${pcr} है — CALL writing अपेक्षाकृत heavy है, जो resistance का संकेत देता है।`);
+    if (pcr >= CONFIG.pcr.bullish) add("PCR", "bull", 1, `PCR ${pcr} है — PUT writing अपेक्षाकृत heavy है, जो support का संकेत देता है।`);
+    else if (pcr <= CONFIG.pcr.bearish) add("PCR", "bear", 1, `PCR ${pcr} है — CALL writing अपेक्षाकृत heavy है, जो resistance का संकेत देता है।`);
     else add("PCR", "neutral", 0, `PCR ${pcr} — लगभग balanced।`);
   }
 

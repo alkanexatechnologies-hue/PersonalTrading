@@ -56,7 +56,8 @@ export function computeSignal(symbol: string, candles: Candle[]): SignalResult {
     });
   }
 
-  // 2. Supertrend (trend-following)
+  // 2. Supertrend (trend-following) — intentionally binary, no strength scaling;
+  // see the Phase 3.1 note above WEIGHTS in signals/score.ts.
   const st = supertrend(candles, 10, 3);
   const stLast = st[st.length - 1];
   if (stLast && stLast.direction !== 0) {
@@ -95,7 +96,8 @@ export function computeSignal(symbol: string, candles: Candle[]): SignalResult {
     });
   }
 
-  // 4. MACD histogram (momentum)
+  // 4. MACD histogram (momentum) — the 0.4 floor is intentional; see the Phase
+  // 3.1 note above WEIGHTS in signals/score.ts.
   const m = macd(closes);
   const hist = last(m.histogram);
   const macdLine = last(m.macd);
@@ -117,28 +119,20 @@ export function computeSignal(symbol: string, candles: Candle[]): SignalResult {
     });
   }
 
-  // 5. RSI (overbought / oversold)
+  // 5. RSI — same conditions as signals/direction4L.ts (momentum, not 30/70 reversal).
   const rsiLast = last(rsi(closes, 14));
   if (rsiLast != null) {
     let contrib = 0;
     let bias: IndicatorVote["bias"] = "neutral";
     let reason = "RSI neutral";
-    if (rsiLast < 30) {
-      contrib = WEIGHTS.rsi; // oversold -> potential bounce
+    if (rsiLast >= 55) {
+      contrib = WEIGHTS.rsi;
       bias = "bullish";
-      reason = "RSI oversold (<30) - possible bounce";
-    } else if (rsiLast > 70) {
-      contrib = -WEIGHTS.rsi; // overbought -> potential pullback
-      bias = "bearish";
-      reason = "RSI overbought (>70) - possible pullback";
-    } else if (rsiLast >= 55) {
-      contrib = WEIGHTS.rsi * 0.4;
-      bias = "bullish";
-      reason = "RSI above 55 - bullish momentum";
+      reason = `RSI ${Math.round(rsiLast)} - bullish momentum`;
     } else if (rsiLast <= 45) {
-      contrib = -WEIGHTS.rsi * 0.4;
+      contrib = -WEIGHTS.rsi;
       bias = "bearish";
-      reason = "RSI below 45 - bearish momentum";
+      reason = `RSI ${Math.round(rsiLast)} - bearish momentum`;
     }
     raw += contrib;
     votes.push({
@@ -150,27 +144,26 @@ export function computeSignal(symbol: string, candles: Candle[]): SignalResult {
     });
   }
 
-  // 6. Bollinger position (mean reversion hint)
+  // 6. Bollinger — same conditions as signals/direction4L.ts (price vs middle band).
   const bb = bollinger(closes, 20, 2);
-  const bbUpper = last(bb.upper);
-  const bbLower = last(bb.lower);
-  if (bbUpper != null && bbLower != null) {
+  const bbMid = last(bb.middle);
+  if (bbMid != null) {
     let contrib = 0;
     let bias: IndicatorVote["bias"] = "neutral";
-    let reason = "Inside Bollinger Bands";
-    if (price >= bbUpper) {
-      contrib = -WEIGHTS.bollinger;
-      bias = "bearish";
-      reason = "At/above upper band - stretched";
-    } else if (price <= bbLower) {
+    let reason = "Price at BB mid";
+    if (price > bbMid) {
       contrib = WEIGHTS.bollinger;
       bias = "bullish";
-      reason = "At/below lower band - stretched";
+      reason = `Price above BB mid ${bbMid.toFixed(2)}`;
+    } else if (price < bbMid) {
+      contrib = -WEIGHTS.bollinger;
+      bias = "bearish";
+      reason = `Price below BB mid ${bbMid.toFixed(2)}`;
     }
     raw += contrib;
     votes.push({
       name: "Bollinger",
-      value: `U=${bbUpper.toFixed(2)} L=${bbLower.toFixed(2)}`,
+      value: `mid=${bbMid.toFixed(2)}`,
       bias,
       weight: Math.abs(contrib),
       reason,

@@ -1,5 +1,6 @@
 import { SymbolDef } from "../config";
 import { OiAnalysis, OiStrike } from "../types";
+import { CONFIG } from "../config/arbitration";
 
 const HEADERS: Record<string, string> = {
   "User-Agent":
@@ -131,8 +132,8 @@ export async function getOiAnalysis(def: SymbolDef): Promise<OiAnalysis> {
   const reasons: string[] = [];
   let score = 0;
   if (pcr != null) {
-    if (pcr >= 1.2) { score += 1; reasons.push(`PCR ${pcr.toFixed(2)} - heavy put writing (support building, bullish lean)`); }
-    else if (pcr <= 0.7) { score -= 1; reasons.push(`PCR ${pcr.toFixed(2)} - heavy call writing (resistance building, bearish lean)`); }
+    if (pcr >= CONFIG.pcr.bullish) { score += 1; reasons.push(`PCR ${pcr.toFixed(2)} - heavy put writing (support building, bullish lean)`); }
+    else if (pcr <= CONFIG.pcr.bearish) { score -= 1; reasons.push(`PCR ${pcr.toFixed(2)} - heavy call writing (resistance building, bearish lean)`); }
     else reasons.push(`PCR ${pcr.toFixed(2)} - balanced`);
   }
   if (peBuildup === "short buildup") { score += 1; reasons.push("Put writers adding OI - defending support"); }
@@ -142,7 +143,7 @@ export async function getOiAnalysis(def: SymbolDef): Promise<OiAnalysis> {
   if (maxPain != null) reasons.push(`Max pain ${maxPain} - price often gravitates here near expiry`);
 
   const bias: OiAnalysis["verdict"]["bias"] = score >= 1 ? "Bullish" : score <= -1 ? "Bearish" : "Neutral";
-  const pcrState: OiAnalysis["pcrState"] = pcr == null ? "neutral" : pcr >= 1.2 ? "bullish" : pcr <= 0.7 ? "bearish" : "neutral";
+  const pcrState: OiAnalysis["pcrState"] = pcr == null ? "neutral" : pcr >= CONFIG.pcr.bullish ? "bullish" : pcr <= CONFIG.pcr.bearish ? "bearish" : "neutral";
 
   return {
     symbol: def.symbol,

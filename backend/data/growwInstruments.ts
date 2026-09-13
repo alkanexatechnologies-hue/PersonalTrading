@@ -76,16 +76,42 @@ function parseCsv(): Map<string, OptionInstrument[]> {
   return map;
 }
 
+// Stale-while-revalidate (same pattern as computeNiftyMacroSetupLive in
+// routes/api.ts): a stale-but-present CSV is parsed and served immediately -
+// its ~19MB size costs ~80ms to parse (measured), so that part was never the
+// blocking cost. The live re-download from Groww's CDN (measured ~1.7s on a
+// fast connection, more on a slower one) is what used to block the first
+// caller; it now runs in the background and swaps `index` in once it
+// succeeds, so a LATER request in the same process picks up the refreshed
+// data - matching "future requests use refreshed copy". A missing CSV (no
+// on-disk copy at all) is unchanged: still a normal blocking download, since
+// there is no valid data to serve in the meantime.
+let backgroundRefreshing = false;
+function refreshInBackground(): void {
+  if (backgroundRefreshing) return;
+  backgroundRefreshing = true;
+  downloadCsv()
+    .then(() => { index = parseCsv(); })
+    .catch(() => { /* keep serving the already-parsed stale copy */ })
+    .finally(() => { backgroundRefreshing = false; });
+}
+
 async function ensureLoaded(): Promise<void> {
   if (index) return;
   if (loadingPromise) return loadingPromise;
   loadingPromise = (async () => {
-    if (!csvFresh()) {
-      try { await downloadCsv(); } catch (e) {
-        // If we already have a stale copy, use it rather than failing hard.
-        if (!fs.existsSync(CSV_PATH)) throw e;
-      }
+    if (csvFresh()) {
+      index = parseCsv();
+      return;
     }
+    if (fs.existsSync(CSV_PATH)) {
+      // Stale but present: serve the existing valid copy now, refresh later.
+      index = parseCsv();
+      refreshInBackground();
+      return;
+    }
+    // No CSV at all - nothing valid to serve yet, so this stays a blocking download.
+    await downloadCsv();
     index = parseCsv();
   })();
   try {

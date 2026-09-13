@@ -29,6 +29,13 @@ export interface ExtInputs {
   oi: OiAnalysis | null;
   burstState: BurstState;
   squeezeOn: boolean; // Bollinger inside Keltner right now (coiling)
+  // Phase 3.3: staleness parity with the OI path (oi/oiTrade.ts checks
+  // dataAgeSec > 90 on the option chain). This is the SAME check for the
+  // candles15m feed — age since it was last actually fetched live (not the
+  // last bar's own timestamp, which normally lags by up to one bar interval
+  // regardless of feed health). null when the cache has no fetch record yet.
+  dataAgeSec: number | null;
+  dataStale: boolean; // dataAgeSec != null && dataAgeSec > 90
 
   // --- level / Setup outputs (READ-ONLY reuse of entryRules.levelContext) ---
   pdh: number | null;

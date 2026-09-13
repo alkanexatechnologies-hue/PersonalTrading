@@ -1,5 +1,6 @@
 import { last, ema, vwap, adx } from "../indicators";
 import { detectCandlePattern } from "../signals/candles";
+import { CONFIG } from "../config/arbitration";
 
 export type BullDir = "UP" | "DOWN" | "FLAT";
 
@@ -88,7 +89,7 @@ function readTf(
   votes.push(futV);
 
   if (ctx.pcr != null) {
-    const v = ctx.pcr >= 1.05 ? 1 : ctx.pcr <= 0.85 ? -1 : 0;
+    const v = ctx.pcr >= CONFIG.pcr.bullish ? 1 : ctx.pcr <= CONFIG.pcr.bearish ? -1 : 0;
     sources.push({ name: "PCR", dir: dirOf(v), detail: String(ctx.pcr) });
     votes.push(v);
   }
