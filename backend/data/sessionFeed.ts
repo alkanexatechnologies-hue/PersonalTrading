@@ -12,6 +12,10 @@ import { GrowwProvider } from "./growwProvider";
 let growwToken = (process.env.GROWW_ACCESS_TOKEN || "").trim();
 
 const FLAGS_FILE = path.join(process.cwd(), "data", "feed-flags.json");
+// The Groww access token is the ONLY Groww credential. It is a live broker
+// credential in plaintext on disk, so it is owner-read/write only and
+// gitignored - it must never reach Git, a log line, or the frontend.
+const TOKEN_FILE = path.join(process.cwd(), ".groww_token");
 
 export interface FeedFlags {
   groww: boolean;
@@ -38,9 +42,46 @@ export function rememberGrowwToken(token?: string) {
   if (token && token.trim()) growwToken = token.trim();
 }
 
-// Clear the in-memory token (used by "Remove saved token" so the next Generate mints fresh).
+// Clear the IN-MEMORY token only. Deliberately does not touch the saved file -
+// disk state is removed explicitly via deletePersistedGrowwToken() so that
+// merely resetting session state (in a test, say) can never destroy the
+// admin's saved credential.
 export function forgetGrowwToken() {
   growwToken = "";
+}
+
+// Remove the saved token file, so a restart doesn't silently reconnect with a
+// token the admin just disconnected.
+export function deletePersistedGrowwToken(): void {
+  try { fs.unlinkSync(TOKEN_FILE); } catch { /* already gone */ }
+}
+
+// Persist the access token so it survives restarts (server.ts reads it on boot).
+// mode 0600 is applied with an explicit chmod too, because writeFileSync's
+// `mode` only applies when the file is newly created - not when an existing
+// file is overwritten.
+export function persistGrowwToken(token: string): void {
+  const t = (token || "").trim();
+  if (!t) return;
+  try {
+    fs.writeFileSync(TOKEN_FILE, t, { encoding: "utf-8", mode: 0o600 });
+    fs.chmodSync(TOKEN_FILE, 0o600);
+  } catch { /* non-fatal: the in-memory token still works for this session */ }
+}
+
+// The token saved on disk, if any (used on boot to auto-reconnect).
+export function readPersistedGrowwToken(): string {
+  try { return fs.readFileSync(TOKEN_FILE, "utf-8").trim(); } catch { return ""; }
+}
+
+// Strips the access token out of any string before it reaches a response, a log
+// line or the UI. Defence-in-depth: provider errors quote Groww's response body,
+// never the token, but a credential must never leak through an error path.
+export function scrubGrowwToken(text: string): string {
+  if (!text) return text;
+  let out = String(text);
+  if (growwToken && growwToken.length > 6) out = out.split(growwToken).join("<redacted>");
+  return out;
 }
 
 export function getGrowwToken(): string {

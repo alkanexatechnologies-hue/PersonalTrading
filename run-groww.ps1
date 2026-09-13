@@ -1,7 +1,7 @@
 # Starts the app on the Groww real-time feed.
 #
 # Two ways to use it:
-#   1) After running ./generate-token.ps1 (which saves .groww_token):
+#   1) With a token already saved in .groww_token:
 #        ./run-groww.ps1
 #   2) Paste a token directly:
 #        ./run-groww.ps1 -Token "PASTE_YOUR_GROWW_ACCESS_TOKEN"
@@ -19,7 +19,7 @@ if (-not $Token) {
     Write-Host "Using token from .groww_token" -ForegroundColor Cyan
   } else {
     Write-Host "No token provided and no .groww_token file found." -ForegroundColor Red
-    Write-Host "Run:  ./generate-token.ps1 -ApiKey '...' -Secret '...'   (or pass -Token '...')" -ForegroundColor Yellow
+    Write-Host "Generate one on Groww -> Settings -> Trading APIs, then pass -Token '...'" -ForegroundColor Yellow
     exit 1
   }
 }

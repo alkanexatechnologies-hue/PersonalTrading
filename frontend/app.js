@@ -24,32 +24,50 @@ let rsiChart, rsiSeries;
 let equityChart, equitySeries;
 let rangeSyncing = false;
 
+// Fetches /api/symbols and renders the watchlist. Split out of init() so it
+// can be retried after a successful login: init() itself fires at page load
+// before any session token exists, so this first attempt 401s for a brand
+// new session (no cached token yet) - see the retry in enterByRole().
+async function loadSymbolsAndWatchlist() {
+  let res;
+  try {
+    res = await fetch("/api/symbols").then((r) => r.json());
+  } catch (_) {
+    return; // offline/network error - leave state.symbols as-is, don't crash init()
+  }
+  if (!res || !Array.isArray(res.symbols)) return; // e.g. {"error":"Unauthorized..."} before login
+  state.symbols = res.symbols;
+  if (el("provider-badge")) el("provider-badge").textContent = "provider: " + res.provider;
+  if (el("disclaimer")) el("disclaimer").textContent = res.disclaimer;
+  renderWatchlist();
+  if (!state.active && state.symbols.length) selectSymbol(state.symbols[0].symbol);
+}
+
 // ---------- init ----------
 async function init() {
   buildChart();
   buildEquityChart();
   startClock();
 
-  const res = await fetch("/api/symbols").then((r) => r.json());
-  state.symbols = res.symbols;
-  if (el("provider-badge")) el("provider-badge").textContent = "provider: " + res.provider;
-  if (el("disclaimer")) el("disclaimer").textContent = res.disclaimer;
-  renderWatchlist();
-  if (state.symbols.length) selectSymbol(state.symbols[0].symbol);
-  loadWatchlistBadges();
-  loadIndexDesk();
+  state.symbols = state.symbols || [];
+  await loadSymbolsAndWatchlist();
   startWatchlistAutoRefresh();
 
-  // Trader Dashboard is the default tab for Monday live testing of the OI model.
+  // Trader Dashboard is the default tab for Monday live testing of the OI model
+  // - keep it immediate so it gets first claim on the Groww throttle. Everything
+  // else below used to fire in the same tick and fight OI Command for the same
+  // 2-concurrent Groww slot right when someone is watching a loading spinner;
+  // staggered the same way loadTopPicks/loadTopOpportunities already are below.
   state.tpUniverse = "index";
   initOiCommand();
   startOiCommandLive();
-  startIndexStrip();
   initAsk();
-
-  loadTraderMind();
-  setInterval(loadTraderMind, 20 * 1000);
   startSessionKeeper();
+
+  setTimeout(() => loadIndexDesk(), 1500);
+  setTimeout(() => startIndexStrip(), 2500);
+  setTimeout(() => { loadTraderMind(); setInterval(loadTraderMind, 20 * 1000); }, 3500);
+  setTimeout(() => loadWatchlistBadges(), 4500);
 
   // Heavy scans are staggered so Groww is not hammered on login (no hang).
   setTimeout(() => loadTopPicks(true), 2500);
@@ -907,16 +925,21 @@ async function loadWatchlistBadges() {
   const st = el("wl-refresh");
   if (st) st.textContent = "updating...";
   try {
-    // Fetch signals for every symbol into state.wlData first, then re-render
-    // once so the list can be ordered by signal strength without flicker.
-    for (const s of state.symbols) {
+    // Fetch signals for every symbol into state.wlData, then re-render once so
+    // the list can be ordered by signal strength without flicker. Fired in
+    // parallel (was a sequential for-loop awaiting one symbol at a time, which
+    // serialized ~26 round-trips and was most of "dashboard is slow after
+    // login") — the browser's own per-origin connection cap plus the server's
+    // Groww request throttle (growwProvider.ts) already bound real concurrency,
+    // so this adds no extra load, just removes an unnecessary added wait.
+    await Promise.all(state.symbols.map(async (s) => {
       try {
         const sig = await fetch(`/api/signal/${encodeURIComponent(s.symbol)}?interval=${state.interval}`).then((r) => r.json());
         if (sig && sig.label) {
           state.wlData[s.symbol] = { score: sig.score, label: sig.label, price: sig.price, regime: sig.regime, rvol: sig.rvol };
         }
       } catch (_) { /* ignore per-item errors */ }
-    }
+    }));
     renderWatchlist(); // re-order: indices first, then best opportunities
   } finally {
     wlBadgesBusy = false;
@@ -939,14 +962,45 @@ function styleBadge(node, score) {
 }
 
 // ---------- connect / data source ----------
+// Groww, WhatsApp, and Dhan each get their own top-bar button + panel (no
+// longer bundled into one "Connect data" panel). All three share the same
+// fixed-position panel styling, so only one is ever shown at a time.
 let _growwPollTimer = null;
+function closeAllConnectPanels() {
+  ["connect-panel", "whatsapp-panel", "dhan-panel"].forEach((id) => {
+    const p = el(id);
+    if (p) p.classList.add("hidden");
+  });
+  stopGrowwPoll();
+}
 function setupConnect() {
   const panel = el("connect-panel");
   el("connect-btn").addEventListener("click", () => {
-    const nowHidden = panel.classList.toggle("hidden");
-    if (!nowHidden) { loadGrowwConfig(); startGrowwPoll(); loadAuthEmail(); } else stopGrowwPoll();
+    const wasHidden = panel.classList.contains("hidden");
+    closeAllConnectPanels();
+    if (wasHidden) { panel.classList.remove("hidden"); loadGrowwConfig(); startGrowwPoll(); loadAuthEmail(); }
   });
-  el("connect-close").addEventListener("click", () => { panel.classList.add("hidden"); stopGrowwPoll(); });
+  el("connect-close").addEventListener("click", closeAllConnectPanels);
+
+  const waPanel = el("whatsapp-panel");
+  if (waPanel) {
+    el("whatsapp-btn").addEventListener("click", () => {
+      const wasHidden = waPanel.classList.contains("hidden");
+      closeAllConnectPanels();
+      if (wasHidden) { waPanel.classList.remove("hidden"); loadWhatsappLoginStatus(); }
+    });
+    el("whatsapp-close").addEventListener("click", closeAllConnectPanels);
+  }
+
+  const dhanPanel = el("dhan-panel");
+  if (dhanPanel) {
+    el("dhan-btn").addEventListener("click", () => {
+      const wasHidden = dhanPanel.classList.contains("hidden");
+      closeAllConnectPanels();
+      if (wasHidden) { dhanPanel.classList.remove("hidden"); loadDhanStatus(); }
+    });
+    el("dhan-close").addEventListener("click", closeAllConnectPanels);
+  }
 
   // Single SAVE & CONNECT button: routes API key+secret, else pasted token.
   el("conn-saveconnect").addEventListener("click", doSaveConnect);
@@ -965,12 +1019,25 @@ function setupConnect() {
   });
 
   // UPDATE TOKEN: reveal + focus the token field so the user can replace it.
-  // REMOVE SAVED TOKEN: delete the stored token so the next Generate mints a fresh one.
+  // REMOVE SAVED TOKEN: clears the stored token; a fresh one must be pasted.
   const upd = el("gc-update-token");
   if (upd) upd.addEventListener("click", doForgetToken);
 
   const saveEmail = el("auth-email-save");
   if (saveEmail) saveEmail.addEventListener("click", doSaveAuthEmail);
+
+  const saveWa = el("wa-save");
+  if (saveWa) saveWa.addEventListener("click", doSaveWhatsappLogin);
+  const testWa = el("wa-test");
+  if (testWa) testWa.addEventListener("click", doTestWhatsappLogin);
+
+  const saveDhan = el("dhan-save");
+  if (saveDhan) saveDhan.addEventListener("click", doSaveDhan);
+  const testDhan = el("dhan-test");
+  if (testDhan) testDhan.addEventListener("click", doTestDhan);
+
+  const rotateBtn = el("rotate-login-btn");
+  if (rotateBtn) rotateBtn.addEventListener("click", doRotateLoginNow);
 
   refreshConnection();
 }
@@ -1014,18 +1081,131 @@ async function doSaveAuthEmail() {
   }
 }
 
+// ---------- WhatsApp login-notification (credential rotation, second channel) ----------
+async function loadWhatsappLoginStatus() {
+  const phoneInp = el("wa-phone");
+  const status = el("wa-status");
+  try {
+    const d = await fetch("/api/whatsapp/status").then((r) => r.json());
+    if (phoneInp && d.phone) phoneInp.placeholder = d.phone + " (saved)";
+    if (status) {
+      status.textContent = d.ready ? `Linked via ${d.via}.` : (d.phone ? d.reason || "" : "");
+      status.className = "conn-status" + (d.phone && !d.ready ? " warn" : d.ready ? " ok" : "");
+    }
+  } catch (_) { /* best-effort */ }
+}
+async function doSaveWhatsappLogin() {
+  const phoneInp = el("wa-phone");
+  const keyInp = el("wa-key");
+  const status = el("wa-status");
+  const phone = (phoneInp?.value || "").trim();
+  const callmebotKey = (keyInp?.value || "").trim();
+  try {
+    const r = await fetch("/api/whatsapp/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true, phone, callmebotKey }),
+    }).then((res) => res.json());
+    if (!r.ok) { if (status) { status.textContent = "Could not save."; status.className = "conn-status err"; } return; }
+    if (phoneInp) phoneInp.value = "";
+    if (keyInp) keyInp.value = "";
+    if (status) {
+      status.textContent = r.ready ? `Saved. Future rotations (08:00 IST) will also go to WhatsApp via ${r.via}.` : (r.reason || "Saved.");
+      status.className = "conn-status" + (r.ready ? " ok" : " warn");
+    }
+    loadWhatsappLoginStatus();
+  } catch (e) {
+    if (status) { status.textContent = "Could not save: " + e.message; status.className = "conn-status err"; }
+  }
+}
+async function doTestWhatsappLogin() {
+  const status = el("wa-status");
+  if (status) { status.textContent = "Sending test message..."; status.className = "conn-status"; }
+  try {
+    const r = await fetch("/api/whatsapp/test", { method: "POST" }).then((res) => res.json());
+    if (status) {
+      status.textContent = r.ok ? `Test sent via ${r.via}.` : (r.error || "Test failed.");
+      status.className = "conn-status" + (r.ok ? " ok" : " err");
+    }
+  } catch (e) {
+    if (status) { status.textContent = "Test failed: " + e.message; status.className = "conn-status err"; }
+  }
+}
+
+// ---------- Dhan historical-data connection (backtesting only) ----------
+async function loadDhanStatus() {
+  const status = el("dhan-status");
+  try {
+    const d = await fetch("/api/dhan/status").then((r) => r.json());
+    if (status) {
+      status.textContent = d.configured ? "Token saved — press TEST CONNECTION to verify it's still valid (24h expiry)." : "";
+      status.className = "conn-status";
+    }
+  } catch (_) { /* best-effort */ }
+}
+async function doSaveDhan() {
+  const inp = el("dhan-token");
+  const status = el("dhan-status");
+  const accessToken = (inp?.value || "").trim();
+  try {
+    const r = await fetch("/api/dhan/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accessToken }),
+    }).then((res) => res.json());
+    if (!r.ok) { if (status) { status.textContent = "Could not save."; status.className = "conn-status err"; } return; }
+    if (inp) inp.value = "";
+    if (status) { status.textContent = r.configured ? "Saved. Press TEST CONNECTION to verify." : "Token removed."; status.className = "conn-status" + (r.configured ? " ok" : ""); }
+  } catch (e) {
+    if (status) { status.textContent = "Could not save: " + e.message; status.className = "conn-status err"; }
+  }
+}
+async function doTestDhan() {
+  const status = el("dhan-status");
+  if (status) { status.textContent = "Testing Dhan connection..."; status.className = "conn-status"; }
+  try {
+    const r = await fetch("/api/dhan/test", { method: "POST" }).then((res) => res.json());
+    if (status) {
+      status.textContent = r.ok ? "Connected — token is valid." : (r.error || "Test failed.");
+      status.className = "conn-status" + (r.ok ? " ok" : " err");
+    }
+  } catch (e) {
+    if (status) { status.textContent = "Test failed: " + e.message; status.className = "conn-status err"; }
+  }
+}
+
+// Immediately rotate the dashboard login password (instead of waiting for the
+// daily 08:00 IST schedule) and push it out via email/WhatsApp, whichever is
+// configured (see POST /api/auth/rotate). Current session stays logged in —
+// only the password for a FUTURE login changes.
+async function doRotateLoginNow() {
+  if (!confirm("Login password abhi rotate karein? Naya password turant email/WhatsApp par bhej diya jayega (jo bhi configured hai) — aap abhi logged-in rahenge.")) return;
+  const btn = el("rotate-login-btn");
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch("/api/auth/rotate", { method: "POST" }).then((res) => res.json());
+    if (!r.ok) { alert(r.error || "Rotation failed."); return; }
+    const via = [r.emailed ? "email" : null, r.whatsapped ? "WhatsApp" : null].filter(Boolean).join(" + ");
+    alert(via ? `Naya password bhej diya gaya (${via}).` : "Naya password ban gaya, par koi delivery channel (email/WhatsApp) configured nahi hai — server console check karein.");
+  } catch (e) {
+    alert("Rotation failed: " + e.message);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 // Delete the saved Groww token, then prompt the user to generate a fresh one.
 async function doForgetToken() {
   const status = el("conn-status");
-  if (!confirm("Remove the saved Groww token? You'll need to press Generate Token & Save (with your API Key + Secret) to mint a fresh one.")) return;
+  if (!confirm("Remove the saved Groww access token? You'll need to paste a fresh token to reconnect.")) return;
   try {
     const r = await fetch("/api/groww/forget-token", { method: "POST" }).then((res) => res.json());
     if (status) {
-      status.textContent = r.message || "Saved token removed. Enter API Key + Secret and press Generate.";
+      status.textContent = r.message || "Saved token removed. Paste a fresh access token to reconnect.";
       status.className = "conn-status warn";
     }
-    const inp = el("conn-token"); if (inp) inp.value = "";
-    const ak = el("conn-apikey"); if (ak) ak.focus();
+    const inp = el("conn-token"); if (inp) { inp.value = ""; inp.focus(); }
+    renderConnStatus("gc-conn-status", "GROWW", "DISCONNECTED", { Connection: "Disconnected", Authentication: "None", "Data Status": "Not receiving" });
     loadGrowwConfig();
   } catch (e) {
     if (status) { status.textContent = "Could not remove token: " + e.message; status.className = "conn-status err"; }
@@ -1189,51 +1369,84 @@ async function refreshConnection() {
   } catch (_) {}
 }
 
-// SAVE & CONNECT — routes to key+secret (mint token) or a pasted token, then
-// proves data is actually received before we ever show CONNECTED.
+// ---------- reusable connection-status component ----------
+// One renderer for every provider (Groww today, Dhan/future providers next).
+// States: CONNECTED / CHECKING / DISCONNECTED / ERROR.
+const CONN_STATE_UI = {
+  CONNECTED:    { dot: "🟢", label: "CONNECTED", cls: "ok" },
+  CHECKING:     { dot: "🟡", label: "CHECKING",  cls: "warn" },
+  DISCONNECTED: { dot: "🔴", label: "DISCONNECTED", cls: "err" },
+  ERROR:        { dot: "⚠️", label: "ERROR", cls: "err" },
+};
+// `info` rows are label/value pairs, e.g. { Authentication: "Valid" }.
+function renderConnStatus(targetId, provider, state, info) {
+  const box = el(targetId);
+  if (!box) return;
+  const s = CONN_STATE_UI[state] || CONN_STATE_UI.DISCONNECTED;
+  const rows = Object.entries(info || {})
+    .filter(([, v]) => v != null && v !== "")
+    .map(([k, v]) => `<div class="cb-row"><span>${k}</span><b>${v}</b></div>`)
+    .join("");
+  box.className = `conn-badge-block ${s.cls}`;
+  box.innerHTML = `<div class="cb-head">${s.dot} ${provider} ${s.label}</div>${rows}`;
+}
+const fmtCheckTime = (ts) => (ts ? new Date(ts).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—");
+
+// SAVE ACCESS TOKEN — the access token is the only Groww credential. The server
+// accepts it only after a real authenticated Groww request returns data, so a
+// non-empty field alone never shows CONNECTED.
 async function doSaveConnect() {
   const status = el("conn-status");
   const btn = el("conn-saveconnect");
-  const apiKey = el("conn-apikey").value.trim();
-  const secret = el("conn-secret").value.trim();
-  const token = el("conn-token").value.trim();
+  const tokenInput = el("conn-token");
+  const token = (tokenInput?.value || "").trim();
 
-  let url, body, verb;
-  if (apiKey && secret) { url = "/api/connect-groww"; body = { apiKey, secret }; verb = "Generating token & saving locally"; }
-  else if (token) { url = "/api/connect"; body = { token }; verb = "Saving token"; }
-  else { status.textContent = "Enter API Key + API Secret (or paste a token under Advanced)."; status.className = "conn-status err"; return; }
+  if (!token) {
+    status.textContent = "Paste your Groww access token first.";
+    status.className = "conn-status err";
+    return;
+  }
 
-  status.textContent = verb + " (a few seconds)…";
+  status.textContent = "Validating token with Groww (a few seconds)…";
   status.className = "conn-status";
+  renderConnStatus("gc-conn-status", "GROWW", "CHECKING", { Connection: "Checking…" });
   btn.disabled = true;
   try {
-    const r = await fetch(url, {
+    const r = await fetch("/api/connect", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ token }),
     }).then((res) => res.json());
     if (r.ok) {
-      // Only claim "connected" when the backend confirms real data received.
-      if (r.dataReceived) { status.textContent = r.message || "Connected — market data received."; status.className = "conn-status ok"; }
-      else { status.textContent = (r.message || "Saved.") + " Waiting for market data…"; status.className = "conn-status warn"; }
+      status.textContent = r.message || "Connected — market data received.";
+      status.className = "conn-status ok";
+      renderConnStatus("gc-conn-status", "GROWW", "CONNECTED", {
+        Connection: "Connected", Authentication: "Valid", "Data Status": "Receiving",
+        "Last Successful Check": fmtCheckTime(Date.now()),
+      });
       setProviderBadge(r.provider || "groww");
-      // Never keep secrets in the DOM after save.
-      el("conn-apikey").value = ""; el("conn-secret").value = ""; el("conn-token").value = "";
+      // SECURITY: never leave the credential sitting in the DOM after saving.
+      if (tokenInput) tokenInput.value = "";
       loadGrowwConfig();
       loadAlerts();
       if (state.active) loadSymbol(state.active);
     } else {
-      status.textContent = r.error || "Connection failed.";
+      status.textContent = r.error || "Groww connection failed.";
       status.className = "conn-status err";
+      renderConnStatus("gc-conn-status", "GROWW", r.code === "NETWORK_ERROR" || r.code === "API_UNAVAILABLE" || r.code === "RATE_LIMIT" ? "ERROR" : "DISCONNECTED", {
+        Connection: "Failed", Authentication: r.code === "INVALID_TOKEN" || r.code === "AUTH_FAILED" ? "Invalid" : "Unknown",
+        Reason: r.error || "—",
+      });
       setProviderBadge(r.provider || "groww");
       loadGrowwConfig();
-      // Groww rate-limits token minting — cool the button down so repeated clicks
-      // don't make it worse. A saved token (if any) is reused automatically.
+      // Groww rate-limits requests — cool the button down so repeated clicks
+      // don't make it worse.
       if (r.rateLimited) { growwCooldown(btn, 90); return; }
     }
   } catch (e) {
     status.textContent = "Error: " + e.message;
     status.className = "conn-status err";
+    renderConnStatus("gc-conn-status", "GROWW", "ERROR", { Connection: "Failed", Reason: e.message });
   } finally {
     if (!btn.dataset.cooldown) btn.disabled = false;
   }
@@ -1260,15 +1473,16 @@ function growwCooldown(btn, secs) {
 // Back-compat shim: some callers still invoke doConnect(token) directly.
 async function doConnect(token) {
   el("conn-token").value = token || "";
-  el("conn-apikey").value = ""; el("conn-secret").value = "";
   return doSaveConnect();
 }
 
-// TEST CONNECTION — per-check results: auth / api / data / freshness.
+// TEST GROWW CONNECTION — the server makes a real authenticated Groww request;
+// we only show 🟢 Groww Connected when actual market data came back.
 async function doTestConnection() {
   const box = el("gc-test-result");
   const btn = el("conn-test");
   box.innerHTML = "<div class='gc-tr-line'>Testing…</div>";
+  renderConnStatus("gc-conn-status", "GROWW", "CHECKING", { Connection: "Checking…" });
   btn.disabled = true;
   try {
     const r = await fetch("/api/groww/test").then((res) => res.json());
@@ -1276,14 +1490,36 @@ async function doTestConnection() {
     const m = r.messages || {};
     const line = (ok, label, msg) =>
       `<div class="gc-tr-line ${ok ? "ok" : "err"}">${ok ? "✓" : "✗"} ${label}${msg ? " — " + msg : ""}</div>`;
-    box.innerHTML =
+    const head = r.ok
+      ? `<div class="gc-tr-head ok">🟢 Groww Connected</div>`
+      : `<div class="gc-tr-head err">🔴 Groww Connection Failed</div>`;
+    box.innerHTML = head +
       line(c.auth, "Authentication", m.auth) +
       line(c.api, "Groww API reachable", m.api) +
       line(c.data, "Market data received", m.data) +
       line(c.freshness, "Data freshness", m.freshness);
+
+    if (r.ok) {
+      renderConnStatus("gc-conn-status", "GROWW", "CONNECTED", {
+        Connection: "Connected",
+        Authentication: "Valid",
+        "Data Status": "Receiving",
+        "Last Successful Check": fmtCheckTime(r.lastSuccessfulCheck),
+      });
+    } else {
+      const errorish = r.code === "NETWORK_ERROR" || r.code === "API_UNAVAILABLE" || r.code === "RATE_LIMIT";
+      renderConnStatus("gc-conn-status", "GROWW", errorish ? "ERROR" : "DISCONNECTED", {
+        Connection: "Failed",
+        Authentication: r.authentication === "VALID" ? "Valid" : r.authentication === "INVALID" ? "Invalid" : "Unknown",
+        "Data Status": "Not receiving",
+        Reason: r.error || "—",
+        "Last Successful Check": fmtCheckTime(r.lastSuccessfulCheck),
+      });
+    }
     loadGrowwConfig();
   } catch (e) {
-    box.innerHTML = `<div class="gc-tr-line err">✗ Test failed — ${e.message}</div>`;
+    box.innerHTML = `<div class="gc-tr-head err">🔴 Groww Connection Failed</div><div class="gc-tr-line err">✗ ${e.message}</div>`;
+    renderConnStatus("gc-conn-status", "GROWW", "ERROR", { Connection: "Failed", Reason: e.message });
   } finally {
     btn.disabled = false;
   }
@@ -1301,6 +1537,14 @@ async function loadGrowwConfig() {
     } else {
       wrap.classList.add("hidden");
     }
+    // Shared connection-status component, driven by the last real probe.
+    renderConnStatus("gc-conn-status", "GROWW",
+      d.connection === "CONNECTED" ? "CONNECTED" : d.connection === "ERROR" ? "ERROR" : "DISCONNECTED", {
+        Connection: d.connection === "CONNECTED" ? "Connected" : d.connection === "ERROR" ? "Error" : "Disconnected",
+        Authentication: d.authentication === "VALID" ? "Valid" : d.authentication === "INVALID" ? "Invalid" : d.authentication === "NONE" ? "No token saved" : "Not tested yet",
+        "Data Status": d.dataStatus === "RECEIVING" ? "Receiving" : d.dataStatus === "DELAYED" ? "Delayed" : d.dataStatus === "MARKET CLOSED" ? "Market closed" : "Not receiving",
+        "Last Successful Check": fmtCheckTime(d.lastSuccessfulCheck),
+      });
     // Status header + health.
     const map = {
       GREEN:  { dot: "🟢", head: "GROWW CONNECTED", data: "LIVE" },
@@ -1570,6 +1814,7 @@ function switchTab(name) {
   if (name === "stockoptions" && !state.stockOptionsInit) { state.stockOptionsInit = true; initStockOptions(); }
 
   if (name === "movetiming" && !state.moveTimingInit) { state.moveTimingInit = true; initMoveTiming(); }
+  if (name === "dhanbacktest" && !state.dhanBacktestInit) { state.dhanBacktestInit = true; initDhanBacktest(); }
   document.body.classList.toggle("oi-focus", name === "oicommand");
   renderWatchlist();
   if (name === "oicommand") { initOiCommand(); startOiCommandLive(); }
@@ -1653,14 +1898,15 @@ function setupMobileNav() {
 
 // ---------- desk mode (Option Trading vs Stock Swing Trading) ----------
 const MODE_KEY = "nsa_mode";
-const VALID_MODES = ["option", "stockOption", "swing"];
-const MODE_FIRST = { option: "oicommand", stockOption: "stockoptions", swing: "news" };
+const VALID_MODES = ["option", "stockOption", "swing", "dhanbacktest"];
+const MODE_FIRST = { option: "oicommand", stockOption: "stockoptions", swing: "news", dhanbacktest: "dhanbacktest" };
 const MODE_TABS = {
   option: ["oicommand", "paper", "toppicks", "earlymoves", "tradermind"],
   // Paper Desk and Top Pick are shared with Option Trading (same panels, already
   // pool-filtered/labelled by kind) rather than duplicated for this desk.
   stockOption: ["stockoptions", "paper", "toppicks"],
   swing: ["news", "bullrank", "todaymovers", "stock", "bigmove", "movetiming"],
+  dhanbacktest: ["dhanbacktest"],
 };
 
 function setupModeGate() {
@@ -4797,6 +5043,31 @@ function renderOiWallsCardHtml(d) {
     </div>`;
 }
 
+// Macro Setup card (NIFTY only) - global markets / morning sector leader /
+// Bank Nifty / IT-majors votes, from backend/paper/ext/macroSetup.ts's
+// computeNiftyMacroSetup (attached server-side as d.macroSetup, NIFTY only).
+// Renders "" for any other symbol (BankNifty/FinNifty/etc, where d.macroSetup
+// is absent) so the Dashboard Grid layout is unaffected there - same .mtg-card/
+// .o2-lv classes as the cards above, no new CSS needed.
+function renderMacroSetupCardHtml(d) {
+  const M = d.macroSetup;
+  if (!M || !M.votes) return "";
+  const biasWord = M.bias === 1 ? "Bullish" : M.bias === -1 ? "Bearish" : "Neutral";
+  const biasCls = M.bias === 1 ? "up" : M.bias === -1 ? "down" : "";
+  const voteRow = (v) => {
+    const cls = v.dir === 1 ? "up" : v.dir === -1 ? "down" : "";
+    const arrow = v.dir === 1 ? "▲" : v.dir === -1 ? "▼" : "•";
+    const note = (v.note || "").replace(/"/g, "&quot;");
+    return `<div class="o2-lv" title="${note}"><span>${v.name}</span><b class="${cls}">${arrow}</b></div>`;
+  };
+  return `
+    <div class="mtg-card">
+      <h5>Macro Setup (NIFTY)</h5>
+      <div class="o2-lv"><span>Overall</span><b class="${biasCls}">${biasWord} (${M.agree}/${M.agree + M.against})</b></div>
+      ${M.votes.map(voteRow).join("")}
+    </div>`;
+}
+
 
 // Model-agreement bulletin: does the 5m scalp / 15m scalp / 1h directional
 // read all point the same way? d.bulletin was already computed server-side
@@ -5064,6 +5335,7 @@ function renderMasterSelector(d) {
         ${renderLevelsCardHtml(C)}
         ${renderWriterBattleHtml(C)}
         ${renderOiWallsCardHtml(d)}
+        ${renderMacroSetupCardHtml(d)}
       </div>
 
       ${renderBulletinHtml(d)}
@@ -6131,6 +6403,171 @@ function renderBullRank(data) {
 }
 
 // ---------- Move Timing (when the market moves most) ----------
+// ---------- Backtest (Dhan historical data) ----------
+async function initDhanBacktest() {
+  const sel = el("dbt-symbol");
+  const from = el("dbt-from");
+  const to = el("dbt-to");
+  const runBtn = el("dbt-run");
+  if (to && !to.value) {
+    const d = new Date(Date.now() + 19800000); // IST "today"
+    to.value = d.toISOString().slice(0, 10);
+    to.max = to.value;
+  }
+  if (from && !from.value) {
+    const d = new Date(Date.now() + 19800000);
+    d.setUTCFullYear(d.getUTCFullYear() - 2); // default: 2 years back
+    from.value = d.toISOString().slice(0, 10);
+  }
+  if (sel && !sel.options.length) {
+    try {
+      const d = await fetch("/api/backtest-dhan/symbols").then((r) => r.json());
+      sel.innerHTML = (d.symbols || []).map((s) => `<option value="${s.symbol}">${s.name} (${s.symbol})</option>`).join("");
+    } catch (_) { /* leave empty, run will surface the error */ }
+  }
+  if (runBtn) runBtn.addEventListener("click", runDhanBacktest);
+  loadDhanDataMode();
+  loadAiDataStatus();
+  loadAiTrainingStatus();
+}
+
+async function loadDhanDataMode() {
+  const box = el("dbt-datamode");
+  if (!box) return;
+  try {
+    const d = await fetch("/api/backtest-dhan/data-mode").then((r) => r.json());
+    const oiCls = d.historicalOiBacktest === "AVAILABLE" ? "ok" : "blocked";
+    box.innerHTML = `<b>DATA MODE</b>`
+      + `<span>Technical Data: <b class="ok">${d.technicalData}</b></span>`
+      + `<span>Historical Full Option Chain: <b class="${d.historicalFullOptionChain === "AVAILABLE" ? "ok" : "blocked"}">${d.historicalFullOptionChain}</b></span>`
+      + `<span>Historical OI Backtest: <b class="${oiCls}">${d.historicalOiBacktest}</b></span>`;
+  } catch (_) {
+    box.textContent = "Could not load DATA MODE status.";
+  }
+}
+
+async function loadAiDataStatus() {
+  const box = el("ai-data-status");
+  if (!box) return;
+  try {
+    const d = await fetch("/api/ai/data-status").then((r) => r.json());
+    box.innerHTML = `<b>AI DATA COLLECTION</b>`
+      + `<span>Status: <b class="${d.status === "ACTIVE" ? "ok" : "blocked"}">${d.status}</b></span>`
+      + `<span>Today's snapshots: <b>${fmt(d.todaySnapshots, 0)}</b></span>`
+      + `<span>Option-chain records: <b>${fmt(d.optionChainRecords, 0)}</b></span>`
+      + `<span>First collection: <b>${d.firstCollection || "-"}</b></span>`
+      + `<span>Last collection: <b>${d.lastCollection || "-"}</b></span>`
+      + `<span>Data quality: <b class="${d.dataQualityPercent == null || d.dataQualityPercent >= 95 ? "ok" : "blocked"}">${d.dataQualityPercent != null ? fmt(d.dataQualityPercent, 1) + "%" : "-"}</b></span>`
+      + `<span>Training dataset: <b class="${d.trainingDatasetReady ? "ok" : "blocked"}">${d.trainingDatasetReady ? "READY" : "NOT READY"}</b></span>`
+      + `<span>Observations: <b>${fmt(d.observations, 0)} / ${fmt(d.minObservationsRequired, 0)}</b></span>`;
+  } catch (_) {
+    box.textContent = "Could not load AI data-collection status.";
+  }
+}
+
+async function loadAiTrainingStatus() {
+  const box = el("ai-training-status");
+  if (!box) return;
+  try {
+    const d = await fetch("/api/ai/training-status").then((r) => r.json());
+    const okCls = (v) => (v === "AVAILABLE" || v === "READY" || v === "REACHED" ? "ok" : v === "DISABLED" ? "ok" : "blocked");
+    box.innerHTML = `<b>AI TRAINING STATUS</b>`
+      + `<span>Historical technical data: <b class="${okCls(d.historicalTechnicalData)}">${d.historicalTechnicalData}</b></span>`
+      + `<span>Live OI archive: <b class="${d.liveOiArchive === "COLLECTING" ? "ok" : "blocked"}">${d.liveOiArchive}</b></span>`
+      + `<span>Feature pipeline: <b class="${okCls(d.featurePipeline)}">${d.featurePipeline}</b></span>`
+      + `<span>Label pipeline: <b class="${okCls(d.labelPipeline)}">${d.labelPipeline}</b></span>`
+      + `<span>Minimum observations: <b class="${okCls(d.minimumObservations)}">${d.minimumObservations}</b> (${fmt(d.observations, 0)}/${fmt(d.minObservationsRequired, 0)})</span>`
+      + `<span>Model training: <b class="${okCls(d.modelTraining)}">${d.modelTraining}</b></span>`;
+  } catch (_) {
+    box.textContent = "Could not load AI training status.";
+  }
+}
+
+async function runDhanBacktest() {
+  const btn = el("dbt-run");
+  const status = el("dbt-status");
+  const summary = el("dbt-summary");
+  if (btn) { btn.disabled = true; btn.textContent = "Running..."; }
+  if (status) { status.textContent = "Fetching Dhan historical candles — a 2-year intraday range can take a while (paginated in 90-day chunks)..."; status.className = "conn-status"; }
+  if (summary) summary.textContent = "";
+  el("dbt-informational") && (el("dbt-informational").innerHTML = "");
+  el("dbt-trades") && (el("dbt-trades").innerHTML = "");
+  try {
+    const body = {
+      symbol: el("dbt-symbol")?.value,
+      interval: el("dbt-interval")?.value || "60",
+      fromDate: el("dbt-from")?.value,
+      toDate: el("dbt-to")?.value,
+      sl: el("dbt-sl")?.value,
+      target: el("dbt-target")?.value,
+      threshold: el("dbt-threshold")?.value,
+      short: !!el("dbt-short")?.checked,
+      mode: el("dbt-mode")?.value || "TECHNICAL_ONLY",
+    };
+    const r = await fetch("/api/backtest-dhan/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((res) => res.json());
+    if (r.error) {
+      if (status) { status.textContent = r.error; status.className = "conn-status err"; }
+      return;
+    }
+    if (status) { status.textContent = ""; }
+    renderDhanBacktest(r);
+  } catch (e) {
+    if (status) { status.textContent = "Backtest failed: " + e.message; status.className = "conn-status err"; }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Run backtest"; }
+  }
+}
+
+function renderDhanBacktest(r) {
+  const pf = r.profitFactor === null || r.profitFactor === "Infinity" || !isFinite(r.profitFactor) ? "∞" : fmt(r.profitFactor);
+  const net = r.netPnlPercent;
+  const summary = el("dbt-summary");
+  if (summary) {
+    summary.innerHTML = `
+      <div class="bt-metrics">
+        <div class="metric"><span>Trades</span><b>${r.totalTrades}</b></div>
+        <div class="metric"><span>Win rate</span><b>${fmt(r.winRate)}%</b></div>
+        <div class="metric"><span>Net P&L (1 unit)</span><b class="${net >= 0 ? "up" : "down"}">${net >= 0 ? "+" : ""}${fmt(net)}%</b></div>
+        <div class="metric"><span>Profit factor</span><b>${pf}</b></div>
+        <div class="metric"><span>Avg win</span><b class="up">+${fmt(r.avgWinPercent)}%</b></div>
+        <div class="metric"><span>Avg loss</span><b class="down">-${fmt(r.avgLossPercent)}%</b></div>
+        <div class="metric"><span>Max drawdown</span><b class="down">-${fmt(r.maxDrawdownPercent)}%</b></div>
+      </div>
+      <p class="wl-sub">${r.symbol} · ${r.dhanInterval === "1d" ? "Daily" : r.dhanInterval + " min"} · ${r.fromDate} → ${r.toDate} · ${r.candles} candles. Past performance does not predict future results.</p>`;
+  }
+  const info = el("dbt-informational");
+  if (info && r.informational) {
+    const inf = r.informational;
+    info.innerHTML = `<b>End-of-window informational reads (not part of the entry/exit decision above):</b> `
+      + `EMA confluence: <b>${inf.emaConfluence || "-"}</b> · `
+      + `Momentum Burst: <b>${inf.momentumBurst?.state || "-"}</b> (${inf.momentumBurst?.direction || "-"}) · `
+      + `Market Regime: <b>${inf.marketRegime?.label || inf.marketRegime?.state || "-"}</b>`;
+  }
+  const tradesBox = el("dbt-trades");
+  if (tradesBox) {
+    const rows = (r.trades || []).slice(-100).map((t) => {
+      const dt = (ts) => ts ? new Date(ts * 1000).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "-";
+      return `<tr>
+        <td>${t.side}</td>
+        <td>${dt(t.entryTime)}</td>
+        <td class="num">${fmt(t.entryPrice)}</td>
+        <td>${dt(t.exitTime)}</td>
+        <td class="num">${fmt(t.exitPrice)}</td>
+        <td class="num ${t.pnlPercent >= 0 ? "up" : "down"}">${t.pnlPercent >= 0 ? "+" : ""}${fmt(t.pnlPercent)}%</td>
+        <td class="wl-sub">${t.exitReason}</td>
+      </tr>`;
+    }).join("");
+    tradesBox.innerHTML = rows
+      ? `<table class="dbt-trade-table"><thead><tr><th>Side</th><th>Entry</th><th>@</th><th>Exit</th><th>@</th><th>P&L%</th><th>Reason</th></tr></thead><tbody>${rows}</tbody></table>
+         <p class="wl-sub">${r.trades.length > 100 ? "Showing last 100 of " + r.trades.length + " trades." : ""}</p>`
+      : `<p class="wl-sub">No trades in this window at the current threshold/SL/target.</p>`;
+  }
+}
+
 function initMoveTiming() {
   const sel = el("mt-symbol");
   if (sel && !sel.options.length) {
@@ -7906,6 +8343,22 @@ const LG_TOKEN_KEY = "nsa_session";
   };
 })();
 
+let lgSelectedMode = "admin";
+
+function enterByRole(role, permissions, username) {
+  state.role = role || "user";
+  state.permissions = permissions || [];
+  state.session = { role: state.role, permissions: state.permissions, username: username || null };
+  applyPermissionGating();
+  // init() (bottom of this file) fires at page load before any session token
+  // exists, so its one and only /api/symbols fetch 401s on a brand new
+  // session and never repopulates the watchlist. Retry now that we actually
+  // have a validated session/token.
+  if (!state.symbols || !state.symbols.length) loadSymbolsAndWatchlist();
+  if (state.role === "admin") enterAdminMode();
+  else enterApp();
+}
+
 async function setupLoginGate() {
   const gate = el("login-gate");
   if (!gate) return;
@@ -7920,12 +8373,24 @@ async function setupLoginGate() {
     show.textContent = reveal ? "HIDE" : "SHOW";
   });
 
+  // Admin/User mode card selector - a UI hint only; the server independently
+  // verifies the real role from the matched account and never trusts this.
+  document.querySelectorAll(".lg-mode-card").forEach((card) => {
+    card.addEventListener("click", () => {
+      lgSelectedMode = card.getAttribute("data-mode");
+      document.querySelectorAll(".lg-mode-card").forEach((c) => c.classList.toggle("selected", c === card));
+    });
+  });
+
+  const logoutBtn = el("logout-btn");
+  if (logoutBtn) logoutBtn.addEventListener("click", doLogout);
+
   // Already have a valid session? Skip the gate.
   const token = localStorage.getItem(LG_TOKEN_KEY);
   if (token) {
     try {
       const r = await fetch("/api/session", { headers: { Authorization: "Bearer " + token } }).then((x) => x.json());
-      if (r && r.valid) { gate.remove(); enterApp(); return; }
+      if (r && r.valid) { gate.remove(); enterByRole(r.role, r.permissions, r.username); return; }
     } catch (_) { /* fall through to login */ }
     localStorage.removeItem(LG_TOKEN_KEY);
   }
@@ -7939,12 +8404,12 @@ async function setupLoginGate() {
       const r = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: el("lg-user").value, password: pass.value }),
+        body: JSON.stringify({ username: el("lg-user").value, password: pass.value, mode: lgSelectedMode }),
       }).then((x) => x.json());
       if (r && r.ok && r.token) {
         localStorage.setItem(LG_TOKEN_KEY, r.token);
         gate.remove();
-        enterApp();
+        enterByRole(r.role, r.permissions, r.username);
       } else if (errEl) {
         errEl.textContent = r && r.error ? r.error : "Login failed.";
       }
@@ -7954,6 +8419,256 @@ async function setupLoginGate() {
       if (btn) btn.disabled = false;
     }
   });
+}
+
+// Hides mode-gate desk cards a "user" role isn't permitted for. Backend
+// enforcement (requirePermission) is the REAL gate (routes/api.ts) - this is
+// only so a restricted user doesn't see a button that would just 403.
+const DESK_PERMISSION_MAP = { option: "oiAnalysis", stockOption: "tradingDashboard", swing: "marketAnalysis", dhanbacktest: "backtesting" };
+// Credential-rotation is ADMIN ONLY - hiding it here is a UX convenience
+// only, never the real security boundary. The actual enforcement is
+// server-side (requireAdmin on every /api/admin/* and provider route,
+// routes/api.ts) - a USER cannot retrieve any of this by typing the URL,
+// calling the API directly, or editing frontend JS, regardless of what this
+// function hides. (Groww/Dhan/WhatsApp buttons are handled separately - they
+// stay permanently hidden in index.html and are only ever reachable via the
+// Admin Control Center's Connections card - see enterAdminMode().)
+const ADMIN_ONLY_BUTTON_IDS = ["rotate-login-btn"];
+function applyPermissionGating() {
+  const isAdmin = state.role === "admin";
+  ADMIN_ONLY_BUTTON_IDS.forEach((id) => {
+    const btn = el(id);
+    if (btn) btn.classList.toggle("hidden", !isAdmin);
+  });
+  if (isAdmin) return; // implicit full access - nothing else hidden
+  document.querySelectorAll("#mode-gate [data-mode]").forEach((btn) => {
+    const mode = btn.getAttribute("data-mode");
+    const perm = DESK_PERMISSION_MAP[mode];
+    const allowed = !perm || (state.permissions || []).includes(perm);
+    btn.classList.toggle("hidden", !allowed);
+  });
+}
+
+// Ends this browser's session both client-side (forget the token, so future
+// /api/* calls stop attaching it) and server-side (POST /api/logout deletes
+// the token from the in-memory sessions map - see auth/session.ts's logout())
+// so it can't be replayed even if it leaked. login-gate's markup is removed
+// from the DOM on a successful login (see setupLoginGate), and this app has a
+// lot of running timers/chart state by the time anyone is logged in, so a
+// full reload is the simplest reliable way back to a clean login screen
+// rather than trying to manually rebuild everything in place.
+async function doLogout() {
+  if (!confirm("Logout karna hai? Session band ho jayega, dobara login karna padega.")) return;
+  const token = localStorage.getItem(LG_TOKEN_KEY);
+  try {
+    await fetch("/api/logout", { method: "POST", headers: token ? { Authorization: "Bearer " + token } : {} });
+  } catch (_) { /* best-effort - still forget the token locally either way */ }
+  try { localStorage.removeItem(LG_TOKEN_KEY); } catch (_) { /* ignore */ }
+  // Also forget the last-chosen desk (nsa_mode) - otherwise enterApp() finds
+  // it still saved on the next login and skips straight past the Option/
+  // Stock Option/Stock Swing/Backtest desk-picker screen entirely.
+  try { localStorage.removeItem(MODE_KEY); } catch (_) { /* ignore */ }
+  location.reload();
+}
+
+// ============================ Admin Control Center ============================
+const PERMISSION_LABELS = {
+  tradingDashboard: "Trading Dashboard", marketAnalysis: "Market Analysis", oiAnalysis: "OI Analysis",
+  aiSignals: "AI Signals", backtesting: "Backtesting", tradeJournal: "Trade Journal", adminReports: "Admin Reports",
+};
+
+function enterAdminMode() {
+  const center = el("admin-center");
+  if (!center) return;
+  center.classList.remove("hidden");
+  const who = el("ac-whoami");
+  if (who) who.textContent = `Logged in as: ${state.session?.username || "admin"} · Mode: ADMIN`;
+  const logoutBtn = el("ac-logout");
+  if (logoutBtn && !logoutBtn.dataset.wired) { logoutBtn.dataset.wired = "1"; logoutBtn.addEventListener("click", doLogout); }
+  const createBtn = el("acf-create");
+  if (createBtn && !createBtn.dataset.wired) { createBtn.dataset.wired = "1"; createBtn.addEventListener("click", doCreateUser); }
+  const showAllChk = el("ac-history-showall");
+  if (showAllChk && !showAllChk.dataset.wired) { showAllChk.dataset.wired = "1"; showAllChk.addEventListener("change", loadLoginHistory); }
+  loadAdminPermissionCheckboxes();
+  loadAdminStats();
+  loadAdminUsers();
+  loadLoginHistory();
+  loadAdminConnectionsSummary();
+}
+
+// Renders the read-only Groww/Dhan/WhatsApp status summary in the Admin
+// Control Center's Connections card. Each "Manage" button just clicks the
+// corresponding (permanently topbar-hidden) legacy button to reuse the
+// existing open/save/test logic in setupConnect() rather than duplicating it.
+const CONNECTION_MANAGE_BTN = { groww: "connect-btn", dhan: "dhan-btn", whatsapp: "whatsapp-btn" };
+function manageConnection(provider) {
+  const btnId = CONNECTION_MANAGE_BTN[provider];
+  if (btnId) el(btnId)?.click();
+}
+async function loadAdminConnectionsSummary() {
+  const body = el("ac-connections-body");
+  if (!body) return;
+  try {
+    const d = await fetch("/api/admin/connections").then((r) => r.json());
+    const fmt = (ts) => (ts ? new Date(ts).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—");
+    const rows = [
+      { key: "groww", label: "Groww", info: d.groww },
+      { key: "dhan", label: "Dhan", info: d.dhan },
+      { key: "whatsapp", label: "WhatsApp", info: d.whatsapp },
+    ];
+    body.innerHTML = rows.map(({ key, label, info }) => {
+      const connected = info?.status === "CONNECTED";
+      const dotCls = connected ? "ok" : info?.status === "ERROR" ? "err" : "blocked";
+      return `<tr>
+        <td>${label}</td>
+        <td class="${dotCls}">● ${info?.status || "UNKNOWN"}</td>
+        <td class="wl-sub">${fmt(info?.lastConnectedAt)}</td>
+        <td class="wl-sub">${fmt(info?.lastTestedAt)}</td>
+        <td><button type="button" class="ghost" onclick="manageConnection('${key}')">Manage</button></td>
+      </tr>`;
+    }).join("");
+  } catch (_) {
+    body.innerHTML = '<tr><td colspan="5" class="wl-sub">Could not load connection status.</td></tr>';
+  }
+}
+
+async function loadAdminPermissionCheckboxes() {
+  const box = el("acf-permissions");
+  if (!box || box.dataset.loaded) return;
+  try {
+    const d = await fetch("/api/admin/permissions").then((r) => r.json());
+    box.innerHTML = (d.permissions || []).map((p) =>
+      `<label><input type="checkbox" value="${p}" class="acf-perm-cb" /> ${PERMISSION_LABELS[p] || p}</label>`
+    ).join("");
+    box.dataset.loaded = "1";
+  } catch (_) { /* best-effort */ }
+}
+
+async function loadAdminStats() {
+  try {
+    const d = await fetch("/api/admin/stats").then((r) => r.json());
+    if (el("ac-stat-total")) el("ac-stat-total").textContent = d.total ?? "-";
+    if (el("ac-stat-active")) el("ac-stat-active").textContent = d.active ?? "-";
+    if (el("ac-stat-expired")) el("ac-stat-expired").textContent = d.expired ?? "-";
+    if (el("ac-stat-disabled")) el("ac-stat-disabled").textContent = d.disabled ?? "-";
+  } catch (_) { /* best-effort */ }
+}
+
+async function doCreateUser() {
+  const status = el("acf-status");
+  const username = el("acf-username")?.value?.trim();
+  const temporaryPassword = el("acf-password")?.value || "";
+  const accessStartDate = el("acf-start")?.value || null;
+  const accessExpiryDate = el("acf-expiry")?.value || null;
+  const permissions = [...document.querySelectorAll(".acf-perm-cb:checked")].map((cb) => cb.value);
+  if (!username || !temporaryPassword) {
+    if (status) { status.textContent = "Username and temporary password are required."; status.className = "conn-status err"; }
+    return;
+  }
+  try {
+    const r = await fetch("/api/admin/users", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, temporaryPassword, accessStartDate, accessExpiryDate, permissions }),
+    }).then((res) => res.json());
+    if (!r.ok) { if (status) { status.textContent = r.error || "Could not create user."; status.className = "conn-status err"; } return; }
+    if (status) { status.textContent = `User created successfully — User ID: ${r.user.userId}, Username: ${r.user.username}. Share the temporary password with them directly.`; status.className = "conn-status ok"; }
+    el("acf-username").value = ""; el("acf-password").value = ""; el("acf-start").value = ""; el("acf-expiry").value = "";
+    document.querySelectorAll(".acf-perm-cb").forEach((cb) => (cb.checked = false));
+    loadAdminStats();
+    loadAdminUsers();
+  } catch (e) {
+    if (status) { status.textContent = "Could not create user: " + e.message; status.className = "conn-status err"; }
+  }
+}
+
+async function loadAdminUsers() {
+  const body = el("ac-users-body");
+  if (!body) return;
+  try {
+    const d = await fetch("/api/admin/users").then((r) => r.json());
+    const users = d.users || [];
+    if (!users.length) { body.innerHTML = '<tr><td colspan="6" class="wl-sub">No users yet — create one above.</td></tr>'; return; }
+    body.innerHTML = users.map((u) => {
+      const today = new Date(Date.now() + 19800000).toISOString().slice(0, 10);
+      const eff = u.status === "DISABLED" ? "DISABLED" : (u.accessExpiryDate && u.accessExpiryDate < today) ? "EXPIRED" : "ACTIVE";
+      const cls = eff === "ACTIVE" ? "ok" : "blocked";
+      const lastLogin = u.lastLogin ? new Date(u.lastLogin).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "never";
+      const permsLabel = (u.permissions || []).map((p) => PERMISSION_LABELS[p] || p).join(", ") || "none";
+      return `<tr>
+        <td>${u.username}</td>
+        <td><b class="${cls}">${eff}</b></td>
+        <td>${u.accessExpiryDate || "never"}</td>
+        <td>${permsLabel}</td>
+        <td>${lastLogin}</td>
+        <td class="ac-actions">
+          ${u.status === "DISABLED"
+            ? `<button type="button" class="ghost" onclick="doEnableUser('${u.userId}')">Enable</button>`
+            : `<button type="button" class="ghost" onclick="doDisableUser('${u.userId}')">Disable</button>`}
+          <button type="button" class="ghost" onclick="doResetUserPassword('${u.userId}')">Reset PW</button>
+          <button type="button" class="ghost" onclick="doRevokeUser('${u.userId}')">Revoke</button>
+          <button type="button" class="ghost danger" onclick="doDeleteUser('${u.userId}', '${u.username.replace(/'/g, "\\'")}')">Delete</button>
+        </td>
+      </tr>`;
+    }).join("");
+  } catch (_) {
+    body.innerHTML = '<tr><td colspan="6" class="wl-sub">Could not load users.</td></tr>';
+  }
+}
+
+async function doDisableUser(userId) {
+  if (!confirm("Is user ko disable karna hai?")) return;
+  await fetch(`/api/admin/users/${userId}/disable`, { method: "POST" });
+  loadAdminStats(); loadAdminUsers();
+}
+async function doEnableUser(userId) {
+  await fetch(`/api/admin/users/${userId}/enable`, { method: "POST" });
+  loadAdminStats(); loadAdminUsers();
+}
+async function doResetUserPassword(userId) {
+  const pw = prompt("Naya temporary password (kam se kam 6 characters):");
+  if (!pw) return;
+  const r = await fetch(`/api/admin/users/${userId}/reset-password`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ temporaryPassword: pw }),
+  }).then((res) => res.json());
+  if (!r.ok) { alert(r.error || "Could not reset password."); return; }
+  alert("Password reset ho gaya. User ko naya password bata dijiye — unka current session bhi revoke ho gaya hai.");
+  loadAdminUsers();
+}
+async function doRevokeUser(userId) {
+  if (!confirm("Is user ke saare active sessions revoke karne hain?")) return;
+  await fetch(`/api/admin/users/${userId}/revoke`, { method: "POST" });
+  alert("Access revoke ho gaya.");
+}
+// Permanent, unlike Disable — the record is removed entirely and cannot be
+// recovered from the Admin Control Center. For accounts genuinely not needed
+// anymore (test/mistake accounts) rather than someone whose access should
+// just be paused.
+async function doDeleteUser(userId, username) {
+  if (!confirm(`"${username}" ko HAMESHA ke liye delete karna hai? Yeh wapas nahi ho sakta — agar sirf access rokna hai to "Disable" use karein.`)) return;
+  const r = await fetch(`/api/admin/users/${userId}`, { method: "DELETE" }).then((res) => res.json());
+  if (!r.ok) { alert(r.error || "Could not delete user."); return; }
+  loadAdminStats(); loadAdminUsers();
+}
+
+async function loadLoginHistory() {
+  const body = el("ac-history-body");
+  if (!body) return;
+  const showAll = !!el("ac-history-showall")?.checked;
+  try {
+    const d = await fetch(`/api/admin/login-history?limit=100&scope=${showAll ? "all" : "admin"}`).then((r) => r.json());
+    const events = d.events || [];
+    if (!events.length) {
+      body.innerHTML = `<tr><td colspan="5" class="wl-sub">${showAll ? "No login activity yet." : "No admin actions yet — check \"Show all activity\" to see user logins/attempts too."}</td></tr>`;
+      return;
+    }
+    body.innerHTML = events.map((e) => {
+      const t = new Date(e.at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      const cls = e.type === "login_success" ? "ok" : (e.type === "login_failure" || e.type === "ADMIN_ACCESS_DENIED") ? "err" : "";
+      return `<tr><td>${t}</td><td class="${cls}">${e.type}</td><td>${e.username || "-"}</td><td>${e.mode || "-"}</td><td class="wl-sub">${e.detail || ""}</td></tr>`;
+    }).join("");
+  } catch (_) {
+    body.innerHTML = '<tr><td colspan="5" class="wl-sub">Could not load login history.</td></tr>';
+  }
 }
 
 setupMobileNav();

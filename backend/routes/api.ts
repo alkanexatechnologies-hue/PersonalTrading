@@ -1,7 +1,7 @@
-import { Router, Request, Response } from "express";
+import { Router, Request, Response, NextFunction } from "express";
 import rateLimit from "express-rate-limit";
 import { getProvider, setActiveProvider } from "../data";
-import { syncSessionProvider, rememberGrowwToken, forgetGrowwToken, isMarketOpenIST, setFeedFlags, getFeedFlags, hasGrowwToken, growwProviderForOi, getGrowwTokenMasked } from "../data/sessionFeed";
+import { syncSessionProvider, rememberGrowwToken, forgetGrowwToken, isMarketOpenIST, setFeedFlags, getFeedFlags, hasGrowwToken, growwProviderForOi, getGrowwTokenMasked, persistGrowwToken, getGrowwToken, deletePersistedGrowwToken } from "../data/sessionFeed";
 
 // ---- Groww data-health tracker (single source, so we can surface connection
 // health + block live signals when Groww is unhealthy). Updated on each live
@@ -54,7 +54,7 @@ import { suggestOptionTrade } from "../options/suggest";
 import { computeRiskRadar } from "../options/riskRadar";
 import { analyzeVolume } from "../volume/analyze";
 import { getOiAnalysis } from "../oi/oi";
-import { growwOiAnalysis, GrowwProvider, growwHasOptions, growwZeroHero, growwRateLimitStats } from "../data/growwProvider";
+import { growwOiAnalysis, GrowwProvider, growwHasOptions, growwZeroHero, growwRateLimitStats, runAsBackgroundGroww } from "../data/growwProvider";
 import { buildNextDayPick } from "../nextday/outlook";
 import { computeMomentumBurst } from "../scalp/momentum";
 import { computeEarlyMove } from "../movement/earlyMove";
@@ -81,12 +81,29 @@ import { recordOiBaseline, computeOiChange, oiBaselineStrike } from "../oi/oiCha
 import { recommendOiTrades, correlateOiModels, buildOiWalls, buildOiLesson } from "../oi/oiTrade";
 import { buildMoveBulletin } from "../oi/bulletin";
 import { tickPaperWhatsApp, sendWhatsappTest, whatsappStatus, saveWhatsappConfig } from "../alerts/paperPing";
+import { loadDhanConfig, saveDhanConfig, dhanConfigured, testDhanConnection, disconnectDhan } from "../data/dhanConfig";
+import { disconnectWhatsapp } from "../alerts/whatsapp";
+import { recordConnectionTest, recordConnectionSuccess, getConnectionStatus } from "../data/connectionStatusTracker";
+import { lookupDhanSecurity } from "../data/dhanInstruments";
+import { fetchDhanCandles, DhanBacktestInterval } from "../data/dhanHistorical";
+import { BacktestMode, DEFAULT_BACKTEST_MODE, FullMasterUnavailableError } from "../backtest/backtestMode";
+import { recordLiveSnapshot } from "../data/liveSnapshotRecorder";
+import { validateDay } from "../data/dataQualityValidator";
+import { MODEL_TRAINING_ENABLED } from "../ml/aiConfig";
+import { historicalOptionChainProvider } from "../backtest/historicalOptionChainProvider";
+import { buildMarketSnapshots } from "../backtest/dhanSnapshotBuilder";
+import { runMasterSelectorBacktest } from "../backtest/masterSelectorBacktest";
 import { evaluateBuyAlgo, buyContextFromCandles } from "../options/highProbAlgo";
 import { logOiSignal, evaluateOiSignals, reviewOiSignals } from "../oi/oiCommandLog";
 import { auditSignal } from "../compliance/signalAudit";
 import { complianceMeta } from "../compliance/disclosures";
-import { login as doLogin, logout as doLogout, sessionInfo, validate as validateSession } from "../auth/session";
-import { getNotifyEmail, setNotifyEmail, rotateCredentials, maybeRotateForNewDay } from "../auth/credentials";
+import { login as doLogin, logout as doLogout, sessionInfo, validate as validateSession, getSession, revokeUserSessions } from "../auth/session";
+import {
+  listUsers, createUser, editUser, setUserStatus, resetPassword, findById, effectiveStatus, userStats,
+  ALL_PERMISSIONS, Permission, deleteUser,
+} from "../auth/userStore";
+import { readAuditLog, logAuditEvent } from "../auth/loginAudit";
+import { getNotifyEmail, setNotifyEmail, rotateCredentials, maybeRotateForNewDay, getCredentials } from "../auth/credentials";
 import { emailConfigured } from "../auth/mailer";
 import { computeOiVolume } from "../oi/oiVolume";
 import { growwChainForExpiry } from "../data/growwProvider";
@@ -94,7 +111,11 @@ import { reviewOptionTrade } from "../backtest/optionReview";
 import { optionExpiries, optionStrikes, hasOptionData, findOption } from "../data/growwInstruments";
 import { growwOptionCandles } from "../data/growwProvider";
 import { directionNoMomentum, levelContext, srRoomOk, capTargetAndStop } from "../paper/entryRules";
-import { ExtInputs, scoreExtension, buildRiskComment, logDecision, getDecisionLog, reconcileOiState, clearDecisionLog, computeTradeScore, arbitrate, ArbiterCandidate, checkArbiterWatchdog } from "../paper/ext";
+import {
+  computeNiftyMacroSetup, classifyGlobalMarketBias, fetchGlobalMarketReads,
+  pctChangeSinceOpen, computeBasketPct, rankSectors, NIFTY_IT_MAJORS, NIFTY_SECTOR_PROXIES,
+} from "../paper/ext/macroSetup";
+import { ExtInputs, scoreExtension, buildRiskComment, logDecision, getDecisionLog, reconcileOiState, clearDecisionLog, computeTradeScore, arbitrate, ArbiterCandidate, checkArbiterWatchdog, computeMarketRegime, MarketRegime } from "../paper/ext";
 import * as centralLog from "../log/centralLog";
 import { runRetentionSweep } from "../log/retentionSweep";
 import { initNarrationAgent } from "../agent/narrationAgent";
@@ -107,13 +128,14 @@ import { computeMoveTiming } from "../backtest/moveTiming";
 import { backtestHourly } from "../backtest/hourlyBacktest";
 import { computeDaySr } from "../backtest/daySr";
 import { computeDirection4L } from "../signals/direction4L";
+import { emaConfluenceDirection } from "../signals/emaConfluence";
 import { backtestDirection4L } from "../backtest/direction4LBacktest";
 import { simulateOiOptionTrade, backtestOiCommandLog } from "../backtest/oiCommand";
 import { buildIndexOutlook, buildDayOpportunity } from "../predict/dayOutlook";
 import { HourlyPick } from "../types";
 import { appendHourlyPicks, readHourlyPicks, writeResolvedPicks, picksFilePath, masterFilePath, istDateStr, istSlot } from "../hourly/store";
 import { getFundamentals } from "../fundamentals/fundamentals";
-import { mintGrowwToken } from "../data/growwAuth";
+import { validateGrowwToken, classifyGrowwError } from "../data/growwAuth";
 import { getMarketNews } from "../news/news";
 import fs from "fs";
 import path from "path";
@@ -153,6 +175,35 @@ router.use((req: Request, res: Response, next) => {
   if (validateSession(bearerToken(req))) return next();
   res.status(401).json({ error: "Unauthorized. Please log in." });
 });
+
+// ---- Admin/permission gates (backend enforcement — never trust the frontend
+// to hide a button and call that "authorization"). requireAdmin rejects
+// anyone whose session role isn't "admin" with a real 403, even if they type
+// an /api/admin/* URL directly. requirePermission(x) lets admin through
+// unconditionally (implicit full access) and checks a user's stored
+// permissions[] otherwise. ----
+export function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  const sess = getSession(bearerToken(req));
+  if (!sess || sess.role !== "admin") {
+    logAuditEvent({
+      type: "ADMIN_ACCESS_DENIED", userId: sess?.userId ?? null, username: sess?.username ?? null,
+      mode: sess?.role ?? null, detail: `denied ${req.method} ${req.path}`, result: "failure",
+    });
+    return res.status(403).json({ error: "ADMIN_ACCESS_REQUIRED" });
+  }
+  next();
+}
+export function requirePermission(perm: Permission) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const sess = getSession(bearerToken(req));
+    if (!sess) return res.status(401).json({ error: "Unauthorized. Please log in." });
+    if (sess.role === "admin") return next();
+    if (!sess.permissions.includes(perm)) {
+      return res.status(403).json({ error: `Access denied — this feature requires the "${perm}" permission. Contact your administrator.` });
+    }
+    next();
+  };
+}
 
 // ---- Short-TTL in-memory cache to speed up (and de-duplicate) repeated scans ----
 // The day-outlook and hourly scans hit overlapping symbols and run back-to-back;
@@ -195,6 +246,15 @@ async function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>): Prom
   })();
   _inflight.set(key, p);
   return p as Promise<T>;
+}
+// Phase 3.3 (stale-data parity with the OI path): age since `key` was last
+// FETCHED LIVE and succeeded — _cache's timestamp only advances on a successful
+// fn() call (see `cached` above), so during a provider outage being served from
+// _lastGood this keeps growing, unlike a candle's own bar timestamp which only
+// reflects normal bar-close lag. null when nothing has ever been fetched for `key`.
+function cacheAgeMs(key: string): number | null {
+  const hit = _cache.get(key);
+  return hit ? Date.now() - hit.ts : null;
 }
 // Relative volume "right now": average of the last 3 bars vs the average bar over
 // the window. >1 = above-normal participation (move has conviction), <1 = quiet
@@ -409,22 +469,20 @@ router.get("/data-status", async (_req: Request, res: Response) => {
   } catch {
     /* ignore */
   }
-  // Market regime from NIFTY 15m ADX (range-bound vs trending).
+  // Market regime: the ONE MarketRegimeEngine (fractal + ATR, Phase 1.1) — was
+  // previously an independent NIFTY-only ADX calculation here. `state` is
+  // translated to this panel's pre-existing vocabulary (Trending / Range-bound /
+  // Weak trend) so the dashboard copy is unchanged, but the underlying VALUE is
+  // now the exact same read the paper engine's entry/exit gates use for NIFTY —
+  // this panel can no longer show "fine to trade" while the engine sees Compressed.
   let regime: any = null;
+  let canonicalRegime: MarketRegime | null = null;
   try {
-    const candles = await getCandlesCached("^NSEI", "15m");
-    if (candles && candles.length >= 40) {
-      const a = adx(candles, 14);
-      const adxV = last(a.adx);
-      const pdi = last(a.plusDI);
-      const mdi = last(a.minusDI);
-      if (adxV != null) {
-        regime = {
-          state: adxV >= 25 ? "Trending" : adxV < 18 ? "Range-bound" : "Weak trend",
-          dir: (pdi ?? 0) > (mdi ?? 0) ? "up" : (mdi ?? 0) > (pdi ?? 0) ? "down" : "flat",
-          adx: Math.round(adxV),
-        };
-      }
+    const rg = await getMarketRegimeForSymbol("^NSEI");
+    if (rg) {
+      canonicalRegime = rg.regime;
+      const state = rg.regime === "Trending" ? "Trending" : rg.regime === "Compressed" ? "Range-bound" : "Weak trend";
+      regime = { state, dir: rg.dir > 0 ? "up" : rg.dir < 0 ? "down" : "flat", adx: rg.adx };
     }
   } catch {
     /* ignore */
@@ -447,8 +505,8 @@ router.get("/data-status", async (_req: Request, res: Response) => {
       const bScore = bSig?.score ?? 0;
       const conviction = Math.round((Math.abs(nScore) + Math.abs(bScore)) / 2);
       const adxV = regime?.adx ?? 0;
-      const rangeBound = regime?.state === "Range-bound";
-      const weak = regime?.state === "Weak trend";
+      const rangeBound = canonicalRegime === "Compressed";
+      const weak = canonicalRegime === "Transitioning";
       // Aligned = both indices lean the same way (both >0 or both <0) with force.
       const aligned = Math.sign(nScore) === Math.sign(bScore) && Math.sign(nScore) !== 0;
       let zone: string;
@@ -456,9 +514,9 @@ router.get("/data-status", async (_req: Request, res: Response) => {
       if (rangeBound || conviction < 15) {
         zone = "NO-TRADE";
         reason = rangeBound
-          ? `Range-bound (NIFTY ADX ${adxV}<18) with weak index conviction (${conviction}/100). Bought options bleed theta - stay out; wait for a breakout.`
+          ? `Range-bound/Compressed (NIFTY ADX ${adxV}) with weak index conviction (${conviction}/100). Bought options bleed theta - stay out; wait for a breakout.`
           : `Index conviction is weak (${conviction}/100, NIFTY ${nScore>0?"+":""}${nScore} / BANKNIFTY ${bScore>0?"+":""}${bScore}). No clear edge - mostly a no-trade zone.`;
-      } else if (regime?.state === "Trending" && aligned && conviction >= 30) {
+      } else if (canonicalRegime === "Trending" && aligned && conviction >= 30) {
         zone = "TRADE-ON";
         reason = `Trending (ADX ${adxV}) and both indices aligned ${nScore>0?"bullish":"bearish"} (conviction ${conviction}/100). Directional option buys favoured.`;
       } else {
@@ -522,7 +580,7 @@ router.get("/data-status", async (_req: Request, res: Response) => {
 });
 
 // Current data-source connection status.
-router.get("/connection", (_req: Request, res: Response) => {
+router.get("/connection", requireAdmin, (_req: Request, res: Response) => {
   const feed = syncSessionProvider();
   res.json({
     provider: getProvider().name, // always "groww"
@@ -539,9 +597,10 @@ router.get("/connection", (_req: Request, res: Response) => {
 // Groww connection config for the settings screen (desktop + mobile). Returns
 // NON-SECRET status only: a masked token (never the full token), the connection
 // state, and live data-health telemetry. Safe to poll.
-router.get("/groww/config", (_req: Request, res: Response) => {
+router.get("/groww/config", requireAdmin, (_req: Request, res: Response) => {
   const g = computeGrowwStatus();
   const health = getGrowwHealth();
+  const tracked = getConnectionStatus("groww");
   res.json({
     dataSource: "GROWW",
     configured: hasGrowwToken(),
@@ -551,6 +610,13 @@ router.get("/groww/config", (_req: Request, res: Response) => {
     marketOpen: g.marketOpen,
     reason: g.reason,
     signalsBlocked: g.signalsBlocked,
+    // Headline fields for the shared connection-status component. Derived from
+    // the last real probe - never from "a token string exists".
+    connection: g.status === "GREEN" || g.status === "YELLOW" || g.status === "CLOSED" ? "CONNECTED"
+      : g.status === "GREY" ? "DISCONNECTED" : "ERROR",
+    authentication: !hasGrowwToken() ? "NONE" : tracked.lastTestOk === false ? "INVALID" : tracked.lastTestOk ? "VALID" : "UNKNOWN",
+    dataStatus: g.status === "GREEN" ? "RECEIVING" : g.status === "YELLOW" ? "DELAYED" : g.status === "CLOSED" ? "MARKET CLOSED" : "NOT RECEIVING",
+    lastSuccessfulCheck: tracked.lastConnectedAt || null,
     health: {
       lastUpdate: health.lastDataTs ? new Date(health.lastDataTs + 19800000).toISOString().slice(11, 19) : null,
       lastDataTs: health.lastDataTs || null,
@@ -563,47 +629,75 @@ router.get("/groww/config", (_req: Request, res: Response) => {
   });
 });
 
-// TEST CONNECTION — actively probes Groww and returns per-check results. Only
-// reports healthy when REAL market data is received (not merely auth success).
-router.get("/groww/test", async (_req: Request, res: Response) => {
+// TEST GROWW CONNECTION — makes a real authenticated Groww request and only
+// reports connected when actual market data comes back. A non-empty token field
+// is never sufficient. Returns a credential-free summary the UI renders
+// directly: Connection / Authentication / Data Status / Last Successful Check.
+router.get("/groww/test", requireAdmin, async (req: Request, res: Response) => {
   const checks = { auth: false, api: false, data: false, freshness: false };
   const messages: Record<string, string> = {};
-  // 1) Auth / token present.
+  const admin = getSession(bearerToken(req));
+
+  // No token at all — nothing to authenticate with.
   if (!hasGrowwToken()) {
-    messages.auth = "No Groww token configured — enter API key/secret or a token.";
-    return res.json({ ok: false, checks, messages, dataSource: "GROWW" });
+    messages.auth = "No access token saved. Paste a Groww access token and save it.";
+    recordConnectionTest("groww", false);
+    logAuditEvent({ type: "GROWW_CONNECTION_TEST", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "groww", result: "failure", detail: "no token configured" });
+    return res.json({
+      ok: false, dataSource: "GROWW", code: "NO_TOKEN", checks, messages,
+      connection: "DISCONNECTED", authentication: "NONE", dataStatus: "NOT RECEIVING",
+      tokenMasked: "", lastSuccessfulCheck: getConnectionStatus("groww").lastConnectedAt || null,
+      error: messages.auth,
+    });
   }
-  checks.auth = true; messages.auth = "Token present.";
-  // 2 + 3) API reachable + real market data received (live quote).
-  const t0 = Date.now();
-  try {
-    const q = await withTimeout(getProvider().getQuote("RELIANCE.NS"), 12_000, "groww test");
-    const latency = Date.now() - t0;
-    checks.api = true; messages.api = `Groww API reachable (${latency} ms).`;
-    if (q && q.price > 0) {
-      checks.data = true; messages.data = `Market data received — Reliance ₹${q.price}.`;
-      recordGrowwOk(latency);
-    } else {
-      messages.data = "Groww reachable but returned no valid price.";
-      recordGrowwFail();
-    }
-  } catch (e: any) {
-    messages.api = "Groww API not reachable: " + (e?.message || "request failed");
-    recordGrowwFail();
-  }
-  // 4) Freshness / market state.
+
+  // Real authenticated request against Groww.
+  const v = await validateGrowwToken();
+  checks.auth = v.ok || (v.code !== "INVALID_TOKEN" && v.code !== "AUTH_FAILED");
+  checks.api = v.ok || v.code === "UNEXPECTED_RESPONSE" || v.code === "INVALID_TOKEN" || v.code === "AUTH_FAILED";
+  checks.data = v.ok;
+  messages.auth = checks.auth ? "Token accepted by Groww." : v.message;
+  messages.api = checks.api ? `Groww API reachable (${v.latencyMs} ms).` : v.message;
+  messages.data = v.ok ? v.message : v.message;
+
+  if (v.ok) { recordGrowwOk(v.latencyMs); recordConnectionSuccess("groww"); }
+  else recordGrowwFail();
+
   const g = computeGrowwStatus();
   checks.freshness = g.status === "GREEN";
   messages.freshness = g.status === "GREEN" ? "Data freshness healthy (live)."
     : g.status === "CLOSED" ? "Market closed — historical only, no live signals."
     : g.status === "YELLOW" ? "Connected but data delayed/stale."
     : g.reason;
-  const ok = checks.auth && checks.api && checks.data;
-  res.json({ ok, checks, messages, dataSource: "GROWW", status: g.status, signalsBlocked: g.signalsBlocked });
+
+  recordConnectionTest("groww", v.ok);
+  logAuditEvent({
+    type: "GROWW_CONNECTION_TEST", userId: admin?.userId ?? null, username: admin?.username ?? null,
+    mode: "admin", provider: "groww", result: v.ok ? "success" : "failure",
+    detail: v.ok ? "authenticated, data received" : `failed (${v.code})`,
+  });
+
+  res.json({
+    ok: v.ok,
+    dataSource: "GROWW",
+    code: v.ok ? undefined : v.code,
+    checks,
+    messages,
+    // Headline fields for the connection-status component.
+    connection: v.ok ? "CONNECTED" : "DISCONNECTED",
+    authentication: v.ok ? "VALID" : (v.code === "INVALID_TOKEN" || v.code === "AUTH_FAILED" ? "INVALID" : "UNKNOWN"),
+    dataStatus: v.ok ? "RECEIVING" : "NOT RECEIVING",
+    lastSuccessfulCheck: getConnectionStatus("groww").lastConnectedAt || null,
+    latencyMs: v.latencyMs,
+    tokenMasked: getGrowwTokenMasked(),
+    status: g.status,
+    signalsBlocked: g.signalsBlocked,
+    error: v.ok ? undefined : v.message,
+  });
 });
 
 // Toggle the single Groww market-data feed on/off (Groww is the only source).
-router.post("/feed", (req: Request, res: Response) => {
+router.post("/feed", requireAdmin, (req: Request, res: Response) => {
   const b = req.body || {};
   const next: { groww?: boolean } = {};
   if (b.groww != null) next.groww = b.groww === true || b.groww === "true" || b.groww === 1;
@@ -629,129 +723,86 @@ router.post("/feed", (req: Request, res: Response) => {
   });
 });
 
-// Connect Groww using API key + secret (server mints the token via the SDK).
-// Body: { apiKey, secret }
-router.post("/connect-groww", async (req: Request, res: Response) => {
-  const apiKey = (req.body?.apiKey || "").trim();
-  const secret = (req.body?.secret || "").trim();
-  if (!apiKey || !secret) {
-    return res.status(400).json({ ok: false, error: "API key and secret are required." });
-  }
-  const tokenFile = path.join(process.cwd(), ".groww_token");
-  const force = req.body?.force === true;
+// Remove the saved Groww token (clears .groww_token + in-memory) and turn the
+// feed off. After this the admin must paste a fresh access token.
+router.post("/groww/forget-token", requireAdmin, (req: Request, res: Response) => {
+  forgetGrowwToken();
+  deletePersistedGrowwToken();
+  setFeedFlags({ groww: false });
+  const admin = getSession(bearerToken(req));
+  logAuditEvent({ type: "GROWW_DISCONNECTED", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "groww", result: "success" });
+  return res.json({ ok: true, tokenMasked: getGrowwTokenMasked(), configured: hasGrowwToken(), message: "Saved token removed. Paste a fresh Groww access token to reconnect." });
+});
 
-  // Try connecting with an already-saved token that still works. Groww limits how
-  // often a token can be MINTED (the "Rate limit breached" error), so if today's
-  // saved token is still valid we reuse it instead of minting a new one.
-  const tryReuse = async (why: string): Promise<any | null> => {
-    let saved = "";
-    try { saved = fs.readFileSync(tokenFile, "utf-8").trim(); } catch { /* none */ }
-    if (!saved) return null;
-    try {
-      setActiveProvider("groww", saved);
-      rememberGrowwToken(saved);
-      setFeedFlags({ groww: true });
-      const q = await getProvider().getQuote("RELIANCE.NS");
-      if (q && q.price > 0) {
-        recordGrowwOk(0);
-        return {
-          ok: true, provider: "groww", dataSource: "GROWW", tokenSaved: true, reused: true,
-          tokenMasked: getGrowwTokenMasked(), dataReceived: true, message: `${why} — Reliance ₹${q.price}.`,
-        };
-      }
-    } catch { /* saved token dead → mint below */ }
-    return null;
+// Connect Groww with an ACCESS TOKEN — the only Groww credential this app takes.
+// The token is accepted only after a real authenticated Groww request succeeds
+// and returns usable data; a non-empty field is never treated as "connected".
+// Body: { token }
+router.post("/connect", requireAdmin, async (req: Request, res: Response) => {
+  const token = String(req.body?.token || "").trim();
+  if (!token) {
+    return res.status(400).json({ ok: false, code: "NO_TOKEN", error: "A Groww access token is required." });
+  }
+
+  // Keep the currently-working token so a bad paste doesn't kill a live feed.
+  // With no previous token, a rejected one must be cleared rather than left in
+  // the slot - otherwise hasGrowwToken() would report "configured" off a
+  // credential Groww just refused.
+  const previous = getGrowwToken();
+  const restorePrevious = () => {
+    if (!previous) {
+      forgetGrowwToken();
+      setFeedFlags({ groww: false });
+      return;
+    }
+    try { setActiveProvider("groww", previous); rememberGrowwToken(previous); } catch { /* best-effort */ }
   };
 
-  // Default flow: reuse a valid saved token (no mint needed). Pass force:true to re-mint.
-  if (!force) {
-    const reused = await tryReuse("Already connected with today's saved token, no new mint needed");
-    if (reused) return res.json(reused);
-  }
-
   try {
-    const token = await mintGrowwToken(apiKey, secret);
     setActiveProvider("groww", token);
     rememberGrowwToken(token);
-    setFeedFlags({ groww: true });
-    recordGrowwReconnect();
-    const q = await getProvider().getQuote("RELIANCE.NS"); // verify it works
-    // Persist the token locally so it's reused across every session (gitignored).
-    // Restricted to owner-only read/write - this is a live broker credential
-    // sitting in plaintext on disk; mode is enforced with an explicit chmod
-    // since writeFileSync's `mode` option only applies when the file is
-    // newly created, not when it already exists and is being overwritten.
-    try {
-      fs.writeFileSync(tokenFile, token, { encoding: "utf-8", mode: 0o600 });
-      fs.chmodSync(tokenFile, 0o600);
-    } catch {
-      /* ignore */
-    }
-    // SECURITY: never return the full token. Save server-side, report masked only.
-    recordGrowwOk(0);
-    return res.json({
-      ok: true, provider: "groww", dataSource: "GROWW",
-      tokenSaved: true, tokenMasked: getGrowwTokenMasked(),
-      dataReceived: !!(q && q.price > 0),
-      message: `Connected to Groww — Reliance ₹${q.price}. Token stored securely server-side (persists across sessions).`,
-    });
-  } catch (e: any) {
-    recordGrowwFail();
-    const raw = e?.message || "Failed to generate Groww token.";
-    const isRate = /rate.?limit|too many|breached|429/i.test(raw);
-    // If the mint was rate-limited but a saved token still works, connect with that.
-    if (isRate) {
-      const reused = await tryReuse("Token mint is rate-limited right now — reusing today's saved token instead");
-      if (reused) return res.json(reused);
-    }
-    return res.status(isRate ? 429 : 502).json({
-      ok: false, provider: "groww", rateLimited: isRate,
-      error: isRate
-        ? "Groww is rate-limiting token minting. A Groww token can only be minted a few times per day — wait a few minutes and try again. If you already generated a token today it is still saved and reused automatically, so you usually don't need to re-mint. Also approve the API key for today (Groww → Settings → Trading APIs), check the IP whitelist, and confirm the Trading API subscription is active."
-        : raw,
-    });
+  } catch (e) {
+    restorePrevious();
+    const { code, message } = classifyGrowwError(e);
+    return res.status(502).json({ ok: false, provider: "groww", code, error: message });
   }
-});
 
-// Remove the saved Groww token (deletes .groww_token + clears in-memory). After this
-// the next "Generate Token & Save" mints a FRESH token (no reuse). Turns the feed off.
-router.post("/groww/forget-token", (_req: Request, res: Response) => {
-  try { fs.unlinkSync(path.join(process.cwd(), ".groww_token")); } catch { /* already gone */ }
-  forgetGrowwToken();
-  setFeedFlags({ groww: false });
-  return res.json({ ok: true, tokenMasked: getGrowwTokenMasked(), configured: hasGrowwToken(), message: "Saved token removed. Enter API Key + Secret and press Generate to mint a fresh token." });
-});
+  const v = await validateGrowwToken();
+  const admin = getSession(bearerToken(req));
 
-// Connect the Groww market-data source at runtime with an access token (from the
-// in-app Connect panel). Groww is the ONLY market-data source — no other provider
-// is accepted here.
-// Body: { token }
-router.post("/connect", async (req: Request, res: Response) => {
-  const token: string | undefined = req.body?.token;
-  if (!token || !token.trim()) {
-    return res.status(400).json({ ok: false, error: "A Groww access token is required." });
-  }
-  try {
-    setActiveProvider("groww", token.trim());
-    rememberGrowwToken(token.trim());
-    setFeedFlags({ groww: true });
-    recordGrowwReconnect();
-    const q = await getProvider().getQuote("RELIANCE.NS"); // verify real data
-    recordGrowwOk(0);
-    return res.json({
-      ok: true, provider: "groww", dataSource: "GROWW",
-      tokenSaved: true, tokenMasked: getGrowwTokenMasked(),
-      dataReceived: !!(q && q.price > 0),
-      message: `Connected to Groww — Reliance ₹${q.price}. Token stored securely server-side.`,
-    });
-  } catch (e: any) {
+  if (!v.ok) {
+    // Rejected: do NOT persist, and put the previously working token back.
+    restorePrevious();
     recordGrowwFail();
-    return res.status(502).json({
-      ok: false,
-      provider: "groww",
-      error: (e?.message || "Connection failed") + " (check the token is valid and your Trading API subscription is active).",
+    recordConnectionTest("groww", false);
+    logAuditEvent({
+      type: "GROWW_CREDENTIAL_UPDATED", userId: admin?.userId ?? null, username: admin?.username ?? null,
+      mode: "admin", provider: "groww", result: "failure", detail: `token rejected (${v.code})`,
+    });
+    return res.status(v.code === "RATE_LIMIT" ? 429 : 502).json({
+      ok: false, provider: "groww", dataSource: "GROWW",
+      code: v.code, rateLimited: v.code === "RATE_LIMIT", error: v.message,
     });
   }
+
+  // Validated: now it is safe to turn the feed on and persist for restarts.
+  setFeedFlags({ groww: true });
+  persistGrowwToken(token);
+  recordGrowwReconnect();
+  recordGrowwOk(v.latencyMs);
+  recordConnectionSuccess("groww");
+  recordConnectionTest("groww", true);
+  logAuditEvent({
+    type: "GROWW_CREDENTIAL_UPDATED", userId: admin?.userId ?? null, username: admin?.username ?? null,
+    mode: "admin", provider: "groww", result: "success", detail: "access token saved and validated",
+  });
+  // SECURITY: never return the token itself — masked form only.
+  return res.json({
+    ok: true, provider: "groww", dataSource: "GROWW",
+    tokenSaved: true, tokenMasked: getGrowwTokenMasked(),
+    dataReceived: true, latencyMs: v.latencyMs,
+    message: `${v.message} Token stored securely server-side (persists across restarts).`,
+  });
 });
 
 // List available symbols + meta.
@@ -1087,13 +1138,19 @@ function deskTf(sig: any) {
 }
 
 /** Right-rail NIFTY desk: 15m + 1h, immediate & major S/R, CE+PE OI buildup. Cached ~55s. */
-router.get("/index-desk", async (_req: Request, res: Response) => {
+router.get("/index-desk", requirePermission("tradingDashboard"), async (_req: Request, res: Response) => {
   try {
     const data = await cached("index-desk", 55_000, async () => {
       const today = istDateStr();
       const idxs = DEFAULT_SYMBOLS.filter((d) => d.type === "index" && d.fno);
-      const rows: any[] = [];
-      for (const def of idxs) {
+      // Each index is independent (no shared state, no ordering dependency
+      // between iterations) - was a sequential for-loop across 2-3 symbols.
+      // Promise.all preserves idxs' input order in the resolved array
+      // regardless of completion order, so row order in the response is
+      // unchanged; the shared Groww throttle (growwProvider.ts) still paces
+      // the actual outbound calls exactly as before - this only removes the
+      // artificial extra wait of finishing one index before starting the next.
+      const rowsOrNull = await Promise.all(idxs.map(async (def) => {
         try {
           const [c15, c60, daily, oi] = await Promise.all([
             getCandlesCached(def.symbol, "15m"),
@@ -1101,7 +1158,7 @@ router.get("/index-desk", async (_req: Request, res: Response) => {
             getDailyCached(def.symbol, 40).catch(() => []),
             def.fno ? getOiCached(def).catch(() => null) : Promise.resolve(null),
           ]);
-          if (!c15 || c15.length < 20) continue;
+          if (!c15 || c15.length < 20) return null;
           const sig15 = computeSignal(def.symbol, c15);
           const sig1h = c60 && c60.length >= 30 ? computeSignal(def.symbol, c60) : null;
           const sr = computeSrLevels(c15, daily || [], oi as any, today, 10);
@@ -1118,7 +1175,7 @@ router.get("/index-desk", async (_req: Request, res: Response) => {
             else if (peN > ceN * 1.12) { buildHot = "PE"; buildText = `PE writing ↑ at ${peB?.strike} (support) — new put contracts adding faster.`; }
             else { buildHot = "even"; buildText = `Both sides adding — CE ${ceB?.strike || "—"} / PE ${peB?.strike || "—"}.`; }
           }
-          rows.push({
+          return {
             symbol: def.symbol, name: def.name, spot: sr.spot,
             tf15: deskTf(sig15), tf1h: deskTf(sig1h),
             immSupport: sr.support, immResistance: sr.resistance,
@@ -1128,9 +1185,10 @@ router.get("/index-desk", async (_req: Request, res: Response) => {
             peBuild: peB ? { strike: peB.strike, oiChg: peB.oiChg, pct: peB.oiChgPct } : null,
             buildHot, buildText,
             netCe: oc?.netCeChg ?? null, netPe: oc?.netPeChg ?? null,
-          });
-        } catch (e) { console.error(`[api] skipped ${def.symbol}:`, e instanceof Error ? e.message : e); }
-      }
+          };
+        } catch (e) { console.error(`[api] skipped ${def.symbol}:`, e instanceof Error ? e.message : e); return null; }
+      }));
+      const rows = rowsOrNull.filter((r): r is NonNullable<typeof r> => r != null);
       return { rows };
     });
     res.json({
@@ -2925,9 +2983,88 @@ function trackOptDayRange(symbol: string, call: number | null, put: number | nul
   return { callHi: r.callHi, callLo: r.callLo, putHi: r.putHi, putLo: r.putLo };
 }
 
+// ============================ Macro Setup (NIFTY only, display-only) ============================
+// Orchestrates backend/paper/ext/macroSetup.ts's pure functions with data this
+// route already knows how to fetch (getCandlesCached). ADVISORY ONLY: attached
+// to the OI-Command payload for the dashboard to show; never read by
+// oiGridToIdea/recommendOiTrades, so it cannot veto or size any trade — that
+// stays an open decision (hard-gate vs. vote) for you to make later. Cached 3
+// min (global markets + sector rotation don't need per-15s freshness), and
+// every fetch is try/caught so a Yahoo hiccup or a thin quote never breaks the
+// main OI-Command payload.
+const MACRO_SETUP_TTL_MS = 3 * 60_000;
+let _macroSetupCache: { ts: number; v: any } | null = null;
+let _macroSetupRefreshing = false;
+
+async function computeNiftyMacroSetupCompute(): Promise<any> {
+  try {
+    const global = classifyGlobalMarketBias(await fetchGlobalMarketReads());
+
+    const symbols = Array.from(new Set<string>([
+      "^NSEBANK", ...NIFTY_IT_MAJORS, ...Object.values(NIFTY_SECTOR_PROXIES).flat(),
+    ]));
+    const pctBySymbol: Record<string, number | null> = {};
+    await Promise.all(symbols.map(async (sym) => {
+      try {
+        const interval = sym === "^NSEBANK" || NIFTY_IT_MAJORS.includes(sym) ? "5m" : "15m";
+        const candles = await getCandlesCached(sym, interval as any);
+        pctBySymbol[sym] = pctChangeSinceOpen(candles as any);
+      } catch { pctBySymbol[sym] = null; }
+    }));
+
+    const bankNiftyPctSinceOpen = pctBySymbol["^NSEBANK"] ?? null;
+    const itMajorsPctSinceOpen = computeBasketPct(pctBySymbol, NIFTY_IT_MAJORS);
+    const sectorLeaderboard = rankSectors(pctBySymbol, NIFTY_SECTOR_PROXIES);
+
+    return computeNiftyMacroSetup({ global, sectorLeaderboard, bankNiftyPctSinceOpen, itMajorsPctSinceOpen });
+  } catch (e: any) {
+    return { votes: [], agree: 0, against: 0, bias: 0, topSector: null, notes: [`macro setup unavailable: ${e?.message || e}`] };
+  }
+}
+
+// Stale-while-revalidate instead of a blocking cache: a request never waits on
+// this (advisory, display-only) computation once it has served once. A stale
+// hit is returned immediately and a background refresh is kicked off (not
+// awaited) so the NEXT request picks up fresh data - only the very first call
+// after server start has nothing to serve yet and pays the real latency once.
+async function computeNiftyMacroSetupLive(): Promise<any> {
+  const now = Date.now();
+  if (_macroSetupCache) {
+    if (now - _macroSetupCache.ts >= MACRO_SETUP_TTL_MS && !_macroSetupRefreshing) {
+      _macroSetupRefreshing = true;
+      computeNiftyMacroSetupCompute()
+        .then((v) => { _macroSetupCache = { ts: Date.now(), v }; })
+        .catch(() => { /* keep serving the last good value on a failed refresh */ })
+        .finally(() => { _macroSetupRefreshing = false; });
+    }
+    return _macroSetupCache.v;
+  }
+  const v = await computeNiftyMacroSetupCompute();
+  _macroSetupCache = { ts: Date.now(), v };
+  return v;
+}
+
+// Stashes the candles/OI buildOiCommand already fetched onto its returned
+// payload as a NON-enumerable property, so extForOiPayload can reuse them
+// (via assembleExtInputs's `pre` param) instead of re-fetching the same
+// symbol's candles a second time under a different cache key. Non-enumerable
+// means JSON.stringify (res.json) never sends this to the client - it only
+// rides along in-process for the one call site that reads it.
+function withRawExt(payload: any, raw: { c5?: any[]; c15?: any[]; daily?: any[]; oi?: OiAnalysis | null }): any {
+  try { Object.defineProperty(payload, "__rawExt", { value: raw, enumerable: false }); } catch { /* best-effort */ }
+  return payload;
+}
+
 async function buildOiCommand(def: SymbolDef): Promise<any> {
       const feed0 = syncSessionProvider();
-      const oi = (await getOiCached(def)) as OiAnalysis;
+      // OI-chain fetch and candle fetches don't depend on each other, but used
+      // to run one after the other (oi() fully finishing before loadBars() even
+      // started) - kicking both off together lets them share the Groww
+      // throttle's queue concurrently instead of serially, which is most of
+      // where "dashboard feels slow after login" comes from. The per-request
+      // Groww rate-limit pacing (growwProvider.ts) is untouched - this only
+      // removes an unnecessary extra wait that wasn't protecting anything.
+      const oiPromise = getOiCached(def) as Promise<OiAnalysis>;
       const loadBars = async () => {
         const [c15arr, c5arr, c60arr, dailyArr] = await Promise.all([
           getCandlesCached(def.symbol, "15m").catch(() => [] as any[]),
@@ -2937,8 +3074,10 @@ async function buildOiCommand(def: SymbolDef): Promise<any> {
         ]);
         return { c5arr: c5arr as any[], c15arr: c15arr as any[], c60arr: c60arr as any[], dailyArr: dailyArr as any[] };
       };
+      const barsPromise = loadBars();
+      const oi = await oiPromise;
       if (!oi || !oi.available || oi.underlying == null) {
-        const { c5arr, c15arr, c60arr } = await loadBars();
+        const { c5arr, c15arr, c60arr, dailyArr } = await barsPromise;
         const snap = latestSnapshot(def.symbol);
         const lastBar = (c15arr.length ? c15arr : c5arr.length ? c5arr : c60arr).slice(-1)[0];
         const lastBarDate = oiBarIstDate(lastBar);
@@ -2984,7 +3123,7 @@ async function buildOiCommand(def: SymbolDef): Promise<any> {
           hasPremiums: false, hasBaseline: false, stale: true,
           excelRows: moodReview.rows || 0, bars: c15arr.length, lastBarDate,
         });
-        return {
+        return withRawExt({
           available: true,
           oiSource,
           symbol: def.symbol,
@@ -3024,13 +3163,13 @@ async function buildOiCommand(def: SymbolDef): Promise<any> {
             : "No Groww OI this print. 15m/1h mood is from Groww historical bars vs last Excel row." },
           stale: true,
           hasBaseline: false,
-        };
+        }, { c5: c5arr, c15: c15arr, daily: dailyArr, oi: null });
       }
       recordOiBaseline(def.symbol, oi); // ensure a day-baseline exists for %-change
       const oc = computeOiChange(def.symbol, def.name, def.type === "index" ? "index" : "equity", oi);
       if (!oc) return { available: false, message: "OI-change अभी compute नहीं हुआ।" };
       const spot = oi.underlying as number;
-      const { c5arr, c15arr, c60arr, dailyArr } = await loadBars();
+      const { c5arr, c15arr, c60arr, dailyArr } = await barsPromise;
       let atr15 = spot * 0.0015;
       try { const a = last(atr(c15arr as any, 14)); if (a) atr15 = a; } catch { /* fallback */ }
       let last5mDir: 1 | -1 | 0 = 0;
@@ -3395,7 +3534,10 @@ async function buildOiCommand(def: SymbolDef): Promise<any> {
             }
         } catch { /* log is best-effort */ }
       }
-      return payload;
+      if (def.symbol === "^NSEI") {
+        try { payload.macroSetup = await computeNiftyMacroSetupLive(); } catch { /* advisory only, never block the OI-Command payload */ }
+      }
+      return withRawExt(payload, { c5: c5arr, c15: c15arr, daily: dailyArr, oi });
 }
 
 function oiGridToIdea(def: SymbolDef, grid: any, kind: "directional" | "scalp"): OptionIdea | null {
@@ -3442,6 +3584,46 @@ function oiGridToIdea(def: SymbolDef, grid: any, kind: "directional" | "scalp"):
   };
 }
 
+// ============================ MarketRegimeEngine (Phase 1.1) ============================
+// ONE regime classifier for the whole app: the fractal + ATR classifier in
+// paper/ext/marketRegime.ts (Trending / Compressed / Transitioning). This function
+// is the sole I/O wrapper around it — every consumer that needs "what regime is
+// symbol X in right now" (the paper engine's live entry/exit gates, and the
+// /data-status + /paper/gate + /paper/why diagnostics) calls THIS, so they can
+// never disagree. Replaces three independent ADX-only classifiers that used to
+// live at this route file's /data-status handler, its TickDeps.getRegime, and the
+// /paper/gate + /paper/why debug mirrors of that same getRegime.
+//
+// NOT folded in here: classifyRegime() (below) — it classifies per-TIMEFRAME chop/
+// coil/whipsaw across 5m/15m/1h for the option-buyer caution panel, a different
+// question (micro-structure per timeframe) than "what is THE current regime"
+// (one fractal+ATR read off 15m+daily). Collapsing it would redesign a separate
+// display feature the plan does not specify, so it is intentionally left as-is.
+//
+// `adx` in the return value is diagnostic display-only context (several existing
+// panels show an ADX number) — it does NOT drive the regime verdict; marketRegime.ts
+// owns that decision entirely now.
+async function getMarketRegimeForSymbol(symbol: string): Promise<{ regime: MarketRegime; dir: -1 | 0 | 1; adx: number | null } | null> {
+  try {
+    const def = findSymbolDef(symbol);
+    const [c15, daily] = await Promise.all([
+      getCandlesCached(symbol, "15m").catch(() => [] as any[]),
+      getDailyCached(symbol, 60).catch(() => [] as any[]),
+    ]);
+    if (!c15 || c15.length < 30) return null;
+    let oi: OiAnalysis | null = null;
+    if (def?.fno) { try { oi = await getOiCached(def); } catch { oi = null; } }
+    const burst = computeMomentumBurst(symbol, c15);
+    const result = computeMarketRegime(c15 as any, daily as any, oi, burst.state);
+    const dir: -1 | 0 | 1 = result.regimeDir === "up" ? 1 : result.regimeDir === "down" ? -1 : 0;
+    let adxNum: number | null = null;
+    try { const a = adx(c15, 14); const v = last(a.adx); adxNum = v != null ? Math.round(v) : null; } catch { adxNum = null; }
+    return { regime: result.marketRegime, dir, adx: adxNum };
+  } catch {
+    return null;
+  }
+}
+
 // SENTIMENT/LIQUIDITY/RISK EXTENSION — assemble live inputs for ONE directional
 // (non-scalp) option candidate. Shared by the paper engine dep (getExtInputs) and
 // the OI Command cockpit read (buildOiCommand), so both score off identical data.
@@ -3464,6 +3646,12 @@ async function assembleExtInputs(
       ]);
     }
     if (!c15 || c15.length < 30) return null;
+    // Phase 3.3: staleness parity with the OI path (oi/oiTrade.ts's >90s chain
+    // check) — age since candles15m was last actually fetched live, not the last
+    // bar's own timestamp (which lags by design, not by feed failure).
+    const ageMs = cacheAgeMs(`c:${idea.symbol}:15m`);
+    const dataAgeSec = ageMs != null ? Math.round(ageMs / 1000) : null;
+    const dataStale = dataAgeSec != null && dataAgeSec > 90;
     let oi: OiAnalysis | null = pre && pre.oi !== undefined ? pre.oi : null;
     if (pre?.oi === undefined) { try { if (def?.fno) oi = await getOiCached(def); } catch { oi = null; } }
 
@@ -3480,18 +3668,24 @@ async function assembleExtInputs(
     const dayLow = todayBars.length ? Math.min(...todayBars.map((c: any) => c.low)) : null;
 
     // Option-premium series for THIS strike (for premiumSentiment's EMA9 slope).
-    // Groww-only; falls back to [] (module then treats the slope as flat).
+    // Groww-only; falls back to [] (module then treats the slope as flat). This
+    // fetch had zero caching (unlike every other Groww call in this file), so
+    // every /oi-command poll paid for it fresh - cached 45s (comparable to the
+    // intraday candle caches) keyed by symbol+strike+type+expiry.
     let premiumSeries: number[] = [];
     try {
       const gp = growwProviderForOi();
       if (gp && oi?.expiry && def) {
         const underlying = (def.nseSymbol || idea.symbol.replace(/\.NS$/i, "")).toUpperCase();
-        const inst = await findOption(underlying, idea.optionType, idea.strike, oi.expiry);
-        if (inst) {
+        const expiry: string = oi.expiry;
+        const cacheKey = `opt-premium:${underlying}:${idea.strike}:${idea.optionType}:${expiry}`;
+        premiumSeries = await cached(cacheKey, 45_000, async () => {
+          const inst = await findOption(underlying, idea.optionType, idea.strike, expiry);
+          if (!inst) return [] as number[];
           const now = Math.floor(Date.now() / 1000);
-          const oc = await growwOptionCandles(gp, inst.tradingSymbol, now - 2 * 24 * 3600, now, 5);
-          premiumSeries = (oc || []).map((c: any) => Number(c.close)).filter((n: number) => Number.isFinite(n));
-        }
+          const oc = await growwOptionCandles(gp!, inst.tradingSymbol, now - 2 * 24 * 3600, now, 5);
+          return (oc || []).map((c: any) => Number(c.close)).filter((n: number) => Number.isFinite(n));
+        });
       }
     } catch { premiumSeries = []; }
 
@@ -3538,6 +3732,7 @@ async function assembleExtInputs(
 
     return {
       candles5m: (c5 || []) as any, candles15m: c15 as any, daily: (daily || []) as any, oi,
+      dataAgeSec, dataStale,
       burstState: burst.state, squeezeOn: burst.squeezeOn,
       pdh: lv.pdh, pdl: lv.pdl, pdc: lv.pdc, dayOpen: lv.dayOpen, atrDaily,
       dayHigh, dayLow, wallSupport: lv.majorSupport, wallResistance: lv.majorResistance,
@@ -3569,7 +3764,10 @@ async function extForOiPayload(payload: any): Promise<any> {
       lotSize: 0, expectedMovePct: recDir.expectedMovePct ?? 0, confidence: recDir.confidence ?? payload.oiMoveScore ?? 55,
       thetaPctPerDay: 0, dte: null, strikeReason: "OI-DIR",
     };
-    const inp = await assembleExtInputs(idea);
+    // Reuse the candles/OI buildOiCommand already fetched for this same symbol
+    // (stashed non-enumerably on payload by withRawExt) instead of paying for a
+    // second, mismatched-cache-key fetch of the same data.
+    const inp = await assembleExtInputs(idea, payload?.__rawExt);
     if (!inp) return null;
     const baseConfidence = calibratedWinProb({ scalp: false, confidence: idea.confidence, strikeReason: idea.strikeReason });
     const ext = scoreExtension(inp, { direction: idea.direction, optionType: idea.optionType }, baseConfidence);
@@ -3646,7 +3844,7 @@ async function extForOiPayload(payload: any): Promise<any> {
 }
 
 // OI Command route (cached 15s). The same builder feeds the 15-min signal logger.
-router.get("/oi-command", async (req: Request, res: Response) => {
+router.get("/oi-command", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
   const feed = syncSessionProvider();
   const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
   if (!def || !def.fno) return res.status(400).json({ available: false, error: "valid F&O symbol चाहिए" });
@@ -3663,9 +3861,13 @@ router.get("/oi-command", async (req: Request, res: Response) => {
     const data = await cached(`oi-command:${def.symbol}`, 15_000, () => buildOiCommand(def));
     // Surface the sentiment/liquidity/risk extension read for the cockpit, and
     // reconcile the Decision Log (user-facing route only, so background scans /
-    // the paper engine don't spam state-change events).
+    // the paper engine don't spam state-change events). Cached with the same
+    // key scheme + 15s TTL as buildOiCommand's own cache immediately above -
+    // extForOiPayload was being recomputed on every request even when `data`
+    // was itself served from cache (same effective freshness window, no new
+    // calculation, no output change - just skips redundant work).
     let ext: any = null;
-    try { ext = await extForOiPayload(data); } catch { ext = null; }
+    try { ext = await cached(`oi-command-ext:${def.symbol}`, 15_000, () => extForOiPayload(data)); } catch { ext = null; }
     if (ext) {
       const verdict = ext.arbitration ? ext.arbitration.verdict : "WAIT";
       // Data-health = stale ONLY during market hours (after-hours 'stale' is expected).
@@ -3673,6 +3875,28 @@ router.get("/oi-command", async (req: Request, res: Response) => {
       try { reconcileOiState(def.symbol, { go: verdict === "GO", regime: ext.regime, liquidity: ext.liquidityState, sentiment: ext.sentimentState, wall: ext.wallReactionState, arbVerdict: verdict, stale: staleNow }); } catch { /* best-effort */ }
       try { checkArbiterWatchdog({ symbol: def.symbol, verdict, primaryFinalScore: ext.arbitration && ext.arbitration.primary ? ext.arbitration.primary.finalScore : null }); } catch { /* best-effort */ }
     }
+    // Data-collection recorder (AI dataset prep) — PASSIVE OBSERVER, reads only
+    // what buildOiCommand/extForOiPayload already computed above; never calls
+    // arbitrate() itself, never alters `data`/`ext`, never affects the response.
+    // See backend/data/liveSnapshotRecorder.ts's header comment.
+    try {
+      const raw = (data as any).__rawExt;
+      if (raw?.c15?.length) {
+        recordLiveSnapshot({
+          symbol: def.symbol,
+          timestamp: data.asOf ?? Math.floor(Date.now() / 1000),
+          spot: data.spot ?? null,
+          atm: data.spot ? nearestStrike(data.spot, def) : null,
+          expiry: data.expiry ?? null,
+          candles: raw.c15,
+          oi: raw.oi ?? null,
+          oiVerdict: data.oiVerdict ?? null,
+          masterDecision: ext?.arbitration?.verdict ?? null,
+          finalScore: ext?.finalScore ?? null,
+          regime: ext?.regime ?? null,
+        });
+      }
+    } catch (e) { console.error("[liveSnapshotRecorder] failed:", e instanceof Error ? e.message : e); }
     res.json(ext ? { ...data, ext } : data);
   } catch (e: any) {
     res.status(502).json({ error: e?.message || "oi-command failed" });
@@ -3710,7 +3934,7 @@ router.get("/compliance/meta", (_req: Request, res: Response) => {
 
 // Groww rate-limit telemetry: per-endpoint call counts, 429s seen, retries, whether the
 // client-side throttle is kicking in, and per-minute/per-day usage vs caps.
-router.get("/groww/ratelimit-stats", (_req: Request, res: Response) => {
+router.get("/groww/ratelimit-stats", requireAdmin, (_req: Request, res: Response) => {
   res.json(growwRateLimitStats());
 });
 
@@ -3721,20 +3945,30 @@ const bearer = (req: Request): string | null => {
   const h = String(req.headers.authorization || "");
   return h.startsWith("Bearer ") ? h.slice(7) : null;
 };
-// Rate-limit login attempts so the (now no-longer-hardcoded, but still finite)
-// password can't be brute-forced over the network.
+// Rate-limit login attempts so a USER account's password can't be brute-forced
+// over the network. The ADMIN username is exempt (skip) — requested
+// explicitly: the admin account should never get locked out of its own
+// dashboard. Trade-off, stated plainly: this removes brute-force throttling
+// for the single most privileged account. Acceptable today because this is a
+// personal/local single-operator tool (not a public multi-tenant service) and
+// the admin password already rotates daily outside dev/passwordless mode -
+// revisit this exemption before ever exposing this app on the open internet.
 const loginLimiter = rateLimit({
   windowMs: 10 * 60_000,
   limit: 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: { ok: false, error: "Too many login attempts. Try again later." },
+  skip: (req) => {
+    const attempted = String(req.body?.username || "").trim().toLowerCase();
+    return !!attempted && attempted === getCredentials().username.toLowerCase();
+  },
 });
 router.post("/login", loginLimiter, (req: Request, res: Response) => {
-  const { username, password } = req.body || {};
-  const r = doLogin(String(username || ""), String(password || ""));
+  const { username, password, mode } = req.body || {};
+  const r = doLogin(String(username || ""), String(password || ""), mode === "admin" || mode === "user" ? mode : undefined);
   if (!r.ok) return res.status(401).json({ ok: false, error: r.error });
-  res.json({ ok: true, token: r.token, expiresAt: r.expiresAt });
+  res.json({ ok: true, token: r.token, expiresAt: r.expiresAt, role: r.role, username: r.username, permissions: r.permissions });
 });
 router.get("/session", (req: Request, res: Response) => {
   res.json(sessionInfo(bearer(req)));
@@ -3742,6 +3976,188 @@ router.get("/session", (req: Request, res: Response) => {
 router.post("/logout", (req: Request, res: Response) => {
   doLogout(bearer(req));
   res.json({ ok: true });
+});
+
+// ============================ Admin: user management ============================
+// Every route below requires requireAdmin - a real 403 server-side, not a
+// hidden UI button. See requireAdmin's comment above.
+router.get("/admin/stats", requireAdmin, (_req: Request, res: Response) => {
+  res.json(userStats());
+});
+router.get("/admin/users", requireAdmin, (_req: Request, res: Response) => {
+  res.json({ users: listUsers() });
+});
+router.post("/admin/users", requireAdmin, (req: Request, res: Response) => {
+  try {
+    const b = req.body || {};
+    const username = String(b.username || "").trim();
+    const temporaryPassword = String(b.temporaryPassword || "");
+    if (!username || !temporaryPassword) return res.status(400).json({ error: "Username and temporary password are required." });
+    if (temporaryPassword.length < 6) return res.status(400).json({ error: "Temporary password must be at least 6 characters." });
+    const permissions: Permission[] = Array.isArray(b.permissions) ? b.permissions.filter((p: any) => ALL_PERMISSIONS.includes(p)) : [];
+    const user = createUser({
+      username, temporaryPassword,
+      accessStartDate: b.accessStartDate || null,
+      accessExpiryDate: b.accessExpiryDate || null,
+      permissions,
+    });
+    const admin = getSession(bearerToken(req));
+    logAuditEvent({ type: "USER_CREATED", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", detail: `created user ${username}`, result: "success" });
+    res.json({ ok: true, user });
+  } catch (e: any) {
+    res.status(400).json({ error: e?.message || "Could not create user." });
+  }
+});
+router.put("/admin/users/:userId", requireAdmin, (req: Request, res: Response) => {
+  try {
+    const b = req.body || {};
+    const permissions: Permission[] | undefined = Array.isArray(b.permissions) ? b.permissions.filter((p: any) => ALL_PERMISSIONS.includes(p)) : undefined;
+    const user = editUser(req.params.userId, {
+      accessStartDate: b.accessStartDate !== undefined ? b.accessStartDate : undefined,
+      accessExpiryDate: b.accessExpiryDate !== undefined ? b.accessExpiryDate : undefined,
+      permissions,
+    });
+    const admin = getSession(bearerToken(req));
+    logAuditEvent({ type: "admin_action", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", detail: `edited user ${user.username}`, result: "success" });
+    res.json({ ok: true, user });
+  } catch (e: any) {
+    res.status(400).json({ error: e?.message || "Could not edit user." });
+  }
+});
+router.post("/admin/users/:userId/disable", requireAdmin, (req: Request, res: Response) => {
+  try {
+    const user = setUserStatus(req.params.userId, "DISABLED");
+    revokeUserSessions(req.params.userId); // a disabled user's existing session is killed immediately
+    const admin = getSession(bearerToken(req));
+    logAuditEvent({ type: "USER_DISABLED", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", detail: `disabled user ${user.username}`, result: "success" });
+    res.json({ ok: true, user });
+  } catch (e: any) {
+    res.status(400).json({ error: e?.message || "Could not disable user." });
+  }
+});
+router.post("/admin/users/:userId/enable", requireAdmin, (req: Request, res: Response) => {
+  try {
+    const user = setUserStatus(req.params.userId, "ACTIVE");
+    const admin = getSession(bearerToken(req));
+    logAuditEvent({ type: "USER_ENABLED", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", detail: `enabled user ${user.username}`, result: "success" });
+    res.json({ ok: true, user });
+  } catch (e: any) {
+    res.status(400).json({ error: e?.message || "Could not enable user." });
+  }
+});
+router.post("/admin/users/:userId/reset-password", requireAdmin, (req: Request, res: Response) => {
+  try {
+    const newTemporaryPassword = String((req.body || {}).temporaryPassword || "");
+    if (newTemporaryPassword.length < 6) return res.status(400).json({ error: "Temporary password must be at least 6 characters." });
+    const user = resetPassword(req.params.userId, newTemporaryPassword);
+    revokeUserSessions(req.params.userId); // force re-login with the new password
+    const admin = getSession(bearerToken(req));
+    logAuditEvent({ type: "USER_PASSWORD_RESET", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", detail: `reset password for user ${user.username}`, result: "success" });
+    res.json({ ok: true, user });
+  } catch (e: any) {
+    res.status(400).json({ error: e?.message || "Could not reset password." });
+  }
+});
+router.post("/admin/users/:userId/revoke", requireAdmin, (req: Request, res: Response) => {
+  const target = findById(req.params.userId);
+  const count = revokeUserSessions(req.params.userId);
+  const admin = getSession(bearerToken(req));
+  logAuditEvent({ type: "USER_REVOKED", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", detail: `revoked ${count} session(s) for user ${target?.username || req.params.userId}`, result: "success" });
+  res.json({ ok: true, revokedSessions: count });
+});
+// Permanent delete (separate from Disable, which is reversible). Revokes any
+// active session for that user FIRST so a delete can never leave a live
+// session behind, then removes the record entirely.
+router.delete("/admin/users/:userId", requireAdmin, (req: Request, res: Response) => {
+  try {
+    const target = findById(req.params.userId);
+    if (!target) return res.status(404).json({ error: "User not found." });
+    revokeUserSessions(req.params.userId);
+    deleteUser(req.params.userId);
+    const admin = getSession(bearerToken(req));
+    logAuditEvent({ type: "USER_DELETED", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", detail: `deleted user ${target.username}`, result: "success" });
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(400).json({ error: e?.message || "Could not delete user." });
+  }
+});
+// scope=admin (default) shows only entries the admin actually performed -
+// login_success/login_failure/logout from USER accounts and ADMIN_ACCESS_DENIED
+// (a non-admin session trying an admin route) are excluded, since those are
+// activity BY users/attempted-intruders, not BY the admin. Pass scope=all to
+// see the complete, unfiltered trail (nothing is ever deleted from the file
+// itself - security-relevant denied/failed attempts stay on disk either way,
+// just not shown by default).
+router.get("/admin/login-history", requireAdmin, (req: Request, res: Response) => {
+  const limit = req.query.limit ? Number(req.query.limit) : 200;
+  const scope = req.query.scope === "all" ? "all" : "admin";
+  const all = readAuditLog(Number.isFinite(limit) ? limit * 4 : 800); // over-fetch before filtering so `limit` still means "N admin events"
+  const events = scope === "admin" ? all.filter((e) => e.mode === "admin") : all;
+  res.json({ events: events.slice(0, Number.isFinite(limit) ? limit : 200), scope });
+});
+router.get("/admin/permissions", requireAdmin, (_req: Request, res: Response) => {
+  res.json({ permissions: ALL_PERMISSIONS });
+});
+
+// ---- Admin: unified Connections summary (Groww/Dhan/WhatsApp) ----
+// Every value here is either a boolean/status/timestamp or an ALREADY-MASKED
+// string - never a raw token/secret. This route (and every /admin/* route) is
+// requireAdmin-gated; a plain USER account cannot reach this even by typing
+// the URL directly (enforced server-side, not just hidden in the nav).
+// Exported (not just used inline) so it's directly unit-testable without
+// faking Express request/response machinery - see routes/adminConnections.test.ts.
+export function buildConnectionsSummary() {
+  const growwCfgured = hasGrowwToken();
+  const growwSt = getConnectionStatus("groww");
+  const dhanCfg = loadDhanConfig();
+  const dhanSt = getConnectionStatus("dhan");
+  const wa = whatsappStatus();
+  const waSt = getConnectionStatus("whatsapp");
+
+  const maskToken = (t: string) => (t ? "••••••••••••" + t.slice(-4) : null);
+
+  return {
+    groww: {
+      status: growwCfgured ? "CONNECTED" : "DISCONNECTED",
+      tokenMasked: getGrowwTokenMasked() || null,
+      lastConnectedAt: growwSt.lastConnectedAt,
+      lastTestedAt: growwSt.lastTestedAt,
+      lastTestOk: growwSt.lastTestOk,
+    },
+    dhan: {
+      status: dhanConfigured(dhanCfg) ? "CONNECTED" : "DISCONNECTED",
+      clientId: dhanCfg.clientId || null,
+      tokenMasked: maskToken(dhanCfg.accessToken),
+      lastConnectedAt: dhanSt.lastConnectedAt,
+      lastTestedAt: dhanSt.lastTestedAt,
+      lastTestOk: dhanSt.lastTestOk,
+    },
+    whatsapp: {
+      status: wa.ready ? "CONNECTED" : (wa.hasCallmebot || wa.hasGreen || wa.hasMeta ? "ERROR" : "DISCONNECTED"),
+      phoneMasked: wa.phone || null, // whatsappStatus() already masks this
+      lastConnectedAt: waSt.lastConnectedAt,
+      lastTestedAt: waSt.lastTestedAt,
+      lastTestOk: waSt.lastTestOk,
+    },
+  };
+}
+
+router.get("/admin/connections", requireAdmin, (_req: Request, res: Response) => {
+  res.json(buildConnectionsSummary());
+});
+
+// ---- Safe, non-admin system status ----
+// For regular users: high-level operational status ONLY. No provider names
+// beyond what's already shown elsewhere in the app, no client IDs, no tokens,
+// no connection configuration. Any logged-in user (admin or user role) may
+// call this - it exposes nothing an unauthenticated visitor couldn't already
+// infer from the dashboard simply not showing live data.
+router.get("/system-status", (_req: Request, res: Response) => {
+  const feed = syncSessionProvider();
+  res.json({
+    marketData: feed.growwOn && feed.configured ? "AVAILABLE" : "UNAVAILABLE",
+    notifications: whatsappStatus().ready ? "AVAILABLE" : "UNAVAILABLE",
+  });
 });
 
 // Login-credential email notifications. Requires an existing valid session
@@ -3754,11 +4170,11 @@ function maskEmail(email: string): string {
   if (at <= 1) return email;
   return email.slice(0, 1) + "***" + email.slice(at - 1);
 }
-router.get("/auth/email", (_req: Request, res: Response) => {
+router.get("/auth/email", requireAdmin, (_req: Request, res: Response) => {
   const email = getNotifyEmail();
   res.json({ email: email ? maskEmail(email) : null, configured: !!email, smtpConfigured: emailConfigured() });
 });
-router.post("/auth/email", (req: Request, res: Response) => {
+router.post("/auth/email", requireAdmin, (req: Request, res: Response) => {
   const email = String(req.body?.email ?? "").trim();
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ ok: false, error: "That doesn't look like a valid email address." });
@@ -3768,10 +4184,16 @@ router.post("/auth/email", (req: Request, res: Response) => {
 });
 // Manual "rotate now" - mostly useful right after setting a notification email,
 // so you don't have to wait for the next 08:00 IST to see it work.
-router.post("/auth/rotate", async (_req: Request, res: Response) => {
+router.post("/auth/rotate", requireAdmin, async (_req: Request, res: Response) => {
   try {
     const creds = await rotateCredentials();
-    res.json({ ok: true, username: creds.username, emailed: !!creds.notifyEmail, smtpConfigured: emailConfigured() });
+    res.json({
+      ok: true,
+      username: creds.username,
+      emailed: !!creds.notifyEmail && emailConfigured(),
+      whatsapped: whatsappStatus().ready,
+      smtpConfigured: emailConfigured(),
+    });
   } catch (e: any) {
     res.status(500).json({ ok: false, error: e?.message || "Rotation failed." });
   }
@@ -3847,10 +4269,10 @@ router.get("/log/verify", (req: Request, res: Response) => {
   res.json({ ok: true, entry });
 });
 
-router.get("/whatsapp/status", (_req: Request, res: Response) => {
+router.get("/whatsapp/status", requireAdmin, (_req: Request, res: Response) => {
   res.json({ ...whatsappStatus(), marketOpen: isTradingTimeIST(), provider: getProvider().name });
 });
-router.post("/whatsapp/config", (req: Request, res: Response) => {
+router.post("/whatsapp/config", requireAdmin, (req: Request, res: Response) => {
   const b = req.body || {};
   const next = saveWhatsappConfig({
     enabled: b.enabled,
@@ -3860,13 +4282,30 @@ router.post("/whatsapp/config", (req: Request, res: Response) => {
     greenToken: b.greenToken,
     webhookUrl: b.webhookUrl,
   });
+  const admin = getSession(bearerToken(req));
+  logAuditEvent({ type: "WHATSAPP_CREDENTIAL_UPDATED", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "whatsapp", result: "success" });
   res.json({ ok: true, ...whatsappStatus(), savedPhone: !!next.phone });
 });
-router.post("/whatsapp/test", async (_req: Request, res: Response) => {
-  try { res.json(await sendWhatsappTest()); }
-  catch (e: any) { res.status(502).json({ ok: false, error: e?.message || "test failed" }); }
+router.post("/whatsapp/test", requireAdmin, async (req: Request, res: Response) => {
+  const admin = getSession(bearerToken(req));
+  try {
+    const r = await sendWhatsappTest();
+    recordConnectionTest("whatsapp", !!r.ok);
+    logAuditEvent({ type: "WHATSAPP_CONNECTION_TEST", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "whatsapp", result: r.ok ? "success" : "failure" });
+    res.json(r);
+  } catch (e: any) {
+    recordConnectionTest("whatsapp", false);
+    logAuditEvent({ type: "WHATSAPP_CONNECTION_TEST", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "whatsapp", result: "failure" });
+    res.status(502).json({ ok: false, error: e?.message || "test failed" });
+  }
 });
-router.post("/whatsapp/tick", async (_req: Request, res: Response) => {
+router.post("/whatsapp/disconnect", requireAdmin, (req: Request, res: Response) => {
+  disconnectWhatsapp();
+  const admin = getSession(bearerToken(req));
+  logAuditEvent({ type: "WHATSAPP_DISCONNECTED", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "whatsapp", result: "success" });
+  res.json({ ok: true });
+});
+router.post("/whatsapp/tick", requireAdmin, async (_req: Request, res: Response) => {
   try {
     const r = await tickPaperWhatsApp({
       marketOpen: isTradingTimeIST(),
@@ -3876,6 +4315,228 @@ router.post("/whatsapp/tick", async (_req: Request, res: Response) => {
     res.json({ ok: true, ...r, ...whatsappStatus(), marketOpen: isTradingTimeIST() });
   } catch (e: any) {
     res.status(502).json({ ok: false, error: e?.message || "tick failed" });
+  }
+});
+
+// ---- Dhan historical-data connection (BACKTESTING ONLY - see dhanConfig.ts).
+// GROWW remains the only source for OI/live signals/Master Trade Selector;
+// this exists purely to let the user pull historical candles for research. ----
+router.get("/dhan/status", requireAdmin, (_req: Request, res: Response) => {
+  const cfg = loadDhanConfig();
+  res.json({
+    configured: dhanConfigured(cfg),
+    clientId: cfg.clientId || null,
+    hasToken: !!cfg.accessToken,
+  });
+});
+router.post("/dhan/config", requireAdmin, (req: Request, res: Response) => {
+  const b = req.body || {};
+  const next = saveDhanConfig({ accessToken: b.accessToken, clientId: b.clientId });
+  const admin = getSession(bearerToken(req));
+  logAuditEvent({ type: "DHAN_CREDENTIAL_UPDATED", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "dhan", result: "success" });
+  res.json({ ok: true, configured: dhanConfigured(next), clientId: next.clientId || null });
+});
+router.post("/dhan/test", requireAdmin, async (req: Request, res: Response) => {
+  const admin = getSession(bearerToken(req));
+  try {
+    const r = await testDhanConnection();
+    recordConnectionTest("dhan", r.ok);
+    logAuditEvent({ type: "DHAN_CONNECTION_TEST", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "dhan", result: r.ok ? "success" : "failure" });
+    res.json(r);
+  } catch (e: any) {
+    recordConnectionTest("dhan", false);
+    logAuditEvent({ type: "DHAN_CONNECTION_TEST", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "dhan", result: "failure" });
+    res.status(502).json({ ok: false, error: e?.message || "test failed" });
+  }
+});
+router.post("/dhan/disconnect", requireAdmin, (req: Request, res: Response) => {
+  disconnectDhan();
+  const admin = getSession(bearerToken(req));
+  logAuditEvent({ type: "DHAN_DISCONNECTED", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "dhan", result: "success" });
+  res.json({ ok: true });
+});
+
+// ---- AI data-collection status (backend/data/liveSnapshotRecorder.ts) ----
+// Placeholder, clearly-labeled minimum (not derived from any ML requirement -
+// there isn't one to derive from yet): reported as-is so it's easy to change
+// once real training requirements are known.
+const MIN_OBSERVATIONS_FOR_TRAINING = 5000;
+
+function tradingDataDir(date: string): string {
+  return path.join(process.cwd(), "data", "trading_data", date);
+}
+function countLines(filePath: string): number {
+  try {
+    const raw = fs.readFileSync(filePath, "utf8");
+    return raw.split("\n").filter((l) => l.length > 0).length;
+  } catch { return 0; }
+}
+function firstLastTimestamp(filePath: string): { first: number | null; last: number | null } {
+  try {
+    const raw = fs.readFileSync(filePath, "utf8");
+    const lines = raw.split("\n").filter((l) => l.length > 0);
+    if (!lines.length) return { first: null, last: null };
+    const firstTs = JSON.parse(lines[0])?.timestamp ?? null;
+    const lastTs = JSON.parse(lines[lines.length - 1])?.timestamp ?? null;
+    return { first: firstTs, last: lastTs };
+  } catch { return { first: null, last: null }; }
+}
+function hhmmIST(epochSec: number | null): string | null {
+  if (epochSec == null) return null;
+  const d = new Date(epochSec * 1000 + 19_800_000);
+  return d.toISOString().slice(11, 16);
+}
+
+router.get("/ai/data-status", requirePermission("aiSignals"), (_req: Request, res: Response) => {
+  const today = new Date(Date.now() + 19_800_000).toISOString().slice(0, 10);
+  const dir = tradingDataDir(today);
+  const marketFile = path.join(dir, "market_snapshots.jsonl");
+  const chainFile = path.join(dir, "option_chain.jsonl");
+  const todaySnapshots = countLines(marketFile);
+  const optionChainRecords = countLines(chainFile);
+  const { first, last } = firstLastTimestamp(marketFile);
+  const report = todaySnapshots > 0 ? validateDay(today) : null;
+  res.json({
+    status: todaySnapshots > 0 ? "ACTIVE" : "INACTIVE",
+    todaySnapshots,
+    optionChainRecords,
+    firstCollection: hhmmIST(first),
+    lastCollection: hhmmIST(last),
+    dataQualityPercent: report?.qualityScorePercent ?? null,
+    trainingDatasetReady: todaySnapshots >= MIN_OBSERVATIONS_FOR_TRAINING,
+    observations: todaySnapshots,
+    minObservationsRequired: MIN_OBSERVATIONS_FOR_TRAINING,
+  });
+});
+
+router.get("/ai/training-status", requirePermission("aiSignals"), (_req: Request, res: Response) => {
+  const today = new Date(Date.now() + 19_800_000).toISOString().slice(0, 10);
+  const todaySnapshots = countLines(path.join(tradingDataDir(today), "market_snapshots.jsonl"));
+  const minReached = todaySnapshots >= MIN_OBSERVATIONS_FOR_TRAINING;
+  res.json({
+    historicalTechnicalData: "AVAILABLE", // Dhan backtest path (Layer 1) — see backend/backtest/
+    liveOiArchive: todaySnapshots > 0 ? "COLLECTING" : "NOT_STARTED",
+    featurePipeline: "READY", // backend/ml/featureSchema.ts
+    labelPipeline: "READY", // backend/ml/labelBuilder.ts
+    minimumObservations: minReached ? "REACHED" : "NOT_REACHED",
+    observations: todaySnapshots,
+    minObservationsRequired: MIN_OBSERVATIONS_FOR_TRAINING,
+    modelTraining: MODEL_TRAINING_ENABLED ? "ENABLED" : "DISABLED",
+  });
+});
+
+// ---- Backtest (Dhan historical data) - PRICE/TECHNICAL LOGIC ONLY ----
+// Deliberately does NOT include OI walls, PCR, or the Master Trade Selector:
+// Dhan's historical API has no live option-chain snapshot history, so that
+// part of the live strategy cannot be reconstructed here. Reuses the exact
+// same runBacktest() engine (signals/score.ts's EMA/Supertrend/VWAP/MACD/RSI/
+// Bollinger composite) already used by the Groww-backed per-symbol backtest -
+// no new strategy logic, just a different candle source and a longer lookback.
+router.get("/backtest-dhan/symbols", requirePermission("backtesting"), (_req: Request, res: Response) => {
+  const symbols = DEFAULT_SYMBOLS.filter((d) => d.fno).map((d) => ({ symbol: d.symbol, name: d.name, type: d.type }));
+  res.json({ symbols });
+});
+
+// DATA MODE status - shown verbatim on the backtest UI so it's never implied
+// that a historical OI backtest ran when it didn't. historicalFullOptionChain
+// reflects historicalOptionChainProvider's real (currently NOT_AVAILABLE)
+// state, not a hardcoded string, so this stays honest if a provider is ever
+// plugged in later.
+router.get("/backtest-dhan/data-mode", requirePermission("backtesting"), async (_req: Request, res: Response) => {
+  const probe = await historicalOptionChainProvider.getSnapshot(0, "^NSEI", "");
+  const chainAvailable = probe !== "NOT_AVAILABLE";
+  res.json({
+    technicalData: "AVAILABLE",
+    historicalFullOptionChain: chainAvailable ? "AVAILABLE" : "NOT_AVAILABLE",
+    historicalOiBacktest: chainAvailable ? "AVAILABLE" : "BLOCKED",
+    provider: historicalOptionChainProvider.name,
+    defaultMode: DEFAULT_BACKTEST_MODE,
+  });
+});
+
+const DHAN_INTERVAL_TO_APP: Record<DhanBacktestInterval, Interval> = { "1d": "1d", "5": "5m", "15": "15m", "60": "60m" };
+// runBacktest()'s end-of-day square-off assumes multiple bars per calendar
+// day (true for intraday candles). Fed daily bars, EVERY bar is its own "new
+// day" relative to the previous one, so every position opens and immediately
+// closes on the same bar (confirmed live: gross P&L always 0, pure cost
+// drag). Restricting this endpoint to intraday intervals avoids handing back
+// a backtest result that looks real but is a fixed cost-drag artifact.
+const DHAN_BACKTESTABLE_INTERVALS: DhanBacktestInterval[] = ["5", "15", "60"];
+
+router.post("/backtest-dhan/run", requirePermission("backtesting"), async (req: Request, res: Response) => {
+  try {
+    const b = req.body || {};
+    const def = findSymbolDef(String(b.symbol || ""));
+    if (!def) return res.status(400).json({ error: "Unknown symbol." });
+    if (!DHAN_BACKTESTABLE_INTERVALS.includes(String(b.interval) as DhanBacktestInterval)) {
+      return res.status(400).json({ error: "Interval must be 5, 15, or 60 (minutes) — daily bars don't work with this engine's end-of-day square-off logic." });
+    }
+    const dhanInterval = String(b.interval) as DhanBacktestInterval;
+    const fromDate = String(b.fromDate || "");
+    const toDate = String(b.toDate || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate) || !/^\d{4}-\d{2}-\d{2}$/.test(toDate)) {
+      return res.status(400).json({ error: "fromDate/toDate must be yyyy-mm-dd." });
+    }
+    const sec = await lookupDhanSecurity(def.nseSymbol || def.symbol);
+    if (!sec) return res.status(400).json({ error: `No Dhan instrument mapping found for ${def.symbol}.` });
+
+    const cacheKey = `dhan-backtest-candles:${def.symbol}:${dhanInterval}:${fromDate}:${toDate}`;
+    const candles = await cached(cacheKey, 10 * 60_000, () => fetchDhanCandles(sec, dhanInterval, fromDate, toDate));
+    if (!candles || candles.length < 60) {
+      return res.status(404).json({ error: "Not enough Dhan candles in this range to backtest (need 60+)." });
+    }
+
+    // BACKTEST_MODE gate - see backend/backtest/backtestMode.ts. FULL_MASTER
+    // is checked BEFORE any scoring/candidate work: it fails safely (no
+    // fabricated OI, arbitrate() never called) since no historical
+    // full-option-chain provider exists yet.
+    const mode: BacktestMode = b.mode === "FULL_MASTER" ? "FULL_MASTER" : "TECHNICAL_ONLY";
+    if (mode === "FULL_MASTER") {
+      try {
+        const snapshots = buildMarketSnapshots(def.symbol, candles);
+        const masterResult = await runMasterSelectorBacktest(mode, def.symbol, "", snapshots);
+        // Not reachable today (runMasterSelectorBacktest always throws for
+        // FULL_MASTER — see that file) but handled for when a real provider
+        // makes this path live.
+        return res.json(masterResult);
+      } catch (e: any) {
+        if (e instanceof FullMasterUnavailableError) {
+          return res.status(409).json({ mode, blocked: true, error: e.message });
+        }
+        throw e;
+      }
+    }
+
+    const appInterval = DHAN_INTERVAL_TO_APP[dhanInterval];
+    const params = {
+      stopLossPercent: b.sl != null ? Number(b.sl) : undefined,
+      targetPercent: b.target != null ? Number(b.target) : undefined,
+      allowShort: b.short != null ? !!b.short : undefined,
+      entryThreshold: b.threshold != null ? Number(b.threshold) : undefined,
+    };
+    const result = runBacktest(def.symbol, appInterval, candles, params);
+
+    // Informational-only reads (NOT part of the entry/exit decision above) -
+    // the same live functions used elsewhere in the app, evaluated once on the
+    // final bars of this candle series, so the user can see where these three
+    // signals stood at the end of the tested window.
+    let informational: any = {};
+    try {
+      const closes = candles.map((c) => c.close);
+      const lastPrice = closes[closes.length - 1];
+      const emaConfluence = emaConfluenceDirection(lastPrice, closes);
+      const burst = computeMomentumBurst(def.symbol, candles as any);
+      const regime = classifyRegime(candles as any);
+      informational = {
+        emaConfluence,
+        momentumBurst: { state: burst.state, direction: burst.direction, squeezeOn: burst.squeezeOn },
+        marketRegime: regime ? { state: regime.state, label: regime.label } : null,
+      };
+    } catch { informational = {}; }
+
+    res.json({ ...result, mode, dhanInterval, fromDate, toDate, informational });
+  } catch (e: any) {
+    res.status(502).json({ error: e?.message || "Dhan backtest failed" });
   }
 });
 
@@ -5314,18 +5975,13 @@ function paperDeps(force = false): TickDeps {
         };
       } catch { return null; }
     },
+    // Phase 1.1: the ONE MarketRegimeEngine (fractal + ATR). Was previously an
+    // independent ADX-only calculation here — now just calls the same engine the
+    // rest of the app reads, so the live entry/exit gate can never disagree with
+    // what /data-status or /paper/why show for the same symbol.
     getRegime: async (symbol: string) => {
       try {
-        const candles = await getCandlesCached(symbol, "15m");
-        if (!candles || candles.length < 40) return null;
-        const a = adx(candles, 14);
-        const adxV = last(a.adx);
-        const pdi = last(a.plusDI);
-        const mdi = last(a.minusDI);
-        if (adxV == null) return null;
-        const regime = adxV >= 25 ? "Trending" : adxV < 18 ? "Range" : "Weak";
-        const dir = (pdi ?? 0) > (mdi ?? 0) ? 1 : (mdi ?? 0) > (pdi ?? 0) ? -1 : 0;
-        return { regime, dir, adx: Math.round(adxV) };
+        return await getMarketRegimeForSymbol(symbol);
       } catch {
         return null;
       }
@@ -5376,6 +6032,38 @@ function paperDeps(force = false): TickDeps {
     // NOTE: this is the DATA-supply half; the ordered pipeline itself lives in
     // engine.ts (runExtPipeline). Scalp ideas never reach this closure.
     getExtInputs: (idea: OptionIdea) => assembleExtInputs(idea),
+    // Phase 2.2 (RiskEngine): pre-trade Risk Radar, now also read by the entry
+    // gate (previously only attached to already-open positions via withRiskRadar).
+    getRiskRadar: async (symbol: string, premium: number) => {
+      try {
+        const candles = await getCandlesCached(symbol, "15m");
+        if (!candles || candles.length < 15) return null;
+        return computeRiskRadar(candles, { interval: "15m" as Interval, premium });
+      } catch { return null; }
+    },
+    // Master Trade Selector EMA + Momentum-Burst confluence (session decision):
+    // blocks only on an ACTIVE opposing read from either signal; Neutral/flat
+    // never blocks. Applied to every option idea type — see engine.ts's
+    // TickDeps.getConfluenceVeto doc comment for the full design rationale.
+    getConfluenceVeto: async (symbol: string, direction: "Bullish" | "Bearish") => {
+      try {
+        const candles = await getCandlesCached(symbol, "15m");
+        if (!candles || candles.length < 50) return null; // not enough history for EMA21/50 — never block on insufficient data
+        const closes = (candles as any[]).map((c) => c.close);
+        const price = closes[closes.length - 1];
+        const emaDir = emaConfluenceDirection(price, closes);
+        const burst = computeMomentumBurst(symbol, candles as any);
+        const burstDir: "Bullish" | "Bearish" | "Neutral" = burst.direction === "up" ? "Bullish" : burst.direction === "down" ? "Bearish" : "Neutral";
+        const opposite: "Bullish" | "Bearish" = direction === "Bullish" ? "Bearish" : "Bullish";
+        if (emaDir === opposite) {
+          return { blocked: true, reason: `EMA confluence opposes ${direction} (EMA9/21 + EMA21/50 both read ${opposite})` };
+        }
+        if (burstDir === opposite) {
+          return { blocked: true, reason: `Momentum Burst opposes ${direction} (${burst.state}, dir ${burst.direction})` };
+        }
+        return { blocked: false, reason: "" };
+      } catch { return null; }
+    },
   };
 }
 
@@ -5458,7 +6146,7 @@ router.get("/paper/gate", async (_req: Request, res: Response) => {
       let block = "WOULD OPEN ✅";
       if (conf < FLOOR) block = `conf<${FLOOR} (have ${conf})`;
       else if (idea.dte != null && idea.dte <= 1 && conf < 80) block = `near-expiry dte=${idea.dte} needs conf>=80`;
-      else if (rg && rg.regime === "Range") block = "regime=Range";
+      else if (rg && rg.regime === "Compressed") block = "regime=Compressed";
       else if (grossRR < OPT_RR_MIN) block = `grossRR<1.3 (${grossRR})`;
       else if (lots < 1) block = `0 lots (risk ${Math.round(lossPerLot)} > 10% pool)`;
       else if (netReward <= 0 || netRR < OPT_RR_MIN) block = `net-cost RR<1.3 (${netRR}, gross ${grossRR})`;
@@ -5515,7 +6203,7 @@ router.get("/paper/why", async (_req: Request, res: Response) => {
           regime: rg?.regime, adx: rg?.adx,
           premium: o.premium, premiumStop: o.premiumStop, premiumTarget: o.premiumTarget, lot,
           lossPerLot: Math.round(lossPerLot), ceil10pct: pool * 0.10, lots, costPerLot: Math.round(cost),
-          blockedBy: !o.tradeable ? "source:tradeable=false" : !o.highProb ? "source:highProb=false" : (o.confidence ?? 0) < 68 ? "engine:conf<68" : rg?.regime === "Range" ? "engine:regime=Range" : lots < 1 ? "engine:0-lots (risk>10% pool)" : cost > pool ? "engine:cost>cash" : "would-open",
+          blockedBy: !o.tradeable ? "source:tradeable=false" : !o.highProb ? "source:highProb=false" : (o.confidence ?? 0) < 68 ? "engine:conf<68" : rg?.regime === "Compressed" ? "engine:regime=Compressed" : lots < 1 ? "engine:0-lots (risk>10% pool)" : cost > pool ? "engine:cost>cash" : "would-open",
         });
       } catch (e: any) { rows.push({ s: def.symbol, drop: "threw: " + (e?.message || "?") }); }
     }
@@ -5677,11 +6365,13 @@ export function startHourlyScheduler() {
     if (waBusy || getProvider().name !== "groww") return;
     waBusy = true;
     try {
-      const r = await tickPaperWhatsApp({
+      // Background-only WhatsApp ping scan - LOW priority (dev priority
+      // mechanism, growwProvider.ts). Nothing else about this changed.
+      const r = await runAsBackgroundGroww(() => tickPaperWhatsApp({
         marketOpen: isTradingTimeIST(),
         provider: getProvider().name,
         scan: scanOiGridsForPing,
-      });
+      }));
       if (r.sent.length) console.log(`[whatsapp] sent ${r.sent.join(", ")}`);
     } catch { /* ignore */ }
     finally { waBusy = false; }
@@ -5692,7 +6382,10 @@ export function startHourlyScheduler() {
   // OI Change tab is hidden from the UI, but its 3-min background snapshot MUST keep
   // running: it warms the option-chain cache that the Option Top Pick data relies on
   // (best low-decay option + expandable broker chain) and keeps a clean 3-min cadence.
-  setInterval(() => { if (isTradingTimeIST()) refreshOiChangeSnapshot(); }, 3 * 60 * 1000);
+  // Scheduled (background) refresh - LOW priority. The two call sites inside
+  // the /oi-change route handler itself (stale-kickoff, cold-start) are
+  // serving an actual request and are deliberately left at the default HIGH.
+  setInterval(() => { if (isTradingTimeIST()) runAsBackgroundGroww(() => refreshOiChangeSnapshot()); }, 3 * 60 * 1000);
 
   // Daily log retention sweep — archives files >90d (gzip into data/log/archive),
   // deletes archives >1yr ONLY if LOG_ARCHIVE_DELETE=1. Runs once/day after close.
@@ -5705,7 +6398,7 @@ export function startHourlyScheduler() {
       if (mins >= 15 * 60 + 35 && lastSweepDate !== today) { lastSweepDate = today; runRetentionSweep(); }
     } catch { /* ignore */ }
   }, 10 * 60 * 1000);
-  setTimeout(() => { refreshOiChangeSnapshot(); }, 10_000); // seed shortly after startup
+  setTimeout(() => { runAsBackgroundGroww(() => refreshOiChangeSnapshot()); }, 10_000); // seed shortly after startup, LOW priority
 
   // Monday-morning / session warmup: pull index + liquid F&O candles and OI
   // from 09:00 IST so tabs do not all stampede Groww at 09:15 and hang.
@@ -5714,19 +6407,31 @@ export function startHourlyScheduler() {
     if (warmBusy) return;
     warmBusy = true;
     try {
-      const idx = DEFAULT_SYMBOLS.filter((d) => d.type === "index" && d.fno);
-      for (const def of idx) {
-        try { await getCandlesCached(def.symbol, "15m"); } catch { /* skip */ }
-        try { await getCandlesCached(def.symbol, "5m"); } catch { /* skip */ }
-        try { await getOiCached(def); } catch { /* skip */ }
-      }
-      const seen = new Set<string>();
-      let n = 0;
-      for (const def of DEFAULT_SYMBOLS) {
-        if (def.type !== "equity" || !def.fno || seen.has(def.symbol) || n >= 6) continue;
-        seen.add(def.symbol); n++;
-        try { await getCandlesCached(def.symbol, "15m"); } catch { /* skip */ }
-      }
+      // Background-only pre-warm - marked LOW priority (dev priority mechanism,
+      // growwProvider.ts) so it never makes a real user's dashboard request wait
+      // behind it. Nothing else about this function changed.
+      await runAsBackgroundGroww(async () => {
+        // Each symbol's cache is independent (keyed per symbol/interval, no
+        // shared/ordered state) - was sequential across symbols AND across each
+        // symbol's own 3 calls. This is background-only (no HTTP response to
+        // order), and the shared Groww throttle (growwProvider.ts) still caps
+        // real outbound concurrency regardless of how many calls are issued at
+        // once here, so this only removes an artificial extra wait, not a limit.
+        const idx = DEFAULT_SYMBOLS.filter((d) => d.type === "index" && d.fno);
+        await Promise.all(idx.map((def) => Promise.all([
+          getCandlesCached(def.symbol, "15m").catch(() => {}),
+          getCandlesCached(def.symbol, "5m").catch(() => {}),
+          getOiCached(def).catch(() => {}),
+        ])));
+        const seen = new Set<string>();
+        const equitySymbols: typeof DEFAULT_SYMBOLS = [];
+        for (const def of DEFAULT_SYMBOLS) {
+          if (def.type !== "equity" || !def.fno || seen.has(def.symbol) || equitySymbols.length >= 6) continue;
+          seen.add(def.symbol);
+          equitySymbols.push(def);
+        }
+        await Promise.all(equitySymbols.map((def) => getCandlesCached(def.symbol, "15m").catch(() => {})));
+      });
     } finally { warmBusy = false; }
   };
   setTimeout(() => { warmCoreFeeds().catch(() => {}); }, 4_000);
@@ -5910,7 +6615,7 @@ const OI_CHANGE_DISCLAIMER =
   "OI change is INTRADAY (vs the day's first captured reading). CE OI rising = call writing (resistance); " +
   "PE OI rising = put writing (support). Read alongside price - OI is one input, not a standalone signal.";
 
-router.get("/oi-change", async (req: Request, res: Response) => {
+router.get("/oi-change", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
   const provider = getProvider();
   if (provider.name !== "groww") return res.json({ marketOpen: isTradingTimeIST(), rows: [], message: "OI change needs the Groww option chain." });
   // Single symbol: compute on-demand (only 1 chain - fast).
@@ -6100,7 +6805,7 @@ router.get("/opportunities", async (req: Request, res: Response) => {
 });
 
 // Backtest.
-router.get("/backtest/:symbol", async (req: Request, res: Response) => {
+router.get("/backtest/:symbol", requirePermission("backtesting"), async (req: Request, res: Response) => {
   try {
     const interval = parseInterval(req.query.interval);
     const candles = await fetchCandles(req.params.symbol, interval);
@@ -6122,7 +6827,7 @@ router.get("/backtest/:symbol", async (req: Request, res: Response) => {
 });
 
 // Compare 5m vs 15m over the SAME recent window and pick the better timeframe.
-router.get("/backtest-compare/:symbol", async (req: Request, res: Response) => {
+router.get("/backtest-compare/:symbol", requirePermission("backtesting"), async (req: Request, res: Response) => {
   try {
     const symbol = req.params.symbol;
     const days = req.query.days ? Number(req.query.days) : 15;

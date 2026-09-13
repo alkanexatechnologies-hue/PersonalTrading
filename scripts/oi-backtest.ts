@@ -105,7 +105,7 @@ async function runLive() {
 
 async function runLog() {
   const token = readToken();
-  if (!token) { console.error("No Groww token. Set GROWW_ACCESS_TOKEN or create .groww_token (./generate-token.ps1)."); process.exit(1); }
+  if (!token) { console.error("No Groww token. Set GROWW_ACCESS_TOKEN or save an access token to .groww_token."); process.exit(1); }
   const provider = new GrowwProvider(token);
   console.log(`\nOI Command Back-test (LOG replay, standalone) · ${symbol} · ${date}`);
   const g = await backtestOiCommandLog(provider, { date, symbol });

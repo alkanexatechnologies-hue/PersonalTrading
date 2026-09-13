@@ -4,67 +4,28 @@
 #      .\start.ps1
 #
 #  What it does:
-#    1) Refreshes the Groww access token (if API key/secret are available),
-#       otherwise uses the existing .groww_token.
+#    1) Loads the saved Groww access token from .groww_token.
 #    2) Sets the environment and starts the server (backend\server.ts).
 #    3) Keeps Windows awake while the app runs.
 #
-#  Provide credentials ANY of these ways (needed only to auto-refresh the
-#  daily token - otherwise it reuses the last .groww_token):
-#    a) Pass them:   .\start.ps1 -ApiKey "xxx" -Secret "yyy"
-#    b) Env vars:    $env:GROWW_API_KEY / $env:GROWW_API_SECRET
-#    c) Local file:  create .groww_creds.ps1 (gitignored) with:
-#                       $env:GROWW_API_KEY="xxx"
-#                       $env:GROWW_API_SECRET="yyy"
-#
-#  Skip the refresh and just reuse the saved token:
-#      .\start.ps1 -SkipTokenRefresh
+#  The ACCESS TOKEN is the only Groww credential. Generate it on
+#  Groww -> Settings -> Trading APIs and save it either by pasting it into
+#  the app's Admin Control Center -> Connections -> Groww -> Manage, or by
+#  writing it to .groww_token (gitignored). Tokens expire daily ~6 AM IST.
 # =====================================================================
 param(
-  [string]$ApiKey,
-  [string]$Secret,
-  [int]$Port = 5173,
-  [switch]$SkipTokenRefresh
+  [int]$Port = 5173
 )
 
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 $tokenFile = "$PSScriptRoot\.groww_token"
 
-# ---- 1) Refresh the Groww token (best-effort) --------------------------------
-if (-not $SkipTokenRefresh) {
-  if ($ApiKey) { $env:GROWW_API_KEY = $ApiKey }
-  if ($Secret) { $env:GROWW_API_SECRET = $Secret }
-  $credsFile = Join-Path $PSScriptRoot ".groww_creds.ps1"
-  if ((-not $env:GROWW_API_KEY -or -not $env:GROWW_API_SECRET) -and (Test-Path $credsFile)) {
-    Write-Host "Loading credentials from .groww_creds.ps1" -ForegroundColor Cyan
-    . $credsFile
-  }
-
-  if ($env:GROWW_API_KEY -and $env:GROWW_API_SECRET) {
-    $py = $null
-    foreach ($c in @("python", "py")) {
-      if (Get-Command $c -ErrorAction SilentlyContinue) { $py = $c; break }
-    }
-    if ($py) {
-      Write-Host "Refreshing Groww token via $py scripts\get_groww_token.py ..." -ForegroundColor Green
-      & $py "scripts\get_groww_token.py"
-      if ($LASTEXITCODE -ne 0) {
-        Write-Host "Token refresh failed (exit $LASTEXITCODE). Trying the existing .groww_token." -ForegroundColor Yellow
-      }
-    } else {
-      Write-Host "Python not found - skipping token refresh, using existing .groww_token." -ForegroundColor Yellow
-    }
-  } else {
-    Write-Host "No API key/secret - skipping refresh, using existing .groww_token." -ForegroundColor Yellow
-    Write-Host "(Set them via -ApiKey/-Secret, env vars, or .groww_creds.ps1 to auto-refresh daily.)" -ForegroundColor DarkGray
-  }
-}
-
 # ---- 2) Load the token -------------------------------------------------------
 if (-not (Test-Path $tokenFile)) {
-  Write-Host "ERROR: .groww_token not found. Generate it once:" -ForegroundColor Red
-  Write-Host '  $env:GROWW_API_KEY="xxx"; $env:GROWW_API_SECRET="yyy"; python scripts\get_groww_token.py' -ForegroundColor Yellow
+  Write-Host "ERROR: .groww_token not found." -ForegroundColor Red
+  Write-Host "  Generate an access token on Groww -> Settings -> Trading APIs, then save it" -ForegroundColor Yellow
+  Write-Host "  via the app (Admin Control Center -> Connections -> Groww) or into .groww_token" -ForegroundColor Yellow
   exit 1
 }
 $token = (Get-Content $tokenFile -Raw).Trim()

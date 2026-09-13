@@ -21,7 +21,7 @@ import fs from "fs";
 import apiRouter, { startHourlyScheduler } from "./routes/api";
 import { CONFIG } from "./config";
 import { getProvider, setActiveProvider } from "./data";
-import { rememberGrowwToken, setFeedFlags } from "./data/sessionFeed";
+import { rememberGrowwToken, setFeedFlags, readPersistedGrowwToken } from "./data/sessionFeed";
 import { getExitCheckHealth } from "./paper/engine";
 
 const app = express();
@@ -69,23 +69,22 @@ process.on("unhandledRejection", (err) => {
   console.error(`[unhandledRejection] (#${unhandledRejectionCount})`, err instanceof Error ? err.message : err);
 });
 
-// Auto-reconnect Groww on boot using the saved token (data/routes/api.ts's
-// /connect + /connect-groww already persist it to .groww_token, but only
-// loaded it into the live session when the user clicked Connect - meaning a
-// simple restart previously dropped the live feed every time even though the
-// token file was sitting right there). Best-effort: a stale/expired token
-// just leaves the feed off, same as before, rather than blocking startup.
+// Auto-reconnect Groww on boot using the saved access token (POST /connect
+// persists it to .groww_token, but only loaded it into the live session when the
+// admin clicked Connect - meaning a simple restart previously dropped the live
+// feed every time even though the token file was sitting right there).
+// Best-effort: a stale/expired token just leaves the feed off rather than
+// blocking startup. The token itself is never logged.
 function autoConnectGroww(): void {
-  const tokenFile = path.join(process.cwd(), ".groww_token");
+  const token = readPersistedGrowwToken();
+  if (!token) return; // no saved token - feed stays off until Connect is used
   try {
-    const token = fs.readFileSync(tokenFile, "utf-8").trim();
-    if (!token) return;
     setActiveProvider("groww", token);
     rememberGrowwToken(token);
     setFeedFlags({ groww: true });
     console.log(`  Groww         : reconnecting with saved token...`);
   } catch {
-    /* no saved token - feed stays off until Connect data is used */
+    /* provider construction failed - feed stays off */
   }
 }
 

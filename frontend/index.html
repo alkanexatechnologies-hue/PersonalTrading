@@ -9,74 +9,110 @@
   </head>
   <body class="oi-focus">
     <!-- ============ Local access gate (paper desk login) ============ -->
-    <div id="login-gate" class="login-gate">
-      <!-- Bull mascot (left) -->
-      <div class="lg-mascot lg-bull-wrap">
-        <svg viewBox="0 0 260 260" class="lg-animal" aria-hidden="true">
-          <defs>
-            <radialGradient id="bullFace" cx="42%" cy="34%" r="72%">
-              <stop offset="0" stop-color="#54d99b"/><stop offset="1" stop-color="#178a5c"/>
-            </radialGradient>
-          </defs>
-          <g fill="#1f9c69">
-            <ellipse cx="70" cy="52" rx="16" ry="42" transform="rotate(-32 70 52)"/>
-            <ellipse cx="190" cy="52" rx="16" ry="42" transform="rotate(32 190 52)"/>
-          </g>
-          <ellipse cx="46" cy="132" rx="20" ry="30" fill="#178a5c"/>
-          <ellipse cx="214" cy="132" rx="20" ry="30" fill="#178a5c"/>
-          <circle cx="130" cy="132" r="82" fill="url(#bullFace)"/>
-          <ellipse cx="130" cy="176" rx="46" ry="34" fill="#3fbf87"/>
-          <circle cx="112" cy="184" r="6" fill="#0d3a28"/>
-          <circle cx="148" cy="184" r="6" fill="#0d3a28"/>
-          <g><circle cx="104" cy="126" r="15" fill="#fff"/><circle cx="107" cy="129" r="7" fill="#0c1a14"/><circle cx="103" cy="124" r="2.4" fill="#fff"/></g>
-          <g><circle cx="156" cy="126" r="15" fill="#fff"/><circle cx="153" cy="129" r="7" fill="#0c1a14"/><circle cx="149" cy="124" r="2.4" fill="#fff"/></g>
-          <polyline points="60,222 100,196 130,214 176,150 208,168" fill="none" stroke="#22e08a" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
-          <polygon points="208,168 190,150 210,146" fill="#22e08a"/>
-        </svg>
-        <span class="lg-mascot-label lg-bull-label">BULL</span>
+    <div id="login-gate" class="login-gate lg-v2">
+      <!-- LEFT: branding -->
+      <div class="lg-left">
+        <div class="lg-logo"><span class="lg-mkt">Market</span><span class="lg-pil">Pil</span></div>
+        <p class="lg-tagline-small">Read the tape. Pilot the move.</p>
+
+        <div class="lg-animals-row">
+          <div class="lg-mascot lg-bull-wrap">
+            <svg viewBox="0 0 260 260" class="lg-animal" aria-hidden="true">
+              <defs>
+                <radialGradient id="bullFace" cx="42%" cy="34%" r="72%">
+                  <stop offset="0" stop-color="#54d99b"/><stop offset="1" stop-color="#178a5c"/>
+                </radialGradient>
+              </defs>
+              <g fill="#1f9c69">
+                <ellipse cx="70" cy="52" rx="16" ry="42" transform="rotate(-32 70 52)"/>
+                <ellipse cx="190" cy="52" rx="16" ry="42" transform="rotate(32 190 52)"/>
+              </g>
+              <ellipse cx="46" cy="132" rx="20" ry="30" fill="#178a5c"/>
+              <ellipse cx="214" cy="132" rx="20" ry="30" fill="#178a5c"/>
+              <circle cx="130" cy="132" r="82" fill="url(#bullFace)"/>
+              <ellipse cx="130" cy="176" rx="46" ry="34" fill="#3fbf87"/>
+              <circle cx="112" cy="184" r="6" fill="#0d3a28"/>
+              <circle cx="148" cy="184" r="6" fill="#0d3a28"/>
+              <circle cx="104" cy="126" r="15" fill="#fff"/>
+              <g class="eye-pupil"><circle cx="107" cy="129" r="7" fill="#0c1a14"/><circle cx="103" cy="124" r="2.4" fill="#fff"/></g>
+              <circle cx="156" cy="126" r="15" fill="#fff"/>
+              <g class="eye-pupil"><circle cx="153" cy="129" r="7" fill="#0c1a14"/><circle cx="149" cy="124" r="2.4" fill="#fff"/></g>
+              <polyline points="60,222 100,196 130,214 176,150 208,168" fill="none" stroke="#22e08a" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+              <polygon points="208,168 190,150 210,146" fill="#22e08a"/>
+            </svg>
+            <span class="lg-mascot-label lg-bull-label">BULL</span>
+            <span class="lg-mascot-sub">OPPORTUNITY</span>
+          </div>
+          <div class="lg-mascot lg-bear-wrap">
+            <svg viewBox="0 0 260 260" class="lg-animal" aria-hidden="true">
+              <defs>
+                <radialGradient id="bearFace" cx="42%" cy="34%" r="72%">
+                  <stop offset="0" stop-color="#e8615b"/><stop offset="1" stop-color="#a5231f"/>
+                </radialGradient>
+              </defs>
+              <circle cx="66" cy="70" r="30" fill="#c23a34"/><circle cx="66" cy="70" r="15" fill="#8f1f1b"/>
+              <circle cx="194" cy="70" r="30" fill="#c23a34"/><circle cx="194" cy="70" r="15" fill="#8f1f1b"/>
+              <circle cx="130" cy="134" r="84" fill="url(#bearFace)"/>
+              <ellipse cx="130" cy="172" rx="44" ry="34" fill="#e07b76"/>
+              <ellipse cx="130" cy="158" rx="15" ry="12" fill="#4a100e"/>
+              <circle cx="102" cy="122" r="13" fill="#fff"/>
+              <g class="eye-pupil"><circle cx="105" cy="125" r="6.5" fill="#160a09"/><circle cx="101" cy="120" r="2.2" fill="#fff"/></g>
+              <circle cx="158" cy="122" r="13" fill="#fff"/>
+              <g class="eye-pupil"><circle cx="155" cy="125" r="6.5" fill="#160a09"/><circle cx="151" cy="120" r="2.2" fill="#fff"/></g>
+              <polyline points="58,150 100,168 130,150 176,210 208,228" fill="none" stroke="#f0524b" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+              <polygon points="208,228 188,224 206,208" fill="#f0524b"/>
+            </svg>
+            <span class="lg-mascot-label lg-bear-label">BEAR</span>
+            <span class="lg-mascot-sub">RISK</span>
+          </div>
+        </div>
+
+        <p class="lg-slogan">SAME DATA. BETTER DECISIONS.</p>
+
+        <div class="lg-features">
+          <div class="lg-feature"><span class="lg-feature-ico">📊</span><b>Live Market Data</b><span>Faster insights</span></div>
+          <div class="lg-feature"><span class="lg-feature-ico">🥧</span><b>OI Analysis</b><span>Deeper context</span></div>
+          <div class="lg-feature"><span class="lg-feature-ico">🤖</span><b>AI Powered</b><span>Smarter signals</span></div>
+          <div class="lg-feature"><span class="lg-feature-ico">🛡️</span><b>Disciplined Trading</b><span>Consistent results</span></div>
+        </div>
+
+        <p class="lg-quote">"Data gives you the edge. Discipline turns it into results."</p>
       </div>
 
-      <!-- Center: logo + form -->
-      <div class="lg-center">
-        <div class="lg-logo"><span class="lg-mkt">Market</span><span class="lg-pil">Pil</span></div>
-        <h1 class="lg-tag">Read the tape.<br/>Pilot the move.</h1>
-        <p class="lg-sub">Bull and bear on one screen — sign in to open your paper desk.</p>
+      <!-- RIGHT: login card -->
+      <div class="lg-right">
         <form class="lg-card" id="login-form" autocomplete="on">
+          <h1 class="lg-welcome">Welcome to <span class="lg-pil">MarketPil</span></h1>
+          <p class="lg-sub">Choose your access mode to continue</p>
+
+          <div class="lg-mode-row">
+            <button type="button" class="lg-mode-card lg-mode-admin selected" id="lg-mode-admin" data-mode="admin">
+              <span class="lg-mode-radio"></span>
+              <span class="lg-mode-ico">⚙️</span>
+              <span class="lg-mode-title">ADMIN MODE</span>
+              <span class="lg-mode-sub">Manage users, access and system settings</span>
+            </button>
+            <button type="button" class="lg-mode-card lg-mode-user" id="lg-mode-user" data-mode="user">
+              <span class="lg-mode-radio"></span>
+              <span class="lg-mode-ico">👤</span>
+              <span class="lg-mode-title">USER MODE</span>
+              <span class="lg-mode-sub">Access trading dashboard and market insights</span>
+            </button>
+          </div>
+
           <label class="lg-label" for="lg-user">USERNAME</label>
-          <input id="lg-user" class="lg-input" type="text" value="Alkasrivastava" autocomplete="username" spellcheck="false" autocapitalize="off" />
+          <input id="lg-user" class="lg-input" type="text" placeholder="Enter your username" value="admin" autocomplete="username" spellcheck="false" autocapitalize="off" />
           <label class="lg-label" for="lg-pass">PASSWORD</label>
           <div class="lg-passwrap">
-            <input id="lg-pass" class="lg-input" type="password" value="Alkasrivastava" autocomplete="current-password" />
+            <input id="lg-pass" class="lg-input" type="password" placeholder="Enter your password" value="" autocomplete="current-password" />
             <button type="button" id="lg-show" class="lg-show">SHOW</button>
           </div>
-          <button type="submit" id="lg-submit" class="lg-enter">Enter desk</button>
+          <button type="submit" id="lg-submit" class="lg-enter">Sign In &rarr;</button>
           <div id="lg-error" class="lg-error"></div>
           <p class="lg-session">Session ends daily at 7:00 AM IST</p>
+          <p class="lg-footer-line">Need access? <span class="wl-sub">Contact your administrator.</span></p>
         </form>
       </div>
-
-      <!-- Bear mascot (right) -->
-      <div class="lg-mascot lg-bear-wrap">
-        <svg viewBox="0 0 260 260" class="lg-animal" aria-hidden="true">
-          <defs>
-            <radialGradient id="bearFace" cx="42%" cy="34%" r="72%">
-              <stop offset="0" stop-color="#e8615b"/><stop offset="1" stop-color="#a5231f"/>
-            </radialGradient>
-          </defs>
-          <circle cx="66" cy="70" r="30" fill="#c23a34"/><circle cx="66" cy="70" r="15" fill="#8f1f1b"/>
-          <circle cx="194" cy="70" r="30" fill="#c23a34"/><circle cx="194" cy="70" r="15" fill="#8f1f1b"/>
-          <circle cx="130" cy="134" r="84" fill="url(#bearFace)"/>
-          <ellipse cx="130" cy="172" rx="44" ry="34" fill="#e07b76"/>
-          <ellipse cx="130" cy="158" rx="15" ry="12" fill="#4a100e"/>
-          <g><circle cx="102" cy="122" r="13" fill="#fff"/><circle cx="105" cy="125" r="6.5" fill="#160a09"/><circle cx="101" cy="120" r="2.2" fill="#fff"/></g>
-          <g><circle cx="158" cy="122" r="13" fill="#fff"/><circle cx="155" cy="125" r="6.5" fill="#160a09"/><circle cx="151" cy="120" r="2.2" fill="#fff"/></g>
-          <polyline points="58,150 100,168 130,150 176,210 208,228" fill="none" stroke="#f0524b" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
-          <polygon points="208,228 188,224 206,208" fill="#f0524b"/>
-        </svg>
-        <span class="lg-mascot-label lg-bear-label">BEAR</span>
-      </div>
-
-      <p class="lg-footer">Paper desk only · local access gate</p>
     </div>
 
     <!-- ============ Desk selector (shown after login) ============ -->
@@ -100,9 +136,182 @@
             <span class="mg-t">Stock Swing Trading</span>
             <span class="mg-d">Market News · Bull % Rank · Today Big Movers · Selected Stock · Big Move · Move Timing</span>
           </button>
+          <button type="button" class="mg-btn mg-dhanbacktest" data-mode="dhanbacktest">
+            <span class="mg-ico">🧪</span>
+            <span class="mg-t">Backtest (Dhan Data)</span>
+            <span class="mg-d">2-year historical strategy testing — EMA/Momentum/RSI/MACD/Bollinger/Supertrend/Market Regime (technical logic only, no OI)</span>
+          </button>
         </div>
         <button type="button" id="mg-close" class="mg-close hidden">✕ Close</button>
       </div>
+    </div>
+
+    <!-- ============ Admin Control Center (admin login lands here) ============ -->
+    <div id="admin-center" class="admin-center hidden">
+      <header class="ac-head">
+        <div class="lg-logo"><span class="lg-mkt">Market</span><span class="lg-pil">Pil</span></div>
+        <h2>ADMIN CONTROL CENTER</h2>
+        <div class="ac-head-actions">
+          <span id="ac-whoami" class="wl-sub"></span>
+          <button type="button" id="ac-logout" class="pill-btn">🚪 Logout</button>
+        </div>
+      </header>
+
+      <div class="ac-stats">
+        <div class="ac-stat"><span>TOTAL USERS</span><b id="ac-stat-total">-</b></div>
+        <div class="ac-stat"><span>ACTIVE USERS</span><b id="ac-stat-active" class="ok">-</b></div>
+        <div class="ac-stat"><span>EXPIRED USERS</span><b id="ac-stat-expired" class="blocked">-</b></div>
+        <div class="ac-stat"><span>DISABLED USERS</span><b id="ac-stat-disabled" class="blocked">-</b></div>
+      </div>
+
+      <div class="ac-card">
+        <div class="card-head"><h3>Connections</h3></div>
+        <div class="ac-table-wrap">
+          <table class="ac-table" id="ac-connections-table">
+            <thead><tr><th>Provider</th><th>Status</th><th>Last Connected</th><th>Last Tested</th><th></th></tr></thead>
+            <tbody id="ac-connections-body"><tr><td colspan="5" class="wl-sub">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="ac-card">
+        <div class="card-head"><h3>Create User</h3></div>
+        <div class="ac-form-grid">
+          <label>User Name <input id="acf-username" type="text" placeholder="e.g. rahul.trader" /></label>
+          <label>Temporary Password <input id="acf-password" type="password" placeholder="min 6 characters" /></label>
+          <label>Access Start Date <input id="acf-start" type="date" /></label>
+          <label>Access Expiry Date <input id="acf-expiry" type="date" /></label>
+        </div>
+        <div class="ac-perms" id="acf-permissions"></div>
+        <button id="acf-create" class="gc-primary">CREATE USER</button>
+        <div id="acf-status" class="conn-status"></div>
+      </div>
+
+      <div class="ac-card">
+        <div class="card-head"><h3>User Management</h3></div>
+        <div class="ac-table-wrap">
+          <table class="ac-table" id="ac-users-table">
+            <thead><tr><th>User</th><th>Status</th><th>Access Expiry</th><th>Permissions</th><th>Last Login</th><th>Actions</th></tr></thead>
+            <tbody id="ac-users-body"><tr><td colspan="6" class="wl-sub">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="ac-card">
+        <div class="card-head">
+          <h3>Login History</h3>
+          <label class="chk" style="margin-left:auto;font-size:12px"><input id="ac-history-showall" type="checkbox" /> Show all activity (user logins/attempts too)</label>
+        </div>
+        <div class="ac-table-wrap">
+          <table class="ac-table" id="ac-history-table">
+            <thead><tr><th>Time</th><th>Type</th><th>User</th><th>Mode</th><th>Detail</th></tr></thead>
+            <tbody id="ac-history-body"><tr><td colspan="5" class="wl-sub">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Groww Connection settings card (desktop + mobile) — admin-only, opened
+         from the Admin Control Center's Connections card ("Manage" button). -->
+    <div id="connect-panel" class="connect-panel gc-panel hidden">
+      <div class="cp-head">
+        <h4>Groww Connection</h4>
+        <button id="connect-close" class="cp-close" aria-label="Close">&times;</button>
+      </div>
+
+      <div class="gc-source">MARKET DATA SOURCE&nbsp; <b>🟢 GROWW</b> <span class="wl-sub">single source</span></div>
+
+      <!-- Shared connection-status component (also used by the Dhan panel). -->
+      <div id="gc-conn-status" class="conn-badge-block"></div>
+
+      <label class="cp-label" for="conn-token">Groww Access Token</label>
+      <div class="gc-field">
+        <input id="conn-token" type="password" placeholder="Paste your Groww access token" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        <button type="button" class="gc-eye" data-target="conn-token" aria-label="Show/hide">👁</button>
+      </div>
+
+      <button id="conn-saveconnect" class="gc-primary">SAVE ACCESS TOKEN</button>
+      <div id="conn-status" class="conn-status"></div>
+
+      <div id="gc-token-current" class="gc-token-current hidden">Saved token: <b id="gc-token-mask">—</b> <span class="wl-sub">— stored server-side, never shown in full</span> <button type="button" id="gc-update-token" class="ghost">Remove saved token</button></div>
+
+      <div id="gc-status" class="gc-status"></div>
+      <div id="gc-signals" class="gc-signals"></div>
+
+      <button id="conn-test" class="gc-test">TEST GROWW CONNECTION</button>
+      <div id="gc-test-result" class="gc-test-result"></div>
+
+      <p class="wl-sub cp-note">
+        The <b>access token is the only Groww credential</b> this app needs. Generate it on
+        Groww &rarr; Settings &rarr; Trading APIs (needs an active Trading API subscription), paste it above and press
+        <b>SAVE ACCESS TOKEN</b> — it is only accepted after a real Groww request succeeds, and is then stored
+        <b>securely server-side (owner-only .groww_token), so it persists across restarts</b>. The full token is never
+        shown, logged, or sent back to this screen. Tokens expire daily ~6 AM IST — paste a fresh one when the test fails.
+      </p>
+
+      <div class="cp-divider"></div>
+      <h4>Login notifications</h4>
+      <label class="cp-label" for="auth-email">Notify email <span class="wl-sub">(optional)</span></label>
+      <div class="gc-field">
+        <input id="auth-email" type="email" placeholder="you@example.com" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        <button id="auth-email-save" type="button" class="auth-email-save" aria-label="Save">💾</button>
+      </div>
+      <div id="auth-email-status" class="conn-status"></div>
+      <p class="wl-sub cp-note">
+        Dashboard credentials stay the same across restarts and only rotate automatically once a day at <b>08:00 IST</b> — set an email here to have each new
+        password sent to you instead of checking the server console. Requires the server's SMTP env vars (SMTP_HOST/SMTP_USER/SMTP_PASS) to actually be configured.
+      </p>
+
+    </div>
+
+    <!-- WhatsApp login-alerts panel (separate from Groww Connection) -->
+    <div id="whatsapp-panel" class="connect-panel gc-panel hidden">
+      <div class="cp-head">
+        <h4>WhatsApp login alerts</h4>
+        <button id="whatsapp-close" class="cp-close" aria-label="Close">&times;</button>
+      </div>
+      <label class="cp-label" for="wa-phone">WhatsApp number <span class="wl-sub">(with country code, e.g. 91XXXXXXXXXX)</span></label>
+      <div class="gc-field">
+        <input id="wa-phone" type="text" placeholder="91XXXXXXXXXX" autocomplete="off" autocapitalize="off" spellcheck="false" />
+      </div>
+      <label class="cp-label" for="wa-key">CallMeBot API key <span class="wl-sub">(free — message CallMeBot on WhatsApp to get one)</span></label>
+      <div class="gc-field">
+        <input id="wa-key" type="password" placeholder="CallMeBot API key" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        <button type="button" class="gc-eye" data-target="wa-key" aria-label="Show/hide">👁</button>
+      </div>
+      <div class="gc-field">
+        <button id="wa-save" type="button" class="auth-email-save" aria-label="Save">💾 SAVE</button>
+        <button id="wa-test" type="button" class="gc-test">SEND TEST</button>
+      </div>
+      <div id="wa-status" class="conn-status"></div>
+      <p class="wl-sub cp-note">
+        Same rotation (daily 08:00 IST, or "rotate now") also sends the new username/password here once a number + key are saved. Green-API / Meta Cloud API /
+        a custom webhook also work — set those via server env vars (see backend/alerts/whatsapp.ts) instead of this form.
+      </p>
+    </div>
+
+    <!-- Dhan historical-data panel (separate from Groww Connection) -->
+    <div id="dhan-panel" class="connect-panel gc-panel hidden">
+      <div class="cp-head">
+        <h4>Connect Dhan (Historical data — backtesting only)</h4>
+        <button id="dhan-close" class="cp-close" aria-label="Close">&times;</button>
+      </div>
+      <!-- Shared connection-status component (same one the Groww panel uses). -->
+      <div id="dhan-conn-status" class="conn-badge-block"></div>
+      <label class="cp-label" for="dhan-token">Access Token <span class="wl-sub">(web.dhan.co → My Profile → Access DhanHQ APIs, 24h validity)</span></label>
+      <div class="gc-field">
+        <input id="dhan-token" type="password" placeholder="Paste Dhan access token" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        <button type="button" class="gc-eye" data-target="dhan-token" aria-label="Show/hide">👁</button>
+      </div>
+      <div class="gc-field">
+        <button id="dhan-save" type="button" class="auth-email-save" aria-label="Save">💾 SAVE</button>
+        <button id="dhan-test" type="button" class="gc-test">TEST CONNECTION</button>
+      </div>
+      <div id="dhan-status" class="conn-status"></div>
+      <p class="wl-sub cp-note">
+        Used ONLY for pulling historical candles for offline backtesting/research — Groww remains the sole source for OI, EMA, live signals and every
+        trading decision. Dhan tokens expire every 24h; press SAVE again with a fresh one when TEST CONNECTION fails.
+      </p>
     </div>
 
     <header class="topbar">
@@ -115,70 +324,20 @@
         <span id="success-ind" class="pill" title="Measured track record from the autonomous paper-trading run">success: -</span>
         <span id="early-ind" class="pill early-ind" title="Early-Move alert: a move in its INITIAL stage (fresh momentum + volume, not extended, potential still to run). Click to open it.">⚡ early: -</span>
         <button id="mode-switch" class="pill-btn" title="Switch between Option Trading, Stock Option Trading and Stock Swing Trading desks">⇄ Desk</button>
-        <button id="connect-btn" class="pill-btn">Connect data</button>
+        <!-- Groww/Dhan/WhatsApp connection management now lives in the Admin
+             Control Center's "Connections" card only - these three legacy
+             trigger buttons stay in the DOM (existing JS still targets them
+             to open/close the same panels) but are permanently hidden from
+             the topbar; the Admin Control Center's "Manage" buttons click
+             them programmatically instead of duplicating the open/close logic. -->
+        <button id="connect-btn" class="pill-btn hidden">Groww</button>
+        <button id="whatsapp-btn" class="pill-btn hidden">WhatsApp</button>
+        <button id="dhan-btn" class="pill-btn hidden">Dhan</button>
+        <button id="rotate-login-btn" class="pill-btn" title="Turant naya login password generate karke email/WhatsApp par bhej do (agar configured hai) — 08:00 IST ka wait nahi karna padega">🔄 Rotate Login</button>
+        <button id="logout-btn" class="pill-btn" title="Session band karke wapas login screen par jayein">🚪 Logout</button>
         <span id="clock" class="clock"></span>
       </div>
 
-      <!-- Groww Connection settings card (desktop + mobile) -->
-      <div id="connect-panel" class="connect-panel gc-panel hidden">
-        <div class="cp-head">
-          <h4>Groww Connection</h4>
-          <button id="connect-close" class="cp-close" aria-label="Close">&times;</button>
-        </div>
-
-        <div class="gc-source">MARKET DATA SOURCE&nbsp; <b>🟢 GROWW</b> <span class="wl-sub">single source</span></div>
-
-        <label class="cp-label" for="conn-apikey">API Key</label>
-        <div class="gc-field">
-          <input id="conn-apikey" type="password" inputmode="text" placeholder="Groww API key" autocomplete="off" autocapitalize="off" spellcheck="false" />
-          <button type="button" class="gc-eye" data-target="conn-apikey" aria-label="Show/hide">👁</button>
-        </div>
-
-        <label class="cp-label" for="conn-secret">API Secret</label>
-        <div class="gc-field">
-          <input id="conn-secret" type="password" placeholder="Groww API secret" autocomplete="off" autocapitalize="off" spellcheck="false" />
-          <button type="button" class="gc-eye" data-target="conn-secret" aria-label="Show/hide">👁</button>
-        </div>
-
-        <button id="conn-saveconnect" class="gc-primary">GENERATE TOKEN &amp; SAVE</button>
-        <div id="conn-status" class="conn-status"></div>
-
-        <div id="gc-token-current" class="gc-token-current hidden">Saved token: <b id="gc-token-mask">—</b> <span class="wl-sub">— saved locally for all sessions</span> <button type="button" id="gc-update-token" class="ghost">Remove saved token</button></div>
-
-        <div id="gc-status" class="gc-status"></div>
-        <div id="gc-signals" class="gc-signals"></div>
-
-        <button id="conn-test" class="gc-test">TEST CONNECTION</button>
-        <div id="gc-test-result" class="gc-test-result"></div>
-
-        <details class="gc-advanced">
-          <summary>Advanced — paste an existing token</summary>
-          <label class="cp-label" for="conn-token">Access Token <span class="wl-sub">(optional — normally auto-minted from key + secret)</span></label>
-          <div class="gc-field">
-            <input id="conn-token" type="password" placeholder="Paste a Groww access token" autocomplete="off" autocapitalize="off" spellcheck="false" />
-            <button type="button" class="gc-eye" data-target="conn-token" aria-label="Show/hide">👁</button>
-          </div>
-        </details>
-
-        <p class="wl-sub cp-note">
-          Enter your API Key + API Secret (Groww &rarr; Settings &rarr; Trading APIs; needs an active subscription + today's approval) and press
-          <b>GENERATE TOKEN &amp; SAVE</b> — the server mints the access token and stores it <b>securely server-side (.groww_token), so it persists across every session</b>
-          (the full token is never shown or logged). Tokens expire daily ~6 AM IST — just press the button again to re-mint. No manual restart; the provider reconnects automatically.
-        </p>
-
-        <div class="cp-divider"></div>
-        <h4>Login notifications</h4>
-        <label class="cp-label" for="auth-email">Notify email <span class="wl-sub">(optional)</span></label>
-        <div class="gc-field">
-          <input id="auth-email" type="email" placeholder="you@example.com" autocomplete="off" autocapitalize="off" spellcheck="false" />
-          <button id="auth-email-save" type="button" class="auth-email-save" aria-label="Save">💾</button>
-        </div>
-        <div id="auth-email-status" class="conn-status"></div>
-        <p class="wl-sub cp-note">
-          Dashboard credentials stay the same across restarts and only rotate automatically once a day at <b>08:00 IST</b> — set an email here to have each new
-          password sent to you instead of checking the server console. Requires the server's SMTP env vars (SMTP_HOST/SMTP_USER/SMTP_PASS) to actually be configured.
-        </p>
-      </div>
     </header>
 
     <div class="disclaimer" id="disclaimer" hidden></div>
@@ -245,6 +404,7 @@
           <button class="tab grp-swing" data-tab="bigmove" data-group="swing">Big Move 20-100%</button>
 
           <button class="tab grp-swing" data-tab="movetiming" data-group="swing">Move Timing</button>
+          <button class="tab" data-tab="dhanbacktest" data-group="dhanbacktest">🧪 Backtest (Dhan)</button>
         </div>
         <div id="tab-flow-wrap">
           <button id="tab-flow-toggle" class="pill-btn">🔍 How this tab works — logic flow ▾</button>
@@ -898,6 +1058,68 @@
             <div id="movetiming">Pick a symbol and basis, then Analyze.</div>
           </div>
         </div><!-- /panel-movetiming -->
+
+        <!-- ================= TAB: Backtest (Dhan historical data) ================= -->
+        <div class="tab-panel" id="panel-dhanbacktest">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h3>🧪 Backtest (Dhan historical data)</h3>
+                <div class="wl-sub">
+                  Price/technical strategy logic only — EMA/Supertrend/VWAP/MACD/RSI/Bollinger composite score (the same
+                  <code>runBacktest</code> engine used elsewhere in this app), plus Momentum Burst / Market Regime / EMA confluence
+                  shown as informational reads. <b>OI walls, PCR, and the Master Trade Selector are NOT included</b> — Dhan's
+                  historical API has no live option-chain snapshot history, so that part of the strategy cannot be backtested here.
+                  Groww remains the only source for anything live/tradeable.
+                </div>
+              </div>
+            </div>
+            <div id="dbt-datamode" class="dbt-datamode">Loading DATA MODE…</div>
+            <div class="swing-filters">
+              <label>Symbol <select id="dbt-symbol" style="min-width:180px"></select></label>
+              <label>Interval
+                <select id="dbt-interval">
+                  <option value="60">60 min</option>
+                  <option value="15">15 min</option>
+                  <option value="5">5 min</option>
+                </select>
+              </label>
+              <label>From <input id="dbt-from" type="date" /></label>
+              <label>To <input id="dbt-to" type="date" /></label>
+              <label>SL% <input id="dbt-sl" type="number" step="0.1" value="0.5" /></label>
+              <label>Target% <input id="dbt-target" type="number" step="0.1" value="1.0" /></label>
+              <label>Threshold <input id="dbt-threshold" type="number" step="5" value="30" /></label>
+              <label class="chk"><input id="dbt-short" type="checkbox" checked /> Allow short</label>
+              <label>Mode
+                <select id="dbt-mode">
+                  <option value="TECHNICAL_ONLY">Technical Only</option>
+                  <option value="FULL_MASTER">Full Master Trade Selector</option>
+                </select>
+              </label>
+              <button id="dbt-run" class="gc-primary">Run backtest</button>
+            </div>
+            <div id="dbt-status" class="conn-status"></div>
+            <div id="dbt-summary" class="bt-summary">Pick a symbol + date range (Dhan connection required — see the Dhan button), then Run backtest.</div>
+            <div id="dbt-informational" class="wl-sub" style="margin:8px 0"></div>
+            <div id="dbt-trades" class="dbt-trades"></div>
+            <p class="backtest-disclaimer">BACKTEST / SIMULATION on Dhan historical data — past performance is not indicative of future results. No brokerage/slippage beyond the round-trip cost % already built into the engine. Not the live trading path.</p>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h3>🤖 AI Data Collection</h3>
+                <div class="wl-sub">
+                  A passive recorder attached to the LIVE Groww OI Command feed (not Dhan) — writes a timestamped
+                  market/option-chain/strategy snapshot every time OI Command refreshes, for future ML training data only.
+                  Advisory data collection only: <b>AI_MODE=ADVISORY_ONLY</b>, no automated trading, no live orders.
+                </div>
+              </div>
+            </div>
+            <div id="ai-data-status" class="dbt-datamode">Loading…</div>
+            <div id="ai-training-status" class="dbt-datamode">Loading…</div>
+          </div>
+        </div><!-- /panel-dhanbacktest -->
 
       </section>
     </main>
