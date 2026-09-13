@@ -394,6 +394,7 @@
           <button class="tab grp-option" data-tab="toppicks" data-group="option">Option Top Pick</button>
           <button class="tab grp-option" data-tab="earlymoves" data-group="option">⚡ Early Moves</button>
           <button class="tab grp-option" data-tab="tradermind" data-group="option">🧠 Trader Mind</button>
+          <button class="tab grp-option" data-tab="strategylab" data-group="option">🔬 Master Strategy Lab</button>
           <button class="tab" data-tab="stockoptions" data-group="stockOption">📊 Stock Options</button>
           <button class="tab grp-swing" data-tab="news" data-group="swing">Market News</button>
           <button class="tab grp-swing" data-tab="bullrank" data-group="swing">Bull % Rank</button>
@@ -484,6 +485,117 @@
               <div class="mtg-card"><h5>System commentary</h5><div id="tm-commentary"></div></div>
               <div class="mtg-card"><h5>Trade plan</h5><div id="tm-plan"></div></div>
             </div>
+          </div>
+        </div>
+
+        <!-- ================= TAB: Master Strategy Lab (visualisation + QA validation) =================
+             VISUALISATION / TESTING / VALIDATION ONLY. Every number on this screen
+             comes from backend/qa/* running the REAL engine - nothing is hard-coded,
+             and an unexecuted suite shows NOT RUN rather than a fake 0%. This screen
+             never enables live trading. -->
+        <div class="tab-panel" id="panel-strategylab">
+          <div class="tm msl">
+
+            <!-- ---------- 1. TOP HEADER ---------- -->
+            <div class="tm-head">
+              <div class="tm-head-row1">
+                <b class="msl-title">🔬 MASTER STRATEGY LAB</b>
+                <span class="wl-sub msl-sub">Visualise, test and validate the Master Strategy. Read-only — this screen never changes strategy logic or enables live trading.</span>
+              </div>
+              <div class="tm-head-row2 msl-statusrow">
+                <div class="tm-badge"><span>Engine</span><b id="msl-st-engine">⚪ —</b></div>
+                <div class="tm-badge"><span>Test engine</span><b id="msl-st-tester">⚪ —</b></div>
+                <div class="tm-badge"><span>Strategy</span><b id="msl-st-integrity">⚪ —</b></div>
+                <div class="tm-meta"><span>Strategy</span><b id="msl-version">—</b></div>
+                <div class="tm-meta"><span>Commit</span><b id="msl-commit">—</b></div>
+                <div class="tm-meta"><span>Last test run</span><b id="msl-lastrun">—</b></div>
+              </div>
+              <div class="msl-counts">
+                <div class="ac-stat"><span>TOTAL TESTS</span><b id="msl-total">—</b></div>
+                <div class="ac-stat"><span>PASSED</span><b id="msl-passed" class="ok">—</b></div>
+                <div class="ac-stat"><span>FAILED</span><b id="msl-failed" class="blocked">—</b></div>
+                <div class="ac-stat"><span>UNEXPECTED</span><b id="msl-unexpected">—</b></div>
+                <div class="ac-stat"><span>NO ENGINE RULE</span><b id="msl-gaps">—</b></div>
+                <div class="ac-stat"><span>PASS %</span><b id="msl-passpct">—</b></div>
+              </div>
+              <div id="msl-blocked" class="msl-blocked hidden"></div>
+            </div>
+
+            <!-- ---------- 3. TEST CONTROL ---------- -->
+            <div class="mtg-card">
+              <h5>Test control</h5>
+              <div class="msl-controls">
+                <button id="msl-run-all" class="gc-primary">RUN ALL SCENARIOS</button>
+                <button id="msl-run-failed" class="gc-test">RUN FAILED SCENARIOS</button>
+                <button id="msl-run-candle" class="gc-test">RUN CANDLE TESTS</button>
+                <button id="msl-run-false" class="gc-test">RUN FALSE SETUP TESTS</button>
+                <button id="msl-clear" class="ghost">CLEAR RESULTS</button>
+              </div>
+              <div class="wl-sub msl-note">Buttons execute the real automated runner in <code>backend/qa/scenarioRunner.ts</code> against the unmodified engine. No results are fabricated.</div>
+              <!-- 15. TEST EXECUTION LOG -->
+              <div id="msl-execlog" class="msl-execlog hidden"></div>
+            </div>
+
+            <!-- ---------- 2. MASTER STRATEGY GRID ---------- -->
+            <div class="mtg-card">
+              <h5>Master Strategy engine — decision flow</h5>
+              <div class="wl-sub msl-note" id="msl-vocab-note"></div>
+              <div id="msl-grid" class="msl-grid"><span class="wl-sub">Loading engine stages…</span></div>
+            </div>
+
+            <!-- ---------- 5. TEST CATEGORIES + 4. SCENARIO GRID ---------- -->
+            <div class="mtg-card">
+              <h5>Scenario testing</h5>
+              <div id="msl-cats" class="msl-cats"></div>
+              <div class="ac-table-wrap">
+                <table class="ac-table msl-table" id="msl-scenario-table">
+                  <thead>
+                    <tr>
+                      <th>ID</th><th>CATEGORY</th><th>SCENARIO</th><th>EXPECTED</th><th>ACTUAL</th>
+                      <th>RESULT</th><th>SCORE</th><th>DIRECTION</th><th>15M</th><th>5M</th><th>R:R</th><th>REASON</th>
+                    </tr>
+                  </thead>
+                  <tbody id="msl-scenario-body"><tr><td colspan="12" class="wl-sub">Loading scenarios…</td></tr></tbody>
+                </table>
+              </div>
+              <div class="wl-sub msl-note">Tap any row for full input data, score breakdown, hard-gate outcomes and the engine/API/UI path check.</div>
+            </div>
+
+            <!-- ---------- 6. 15M / 5M VISUAL TESTING ---------- -->
+            <div class="tm-row2">
+              <div class="mtg-card"><h5>15M / 5M candle validation</h5><div id="msl-candle"><span class="wl-sub">Not run.</span></div></div>
+              <!-- ---------- 7. FALSE SETUP TESTING ---------- -->
+              <div class="mtg-card"><h5>False setup detector</h5><div id="msl-false"><span class="wl-sub">Not run.</span></div></div>
+            </div>
+
+            <!-- ---------- 10. STRATEGY INTEGRITY ---------- -->
+            <div class="tm-row2">
+              <div class="mtg-card"><h5>Master Strategy integrity</h5><div id="msl-integrity"><span class="wl-sub">Loading…</span></div></div>
+              <!-- ---------- 11. TEST RUN HISTORY ---------- -->
+              <div class="mtg-card"><h5>Test run history</h5><div id="msl-history"><span class="wl-sub">Loading…</span></div></div>
+            </div>
+
+            <!-- ---------- 16. FINAL SUMMARY ---------- -->
+            <div class="mtg-card">
+              <h5>Master Strategy QA summary</h5>
+              <div id="msl-qasummary"><span class="wl-sub">Loading…</span></div>
+              <div class="cs-risk-full msl-disclaimer">
+                Passing scenario tests proves the engine follows its own documented rules. It does <b>NOT</b> prove profitability.
+                No win-rate or profitability claim is made here — that requires real historical / backtest / paper-trading results.
+              </div>
+            </div>
+
+          </div>
+        </div><!-- /panel-strategylab -->
+
+        <!-- 8. SCENARIO DETAIL MODAL -->
+        <div id="msl-modal" class="msl-modal hidden">
+          <div class="msl-modal-box">
+            <div class="cp-head">
+              <h4 id="msl-modal-title">Scenario</h4>
+              <button id="msl-modal-close" class="cp-close" aria-label="Close">&times;</button>
+            </div>
+            <div id="msl-modal-body"></div>
           </div>
         </div>
 

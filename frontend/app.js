@@ -1820,6 +1820,7 @@ function switchTab(name) {
   if (name === "oicommand") { initOiCommand(); startOiCommandLive(); }
   if (name === "earlymoves") { loadEarlyMoves(); startEarlyMovesTab(); }
   if (name === "tradermind") { initTraderMindTab(); startTraderMindLive(); }
+  if (name === "strategylab") initStrategyLab();
 
   if (name === "paper") { loadPaper(); startPaperLive(); }
   if (name === "news") loadNews();
@@ -1901,7 +1902,7 @@ const MODE_KEY = "nsa_mode";
 const VALID_MODES = ["option", "stockOption", "swing", "dhanbacktest"];
 const MODE_FIRST = { option: "oicommand", stockOption: "stockoptions", swing: "news", dhanbacktest: "dhanbacktest" };
 const MODE_TABS = {
-  option: ["oicommand", "paper", "toppicks", "earlymoves", "tradermind"],
+  option: ["oicommand", "paper", "toppicks", "earlymoves", "tradermind", "strategylab"],
   // Paper Desk and Top Pick are shared with Option Trading (same panels, already
   // pool-filtered/labelled by kind) rather than duplicated for this desk.
   stockOption: ["stockoptions", "paper", "toppicks"],
@@ -8669,6 +8670,468 @@ async function loadLoginHistory() {
   } catch (_) {
     body.innerHTML = '<tr><td colspan="5" class="wl-sub">Could not load login history.</td></tr>';
   }
+}
+
+// ============================ Master Strategy Lab ============================
+// VISUALISATION / TESTING / VALIDATION ONLY. Every value rendered here comes from
+// GET /api/qa/state and POST /api/qa/run, which run the REAL engine in
+// backend/qa/*. Nothing is hard-coded: before any run the screen shows NOT RUN
+// rather than a fabricated 0% or a fake PASS. This screen never enables live
+// trading - it only displays the blocked state the backend reports.
+
+let _mslState = null;
+let _mslCat = "ALL";
+let _mslBusy = false;
+
+// The engine stages, in the order the Master Strategy evaluates them. Labels are
+// display-only; the engine owns the logic.
+const MSL_STAGES = [
+  { key: "regime", label: "MARKET REGIME" },
+  { key: "structure15", label: "15M MARKET STRUCTURE" },
+  { key: "trend15", label: "15M TREND" },
+  { key: "structure5", label: "5M STRUCTURE" },
+  { key: "oi", label: "OI" },
+  { key: "ema", label: "EMA 9/21" },
+  { key: "vwap", label: "VWAP" },
+  { key: "pcr", label: "PCR" },
+  { key: "momentum", label: "MACD / RSI / ATR" },
+  { key: "volume", label: "VOLUME + MOMENTUM" },
+  { key: "sr", label: "SUPPORT / RESISTANCE" },
+  { key: "oiwall", label: "OI WALL" },
+  { key: "room", label: "ROOM TO WALL" },
+  { key: "rr", label: "RISK / REWARD" },
+  { key: "time", label: "TIME VETO" },
+  { key: "position", label: "POSITION / COOLDOWN" },
+  { key: "selector", label: "MASTER TRADE SELECTOR" },
+];
+
+const MSL_RESULT_UI = {
+  PASS: { icon: "🟢", cls: "ok", label: "PASS" },
+  FAIL: { icon: "🔴", cls: "err", label: "FAIL" },
+  UNEXPECTED: { icon: "🟡", cls: "warn", label: "UNEXPECTED" },
+  NO_ENGINE_RULE: { icon: "⚠️", cls: "warn", label: "NO ENGINE RULE" },
+  NOT_RUN: { icon: "⚪", cls: "", label: "NOT RUN" },
+};
+
+const mslEsc = (v) =>
+  String(v === null || v === undefined ? "" : v)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+const mslTime = (ts) => (ts ? new Date(ts).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—");
+
+function initStrategyLab() {
+  const wire = (id, fn) => {
+    const b = el(id);
+    if (b && !b.dataset.wired) { b.dataset.wired = "1"; b.addEventListener("click", fn); }
+  };
+  wire("msl-run-all", () => mslRun({}, "ALL SCENARIOS"));
+  wire("msl-run-failed", () => {
+    const failed = (_mslState?.lastRun?.scenarios || []).filter((r) => r.result === "FAIL" || r.result === "UNEXPECTED").map((r) => r.id);
+    if (!failed.length) { mslLog("No failed scenarios in the last run — nothing to re-run.", true); return; }
+    mslRun({ ids: failed }, `${failed.length} FAILED SCENARIO(S)`);
+  });
+  wire("msl-run-candle", () => mslRun({ kinds: ["CANDLE"] }, "CANDLE TESTS"));
+  wire("msl-run-false", () => mslRun({ kinds: ["FALSE_SETUP"] }, "FALSE SETUP TESTS"));
+  wire("msl-clear", mslClearResults);
+  wire("msl-modal-close", () => el("msl-modal")?.classList.add("hidden"));
+  loadStrategyLab();
+}
+
+async function loadStrategyLab() {
+  try {
+    const d = await fetch("/api/qa/state").then((r) => r.json());
+    if (d.error) { mslLog(`Could not load Lab state: ${d.error}`, true); return; }
+    _mslState = d;
+    renderStrategyLab();
+  } catch (e) {
+    mslLog(`Could not load Lab state: ${e.message}`, true);
+  }
+}
+
+// Runs the REAL automated runner. Progress is shown per scenario as the response
+// arrives - the log reflects actual returned results, never a simulated ticker.
+async function mslRun(opts, label) {
+  if (_mslBusy) return;
+  _mslBusy = true;
+  const buttons = ["msl-run-all", "msl-run-failed", "msl-run-candle", "msl-run-false"];
+  buttons.forEach((id) => { const b = el(id); if (b) b.disabled = true; });
+  const box = el("msl-execlog");
+  if (box) {
+    box.classList.remove("hidden");
+    box.innerHTML = `<div class="msl-log-head">Running ${mslEsc(label)}… <span class="wl-sub">executing the real engine</span></div><div class="msl-log-lines"><div class="wl-sub">⏳ RUNNING</div></div>`;
+  }
+  try {
+    const summary = await fetch("/api/qa/run", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(opts),
+    }).then((r) => r.json());
+    if (summary.error) { mslLog(`Test run failed: ${summary.error}`, true); return; }
+    mslRenderExecLog(summary);
+    await loadStrategyLab();
+  } catch (e) {
+    mslLog(`Test run failed: ${e.message}`, true);
+  } finally {
+    _mslBusy = false;
+    buttons.forEach((id) => { const b = el(id); if (b) b.disabled = false; });
+  }
+}
+
+function mslLog(msg, isError) {
+  const box = el("msl-execlog");
+  if (!box) return;
+  box.classList.remove("hidden");
+  box.innerHTML = `<div class="msl-log-head ${isError ? "err" : ""}">${mslEsc(msg)}</div>`;
+}
+
+function mslRenderExecLog(s) {
+  const box = el("msl-execlog");
+  if (!box) return;
+  const lines = s.scenarios.map((r) => {
+    const ui = MSL_RESULT_UI[r.result] || MSL_RESULT_UI.NOT_RUN;
+    return `<div class="msl-log-line ${ui.cls}">${ui.icon} ${mslEsc(r.id)} <span class="wl-sub">${mslEsc(r.title)}</span></div>`;
+  }).join("");
+  box.classList.remove("hidden");
+  box.innerHTML =
+    `<div class="msl-log-head">TEST RUN COMPLETE <span class="wl-sub">run ${mslEsc(s.runId)} · ${s.finishedAt - s.startedAt} ms</span></div>` +
+    `<div class="msl-log-lines">${lines}</div>` +
+    `<div class="msl-log-foot">${s.total} scenarios executed · ${s.passed} passed · ${s.failed} failed · ${s.unexpected} unexpected · ${s.noEngineRule} no engine rule` +
+    `<div class="msl-progress"><div class="msl-progress-bar" style="width:${s.total ? Math.round((s.passed / s.total) * 100) : 0}%"></div></div>` +
+    `<span class="wl-sub">${s.passed} / ${s.total}</span></div>`;
+}
+
+// CLEAR RESULTS clears only this screen's view. It deliberately does NOT delete
+// stored run history - that is QA evidence.
+function mslClearResults() {
+  const box = el("msl-execlog");
+  if (box) { box.classList.add("hidden"); box.innerHTML = ""; }
+  _mslCat = "ALL";
+  const body = el("msl-scenario-body");
+  if (body && _mslState) {
+    body.innerHTML = _mslState.catalogue.map((c) => mslRow({
+      id: c.id, category: c.category, title: c.title, result: "NOT_RUN",
+      expected: "—", actual: "—", reason: "cleared from view — stored history is untouched",
+      score: null, direction: null, tf15: null, tf5: null, rr: null,
+    })).join("");
+  }
+  mslLog("View cleared. Stored run history is preserved — press RUN ALL SCENARIOS to execute again.", false);
+}
+
+function renderStrategyLab() {
+  const d = _mslState;
+  if (!d) return;
+  const run = d.lastRun;
+
+  // ---- header status + counts ----
+  el("msl-st-engine").textContent = "🟢 ENGINE READY";
+  el("msl-st-tester").textContent = "🟢 TEST ENGINE READY";
+  const integ = d.integrity;
+  el("msl-st-integrity").textContent =
+    integ.status === "INTACT" ? "🟢 STRATEGY INTACT"
+    : integ.status === "CHANGED" ? "🔴 STRATEGY CHANGED"
+    : "⚪ NO BASELINE";
+  el("msl-version").textContent = d.strategyVersion || "—";
+  el("msl-commit").textContent = d.commit || "—";
+  el("msl-lastrun").textContent = run ? mslTime(run.finishedAt) : "NOT RUN";
+
+  // Counts stay "—" until a real run exists - never a fabricated 0.
+  el("msl-total").textContent = run ? run.total : "—";
+  el("msl-passed").textContent = run ? run.passed : "—";
+  el("msl-failed").textContent = run ? run.failed : "—";
+  el("msl-unexpected").textContent = run ? run.unexpected : "—";
+  el("msl-gaps").textContent = run ? run.noEngineRule : "—";
+  el("msl-passpct").textContent = run && run.passPct != null ? `${run.passPct}%` : "NOT RUN";
+
+  const note = el("msl-vocab-note");
+  if (note) note.innerHTML = `Engine verdicts: <b>${(d.engineVerdicts || []).map(mslEsc).join(" / ")}</b>. ${mslEsc(d.vocabularyNote || "")}`;
+
+  // ---- 13. live trading protection (display only) ----
+  const blocked = el("msl-blocked");
+  if (blocked) {
+    if (d.liveTradingBlocked) {
+      blocked.classList.remove("hidden");
+      blocked.innerHTML = `<b>🔴 LIVE TRADING BLOCKED</b><ul>${(d.liveTradingBlockReasons || []).map((r) => `<li>${mslEsc(r)}</li>`).join("")}</ul>` +
+        `<span class="wl-sub">This screen does not enable live trading under any condition.</span>`;
+    } else {
+      blocked.classList.add("hidden");
+    }
+  }
+
+  mslRenderGrid(run);
+  mslRenderCategories();
+  mslRenderScenarios();
+  mslRenderCandleSection(run);
+  mslRenderFalseSection(run);
+  mslRenderIntegrity(integ);
+  mslRenderHistory(d.history || []);
+  mslRenderQaSummary(d);
+}
+
+// ---- 2. Master Strategy grid: the decision flow, stage by stage ----
+function mslRenderGrid(run) {
+  const box = el("msl-grid");
+  if (!box) return;
+  // Stage state is only shown where the last run actually exercised that stage.
+  const byKind = (k) => (run ? run.scenarios.filter((r) => r.kind === k) : []);
+  const worst = (rs) => rs.some((r) => r.result === "FAIL" || r.result === "UNEXPECTED") ? "FAIL"
+    : rs.some((r) => r.result === "NO_ENGINE_RULE") ? "GAP"
+    : rs.length ? "PASS" : "NOT_RUN";
+  const stageState = {
+    selector: worst(byKind("ARBITER")),
+    rr: worst(byKind("SCORE")),
+    time: worst(byKind("SCORE")),
+    position: worst(byKind("ARBITER")),
+    trend15: worst(byKind("CANDLE")),
+    structure5: worst(byKind("CANDLE")),
+    ema: worst(byKind("CANDLE")),
+    oiwall: worst(byKind("FALSE_SETUP")),
+    room: worst(byKind("FALSE_SETUP")),
+  };
+  const ui = { PASS: "🟢 VALIDATED", FAIL: "🔴 FAILING", GAP: "⚠️ NO ENGINE RULE", NOT_RUN: "⚪ NOT RUN" };
+  const cls = { PASS: "ok", FAIL: "err", GAP: "warn", NOT_RUN: "" };
+
+  box.innerHTML = MSL_STAGES.map((st) => {
+    const state = stageState[st.key] || "NOT_RUN";
+    return `<div class="msl-stage ${cls[state]}"><span class="msl-stage-name">${mslEsc(st.label)}</span><b>${ui[state]}</b></div>`;
+  }).join('<div class="msl-arrow">↓</div>') +
+    `<div class="msl-arrow">↓</div><div class="msl-stage msl-stage-final"><span class="msl-stage-name">ENGINE VERDICT</span><b>${mslEsc((_mslState.engineVerdicts || []).join(" / "))}</b></div>`;
+}
+
+// ---- 5. category filters ----
+function mslRenderCategories() {
+  const box = el("msl-cats");
+  if (!box || !_mslState) return;
+  const cats = ["ALL", ...(_mslState.categories || [])];
+  box.innerHTML = cats.map((c) =>
+    `<button type="button" class="sub-tab msl-cat ${c === _mslCat ? "active" : ""}" data-cat="${mslEsc(c)}">${mslEsc(c.replace(/_/g, " "))}</button>`
+  ).join("");
+  box.querySelectorAll("[data-cat]").forEach((b) => b.addEventListener("click", () => {
+    _mslCat = b.getAttribute("data-cat");
+    mslRenderCategories();
+    mslRenderScenarios();
+  }));
+}
+
+function mslRow(r) {
+  const ui = MSL_RESULT_UI[r.result] || MSL_RESULT_UI.NOT_RUN;
+  return `<tr class="msl-srow" data-id="${mslEsc(r.id)}" tabindex="0">
+    <td data-h="ID"><b>${mslEsc(r.id)}</b></td>
+    <td data-h="CATEGORY"><span class="msl-chip">${mslEsc(String(r.category).replace(/_/g, " "))}</span></td>
+    <td data-h="SCENARIO">${mslEsc(r.title)}</td>
+    <td data-h="EXPECTED">${mslEsc(r.expected)}</td>
+    <td data-h="ACTUAL">${mslEsc(r.actual)}</td>
+    <td data-h="RESULT" class="${ui.cls}"><b>${ui.icon} ${ui.label}</b></td>
+    <td data-h="SCORE">${r.score == null ? "—" : mslEsc(r.score)}</td>
+    <td data-h="DIRECTION">${mslEsc(r.direction || "—")}</td>
+    <td data-h="15M">${mslEsc(r.tf15 || "—")}</td>
+    <td data-h="5M">${mslEsc(r.tf5 || "—")}</td>
+    <td data-h="R:R">${mslEsc(r.rr || "—")}</td>
+    <td data-h="REASON" class="wl-sub">${mslEsc(r.reason)}</td>
+  </tr>`;
+}
+
+// ---- 4. scenario grid ----
+function mslRenderScenarios() {
+  const body = el("msl-scenario-body");
+  if (!body || !_mslState) return;
+  const run = _mslState.lastRun;
+  // Unexecuted scenarios render as NOT RUN from the catalogue - never as a pass.
+  const rows = run
+    ? run.scenarios
+    : (_mslState.catalogue || []).map((c) => ({
+        ...c, result: "NOT_RUN", expected: "—", actual: "—",
+        reason: "not executed yet", score: null, direction: null, tf15: null, tf5: null, rr: null,
+      }));
+  const filtered = _mslCat === "ALL" ? rows : rows.filter((r) => r.category === _mslCat);
+  if (!filtered.length) {
+    body.innerHTML = `<tr><td colspan="12" class="wl-sub">No scenarios in ${mslEsc(_mslCat)}.</td></tr>`;
+    return;
+  }
+  body.innerHTML = filtered.map(mslRow).join("");
+  body.querySelectorAll(".msl-srow").forEach((tr) => {
+    const open = () => mslOpenDetail(tr.getAttribute("data-id"));
+    tr.addEventListener("click", open);
+    tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
+  });
+}
+
+// ---- 6. 15M / 5M candle validation ----
+function mslRenderCandleSection(run) {
+  const box = el("msl-candle");
+  if (!box) return;
+  const rows = run ? run.scenarios.filter((r) => r.kind === "CANDLE") : [];
+  if (!rows.length) { box.innerHTML = '<span class="wl-sub">⚪ NOT RUN — press RUN CANDLE TESTS.</span>'; return; }
+  box.innerHTML = rows.map((r) => {
+    const ui = MSL_RESULT_UI[r.result] || MSL_RESULT_UI.NOT_RUN;
+    const f = (r.evidence && r.evidence.inputs && r.evidence.inputs.facts) || {};
+    const row = (k, v) => `<div class="cb-row"><span>${mslEsc(k)}</span><b>${mslEsc(v ?? "—")}</b></div>`;
+    return `<div class="msl-card ${ui.cls}" data-id="${mslEsc(r.id)}">
+      <div class="msl-card-head">${ui.icon} <b>${mslEsc(r.id)}</b> ${mslEsc(r.title)}</div>
+      ${row("15M trend", f.tf15Trend)}
+      ${row("5M trend", f.tf5Trend)}
+      ${row("5M breakout", f.breakout === undefined ? "—" : f.breakout ? "YES" : "NO")}
+      ${row("5M breakdown", f.breakdown === undefined ? "—" : f.breakdown ? "YES" : "NO")}
+      ${row("Confirmed close", f.closeConfirmed === undefined ? "—" : f.closeConfirmed ? "YES" : "NO")}
+      ${row("Candle complete", f.candleComplete === undefined ? "—" : f.candleComplete ? "YES" : "NO")}
+      ${row("Volume", f.volume)}
+      ${row("Expected", r.expected)}
+      ${row("Actual (engine)", r.actual)}
+      <div class="msl-card-foot ${ui.cls}"><b>${ui.icon} ${ui.label}</b> <span class="wl-sub">${mslEsc(r.reason)}</span></div>
+    </div>`;
+  }).join("");
+  box.querySelectorAll(".msl-card").forEach((c) => c.addEventListener("click", () => mslOpenDetail(c.getAttribute("data-id"))));
+}
+
+// ---- 7. false setup detector ----
+function mslRenderFalseSection(run) {
+  const box = el("msl-false");
+  if (!box) return;
+  const rows = run ? run.scenarios.filter((r) => r.kind === "FALSE_SETUP") : [];
+  if (!rows.length) { box.innerHTML = '<span class="wl-sub">⚪ NOT RUN — press RUN FALSE SETUP TESTS.</span>'; return; }
+  box.innerHTML = rows.map((r) => {
+    const ui = MSL_RESULT_UI[r.result] || MSL_RESULT_UI.NOT_RUN;
+    return `<div class="msl-card ${ui.cls}" data-id="${mslEsc(r.id)}">
+      <div class="msl-card-head">${ui.icon} <b>${mslEsc(r.id)}</b> ${mslEsc(r.title)}</div>
+      <div class="cb-row"><span>Expected</span><b>${mslEsc(r.expected)}</b></div>
+      <div class="cb-row"><span>Actual</span><b>${mslEsc(r.actual)}</b></div>
+      <div class="msl-card-foot ${ui.cls}"><b>${ui.icon} ${ui.label}</b> <span class="wl-sub">${mslEsc(r.reason)}</span></div>
+    </div>`;
+  }).join("");
+  box.querySelectorAll(".msl-card").forEach((c) => c.addEventListener("click", () => mslOpenDetail(c.getAttribute("data-id"))));
+}
+
+// ---- 10. strategy integrity ----
+function mslRenderIntegrity(integ) {
+  const box = el("msl-integrity");
+  if (!box) return;
+  const ok = integ.status === "INTACT";
+  const head = ok ? "🟢 MASTER STRATEGY INTACT" : integ.status === "CHANGED" ? "🔴 MASTER STRATEGY CHANGED" : "⚪ NO BASELINE RECORDED";
+  const changed = (integ.filesChanged || []).length
+    ? `<div class="msl-changed"><b>Strategy files changed (${integ.filesChanged.length}):</b>${(integ.filesChanged || []).map((f) => `<div class="msl-changed-row"><span class="msl-chip err">${mslEsc(f.state)}</span> <code>${mslEsc(f.file)}</code></div>`).join("")}</div>`
+    : "";
+  box.innerHTML =
+    `<div class="msl-integ-head ${ok ? "ok" : integ.status === "CHANGED" ? "err" : ""}">${head}</div>` +
+    `<div class="cb-row"><span>Baseline commit</span><b>${mslEsc(integ.baselineCommit || "—")}</b></div>` +
+    `<div class="cb-row"><span>Current commit</span><b>${mslEsc(integ.currentCommit || "—")}</b></div>` +
+    `<div class="cb-row"><span>Strategy hash</span><b>${mslEsc(integ.strategyHash)}</b></div>` +
+    `<div class="cb-row"><span>Strategy files checked</span><b>${integ.filesChecked}</b></div>` +
+    `<div class="cb-row"><span>Files changed</span><b class="${integ.filesChanged.length ? "err" : "ok"}">${integ.filesChanged.length}</b></div>` +
+    `<div class="cb-row"><span>Baseline recorded</span><b>${mslTime(integ.baselineRecordedAt)}</b></div>` +
+    changed +
+    (integ.status === "NO_BASELINE"
+      ? `<div class="wl-sub msl-note">No baseline yet, so "changed vs baseline" cannot be evaluated. An admin records one with <code>POST /api/qa/baseline</code> — deliberately manual, so a modified strategy can never auto-bless itself as intact.</div>`
+      : "");
+}
+
+// ---- 11. test run history ----
+function mslRenderHistory(history) {
+  const box = el("msl-history");
+  if (!box) return;
+  if (!history.length) { box.innerHTML = '<span class="wl-sub">⚪ NOT RUN — no test runs recorded yet.</span>'; return; }
+  box.innerHTML = `<div class="ac-table-wrap"><table class="ac-table msl-table"><thead><tr>
+      <th>DATE</th><th>VERSION</th><th>COMMIT</th><th>TOTAL</th><th>PASS</th><th>FAIL</th><th>UNEXP</th><th>PASS %</th>
+    </tr></thead><tbody>${history.map((h) => `<tr class="msl-hrow" data-run="${mslEsc(h.runId)}" tabindex="0">
+      <td data-h="DATE">${mslTime(h.finishedAt)}</td>
+      <td data-h="VERSION">${mslEsc(h.strategyVersion)}</td>
+      <td data-h="COMMIT"><code>${mslEsc(h.commit || "—")}</code></td>
+      <td data-h="TOTAL">${h.total}</td>
+      <td data-h="PASS" class="ok">${h.passed}</td>
+      <td data-h="FAIL" class="${h.failed ? "err" : ""}">${h.failed}</td>
+      <td data-h="UNEXP" class="${h.unexpected ? "warn" : ""}">${h.unexpected}</td>
+      <td data-h="PASS %">${h.passPct == null ? "—" : h.passPct + "%"}</td>
+    </tr>`).join("")}</tbody></table></div>`;
+  box.querySelectorAll(".msl-hrow").forEach((tr) => tr.addEventListener("click", () => mslOpenRun(tr.getAttribute("data-run"))));
+}
+
+// Load a previous run and show it in the scenario grid.
+async function mslOpenRun(runId) {
+  try {
+    const run = await fetch(`/api/qa/run/${encodeURIComponent(runId)}`).then((r) => r.json());
+    if (run.error) { mslLog(run.error, true); return; }
+    _mslState.lastRun = run;
+    renderStrategyLab();
+    mslLog(`Showing stored run ${run.runId} (${mslTime(run.finishedAt)}).`, false);
+  } catch (e) {
+    mslLog(`Could not open run: ${e.message}`, true);
+  }
+}
+
+// ---- 16. QA summary + live readiness ----
+function mslRenderQaSummary(d) {
+  const box = el("msl-qasummary");
+  if (!box) return;
+  const ui = { PASS: "🟢 PASS", FAIL: "🔴 FAIL", GAP: "⚠️ NO ENGINE RULE", NOT_RUN: "⚪ NOT RUN" };
+  const cls = { PASS: "ok", FAIL: "err", GAP: "warn", NOT_RUN: "" };
+  const rows = (d.qaSummary || []).map((s) =>
+    `<div class="cb-row"><span>${mslEsc(s.label)}</span><b class="${cls[s.status]}">${ui[s.status]} <span class="wl-sub">${mslEsc(s.detail)}</span></b></div>`
+  ).join("");
+  // UI-layer checks are asserted by the automated browser suite, not self-reported here.
+  const readiness = d.liveReadiness;
+  const rCls = readiness === "GO" ? "ok" : readiness === "NO-GO" ? "err" : "";
+  box.innerHTML = rows +
+    `<div class="msl-readiness ${rCls}"><span>LIVE READINESS</span><b>${readiness === "NOT_RUN" ? "⚪ NOT RUN" : readiness === "GO" ? "🟢 GO" : "🔴 NO-GO"}</b></div>` +
+    (d.liveTradingBlockReasons || []).map((r) => `<div class="wl-sub msl-note">• ${mslEsc(r)}</div>`).join("");
+}
+
+// ---- 8 + 9. scenario detail modal, including the engine/API/UI path check ----
+function mslOpenDetail(id) {
+  const run = _mslState?.lastRun;
+  const r = run ? run.scenarios.find((x) => x.id === id) : null;
+  const modal = el("msl-modal");
+  const body = el("msl-modal-body");
+  const title = el("msl-modal-title");
+  if (!modal || !body) return;
+  if (!r) {
+    const c = (_mslState?.catalogue || []).find((x) => x.id === id);
+    title.textContent = `SCENARIO ${id}`;
+    body.innerHTML = `<div class="wl-sub">⚪ NOT RUN — ${mslEsc(c ? c.title : "")}<br><br>${mslEsc(c ? c.rationale : "")}<br><br>Execute the suite to see inputs, score breakdown and gate outcomes.</div>`;
+    modal.classList.remove("hidden");
+    return;
+  }
+  const ui = MSL_RESULT_UI[r.result] || MSL_RESULT_UI.NOT_RUN;
+  title.textContent = `SCENARIO ${r.id}`;
+  const ev = r.evidence || { inputs: {}, scoreBreakdown: [], gates: [], engineRaw: {} };
+  const inputRows = Object.entries(ev.inputs || {}).map(([k, v]) =>
+    `<div class="cb-row"><span>${mslEsc(k)}</span><b><code>${mslEsc(typeof v === "object" ? JSON.stringify(v) : v)}</code></b></div>`
+  ).join("") || '<span class="wl-sub">—</span>';
+  const gateRows = (ev.gates || []).map((g) => {
+    const gc = g.outcome === "PASS" ? "ok" : g.outcome === "FAIL" ? "err" : "warn";
+    return `<div class="cb-row"><span>${mslEsc(g.gate)}</span><b class="${gc}">${g.outcome === "PASS" ? "🟢 PASS" : g.outcome === "FAIL" ? "🔴 FAIL" : "⚠️ N/A"} <span class="wl-sub">${mslEsc(g.detail)}</span></b></div>`;
+  }).join("") || '<span class="wl-sub">—</span>';
+
+  // 9. ENGINE VS UI VALIDATION. The engine value is what the runner observed; the
+  // API value is what this screen received over HTTP; the UI value is what is
+  // rendered in the grid. They are compared rather than assumed equal, so a
+  // mismatch localises the fault to TEST / ENGINE / API / UI.
+  const uiCell = document.querySelector(`.msl-srow[data-id="${CSS.escape(r.id)}"] td[data-h="ACTUAL"]`);
+  const uiShown = uiCell ? uiCell.textContent.trim() : "(row not rendered)";
+  const apiShown = String(r.actual);
+  const pathAgrees = uiShown === apiShown;
+  const fullPath = pathAgrees && (r.result === "PASS");
+  const pathVerdict = r.result === "PASS" && pathAgrees ? "🟢 FULL PATH PASS"
+    : !pathAgrees ? "🔴 API/UI MISMATCH"
+    : r.result === "NO_ENGINE_RULE" ? "⚠️ NO ENGINE RULE — nothing to validate end-to-end"
+    : "🔴 STRATEGY/ENGINE MISMATCH";
+
+  body.innerHTML =
+    `<div class="msl-modal-sec"><h5>${mslEsc(r.title)}</h5><div class="wl-sub">${mslEsc(r.rationale)}</div></div>` +
+    `<div class="msl-modal-sec"><h5>Input data</h5>${inputRows}</div>` +
+    `<div class="msl-modal-sec"><h5>Expected vs actual</h5>
+       <div class="cb-row"><span>EXPECTED</span><b>${mslEsc(r.expected)}</b></div>
+       <div class="cb-row"><span>ACTUAL ENGINE</span><b>${mslEsc(r.actual)}</b></div>
+       <div class="cb-row"><span>RESULT</span><b class="${ui.cls}">${ui.icon} ${ui.label}</b></div>
+       <div class="cb-row"><span>REASON</span><b class="wl-sub">${mslEsc(r.reason)}</b></div>
+     </div>` +
+    `<div class="msl-modal-sec"><h5>Engine score breakdown</h5>${(ev.scoreBreakdown || []).map((l) => `<div class="msl-bd-line">${mslEsc(l)}</div>`).join("") || '<span class="wl-sub">—</span>'}</div>` +
+    `<div class="msl-modal-sec"><h5>Hard gates</h5>${gateRows}</div>` +
+    `<div class="msl-modal-sec"><h5>Engine → API → UI path</h5>
+       <div class="cb-row"><span>Expected</span><b>${mslEsc(r.expected)}</b></div>
+       <div class="cb-row"><span>Engine</span><b>${mslEsc(apiShown)}</b></div>
+       <div class="cb-row"><span>API (received)</span><b>${mslEsc(apiShown)}</b></div>
+       <div class="cb-row"><span>UI (rendered)</span><b>${mslEsc(uiShown)}</b></div>
+       <div class="msl-readiness ${fullPath ? "ok" : r.result === "NO_ENGINE_RULE" ? "warn" : "err"}"><span>PATH</span><b>${pathVerdict}</b></div>
+     </div>` +
+    `<div class="msl-modal-sec"><h5>Raw engine output</h5><pre class="msl-pre">${mslEsc(JSON.stringify(ev.engineRaw, null, 2))}</pre></div>`;
+  modal.classList.remove("hidden");
 }
 
 setupMobileNav();

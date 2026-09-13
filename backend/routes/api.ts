@@ -136,6 +136,8 @@ import { HourlyPick } from "../types";
 import { appendHourlyPicks, readHourlyPicks, writeResolvedPicks, picksFilePath, masterFilePath, istDateStr, istSlot } from "../hourly/store";
 import { getFundamentals } from "../fundamentals/fundamentals";
 import { validateGrowwToken, classifyGrowwError } from "../data/growwAuth";
+import { buildLabState, runScenarios, scenarioCatalogue, readRun as readQaRun } from "../qa/masterStrategyLab";
+import { writeBaseline as writeStrategyBaseline, checkStrategyIntegrity } from "../qa/strategyIntegrity";
 import { getMarketNews } from "../news/news";
 import fs from "fs";
 import path from "path";
@@ -6879,6 +6881,60 @@ router.get("/backtest-compare/:symbol", requirePermission("backtesting"), async 
     });
   } catch (e: any) {
     res.status(502).json({ error: e?.message || "Failed to compare backtests" });
+  }
+});
+
+// ======================= Master Strategy Lab (QA / validation) =======================
+// Read + execute endpoints for the Master Strategy Lab screen. These run the
+// REAL engine through backend/qa/* and never modify strategy logic. Gated on the
+// "backtesting" permission (admin passes implicitly) - the Lab exposes strategy
+// file hashes and the git commit, which is operator information, not user data.
+//
+// NOTE: nothing here enables live trading. /qa/state only REPORTS a blocked
+// state for the UI to display.
+
+router.get("/qa/state", requirePermission("backtesting"), (_req: Request, res: Response) => {
+  try {
+    res.json({ ...buildLabState(), catalogue: scenarioCatalogue() });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || "Could not build Master Strategy Lab state." });
+  }
+});
+
+// Executes scenarios against the real engine. Body: { kinds?: string[], ids?: string[] }
+router.post("/qa/run", requirePermission("backtesting"), (req: Request, res: Response) => {
+  try {
+    const b = req.body || {};
+    const kinds = Array.isArray(b.kinds) ? b.kinds.filter((k: any) => ["ARBITER", "SCORE", "CANDLE", "FALSE_SETUP"].includes(k)) : undefined;
+    const ids = Array.isArray(b.ids) ? b.ids.filter((i: any) => typeof i === "string").slice(0, 500) : undefined;
+    const summary = runScenarios({ kinds: kinds?.length ? kinds : undefined, ids: ids?.length ? ids : undefined });
+    res.json(summary);
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || "Test run failed." });
+  }
+});
+
+router.get("/qa/run/:runId", requirePermission("backtesting"), (req: Request, res: Response) => {
+  const run = readQaRun(req.params.runId);
+  if (!run) return res.status(404).json({ error: "Test run not found." });
+  res.json(run);
+});
+
+// Records the CURRENT strategy state as the integrity baseline. Admin only and
+// never automatic: doing this silently would let a changed strategy report as
+// intact, which is exactly what the integrity check exists to prevent.
+router.post("/qa/baseline", requireAdmin, (req: Request, res: Response) => {
+  try {
+    const baseline = writeStrategyBaseline();
+    const admin = getSession(bearerToken(req));
+    logAuditEvent({
+      type: "admin_action", userId: admin?.userId ?? null, username: admin?.username ?? null,
+      mode: "admin", result: "success",
+      detail: `recorded Master Strategy baseline at commit ${baseline.commit ?? "unknown"} (${baseline.files.length} files)`,
+    });
+    res.json({ ok: true, baseline, integrity: checkStrategyIntegrity() });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || "Could not record baseline." });
   }
 });
 
