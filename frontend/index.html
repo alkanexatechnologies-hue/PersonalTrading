@@ -461,9 +461,10 @@
         <!-- Persistent NIFTY/BANKNIFTY glance strip, Option Trading desk only. -->
         <div id="index-strip" class="index-strip"></div>
         <div class="tabs" id="tabs">
-          <button class="tab active grp-option" data-tab="oicommand" data-group="option">🎯 Trader Dashboard</button>
+          <button class="tab tab-primary active grp-option" data-tab="oicommand" data-group="option">🎯 Trader Dashboard</button>
           <button class="tab grp-option" data-tab="paper" data-group="option">AI Paper Desk</button>
           <button class="tab grp-option" data-tab="toppicks" data-group="option">Option Top Pick</button>
+          <button class="tab grp-option" data-tab="liquiditystatus" data-group="option">🌊 Liquidity Status</button>
           <button class="tab grp-option" data-tab="earlymoves" data-group="option">⚡ Early Moves</button>
           <button class="tab grp-option" data-tab="tradermind" data-group="option">🧠 Trader Mind</button>
           <button class="tab grp-option" data-tab="strategylab" data-group="option">🔬 Master Strategy Lab</button>
@@ -1171,6 +1172,26 @@
 
         <!-- ================= Top Picks (multi-timeframe) ================= -->
         <div class="tab-panel" id="panel-toppicks">
+          <div class="card otp-card">
+            <div class="card-head">
+              <div>
+                <h3 style="margin:0">Option Top Pick</h3>
+                <div class="wl-sub">Best stock-option opportunities — two separate strategies, never mixed into one score</div>
+              </div>
+              <div class="swing-filters">
+                <button id="otp-refresh" class="ghost">Refresh scan</button>
+              </div>
+            </div>
+            <div id="otp-meta" class="wl-sub" style="margin-bottom:8px"></div>
+            <div class="otp-track">
+              <h4 class="otp-track-title">🌊 Liquidity Directional <span class="wl-sub">— OI + volume + premium confirm a directional move</span></h4>
+              <div id="otp-liquidity-list" class="otp-cand-grid">Scanning…</div>
+            </div>
+            <div class="otp-track">
+              <h4 class="otp-track-title">📐 Stock Setup <span class="wl-sub">— technical structure only, no liquidity confirmation required</span></h4>
+              <div id="otp-setup-list" class="otp-cand-grid">Scanning…</div>
+            </div>
+          </div>
           <div class="card">
             <div class="card-head">
               <div>
@@ -1196,6 +1217,32 @@
           </div>
         </div><!-- /panel-toppicks -->
 
+        <div class="tab-panel" id="panel-liquiditystatus">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h3 style="margin:0">Liquidity Status</h3>
+                <div class="wl-sub">Where is liquidity, which side is building, and is a move starting, continuing or exhausting</div>
+              </div>
+              <div class="swing-filters">
+                <select id="ls-symbol">
+                  <option value="^NSEI">NIFTY</option>
+                  <option value="^NSEBANK">BANKNIFTY</option>
+                  <option value="^CNXFIN">FINNIFTY</option>
+                </select>
+                <button id="ls-refresh" class="ghost">Refresh</button>
+              </div>
+            </div>
+            <div id="ls-body">Loading Liquidity Status…</div>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <div><h3 style="margin:0">Top Liquidity Movers</h3><div class="wl-sub">Stock-level scan — click Refresh to run</div></div>
+              <div class="swing-filters"><button id="ls-scan-refresh" class="ghost">Scan stocks</button></div>
+            </div>
+            <div id="ls-movers-list" class="otp-cand-grid"><div class="otp-empty">Not scanned yet.</div></div>
+          </div>
+        </div><!-- /panel-liquiditystatus -->
 
 
         <!-- ================= Bull % Rank (historical up-day bias) ================= -->

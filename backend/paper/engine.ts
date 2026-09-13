@@ -1591,6 +1591,11 @@ export function getPaperSummary(): any {
     checkLog: s.checkLog || [],
     entryLog: (s.entryLog || []).filter((e) => e.displayed !== false),
     manual: manualSummary(s),
+    // Exposed so read-only advisory features outside this engine (Option Top
+    // Pick) can apply the SAME "just stopped out" cooldown via
+    // stopOutCooldownCheck(stopOutCooldown, symbol, nowEpoch) without this
+    // engine's internal PaperState leaking out.
+    stopOutCooldown: s.stopOutCooldown || {},
   };
 }
 

@@ -26,7 +26,9 @@ export type LogChannel =
   | "arbitration"
   | "verification"   // §C live-verification records — kept separate from trade channels
   | "signal-audit"   // compliance audit trail: one durable record per emitted signal
-  | "agent-narration"; // plain-language guidance produced by the narration agent
+  | "agent-narration" // plain-language guidance produced by the narration agent
+  | "option-top-pick" // Option Top Pick engine evaluations (backend/optionTopPick/)
+  | "liquidity-status"; // Liquidity Status engine evaluations (backend/liquidityStatus/) — distinct from the "liquidity" channel (order-book thinness, paper/ext/liquidityGuard.ts)
 
 export type LogSeverity = "info" | "warn" | "veto";
 export type LogMode = "Directional" | "Scalp" | "Setup" | null;
@@ -48,14 +50,14 @@ export type LogInput = Omit<LogEntry, "id" | "ts"> & { id?: string; ts?: number 
 const DIR = path.join(process.cwd(), "data", "log");
 const DEFAULT_CAP = 800;
 const CHANNEL_CAP: Partial<Record<LogChannel, number>> = {
-  "decision": 800, "opening-bias": 500, "oi-command": 800,
+  "decision": 800, "opening-bias": 500, "oi-command": 800, "option-top-pick": 800, "liquidity-status": 800,
 };
 
 const ALL_CHANNELS: LogChannel[] = [
   "paper-trade", "paper-sell", "decision", "opening-bias", "oi-command",
   "oi-snapshot", "oi-baseline", "oi-hourly-ready", "regime", "liquidity",
   "sentiment", "wall-reaction", "premium-sentiment", "trade-score", "dedup",
-  "arbitration", "verification", "signal-audit", "agent-narration",
+  "arbitration", "verification", "signal-audit", "agent-narration", "option-top-pick", "liquidity-status",
 ];
 
 // ---- generic bounded ring buffer ----

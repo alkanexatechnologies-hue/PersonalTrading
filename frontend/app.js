@@ -73,6 +73,11 @@ async function init() {
 
   // Heavy scans are staggered so Groww is not hammered on login (no hang).
   setTimeout(() => loadTopPicks(true), 2500);
+  setTimeout(() => loadOptionTopPick(), 5000); // scans ~60 stocks - stays clear of the earlier, cheaper staggered loaders
+  if (el("otp-refresh")) el("otp-refresh").addEventListener("click", loadOptionTopPick);
+  if (el("ls-refresh")) el("ls-refresh").addEventListener("click", loadLiquidityStatusScreen);
+  if (el("ls-symbol")) el("ls-symbol").addEventListener("change", loadLiquidityStatusScreen);
+  if (el("ls-scan-refresh")) el("ls-scan-refresh").addEventListener("click", loadLiquidityMovers);
   setTimeout(() => { if (isMarketOpen() || isFeedWindow()) loadTopOpportunities(); }, 4000);
   setInterval(() => { if (isMarketOpen() || isFeedWindow()) loadTopOpportunities(); }, 60 * 1000);
   startLiveTicker();
@@ -1865,6 +1870,7 @@ function switchTab(name) {
   if (name === "todaymovers" && !state.todayMoversLoaded) { state.todayMoversLoaded = true; loadTodayMovers(); }
 
   if (name === "toppicks" && !state.topPicksLoaded) { state.topPicksLoaded = true; loadTopPicks(); }
+  if (name === "liquiditystatus" && !state.liquidityStatusLoaded) { state.liquidityStatusLoaded = true; loadLiquidityStatusScreen(); }
   if (name === "bullrank" && !state.bullRankLoaded) { state.bullRankLoaded = true; loadBullRank(); }
   if (name === "stockoptions" && !state.stockOptionsInit) { state.stockOptionsInit = true; initStockOptions(); }
 
@@ -1957,7 +1963,7 @@ const MODE_KEY = "nsa_mode";
 const VALID_MODES = ["option", "stockOption", "swing", "dhanbacktest"];
 const MODE_FIRST = { option: "oicommand", stockOption: "stockoptions", swing: "news", dhanbacktest: "dhanbacktest" };
 const MODE_TABS = {
-  option: ["oicommand", "paper", "toppicks", "earlymoves", "tradermind", "strategylab"],
+  option: ["oicommand", "paper", "toppicks", "liquiditystatus", "earlymoves", "tradermind", "strategylab"],
   // Paper Desk and Top Pick are shared with Option Trading (same panels, already
   // pool-filtered/labelled by kind) rather than duplicated for this desk.
   stockOption: ["stockoptions", "paper", "toppicks"],
@@ -6005,6 +6011,223 @@ function renderHourOutlook(d) {
   box.innerHTML = `
     <div class="ho-head">🧭 अगले 1 घंटे का रुख <span class="wl-sub">(EMA21/EMA50 + VWAP + RSI + ADX · 15m) · updated ${when} IST ${d.marketOpen ? "" : "· market बंद"}</span></div>
     <div class="ho-cards">${cards}</div>`;
+}
+
+// ---------- Option Top Pick (best stock-option scanner, two separate tracks) ----------
+function otpDecisionClass(decision) {
+  return "decision-" + String(decision).toLowerCase().replace(/[^a-z]+/g, "-").replace(/(^-|-$)/g, "");
+}
+
+function renderOtpCandidate(c) {
+  const dcls = otpDecisionClass(c.decision);
+  const sideCls = c.direction === "Bearish" ? "bearish" : "bullish";
+  const opt = c.selectedOption;
+  const facts = [
+    ["Movement", c.movementStage],
+    ["VWAP", c.structure.vwapStatus],
+    ["EMA", c.structure.emaStructure],
+    ["Score", c.qualityScore.score + "/100"],
+  ];
+  if (c.track === "LIQUIDITY_DIRECTIONAL" && c.liquidityFlow) {
+    facts.push(["Liquidity", c.liquidityFlow.label], ["RVOL", c.liquidityFlow.rvol != null ? fmt(c.liquidityFlow.rvol, 2) + "x" : "—"]);
+  } else {
+    facts.push(["OI Structure", c.oi.oiVerdict], ["PCR", c.oi.pcr != null ? fmt(c.oi.pcr, 2) : "—"]);
+  }
+  const factsHtml = facts.map(([k, v]) => `<div><span>${k}</span><b>${v ?? "—"}</b></div>`).join("");
+
+  const levelsHtml = c.levels ? `
+    <div class="otp-cand-levels">
+      <div><span class="wl-sub">Entry</span><b>₹${fmt(c.levels.entry)}</b></div>
+      <div><span class="wl-sub">Target 1</span><b>₹${fmt(c.levels.target1)}</b></div>
+      <div><span class="wl-sub">Target 2</span><b>₹${fmt(c.levels.target2)}</b></div>
+      <div><span class="wl-sub">Stop</span><b>₹${fmt(c.levels.stop)}</b></div>
+      <div><span class="wl-sub">R:R</span><b>${c.levels.riskReward != null ? "1:" + fmt(c.levels.riskReward, 1) : "—"}</b></div>
+    </div>` : "";
+
+  const reasonsHtml = (!c.gates.allPass && c.reasons.length) ? `<div class="otp-cand-reasons">${c.reasons.join(" · ")}</div>` : "";
+
+  return `<article class="otp-cand ${dcls}">
+    <div class="otp-cand-head">
+      <span class="otp-cand-name">${c.name}</span>
+      <span class="otp-cand-decision ${dcls}">${c.decision}</span>
+    </div>
+    ${opt ? `<div class="otp-cand-side ${sideCls}">${opt.side === "CE" ? "BUY CE" : "BUY PE"} · ${opt.strike} <span class="wl-sub" style="font-size:12px">₹${fmt(opt.ltp)}</span></div>` : ""}
+    <div class="otp-cand-grid-facts">${factsHtml}</div>
+    ${levelsHtml}
+    <div class="otp-cand-commentary">${c.commentary}</div>
+    ${reasonsHtml}
+  </article>`;
+}
+
+function renderOtpList(elId, list) {
+  const box = el(elId);
+  if (!box) return;
+  box.innerHTML = list && list.length ? list.map(renderOtpCandidate).join("") : '<div class="otp-empty">No candidates clear the bar right now — no trade preferred over a low-quality one.</div>';
+}
+
+let otpBusy = false;
+async function loadOptionTopPick() {
+  const meta = el("otp-meta");
+  if (otpBusy) return;
+  otpBusy = true;
+  try {
+    const d = await fetchJSON("/api/option-top-pick/scan", 60000);
+    if (d && d.error) { if (meta) meta.textContent = d.error; return; }
+    renderOtpList("otp-liquidity-list", d.liquidityDirectional);
+    renderOtpList("otp-setup-list", d.stockSetup);
+    if (meta) meta.textContent = `Scanned ${d.scannedCount}/${d.eligibleCount} F&O stocks · updated ${new Date(d.generatedAt * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })} IST · ${d.disclaimer || ""}`;
+  } catch (e) {
+    if (meta) meta.textContent = "Option Top Pick scan unavailable: " + e.message;
+  } finally {
+    otpBusy = false;
+  }
+}
+
+// ---------- Liquidity Status (trader-first liquidity + market-move intelligence) ----------
+const LS_SHIFT_CLASS = { "Strong Bullish": "bullish", "Bullish": "bullish", "Strong Bearish": "bearish", "Bearish": "bearish", "Neutral": "neutral", "Conflict": "conflict" };
+const LS_SHIFT_ICON = { "Strong Bullish": "🟢", "Bullish": "🟢", "Strong Bearish": "🔴", "Bearish": "🔴", "Neutral": "⚪", "Conflict": "⚠️" };
+
+function lsFact(label, value) {
+  return `<div class="ls-fact"><span>${label}</span><b>${value ?? "—"}</b></div>`;
+}
+
+function renderLiquidityStatus(d) {
+  const box = el("ls-body");
+  if (!box || !d) return;
+  const shiftCls = LS_SHIFT_CLASS[d.liquidityShift] || "neutral";
+  const icon = LS_SHIFT_ICON[d.liquidityShift] || "⚪";
+
+  // Section 22 — one-glance summary.
+  const glance = `
+    <div class="ls-glance ls-${shiftCls}">
+      <div class="ls-glance-head">${icon} ${d.liquidityShift.toUpperCase()}</div>
+      <div class="ls-fact-grid">
+        ${lsFact("Move", d.moveStage.replace(/_/g, " "))}
+        ${lsFact("Liquidity", d.directionalConfidence.quality)}
+        ${lsFact("Direction", d.directionBias)}
+        ${lsFact("Score", d.moveStrength + "/100")}
+        ${lsFact("Support", d.battlefield.support.price)}
+        ${lsFact("Resistance", d.battlefield.resistance.price)}
+        ${lsFact("Trigger", d.trigger ? d.trigger.level : "—")}
+        ${lsFact("Invalidation", d.invalidation ? d.invalidation.level : "—")}
+      </div>
+      <div class="ls-action">ACTION: <b>${d.traderAction}</b></div>
+      <div class="wl-sub">${d.traderActionDetail}</div>
+    </div>`;
+
+  const conflictBanner = d.conflict.conflict
+    ? `<div class="ls-conflict">⚠ LIQUIDITY CONFLICT — ${d.conflict.reason}</div>` : "";
+
+  // Section 1 — system view + trader preparation.
+  const systemView = `<div class="otp-cand-commentary" style="margin-top:10px"><b>System View:</b> ${d.systemView}</div>
+    <div class="otp-cand-commentary"><b>Trader Preparation:</b> ${d.traderPreparation}</div>`;
+
+  // Section 3 — exact levels + distances.
+  const levelRows = d.keyLevels.map((lv) => `
+    <div class="ls-level-row">
+      <span class="ls-level-label">${lv.label}</span>
+      <b>${lv.price ?? "—"}</b>
+      <span class="ls-level-meta">${lv.oi != null ? "OI " + fmt(lv.oi, 0) : ""} ${lv.oiChange != null ? (lv.oiChange >= 0 ? "+" : "") + fmt(lv.oiChange, 0) : ""} · ${lv.strength}${lv.distancePts != null ? " · " + Math.abs(lv.distancePts).toFixed(0) + " pts " + (lv.label.includes("SUPPORT") ? "below" : "above") : ""}</span>
+    </div>`).join("");
+
+  // Section 9 — battlefield visual.
+  const sup = d.battlefield.support, res = d.battlefield.resistance;
+  const total = (sup.price != null && res.price != null) ? Math.max(1, res.price - sup.price) : 1;
+  const spotPct = (sup.price != null && res.price != null) ? Math.min(100, Math.max(0, ((d.spot - sup.price) / total) * 100)) : 50;
+  const battlefield = (sup.price != null && res.price != null) ? `
+    <div class="ls-battlefield">
+      <div class="ls-bf-row"><span>CALL RESISTANCE ${res.price}</span><div class="ls-bf-bar ls-bf-res" style="width:${res.strength === "STRONG" ? 90 : res.strength === "MODERATE" ? 60 : 30}%"></div><span class="wl-sub">${res.strength}</span></div>
+      <div class="ls-bf-spot" style="left:${spotPct}%"><span>● ${fmt(d.spot)}</span></div>
+      <div class="ls-bf-row"><span>PUT SUPPORT ${sup.price}</span><div class="ls-bf-bar ls-bf-sup" style="width:${sup.strength === "STRONG" ? 90 : sup.strength === "MODERATE" ? 60 : 30}%"></div><span class="wl-sub">${sup.strength}</span></div>
+    </div>` : "";
+
+  // Sections 2 & 18 — evidence.
+  const evidenceRows = d.evidence.length ? d.evidence.map((e) => `
+    <div class="ls-evidence-row">
+      <b>${e.side} ${e.strike ?? ""}</b>
+      <span>OI ${e.oiChange != null ? (e.oiChange >= 0 ? "+" : "") + fmt(e.oiChange, 0) : "—"}</span>
+      <span>Premium ${e.premiumChangePct != null ? (e.premiumChangePct >= 0 ? "+" : "") + fmt(e.premiumChangePct, 1) + "%" : "—"}</span>
+      <span class="ls-interp">${e.interpretation}</span>
+    </div>`).join("") : '<div class="wl-sub">No OI baseline yet today — evidence unavailable.</div>';
+
+  // Section 6 — flow score breakdown.
+  const scoreRows = d.liquidityFlowScore.breakdown.map((b) => `<div class="ls-score-row"><span>${b.label} (${b.weightPct})</span><b>${b.contribution}</b></div>`).join("");
+
+  // Section 8 — confirmation checklist.
+  const confirmedHtml = d.confirmations.confirmed.map((c) => `<li class="ls-ok">✓ ${c.label}</li>`).join("");
+  const remainingHtml = d.confirmations.remaining.map((c) => `<li class="ls-warn">⚠ ${c.label}</li>`).join("");
+
+  // Section 13 — early warnings.
+  const warnHtml = d.earlyWarnings.length ? d.earlyWarnings.map((w) => `<div class="ls-warning ${w.severity}">⚡ ${w.text}</div>`).join("") : "";
+
+  // Sections 14-15 — shift history.
+  const historyHtml = d.shiftHistory.map((p) => `<span class="ls-hist-point">${p.time} <b>${p.state}</b></span>`).join(" → ");
+
+  // Section 16 — freshness.
+  const fr = d.freshness;
+  const freshness = `<div class="ls-freshness">Price ${fr.priceAgeSec}s ago · OI ${fr.oiAgeSec != null ? fr.oiAgeSec + "s ago" : "n/a"} ${fr.oiStale ? '<span class="ls-stale">OI DATA STALE</span>' : ""} ${fr.liveFeedStale ? '<span class="ls-stale">LIVE FEED STALE</span>' : ""}</div>`;
+
+  box.innerHTML = `
+    ${glance}
+    ${conflictBanner}
+    ${systemView}
+    <div class="ls-grid-2">
+      <div class="ls-panel"><h5>Key Levels</h5>${levelRows}</div>
+      <div class="ls-panel"><h5>Market Battlefield</h5>${battlefield}</div>
+    </div>
+    <div class="ls-panel"><h5>Big Money / Liquidity Hint</h5>${evidenceRows}</div>
+    <div class="ls-grid-2">
+      <div class="ls-panel"><h5>Liquidity Flow Score — ${d.liquidityFlowScore.score}/100</h5>${scoreRows}</div>
+      <div class="ls-panel"><h5>Confirmation Status</h5><ul class="ls-checklist">${confirmedHtml}${remainingHtml}</ul></div>
+    </div>
+    ${warnHtml}
+    ${historyHtml ? `<div class="ls-panel"><h5>Time-Based Change</h5><div class="ls-history">${historyHtml}</div></div>` : ""}
+    <div class="wl-sub">${d.disclaimer || ""}</div>
+    ${freshness}`;
+}
+
+let lsBusy = false;
+async function loadLiquidityStatusScreen() {
+  const sel = el("ls-symbol");
+  const box = el("ls-body");
+  if (!box || lsBusy) return;
+  const symbol = (sel && sel.value) || "^NSEI";
+  lsBusy = true;
+  try {
+    const d = await fetchJSON(`/api/liquidity-status/${encodeURIComponent(symbol)}`, 30000);
+    if (d && d.error) { box.innerHTML = `<div class="wl-sub">${d.error}</div>`; return; }
+    renderLiquidityStatus(d);
+  } catch (e) {
+    box.innerHTML = `<div class="wl-sub">Liquidity Status unavailable: ${e.message}</div>`;
+  } finally {
+    lsBusy = false;
+  }
+}
+
+function renderLiquidityMover(m) {
+  const cls = m.direction === "Bearish" ? "bearish" : m.direction === "Bullish" ? "bullish" : "neutral";
+  return `<article class="otp-cand">
+    <div class="otp-cand-head"><span class="otp-cand-name">${m.name}</span><span class="wl-sub">${m.liquidityFlow}</span></div>
+    <div class="otp-cand-side ${cls}">${m.direction} · ${m.moveStage.replace(/_/g, " ")}</div>
+    <div class="otp-cand-grid-facts"><div><span>Score</span><b>${m.score}/100</b></div></div>
+  </article>`;
+}
+
+let lsScanBusy = false;
+async function loadLiquidityMovers() {
+  const box = el("ls-movers-list");
+  if (!box || lsScanBusy) return;
+  lsScanBusy = true;
+  box.innerHTML = '<div class="otp-empty">Scanning stocks…</div>';
+  try {
+    const d = await fetchJSON("/api/liquidity-status/scan/movers", 60000);
+    if (d && d.error) { box.innerHTML = `<div class="otp-empty">${d.error}</div>`; return; }
+    box.innerHTML = d.topMovers && d.topMovers.length ? d.topMovers.map(renderLiquidityMover).join("") : '<div class="otp-empty">No movers cleared the bar right now.</div>';
+  } catch (e) {
+    box.innerHTML = `<div class="otp-empty">Scan unavailable: ${e.message}</div>`;
+  } finally {
+    lsScanBusy = false;
+  }
 }
 
 // ---------- top picks (multi-timeframe) ----------

@@ -168,6 +168,13 @@ import {
 import { buildMarketCommentary, detectStructure, formatTradeReview } from "../commentary/marketCommentary";
 import { CONFIG, DEFAULT_SYMBOLS, DISCLAIMER, SymbolDef, nearestStrike, SWING_SYMBOLS, findSymbolDef, ALL_SYMBOLS } from "../config";
 import { istDateOfSec } from "../util/istTime";
+import { getOptionTopPickAuditLog } from "../optionTopPick/auditLog";
+import { scanOptionTopPick, evaluateStockBothTracks } from "../optionTopPick/scanner";
+import { OptionTopPickDeps } from "../optionTopPick/types";
+import { evaluateLiquidityStatus } from "../liquidityStatus/engine";
+import { scanLiquidityStatus } from "../liquidityStatus/scanner";
+import { getLiquidityStatusAuditLog } from "../liquidityStatus/auditLog";
+import { LiquidityStatusDeps } from "../liquidityStatus/types";
 import { dayHighLow } from "../indicators/dayRange";
 import { Interval, NextDayPick, Opportunity, TradeAlert, OiAnalysis } from "../types";
 
@@ -4731,6 +4738,97 @@ router.get("/oi-command/backtest", async (req: Request, res: Response) => {
     res.json({ available: true, symbol: def.symbol, name: def.name, date, entry: entryHM, live, log });
   } catch (e: any) {
     res.status(502).json({ available: false, error: e?.message || "oi-command backtest failed" });
+  }
+});
+
+// ============================ Option Top Pick — stock scanner (backend/optionTopPick/) ============================
+// Dependency-injected per OptionTopPickDeps so backend/optionTopPick/ never imports
+// upward from routes/ (circular). getOi() never throws — a chain that's genuinely
+// unavailable for a given stock degrades that candidate gracefully instead of
+// failing the whole scan.
+const otpDeps: OptionTopPickDeps = {
+  listEligibleStocks: () => DEFAULT_SYMBOLS.filter((d) => d.type === "equity" && d.fno),
+  getCandles: (symbol, interval) => getCandlesCached(symbol, interval as Interval),
+  getOi: async (symbol) => {
+    const d = findSymbolDef(symbol);
+    if (!d) return null;
+    try { return await getOiCached(d); } catch { return null; }
+  },
+  nowEpochSec: () => Math.floor(Date.now() / 1000),
+};
+
+// Scanning ~60 stocks (candles + OI chain each) is expensive - cached like
+// /top-picks so repeated tab views/refreshes within the window are free.
+router.get("/option-top-pick/scan", async (_req: Request, res: Response) => {
+  try {
+    const result = await cached("otp:scan", 90_000, () => scanOptionTopPick(otpDeps));
+    res.json(result);
+  } catch (e: any) {
+    res.status(502).json({ error: e?.message || "Option Top Pick scan failed" });
+  }
+});
+
+router.get("/option-top-pick/:symbol", async (req: Request, res: Response) => {
+  try {
+    const symbol = req.params.symbol;
+    const def = findSymbolDef(symbol);
+    if (!def) return res.status(404).json({ error: `Unknown symbol: ${symbol}` });
+    const result = await evaluateStockBothTracks(symbol, otpDeps);
+    res.json(result);
+  } catch (e: any) {
+    res.status(502).json({ error: e?.message || "Failed to evaluate Option Top Pick" });
+  }
+});
+
+router.get("/option-top-pick/:symbol/audit", (req: Request, res: Response) => {
+  try {
+    res.json({ entries: getOptionTopPickAuditLog({ symbol: req.params.symbol, limit: Number(req.query.limit) || 50 }) });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || "Failed to read audit log" });
+  }
+});
+
+// ============================ Liquidity Status (backend/liquidityStatus/) ============================
+// Same dependency-injection convention as Option Top Pick's otpDeps above - kept
+// as a separate deps object (not reused) since getOi()'s contract differs
+// slightly (returns OiAnalysis | null here vs a thrown/degraded OiAnalysis there).
+const liquidityStatusDeps: LiquidityStatusDeps = {
+  listEligibleStocks: () => DEFAULT_SYMBOLS.filter((d) => d.type === "equity" && d.fno),
+  getCandles: (symbol, interval) => getCandlesCached(symbol, interval as Interval),
+  getOi: async (symbol) => {
+    const d = findSymbolDef(symbol);
+    if (!d) return null;
+    try { return await getOiCached(d); } catch { return null; }
+  },
+  nowEpochSec: () => Math.floor(Date.now() / 1000),
+};
+
+router.get("/liquidity-status/:symbol", async (req: Request, res: Response) => {
+  try {
+    const symbol = req.params.symbol;
+    const def = findSymbolDef(symbol);
+    if (!def) return res.status(404).json({ error: `Unknown symbol: ${symbol}` });
+    const result = await cached(`ls:${symbol}`, 15_000, () => evaluateLiquidityStatus(symbol, liquidityStatusDeps));
+    res.json(result);
+  } catch (e: any) {
+    res.status(502).json({ error: e?.message || "Liquidity Status evaluation failed" });
+  }
+});
+
+router.get("/liquidity-status/scan/movers", async (_req: Request, res: Response) => {
+  try {
+    const result = await cached("ls:scan", 90_000, () => scanLiquidityStatus(liquidityStatusDeps));
+    res.json(result);
+  } catch (e: any) {
+    res.status(502).json({ error: e?.message || "Liquidity Status scan failed" });
+  }
+});
+
+router.get("/liquidity-status/:symbol/audit", (req: Request, res: Response) => {
+  try {
+    res.json({ entries: getLiquidityStatusAuditLog({ symbol: req.params.symbol, limit: Number(req.query.limit) || 50 }) });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || "Failed to read audit log" });
   }
 });
 
