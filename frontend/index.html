@@ -118,31 +118,85 @@
     <!-- ============ Desk selector (shown after login) ============ -->
     <div id="mode-gate" class="mode-gate hidden">
       <div class="mg-inner">
-        <div class="lg-logo"><span class="lg-mkt">Market</span><span class="lg-pil">Pil</span></div>
-        <p class="mg-sub">Choose your desk</p>
+        <!-- Home top bar: market status, live clock, notifications shortcut, identity -->
+        <div class="home-topbar">
+          <div class="lg-logo home-logo"><span class="lg-mkt">Market</span><span class="lg-pil">Pil</span></div>
+          <div class="home-topbar-right">
+            <span id="home-market-status" data-market-status class="pill market-status">market: -</span>
+            <span id="home-clock" data-clock class="clock"></span>
+            <button type="button" id="home-bell" class="home-bell" title="Open Option Trading alerts" aria-label="Notifications">🔔</button>
+            <div class="home-identity">
+              <button type="button" id="home-avatar-btn" class="home-avatar-btn">
+                <span id="home-avatar-initials" class="home-avatar">·</span>
+                <span class="home-identity-text">
+                  <b id="home-username">—</b>
+                  <span id="home-role" class="wl-sub">—</span>
+                </span>
+                <span class="home-caret">▾</span>
+              </button>
+              <div id="home-identity-menu" class="home-identity-menu hidden">
+                <button type="button" id="home-admin-settings" class="home-menu-item hidden">⚙ Admin Settings</button>
+                <button type="button" id="home-logout" class="home-menu-item">🚪 Logout</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Welcome banner -->
+        <div class="home-welcome">
+          <div>
+            <div class="home-welcome-hi">Welcome Back,</div>
+            <div class="home-welcome-name" id="home-welcome-name">Trader</div>
+            <p class="home-welcome-sub">Choose your trading desk to get started.</p>
+          </div>
+          <div class="home-quote">“Discipline today, better trades tomorrow.”<span>— MarketPil</span></div>
+        </div>
+
         <div class="mg-btns">
-          <button type="button" class="mg-btn mg-option" data-mode="option">
+          <article class="mg-btn mg-option" data-mode="option" role="button" tabindex="0">
             <span class="mg-ico">🎯</span>
             <span class="mg-t">Option Trading</span>
             <span class="mg-d">Trader Dashboard · AI Paper Desk · Option Top Pick · Early Moves</span>
-          </button>
-          <button type="button" class="mg-btn mg-stockoption" data-mode="stockOption">
+            <button type="button" class="mg-cta">Open Option Trading →</button>
+          </article>
+          <article class="mg-btn mg-stockoption" data-mode="stockOption" role="button" tabindex="0">
             <span class="mg-ico">📊</span>
             <span class="mg-t">Stock Option Trading</span>
             <span class="mg-d">Stock Options · AI Paper Desk · Option Top Pick</span>
-          </button>
-          <button type="button" class="mg-btn mg-swing" data-mode="swing">
+            <button type="button" class="mg-cta">Open Stock Options →</button>
+          </article>
+          <article class="mg-btn mg-swing" data-mode="swing" role="button" tabindex="0">
             <span class="mg-ico">📈</span>
             <span class="mg-t">Stock Swing Trading</span>
             <span class="mg-d">Market News · Bull % Rank · Today Big Movers · Selected Stock · Big Move · Move Timing</span>
-          </button>
-          <button type="button" class="mg-btn mg-dhanbacktest" data-mode="dhanbacktest">
+            <button type="button" class="mg-cta">Open Swing Trading →</button>
+          </article>
+          <article class="mg-btn mg-dhanbacktest" data-mode="dhanbacktest" role="button" tabindex="0">
             <span class="mg-ico">🧪</span>
             <span class="mg-t">Backtest (Dhan Data)</span>
             <span class="mg-d">2-year historical strategy testing — EMA/Momentum/RSI/MACD/Bollinger/Supertrend/Market Regime (technical logic only, no OI)</span>
-          </button>
+            <button type="button" class="mg-cta">Open Backtest →</button>
+          </article>
         </div>
         <button type="button" id="mg-close" class="mg-close hidden">✕ Close</button>
+
+        <!-- Live index strip + real feed status (replaces any invented stats) -->
+        <div class="home-ticker">
+          <span class="home-ticker-item"><b>NIFTY 50</b><em id="home-tk-nsei">—</em></span>
+          <span class="home-ticker-item"><b>BANKNIFTY</b><em id="home-tk-nsebank">—</em></span>
+          <span class="home-ticker-item"><b>FINNIFTY</b><em id="home-tk-cnxfin">—</em></span>
+          <span class="home-ticker-item home-ticker-provider"><b>Data feed</b><em id="home-tk-provider">—</em></span>
+        </div>
+
+        <div id="home-tip" class="home-tip">
+          <span>💡 <b>Pro Tip:</b> Start with Option Trading for today's market view, or run a backtest to validate your strategy.</span>
+          <button type="button" id="home-tip-close" aria-label="Dismiss">✕</button>
+        </div>
+
+        <div class="home-footer">
+          <span class="home-footer-brand">MarketPil</span>
+          <span id="home-footer-disclaimer" class="wl-sub"></span>
+        </div>
       </div>
     </div>
 
@@ -153,6 +207,7 @@
         <h2>ADMIN CONTROL CENTER</h2>
         <div class="ac-head-actions">
           <span id="ac-whoami" class="wl-sub"></span>
+          <button type="button" id="ac-back-home" class="pill-btn">← Back to Home</button>
           <button type="button" id="ac-logout" class="pill-btn">🚪 Logout</button>
         </div>
       </header>
@@ -334,7 +389,7 @@
     <header class="topbar">
       <div class="topbar-right">
         <!-- Consolidated status row: one pill per distinct fact (no repeated market/provider). -->
-        <span id="market-status" class="pill market-status" title="Market session + last data refresh (IST). Groww historical only when closed.">market: -</span>
+        <span id="market-status" data-market-status class="pill market-status" title="Market session + last data refresh (IST). Groww historical only when closed.">market: -</span>
         <button type="button" id="feed-groww" class="pill-btn feed-tog on" title="Groww is the ONLY market-data source (quotes, candles, historical, option chain, OI). Click to turn the feed on/off.">Groww · single source · ON</button>
         <span id="best-trade" class="pill best-trade" title="Best option trade right now on the 15-min model (safety-gated). Shown across all sections.">best 15m: —</span>
         <span id="regime-ind" class="pill" title="Market regime from NIFTY 15m ADX. Range-bound = avoid buying options (theta bleed).">regime: -</span>
@@ -352,7 +407,7 @@
         <button id="dhan-btn" class="pill-btn hidden">Dhan</button>
         <button id="rotate-login-btn" class="pill-btn" title="Turant naya login password generate karke email/Telegram par bhej do (agar configured hai) — 08:00 IST ka wait nahi karna padega">🔄 Rotate Login</button>
         <button id="logout-btn" class="pill-btn" title="Session band karke wapas login screen par jayein">🚪 Logout</button>
-        <span id="clock" class="clock"></span>
+        <span id="clock" data-clock class="clock"></span>
       </div>
 
     </header>

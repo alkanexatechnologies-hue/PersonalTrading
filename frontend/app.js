@@ -39,6 +39,8 @@ async function loadSymbolsAndWatchlist() {
   state.symbols = res.symbols;
   if (el("provider-badge")) el("provider-badge").textContent = "provider: " + res.provider;
   if (el("disclaimer")) el("disclaimer").textContent = res.disclaimer;
+  if (el("home-footer-disclaimer")) el("home-footer-disclaimer").textContent = res.disclaimer || "";
+  if (el("home-tk-provider")) el("home-tk-provider").textContent = res.provider || "—";
   renderWatchlist();
   if (!state.active && state.symbols.length) selectSymbol(state.symbols[0].symbol);
 }
@@ -166,17 +168,22 @@ async function init() {
 }
 
 function updateMarketStatus() {
-  const node = el("market-status");
-  if (!node) return;
+  // Updates every market-status pill on the page (the main app topbar's
+  // #market-status AND the Home screen's #home-market-status) from one
+  // real, shared isMarketOpen() check - no separate/duplicated status logic.
+  const nodes = document.querySelectorAll("[data-market-status]");
+  if (!nodes.length) return;
   const open = isMarketOpen();
   const nowIST = new Date(Date.now() + (new Date().getTimezoneOffset() + 330) * 60000);
   const day = nowIST.getDay();
   const mins = nowIST.getHours() * 60 + nowIST.getMinutes();
   const preOpen = day >= 1 && day <= 5 && mins >= 540 && mins < 555; // 09:00-09:15
   const t = state.lastRefreshIst ? " · " + state.lastRefreshIst : "";
-  if (open) { node.textContent = "● Market OPEN" + t; node.className = "pill market-status open"; }
-  else if (preOpen) { node.textContent = "● Pre-open" + t; node.className = "pill market-status pre"; }
-  else { node.textContent = "● Market CLOSED" + t; node.className = "pill market-status muted"; }
+  let text, cls;
+  if (open) { text = "● Market OPEN" + t; cls = "pill market-status open"; }
+  else if (preOpen) { text = "● Pre-open" + t; cls = "pill market-status pre"; }
+  else { text = "● Market CLOSED" + t; cls = "pill market-status muted"; }
+  nodes.forEach((node) => { node.textContent = text; node.className = cls; });
 }
 
 // Live-feed freshness indicator: shows source, last tick, and refresh cadence.
@@ -1959,13 +1966,21 @@ const MODE_TABS = {
 };
 
 function setupModeGate() {
-  document.querySelectorAll("#mode-gate [data-mode]").forEach((b) =>
-    b.addEventListener("click", () => chooseMode(b.getAttribute("data-mode")))
-  );
+  // Desk cards are <article role="button"> (not a real <button>) so the CTA
+  // <button class="mg-cta"> inside each one can be a real, separately
+  // clickable element without illegal nested <button> markup - a click on the
+  // CTA bubbles up to this same delegated listener, so it only ever fires once.
+  document.querySelectorAll("#mode-gate [data-mode]").forEach((b) => {
+    b.addEventListener("click", () => chooseMode(b.getAttribute("data-mode")));
+    b.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); chooseMode(b.getAttribute("data-mode")); }
+    });
+  });
   const close = el("mg-close");
   if (close) close.addEventListener("click", () => el("mode-gate").classList.add("hidden"));
   const sw = el("mode-switch");
   if (sw) sw.addEventListener("click", () => showModeGate(true));
+  setupHomeChrome();
 }
 
 function showModeGate(allowClose) {
@@ -1974,6 +1989,9 @@ function showModeGate(allowClose) {
   const close = el("mg-close");
   if (close) close.classList.toggle("hidden", !allowClose);
   gate.classList.remove("hidden");
+  // Refresh the Home screen's live index ticker every time it's (re)shown -
+  // both the initial post-login landing and a later manual "switch desk".
+  loadHomeTicker();
 }
 
 function chooseMode(mode) {
@@ -2004,12 +2022,13 @@ function applyMode(mode) {
   else syncMobileNav(activeTab);
 }
 
-// Called once the login gate is cleared: apply the saved desk or ask for one.
+// Called once login is confirmed: always land on Home ("Choose your desk"),
+// for every role. Previously this skipped straight to the last-used desk
+// (localStorage MODE_KEY) if one was remembered - now Home is the required
+// landing screen every time; picking a card (chooseMode()) still remembers
+// the choice for the "switch desk" convenience elsewhere in the app.
 function enterApp() {
-  let saved = null;
-  try { saved = localStorage.getItem(MODE_KEY); } catch (_) {}
-  if (VALID_MODES.includes(saved)) applyMode(saved);
-  else showModeGate(false);
+  showModeGate(false);
 }
 
 // Highlight the bottom-nav item matching the active tab; fall back to "More".
@@ -8673,7 +8692,8 @@ function cssId(sym) { return sym.replace(/[^a-zA-Z0-9]/g, "_"); }
 function startClock() {
   const tick = () => {
     const now = new Date();
-    el("clock").textContent = now.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" }) + " IST";
+    const text = now.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" }) + " IST";
+    document.querySelectorAll("[data-clock]").forEach((n) => { n.textContent = text; });
   };
   tick();
   setInterval(tick, 1000);
@@ -8724,8 +8744,89 @@ function enterByRole(role, permissions, username) {
     state.dashboardInited = true;
     init();
   }
-  if (state.role === "admin") enterAdminMode();
-  else enterApp();
+  renderHomeIdentity();
+  // Home ("Choose your desk") is the required landing screen for every role,
+  // admin included - the Admin Control Center used to be admin's forced
+  // landing page instead; it's now reached on demand from Home's "⚙ Admin
+  // Settings" menu (see renderHomeIdentity()/enterAdminMode()) so an admin
+  // sees the same first screen as everyone else and picks a desk explicitly.
+  enterApp();
+}
+
+// Fills in the Home screen's identity block (avatar initials, username, role)
+// and shows/hides the admin-only menu item. Called once per login from
+// enterByRole() - the dropdown/menu wiring itself is idempotent (setupHomeChrome()
+// runs once at page load, before auth, since it's pure event-listener setup).
+function renderHomeIdentity() {
+  const username = state.session?.username || "Trader";
+  const isAdmin = state.role === "admin";
+  const nameEl = el("home-username");
+  if (nameEl) nameEl.textContent = username;
+  const welcomeEl = el("home-welcome-name");
+  if (welcomeEl) welcomeEl.textContent = username;
+  const roleEl = el("home-role");
+  if (roleEl) roleEl.textContent = isAdmin ? "Admin" : "Trader";
+  const initialsEl = el("home-avatar-initials");
+  if (initialsEl) initialsEl.textContent = username.slice(0, 2).toUpperCase();
+  const adminBtn = el("home-admin-settings");
+  if (adminBtn) adminBtn.classList.toggle("hidden", !isAdmin);
+}
+
+// Pure UI wiring for the Home screen's top bar (avatar dropdown, notification
+// bell shortcut, pro-tip dismiss). No auth-gated data here, so - like
+// setupModeGate()/setupMobileNav() - this runs once at page load regardless
+// of login state.
+function setupHomeChrome() {
+  const avatarBtn = el("home-avatar-btn");
+  const menu = el("home-identity-menu");
+  if (avatarBtn && menu) {
+    avatarBtn.addEventListener("click", (e) => { e.stopPropagation(); menu.classList.toggle("hidden"); });
+    document.addEventListener("click", (e) => { if (!menu.classList.contains("hidden") && !menu.contains(e.target) && e.target !== avatarBtn) menu.classList.add("hidden"); });
+  }
+  const adminBtn = el("home-admin-settings");
+  if (adminBtn) adminBtn.addEventListener("click", () => { menu?.classList.add("hidden"); enterAdminMode(); });
+  const logoutBtn = el("home-logout");
+  if (logoutBtn) logoutBtn.addEventListener("click", () => { menu?.classList.add("hidden"); doLogout(); });
+  const bell = el("home-bell");
+  if (bell) bell.addEventListener("click", () => chooseMode("option"));
+
+  const tip = el("home-tip");
+  const TIP_KEY = "nsa_home_tip_dismissed";
+  if (tip) {
+    try { if (localStorage.getItem(TIP_KEY) === "1") tip.classList.add("hidden"); } catch (_) {}
+    const closeBtn = el("home-tip-close");
+    if (closeBtn) closeBtn.addEventListener("click", () => {
+      tip.classList.add("hidden");
+      try { localStorage.setItem(TIP_KEY, "1"); } catch (_) {}
+    });
+  }
+}
+
+// Live NIFTY/BANKNIFTY/FINNIFTY strip on the Home screen - the same real
+// /api/quotes endpoint the in-app live ticker already uses (startLiveTicker()),
+// just for the three headline indices. Fetched once whenever Home is (re)shown
+// (see showModeGate()), not on a perpetual timer, so it never adds background
+// load beyond what a normal page view already causes.
+const HOME_INDEX_SYMBOLS = { "^NSEI": "home-tk-nsei", "^NSEBANK": "home-tk-nsebank", "^CNXFIN": "home-tk-cnxfin" };
+async function loadHomeTicker() {
+  try {
+    const syms = Object.keys(HOME_INDEX_SYMBOLS);
+    const d = await fetch("/api/quotes?symbols=" + encodeURIComponent(syms.join(","))).then((r) => r.json());
+    const q = (d && d.quotes) || {};
+    syms.forEach((sym) => {
+      const node = el(HOME_INDEX_SYMBOLS[sym]);
+      if (!node) return;
+      const v = q[sym];
+      if (!v || v.price == null) return;
+      const chg = v.changePercent;
+      node.textContent = fmt(v.price) + (chg != null ? ` (${chg >= 0 ? "+" : ""}${fmt(chg, 2)}%)` : "");
+      node.className = chg == null ? "" : chg >= 0 ? "up" : "down";
+    });
+  } catch (_) { /* Home ticker is a convenience readout - a failed fetch just leaves it blank */ }
+  // Data-feed provider text is set directly by loadSymbolsAndWatchlist() (the
+  // single source of truth for res.provider), not scraped from another DOM
+  // node here, since that fetch and this one aren't ordered relative to each
+  // other and #provider-badge is sometimes still empty at this point.
 }
 
 async function setupLoginGate() {
@@ -8857,14 +8958,22 @@ const PERMISSION_LABELS = {
   aiSignals: "AI Signals", backtesting: "Backtesting", tradeJournal: "Trade Journal", adminReports: "Admin Reports",
 };
 
+// Opened on demand from Home's "⚙ Admin Settings" menu (renderHomeIdentity()) -
+// no longer the forced landing screen for admin. See ac-back-home for the way out.
 function enterAdminMode() {
   const center = el("admin-center");
   if (!center) return;
+  el("mode-gate")?.classList.add("hidden");
   center.classList.remove("hidden");
   const who = el("ac-whoami");
   if (who) who.textContent = `Logged in as: ${state.session?.username || "admin"} · Mode: ADMIN`;
   const logoutBtn = el("ac-logout");
   if (logoutBtn && !logoutBtn.dataset.wired) { logoutBtn.dataset.wired = "1"; logoutBtn.addEventListener("click", doLogout); }
+  const backBtn = el("ac-back-home");
+  if (backBtn && !backBtn.dataset.wired) {
+    backBtn.dataset.wired = "1";
+    backBtn.addEventListener("click", () => { center.classList.add("hidden"); enterApp(); });
+  }
   const createBtn = el("acf-create");
   if (createBtn && !createBtn.dataset.wired) { createBtn.dataset.wired = "1"; createBtn.addEventListener("click", doCreateUser); }
   const showAllChk = el("ac-history-showall");

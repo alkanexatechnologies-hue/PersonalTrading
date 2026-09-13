@@ -2278,10 +2278,14 @@ body.mode-option .index-strip { display: flex; }
    Desk/Top Pick are shared between Option Trading and Stock Option Trading) ============ */
 #tabs .tab.hidden { display: none !important; }
 
-/* Desk selector overlay (shown after login). */
+/* Desk selector overlay (shown after login) - the app's Home / "Choose Your
+   Desk" screen. Kept on the existing #mode-gate element/selectors (mg-btns,
+   [data-mode], showModeGate()/chooseMode()) so the working desk-switch logic
+   is untouched; only the surrounding chrome (topbar/welcome/ticker/footer)
+   and the card styling are new. */
 .mode-gate {
   position: fixed; inset: 0; z-index: 900;
-  display: flex; align-items: center; justify-content: center; padding: 24px 16px;
+  display: flex; align-items: flex-start; justify-content: center; padding: 24px 16px 40px;
   background:
     radial-gradient(circle at 20% 30%, rgba(22,199,132,0.16), transparent 45%),
     radial-gradient(circle at 80% 70%, rgba(59,130,246,0.14), transparent 45%),
@@ -2289,39 +2293,135 @@ body.mode-option .index-strip { display: flex; }
   overflow: auto;
 }
 .mode-gate.hidden { display: none; }
-.mg-inner { width: 100%; max-width: 720px; text-align: center; display: flex; flex-direction: column; align-items: center; }
+.mg-inner { width: 100%; max-width: 1180px; text-align: center; display: flex; flex-direction: column; align-items: center; }
 .mg-sub { font-size: 15px; color: var(--muted); margin: 4px 0 22px; letter-spacing: 0.5px; }
-.mg-btns { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; width: 100%; }
+
+/* ---- Home top bar ---- */
+.home-topbar { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+.home-logo { font-size: 22px; }
+.home-topbar-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.home-bell {
+  background: rgba(255,255,255,0.06); border: 1px solid var(--border); border-radius: 10px;
+  width: 40px; height: 40px; font-size: 17px; cursor: pointer; color: var(--text);
+}
+.home-bell:hover { border-color: rgba(255,255,255,0.25); }
+.home-identity { position: relative; }
+.home-avatar-btn {
+  display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border); border-radius: 12px; padding: 6px 10px 6px 6px; cursor: pointer; color: var(--text);
+  min-height: 44px;
+}
+.home-avatar {
+  width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #16c784, #3b82f6); color: #06110c; font-weight: 800; font-size: 13px; flex: none;
+}
+.home-identity-text { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.25; text-align: left; }
+.home-identity-text b { font-size: 13px; }
+.home-caret { color: var(--muted); font-size: 11px; }
+.home-identity-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); min-width: 190px; z-index: 20;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+}
+.home-identity-menu.hidden { display: none; }
+.home-menu-item {
+  width: 100%; text-align: left; background: transparent; border: none; color: var(--text);
+  padding: 10px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; min-height: 40px;
+}
+.home-menu-item:hover { background: rgba(255,255,255,0.06); }
+.home-menu-item.hidden { display: none; }
+
+/* ---- Welcome banner ---- */
+.home-welcome {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;
+  text-align: left; background: linear-gradient(120deg, rgba(22,60,110,0.55), rgba(16,20,27,0.4));
+  border: 1px solid var(--border); border-radius: 18px; padding: 22px 26px; margin-bottom: 22px;
+}
+.home-welcome-hi { font-size: 15px; color: var(--muted); }
+.home-welcome-name { font-size: 28px; font-weight: 800; background: linear-gradient(90deg, #16c784, #6ea8fe); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.home-welcome-sub { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
+.home-quote { max-width: 280px; font-style: italic; color: var(--muted); font-size: 13px; text-align: right; }
+.home-quote span { display: block; margin-top: 4px; font-style: normal; font-weight: 700; color: var(--text); opacity: 0.8; }
+
+/* ---- Desk cards ---- */
+.mg-btns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; width: 100%; }
 .mg-btn {
   display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center;
   padding: 26px 18px; border-radius: 16px; cursor: pointer;
   background: rgba(16,20,27,0.85); border: 1px solid rgba(255,255,255,0.08);
   color: var(--text); transition: transform 0.12s, border-color 0.12s;
 }
+.mg-btn:focus-visible { outline: 2px solid rgba(255,255,255,0.4); outline-offset: 2px; }
 .mg-btn:hover { transform: translateY(-3px); }
 .mg-btn.hidden { display: none; }
 .mg-ico { font-size: 40px; line-height: 1; }
-.mg-t { font-size: 19px; font-weight: 800; }
-.mg-d { font-size: 12px; color: var(--muted); line-height: 1.5; }
+.mg-t { font-size: 19px; font-weight: 800; letter-spacing: 0.3px; }
+.mg-d { font-size: 12px; color: var(--muted); line-height: 1.5; flex: 1; }
+.mg-cta {
+  margin-top: 10px; width: 100%; min-height: 44px; border-radius: 10px; font-weight: 700; font-size: 13px;
+  border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.06); color: var(--text); cursor: pointer;
+}
+.mg-cta:hover { background: rgba(255,255,255,0.12); }
 .mg-option { border-color: rgba(22,199,132,0.35); }
 .mg-option:hover { border-color: #16c784; }
 .mg-option .mg-t { color: #2fbf85; }
+.mg-option .mg-cta { border-color: rgba(22,199,132,0.5); color: #2fbf85; }
 .mg-swing { border-color: rgba(59,130,246,0.35); }
 .mg-swing:hover { border-color: #3b82f6; }
 .mg-swing .mg-t { color: #6ea8fe; }
+.mg-swing .mg-cta { border-color: rgba(59,130,246,0.5); color: #6ea8fe; }
 .mg-stockoption { border-color: rgba(168,85,247,0.35); }
 .mg-stockoption:hover { border-color: #a855f7; }
 .mg-stockoption .mg-t { color: #c084fc; }
+.mg-stockoption .mg-cta { border-color: rgba(168,85,247,0.5); color: #c084fc; }
+.mg-dhanbacktest { border-color: rgba(245,158,11,0.35); }
+.mg-dhanbacktest:hover { border-color: #f59e0b; }
+.mg-dhanbacktest .mg-t { color: #fbbf24; }
+.mg-dhanbacktest .mg-cta { border-color: rgba(245,158,11,0.5); color: #fbbf24; }
 .mg-close {
   margin-top: 22px; background: transparent; border: 1px solid var(--border);
-  color: var(--muted); padding: 9px 18px; border-radius: 10px; font-weight: 600;
+  color: var(--muted); padding: 9px 18px; border-radius: 10px; font-weight: 600; min-height: 44px;
 }
 .mg-close.hidden { display: none; }
 
+/* ---- Live index ticker / feed status strip ---- */
+.home-ticker {
+  width: 100%; display: flex; gap: 14px; flex-wrap: wrap; margin-top: 22px;
+  background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 14px; padding: 14px 18px;
+}
+.home-ticker-item { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 120px; text-align: left; }
+.home-ticker-item b { font-size: 11px; color: var(--muted); letter-spacing: 0.4px; }
+.home-ticker-item em { font-style: normal; font-size: 16px; font-weight: 700; }
+.home-ticker-item em.up { color: var(--green); }
+.home-ticker-item em.down { color: var(--red); }
+.home-ticker-provider { margin-left: auto; }
+
+/* ---- Pro-tip banner ---- */
+.home-tip {
+  width: 100%; margin-top: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.3); border-radius: 12px; padding: 12px 16px;
+  font-size: 13px; text-align: left;
+}
+.home-tip.hidden { display: none; }
+.home-tip button { background: transparent; border: none; color: var(--muted); font-size: 15px; cursor: pointer; min-width: 32px; min-height: 32px; }
+
+/* ---- Footer ---- */
+.home-footer {
+  width: 100%; margin-top: 22px; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  color: var(--muted); font-size: 12px; flex-wrap: wrap;
+}
+.home-footer-brand { font-weight: 700; }
+
+@media (max-width: 1024px) {
+  .mg-btns { grid-template-columns: 1fr 1fr; }
+}
 @media (max-width: 620px) {
   .mg-btns { grid-template-columns: 1fr; }
   .mg-ico { font-size: 34px; }
   .mg-t { font-size: 17px; }
+  .home-welcome { flex-direction: column; align-items: flex-start; }
+  .home-quote { text-align: left; max-width: none; }
+  .home-topbar { justify-content: center; }
+  .home-identity-text { display: none; }
 }
 
 /* ============ Master Trade Selector (Trader Dashboard main screen) ============ */
