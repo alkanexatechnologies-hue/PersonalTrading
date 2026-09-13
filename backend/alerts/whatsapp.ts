@@ -53,7 +53,24 @@ export function saveWhatsappConfig(patch: Partial<WhatsappConfig>): WhatsappConf
   };
   try {
     fs.mkdirSync(path.dirname(FILE), { recursive: true });
-    fs.writeFileSync(FILE, JSON.stringify(next, null, 2));
+    // 0600 (owner read/write only) - matches every other credential file in
+    // this app (.groww_token, data/dhan-config.json, data/auth-credentials.json).
+    // This file was previously written world/group-readable by default; fixed
+    // here rather than left as a quiet gap (see the session's security review).
+    fs.writeFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
+    fs.chmodSync(FILE, 0o600);
+  } catch { /* best-effort */ }
+  return next;
+}
+
+// Explicit "Disconnect" - clears every saved credential outright (unlike
+// saveWhatsappConfig, which only ever fills in a field, never blanks one).
+export function disconnectWhatsapp(): WhatsappConfig {
+  const next: WhatsappConfig = { enabled: false, phone: "", callmebotKey: "", greenId: "", greenToken: "", metaToken: "", metaPhoneId: "", webhookUrl: "" };
+  try {
+    fs.mkdirSync(path.dirname(FILE), { recursive: true });
+    fs.writeFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
+    fs.chmodSync(FILE, 0o600);
   } catch { /* best-effort */ }
   return next;
 }

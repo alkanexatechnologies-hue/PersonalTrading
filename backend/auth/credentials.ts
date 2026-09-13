@@ -2,6 +2,7 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { sendCredentialsEmail } from "./mailer";
+import { sendWhatsapp, whatsappReady } from "../alerts/whatsapp";
 
 // ============================ Persisted, rotating login credentials ============================
 // The dashboard's login used to regenerate a brand-new random password every
@@ -13,13 +14,21 @@ import { sendCredentialsEmail } from "./mailer";
 //
 // If a notification email is configured (setNotifyEmail, exposed via
 // POST /api/auth/email), each rotation also emails the new username/password
-// there (see mailer.ts) instead of only printing to the server console.
+// there (see mailer.ts) instead of only printing to the server console. If a
+// WhatsApp sender is configured (POST /api/whatsapp/config - phone + one of
+// CallMeBot/Green-API/Meta Cloud, see alerts/whatsapp.ts), each rotation is
+// also sent there.
 
 export interface StoredCredentials {
   username: string;
   password: string; // plaintext at rest (needed to re-send by email on rotation) - file is 0600, matching how .groww_token is protected elsewhere in this app.
   lastRotatedDate: string; // IST calendar date "YYYY-MM-DD" of the last rotation
   notifyEmail: string | null;
+  // DEV-ONLY: skip the password check entirely (username still required). Set
+  // via setPasswordless(true) - a deliberate, explicit, reversible choice for
+  // local development, requested to be turned back off before going live (see
+  // session.ts's login()). Never auto-enabled; defaults to false.
+  passwordless?: boolean;
 }
 
 const FILE = path.join(process.cwd(), "data", "auth-credentials.json");
@@ -49,13 +58,21 @@ function load(): StoredCredentials | null {
   try {
     const raw = JSON.parse(fs.readFileSync(FILE, "utf-8"));
     if (raw && typeof raw.username === "string" && typeof raw.password === "string") {
-      return { username: raw.username, password: raw.password, lastRotatedDate: raw.lastRotatedDate || "", notifyEmail: raw.notifyEmail ?? null };
+      return {
+        username: raw.username, password: raw.password, lastRotatedDate: raw.lastRotatedDate || "",
+        notifyEmail: raw.notifyEmail ?? null, passwordless: raw.passwordless === true,
+      };
     }
   } catch { /* missing or corrupt - fall through to generating fresh credentials */ }
   return null;
 }
 
 function announce(creds: StoredCredentials, justRotated: boolean): void {
+  if (creds.passwordless) {
+    console.log(`\n  ⚠️  Dashboard login PASSWORD DISABLED (dev mode) — user "${creds.username}", any password (including blank) is accepted.`);
+    console.log(`  Turn real authentication back on before going live (ask to re-enable passwordless: false).\n`);
+    return;
+  }
   if (process.env.LOGIN_PASS) return; // fixed via env - nothing new to report
   console.log(`\n  Dashboard login${justRotated ? " (just rotated)" : ""}:`);
   console.log(`    user     : ${creds.username}`);
@@ -63,8 +80,13 @@ function announce(creds: StoredCredentials, justRotated: boolean): void {
   console.log(`  Stays the same across restarts now; rotates automatically at 08:00 IST daily.`);
   console.log(
     creds.notifyEmail
-      ? `  New credentials are emailed to ${creds.notifyEmail} on each rotation.\n`
-      : `  Set a notification email (Connect panel -> Login notifications) to have new credentials emailed to you instead of checking this log.\n`
+      ? `  New credentials are emailed to ${creds.notifyEmail} on each rotation.`
+      : `  Set a notification email (Connect panel -> Login notifications) to have new credentials emailed to you instead of checking this log.`
+  );
+  console.log(
+    whatsappReady().ok
+      ? `  New credentials are also sent via WhatsApp on each rotation.\n`
+      : `  Set a WhatsApp number + key (Connect panel -> WhatsApp login alerts) to also get new credentials on WhatsApp.\n`
   );
 }
 
@@ -99,6 +121,20 @@ export function setNotifyEmail(email: string | null): void {
   save(current);
 }
 
+export function isPasswordless(): boolean {
+  return current.passwordless === true;
+}
+
+// DEV-ONLY toggle: skip the password check (username still required).
+// setPasswordless(true) is a deliberate, explicit choice - call this again
+// with false ("go live") to restore real password checking + daily rotation.
+export function setPasswordless(on: boolean): StoredCredentials {
+  current = { ...current, passwordless: on };
+  save(current);
+  announce(current, false);
+  return current;
+}
+
 // Rotate to a brand-new random password, persist, and email it if a
 // notification address is configured. Used by the daily 08:00 IST schedule and
 // available standalone for a manual "rotate now".
@@ -118,6 +154,20 @@ export async function rotateCredentials(): Promise<StoredCredentials> {
       console.error("[auth] failed to email rotated credentials:", e instanceof Error ? e.message : e);
     }
   }
+  // Same rotated credentials, second delivery channel - reuses the personal
+  // WhatsApp sender already built for trade alerts (alerts/whatsapp.ts), so this
+  // needs no new integration, only a phone number + provider key configured via
+  // POST /api/whatsapp/config (see the Connect panel's WhatsApp section).
+  if (whatsappReady().ok) {
+    try {
+      const r = await sendWhatsapp(
+        `NSA Dashboard login (today):\nuser: ${current.username}\npass: ${current.password}\n\nRotates again tomorrow ~08:00 IST.`
+      );
+      if (!r.ok) console.error("[auth] failed to WhatsApp rotated credentials:", r.error);
+    } catch (e) {
+      console.error("[auth] failed to WhatsApp rotated credentials:", e instanceof Error ? e.message : e);
+    }
+  }
   return current;
 }
 
@@ -125,6 +175,7 @@ export async function rotateCredentials(): Promise<StoredCredentials> {
 // day, only once 08:00 IST has actually passed - never on every restart.
 export async function maybeRotateForNewDay(): Promise<void> {
   if (envPass) return; // fixed credentials via env - never auto-rotate
+  if (current.passwordless) return; // dev mode - password check is skipped anyway
   const today = istDateStr();
   if (current.lastRotatedDate === today) return;
   if (istHour() < 8) return;
