@@ -1,0 +1,48 @@
+services:
+  - type: web
+    name: nsa-intraday-assistant
+    runtime: node
+    plan: free
+    autoDeploy: true
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.19.0
+      # --- Required for real login (otherwise a random password is generated
+      # on every restart and only visible in the Render log) ---
+      - key: LOGIN_USER
+        sync: false
+      - key: LOGIN_PASS
+        sync: false
+      # --- Live market data / broker (optional, only if used) ---
+      - key: GROWW_ACCESS_TOKEN
+        sync: false
+      - key: DHAN_ACCESS_TOKEN
+        sync: false
+      - key: DHAN_CLIENT_ID
+        sync: false
+      # --- Alerts / notifications (optional) ---
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      # --- AI narration (optional) ---
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # --- Safety switches: must stay off in production per project rules ---
+      - key: LIVE_ORDER_EXECUTION
+        value: "false"
+      - key: MODEL_TRAINING_ENABLED
+        value: "false"
