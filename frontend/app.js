@@ -4966,6 +4966,146 @@ async function enableOiPaperAlgo() {
     if (st) st.textContent = "Algo failed: " + ((e && e.message) || e);
   }
 }
+// ---------- Mobile Trader Dashboard hero (Part 26: a mobile trader DECISION
+// screen, not a shrunk desktop one). Hidden on desktop via CSS; built entirely
+// from data already fetched elsewhere on this same tab (/api/oi-command's
+// recommendation.directional/scalp + setup, /api/liquidity-status for the
+// bias/EMA/VWAP/RSI read, /api/quotes for change%, /api/paper/state for the
+// one-open-trade rule) - never a second, independent data source, so it can
+// never show a different instrument than the desktop view underneath it. ----------
+function mthBadge(confidence) {
+  const c = confidence || 0;
+  if (c >= 75) return "STRONG";
+  if (c >= 60) return "GOOD";
+  if (c >= 45) return "MODERATE";
+  return "WEAK";
+}
+function mthAction(leg) {
+  if (!leg || !leg.optionType || leg.optionType === "—" || !leg.take) return "AVOID";
+  return leg.algoReady ? "TAKE" : "WAIT";
+}
+function mthActionClass(action) {
+  return action === "TAKE" ? "mth-act-take" : action === "WAIT" ? "mth-act-wait" : "mth-act-avoid";
+}
+
+function renderMthTradeCard(title, subtitle, icon, colorCls, leg, symName) {
+  leg = leg || {};
+  const conf = leg.confidence || 0;
+  const action = mthAction(leg);
+  const headline = leg.take && leg.optionType && leg.optionType !== "—" ? `BUY ${leg.optionType}` : "NO TRADE";
+  const sideCls = leg.optionType === "PE" ? "bearish" : leg.optionType === "CE" ? "bullish" : "neutral";
+  const reason = (leg.reasons && leg.reasons[0]) || (leg.skipReasons && leg.skipReasons[0]) || "Not enough confirmation yet.";
+  const facts = [
+    leg.ltp != null ? `<span>LTP <b>₹${fmt(leg.ltp)}</b></span>` : "",
+    leg.target != null ? `<span>Target <b>₹${fmt(leg.target)}</b></span>` : "",
+    leg.stop != null ? `<span>Stop <b>₹${fmt(leg.stop)}</b></span>` : "",
+  ].filter(Boolean).join("");
+  return `<article class="mth-card ${colorCls}">
+    <div class="mth-card-head">
+      <div class="mth-card-title">${icon} ${title}<span class="wl-sub">${subtitle}</span></div>
+      <div class="mth-badges"><span class="mth-badge">${mthBadge(conf)}</span><span class="mth-score">${Math.round(conf)}/100</span></div>
+    </div>
+    <div class="mth-headline ${sideCls}">${headline}</div>
+    ${leg.strike ? `<div class="wl-sub">${symName} ${fmt(leg.strike, 0)} ${leg.optionType}</div>` : ""}
+    ${facts ? `<div class="mth-facts">${facts}</div>` : ""}
+    <button type="button" class="mth-action ${mthActionClass(action)}">${action}</button>
+    <div class="mth-reason">${reason}</div>
+  </article>`;
+}
+
+function renderMthSetupCard(leg, ls, symName) {
+  leg = leg || {};
+  const conf = leg.confidence || 0;
+  const action = mthAction(leg);
+  const headline = leg.take && leg.optionType && leg.optionType !== "—" ? (leg.optionType === "CE" ? "BULLISH" : "BEARISH") : "NEUTRAL";
+  const sideCls = headline === "BULLISH" ? "bullish" : headline === "BEARISH" ? "bearish" : "neutral";
+  const reason = (leg.reasons && leg.reasons[0]) || (leg.skipReasons && leg.skipReasons[0]) || "No clean technical setup yet.";
+  const st = ls && ls.structure;
+  const emaTxt = st ? (st.emaStructure === "Strong Bullish" ? "9 > 21 > 50" : st.emaStructure === "Strong Bearish" ? "9 < 21 < 50" : "Mixed") : "—";
+  const vwapTxt = st ? (st.vwapStatus.startsWith("Above") ? "Above ▲" : st.vwapStatus.startsWith("Below") ? "Below ▼" : "Choppy") : "—";
+  const rsiTxt = st && st.rsi != null ? Math.round(st.rsi) : "—";
+  return `<article class="mth-card mth-setup">
+    <div class="mth-card-head">
+      <div class="mth-card-title">📊 SETUP<span class="wl-sub">Regular trade opportunity</span></div>
+      <div class="mth-badges"><span class="mth-badge">${mthBadge(conf)}</span><span class="mth-score">${Math.round(conf)}/100</span></div>
+    </div>
+    <div class="mth-headline ${sideCls}">${headline}</div>
+    <div class="wl-sub">${symName} (Spot)</div>
+    <div class="mth-facts"><span>EMA <b>${emaTxt}</b></span><span>VWAP <b>${vwapTxt}</b></span><span>RSI <b>${rsiTxt}</b></span></div>
+    <button type="button" class="mth-action ${mthActionClass(action)}">${action}</button>
+    <div class="mth-reason">${reason}</div>
+  </article>`;
+}
+
+function renderMthBiasCard(ls) {
+  if (!ls) return `<div class="mth-card mth-bias neutral"><div class="wl-sub">Market bias unavailable right now.</div></div>`;
+  const dir = ls.directionBias;
+  const cls = dir === "Bullish" ? "bullish" : dir === "Bearish" ? "bearish" : dir === "Conflict" ? "conflict" : "neutral";
+  const icon = dir === "Bullish" ? "🐂" : dir === "Bearish" ? "🐻" : dir === "Conflict" ? "⚠️" : "⚪";
+  const vwapTxt = ls.structure.vwapStatus.startsWith("Above") ? "Above" : ls.structure.vwapStatus.startsWith("Below") ? "Below" : "Choppy";
+  return `<div class="mth-card mth-bias ${cls}">
+    <div class="mth-bias-head">${icon} MARKET BIAS <b>${String(dir).toUpperCase()}</b></div>
+    <div class="mth-facts">
+      <span>Confidence <b>${ls.directionalConfidence.score}/100</b></span>
+      <span>Move Stage <b>${ls.moveStage.replace(/_/g, " ")}</b></span>
+      <span>VWAP <b>${vwapTxt}</b></span>
+    </div>
+    <div class="mth-reason">${ls.systemView}</div>
+  </div>`;
+}
+
+async function renderMobileTraderHero(d, sym) {
+  const box = el("mobile-th-hero");
+  if (!box) return;
+  const symName = (el("oic-symbol") && el("oic-symbol").selectedOptions[0] && el("oic-symbol").selectedOptions[0].textContent) || sym;
+
+  let quote = null;
+  try {
+    const q = await fetchJSON("/api/quotes?symbols=" + encodeURIComponent(sym), 8000);
+    quote = (q && q.quotes && q.quotes[sym]) || null;
+  } catch (_) { /* fall back to d.spot below */ }
+
+  let ls = null;
+  try { ls = await fetchJSON("/api/liquidity-status/" + encodeURIComponent(sym), 15000); } catch (_) { /* bias card degrades gracefully */ }
+
+  let openTrade = null;
+  try {
+    if (!state.paperState) state.paperState = await fetchJSON("/api/paper/state", 8000);
+    openTrade = (state.paperState.open || []).find((p) => p.kind === "indexOption" && p.symbol === sym);
+  } catch (_) { /* no open-trade banner if this fails - never blocks the rest */ }
+
+  const spot = quote && quote.price != null ? quote.price : d.spot;
+  const chgPct = quote ? quote.changePercent : null;
+  const chgCls = chgPct > 0 ? "up" : chgPct < 0 ? "down" : "";
+  const age = d.dataAgeSec != null ? Math.round(d.dataAgeSec) : null;
+  const live = d.refresh?.marketOpen !== false && age != null && age < 60;
+  const rec = d.recommendation || {};
+
+  box.innerHTML = `
+    <div class="mth-symbol-row"><span class="mth-symbol">${symName}</span>${openTrade ? '<span class="mth-open-badge">OPEN TRADE</span>' : ""}</div>
+    <div class="mth-spot">${spot != null ? fmt(spot) : "—"}</div>
+    ${chgPct != null ? `<div class="mth-chg ${chgCls}">${chgPct >= 0 ? "▲ +" : "▼ "}${fmt(Math.abs(chgPct))}%</div>` : ""}
+    ${age != null ? `<div class="mth-updated">${live ? '<span class="live-dot"></span> ' : ""}Updated ${age}s ago</div>` : ""}
+    ${openTrade ? `<div class="mth-opentrade">OPEN TRADE — ${symName} ${openTrade.strike || ""} ${openTrade.optionType || ""} · <b>HOLD</b> (one trade at a time — no new BUY while this is open)</div>` : ""}
+    ${renderMthBiasCard(ls)}
+    ${renderMthTradeCard("DIRECTIONAL", "Higher conviction trade", "🎯", "mth-directional", rec.directional, symName)}
+    ${renderMthSetupCard(d.setup, ls, symName)}
+    ${renderMthTradeCard("SCALP", "Short-term opportunity", "⚡", "mth-scalp", rec.scalp, symName)}
+    <div class="mth-risk-banner">
+      <span>⚠ Trading involves risk. Signals are decision-support only.</span>
+      <button type="button" id="mth-view-disclosure" class="mth-risk-link">View Disclosure ›</button>
+    </div>
+    <button type="button" id="mth-toggle-details" class="mth-details-toggle">▾ View Full Details</button>`;
+
+  const dbtn = el("mth-view-disclosure");
+  if (dbtn) dbtn.addEventListener("click", () => { const b = el("open-risk-disclosure"); if (b) b.click(); });
+  const tbtn = el("mth-toggle-details");
+  if (tbtn) tbtn.addEventListener("click", () => {
+    document.body.classList.toggle("mth-details-open");
+    tbtn.textContent = document.body.classList.contains("mth-details-open") ? "▴ Hide Full Details" : "▾ View Full Details";
+  });
+}
+
 async function loadOiCommand() {
   const box = el("oicommand");
   const sym = (el("oic-symbol") && el("oic-symbol").value) || "^NSEI";
@@ -4984,6 +5124,10 @@ async function loadOiCommand() {
     await loadLiquidityStatus(sym);
     if (!d.available && !d.bulletin) { if (box) box.innerHTML = `<div class="wl-sub">${d.message || d.error || "उपलब्ध नहीं"}</div>`; if (st) st.textContent = ""; return; }
     renderLive("oicommand", () => renderMasterSelector(d));
+    // Fire-and-forget: the mobile hero makes its own small extra calls (quotes/
+    // liquidity-status/paper-state) and must never block or delay the desktop
+    // render above - it degrades each piece independently on its own errors.
+    renderMobileTraderHero(d, sym);
     // Freshness: the OI/candle data behind this screen is cached server-side
     // (routes/api.ts already computes dataAgeSec/refresh) - surface it so "is
     // this actually live" is visible rather than implicit.

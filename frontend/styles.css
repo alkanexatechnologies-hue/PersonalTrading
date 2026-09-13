@@ -1902,6 +1902,11 @@ body.oi-focus .signal-block { padding: 6px 12px; font-size: 13px; }
 .cmp-box {
   background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
   padding: 20px; width: 100%; max-width: 520px; box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  /* Every compliance box (consent/disclosure/autotrade) gets a height cap + its
+     own scroll, not just the ones opted in via .cmp-box-scroll below - a short
+     phone viewport was rendering #consent-modal at its full natural height with
+     no scroll affordance, pushing the checkbox/CONTINUE button off-screen. */
+  max-height: 90vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
 }
 .cmp-box-scroll { max-height: 84vh; overflow-y: auto; }
 .cmp-box h2 { margin: 0 0 10px; font-size: 18px; }
@@ -3315,3 +3320,64 @@ body.oi-focus .cockpit-strip #mind-bar {
   .ls-evidence-row { grid-template-columns: 1fr 1fr; }
   .ls-bf-row span:first-child { min-width: 100px; font-size: 10px; }
 }
+
+/* ============ Mobile Trader Dashboard hero ============
+   A genuine mobile-first "trader decision screen" (index/stock, spot, three
+   trade cards, action, one-line reason) - not the desktop dashboard scaled
+   down. Hidden entirely on desktop/tablet; the full desktop view (.mtg-grid,
+   tables, etc.) keeps rendering unchanged underneath and is reachable on
+   mobile via [View Full Details]. */
+.mth-hero { display: none; }
+
+@media (max-width: 640px) {
+  .mth-hero { display: block; padding: 0 0 var(--space-3); }
+  /* The existing desktop-detail content stays in the DOM (nothing is deleted)
+     but starts collapsed on mobile until the trader asks for it. */
+  body.oi-focus #oic-backtest, body.oi-focus #oicommand { display: none; }
+  body.oi-focus.mth-details-open #oic-backtest, body.oi-focus.mth-details-open #oicommand { display: block; }
+}
+
+.mth-symbol-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-1); }
+.mth-symbol { font-size: var(--font-lg); font-weight: 800; }
+.mth-open-badge { background: rgba(59,130,246,0.15); color: var(--blue); font-size: var(--font-xs); font-weight: 800; padding: 3px 9px; border-radius: 999px; }
+.mth-spot { font-size: 34px; font-weight: 800; line-height: 1.1; }
+.mth-chg { font-size: var(--font-md); font-weight: 700; margin-top: 2px; }
+.mth-chg.up { color: var(--bullish); }
+.mth-chg.down { color: var(--bearish); }
+.mth-updated { font-size: var(--font-xs); color: var(--muted); margin-top: 2px; }
+.mth-opentrade { background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.35); border-radius: var(--radius-sm); padding: var(--space-2) var(--space-3); margin-top: var(--space-3); font-size: var(--font-sm); }
+
+.mth-card { background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-3) var(--space-4); margin-top: var(--space-3); }
+.mth-directional { border-color: rgba(22,199,132,0.4); }
+.mth-setup { border-color: rgba(59,130,246,0.4); }
+.mth-scalp { border-color: rgba(168,85,247,0.4); }
+.mth-bias.bullish { border-color: rgba(22,199,132,0.4); }
+.mth-bias.bearish { border-color: rgba(234,57,67,0.4); }
+.mth-bias.conflict { border-color: rgba(217,164,65,0.5); }
+
+.mth-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-2); }
+.mth-card-title { font-size: var(--font-base); font-weight: 800; display: flex; flex-direction: column; gap: 2px; }
+.mth-card-title .wl-sub { font-weight: 400; font-size: var(--font-xs); }
+.mth-badges { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.mth-badge { background: rgba(255,255,255,0.08); font-size: var(--font-xs); font-weight: 800; padding: 2px 8px; border-radius: 999px; }
+.mth-score { font-size: var(--font-xs); color: var(--muted); font-weight: 700; }
+
+.mth-headline { font-size: 26px; font-weight: 800; margin-top: var(--space-2); }
+.mth-headline.bullish { color: var(--bullish); }
+.mth-headline.bearish { color: var(--bearish); }
+.mth-headline.neutral { color: var(--muted); }
+
+.mth-facts { display: flex; gap: var(--space-3); flex-wrap: wrap; font-size: var(--font-sm); color: var(--muted); margin-top: var(--space-2); }
+.mth-facts b { color: var(--text); }
+
+.mth-action { width: 100%; min-height: 48px; margin-top: var(--space-3); border-radius: var(--radius-md); font-weight: 800; font-size: var(--font-md); letter-spacing: 0.5px; border: none; cursor: pointer; }
+.mth-act-take { background: var(--bullish); color: #06110c; }
+.mth-act-wait { background: var(--warn); color: #2a1c00; }
+.mth-act-avoid { background: rgba(255,255,255,0.08); color: var(--muted); }
+.mth-reason { font-size: var(--font-sm); color: var(--muted); margin-top: var(--space-2); line-height: 1.4; }
+
+.mth-bias-head { font-size: var(--font-md); font-weight: 800; display: flex; align-items: center; gap: var(--space-2); }
+
+.mth-risk-banner { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); background: rgba(217,164,65,0.1); border: 1px solid rgba(217,164,65,0.35); border-radius: var(--radius-md); padding: var(--space-3); margin-top: var(--space-3); font-size: var(--font-sm); flex-wrap: wrap; }
+.mth-risk-link { background: transparent; border: none; color: var(--warn); font-weight: 700; font-size: var(--font-sm); cursor: pointer; min-height: 44px; padding: 0 4px; }
+.mth-details-toggle { width: 100%; min-height: 44px; margin-top: var(--space-3); background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--muted); font-weight: 700; font-size: var(--font-sm); cursor: pointer; }

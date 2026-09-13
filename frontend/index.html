@@ -703,6 +703,13 @@
               <span id="oic-status" class="wl-sub"></span>
               <button id="oic-log-btn" class="ghost" title="Decision Log — every GO/WAIT flip, module state change, and trade emit / veto / dedup">🧾 Log</button>
             </div>
+            <!-- Mobile-only trader decision screen (Part 26: "mobile trader decision
+                 screen", not a shrunk desktop dashboard). Hidden on desktop via CSS;
+                 filled in by renderMobileTraderHero() from the SAME /api/oi-command
+                 payload + /api/liquidity-status + /api/quotes + /api/paper/state
+                 already used elsewhere - no separate data source, so it can never
+                 show a different instrument's data than the desktop view. -->
+            <div id="mobile-th-hero" class="mth-hero">Loading…</div>
             <div id="oic-backtest"></div>
             <div id="oicommand">Trader Dashboard लोड हो रहा…</div>
             <!-- Decision Log slide-out drawer (opens over the live view) -->

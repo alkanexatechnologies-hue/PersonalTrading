@@ -134,7 +134,8 @@ export interface LiquidityStatusResult {
   lastShiftEvent: LiquidityShiftEvent | null;
   conflict: LiquidityConflict;
 
-  structure: { ema9: number | null; ema21: number | null; ema50: number | null; emaStructure: EmaStructure; vwapStatus: VwapStatus; vwapValue: number | null };
+  structure: { ema9: number | null; ema21: number | null; ema50: number | null; emaStructure: EmaStructure; vwapStatus: VwapStatus; vwapValue: number | null; rsi: number | null };
+  rvol: number | null;
   detection: DetectionResult;
   openingRange: OpeningRange;
   levels: LiquidityLevel[];
