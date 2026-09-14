@@ -6424,8 +6424,10 @@ function renderMasterSelector(d) {
   // Analysis text collapsed by default (still one click away, nothing
   // removed), then the full decision table - every one of its original
   // columns kept exactly as before.
-  // Named, numbered section label so each cockpit zone reads clearly.
-  const secLabel = (name, desc) => `<div class="mts-sec"><span class="mts-sec-n">${name}</span>${desc ? `<span class="mts-sec-d">${desc}</span>` : ""}</div>`;
+  // Named, numbered section label styled like a Decision Flow step (circled
+  // number + name + a short question), so the cockpit reads in the same
+  // guided sequence as the Decision Flow desk.
+  const secLabel = (n, name, q) => `<div class="mts-sec"><span class="mts-sec-n">${n}</span><span class="mts-sec-t">${name}<small>${q}</small></span></div>`;
 
   box.innerHTML = `
     <div class="mts">
@@ -6437,7 +6439,7 @@ function renderMasterSelector(d) {
         </div>
       </div>
 
-      ${secLabel("1 · Market Verdict", "the system's GO / WAIT / CONFLICT call + risk")}
+      ${secLabel(1, "Market Command", "Is today worth trading? — verdict + risk")}
       <div class="mtg-hero">
         <div class="mts-verdict ${vcls}">
           <div class="mts-verdict-word">${vWord}</div>
@@ -6463,7 +6465,7 @@ function renderMasterSelector(d) {
 
       ${risk ? riskRadarHtml(risk, renderMarketReadHtml(C)) : renderMarketReadHtml(C)}
 
-      ${secLabel("2 · Market Snapshot", "key levels · OI walls · writer battle · structure · liquidity")}
+      ${secLabel(2, "Market Map &amp; OI", "Where can it move? — levels · OI walls · structure")}
       <div class="mtg-grid">
         ${renderLevelsCardHtml(C)}
         ${renderWriterBattleHtml(C)}
@@ -6472,10 +6474,10 @@ function renderMasterSelector(d) {
         ${renderLiquidityCardHtml()}
       </div>
 
-      ${secLabel("3 · Model Bulletin", "what each model layer is saying right now")}
+      ${secLabel(3, "Trader Mind", "Why is this a setup? — what each model layer says")}
       ${renderBulletinHtml(d)}
 
-      ${secLabel("4 · Strategy Comparison", "Setup vs Directional vs Scalp — one row each, with its state & outcome")}
+      ${secLabel(4, "Setup Decision", "Trade now? — Setup vs Directional vs Scalp")}
       <div class="mts-tablewrap">
         <table class="mts-table">
           <thead><tr>
@@ -6492,7 +6494,7 @@ function renderMasterSelector(d) {
         </table>
       </div>
 
-      ${secLabel("5 · Final Decision", "the one call the selector promotes")}
+      ${secLabel(5, "Confirmation", "All conditions met? — final master decision")}
       <div class="mts-final ${vcls}">
         <span class="mts-final-lab">🎯 Final Master Decision:</span>
         <span class="mts-final-word">${verdict}</span>
@@ -6503,7 +6505,7 @@ function renderMasterSelector(d) {
       <!-- ADVISORY suggestion panel. Shows WHERE the suggestion came from and,
            once the observation windows elapse, what the market actually did.
            ADVISORY ONLY — nothing here places or routes an order. -->
-      ${secLabel("6 · Advisory Suggestion", "what to consider, and how it played out — advisory only")}
+      ${secLabel(6, "Best Option", "Which contract to consider — advisory only")}
       <div class="mts-advisory ${suggestion.startsWith("BUY") ? "act" : "hold"}">
         <div class="mts-adv-head">
           <span class="mts-adv-lab">Trade suggestion</span>

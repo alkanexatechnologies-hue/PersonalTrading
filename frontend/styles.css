@@ -3730,8 +3730,13 @@ body.oi-focus #panel-oicommand.active #oic-df-stage { overflow-y: auto; }
 /* On a normal (non-oi-focus) render, give the flow a sensible min height. */
 #oic-flow.df { min-height: 60vh; }
 
-/* Cockpit section labels — name each zone of the Master Trade Selector. */
-.mts-sec { display: flex; align-items: baseline; gap: 10px; margin: 14px 0 7px; padding-bottom: 5px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+/* Cockpit section labels — styled like a Decision Flow step (circled number +
+   name + short question) so the cockpit reads in the same guided sequence. */
+.mts-sec { display: flex; align-items: center; gap: 11px; margin: 16px 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
 .mts-sec:first-of-type { margin-top: 4px; }
-.mts-sec-n { font-size: 12px; font-weight: 800; letter-spacing: .4px; color: var(--text); text-transform: uppercase; }
-.mts-sec-d { font-size: 11px; color: var(--muted); }
+.mts-sec-n { flex: 0 0 auto; width: 24px; height: 24px; border: 1px solid var(--blue); border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; font-family: var(--mono, "IBM Plex Mono", monospace);
+  font-size: 12px; font-weight: 700; color: var(--blue); background: rgba(59,130,246,.12); }
+.mts-sec-t { display: flex; flex-direction: column; gap: 1px; line-height: 1.2; }
+.mts-sec-t { font-size: 13px; font-weight: 800; letter-spacing: .3px; color: var(--text); }
+.mts-sec-t small { font-size: 11px; font-weight: 400; letter-spacing: 0; color: var(--muted); }
