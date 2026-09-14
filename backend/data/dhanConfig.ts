@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { dataFile } from "../config/dataDir";
 import { dhanFetch } from "./dhanClient";
 
 // ---- Dhan historical-data connection (BACKTESTING ONLY) ----
@@ -20,7 +21,9 @@ export interface DhanConfig {
   clientId: string; // optional, for display/labeling only - not required by the historical/fund-limit endpoints
 }
 
-const FILE = path.join(process.cwd(), "data", "dhan-config.json");
+// Persisted on DATA_DIR (the mounted disk in production) so the Dhan
+// configuration survives a restart/redeploy. See config/dataDir.ts.
+const FILE = dataFile("dhan-config.json");
 
 export function loadDhanConfig(): DhanConfig {
   let file: Partial<DhanConfig> = {};

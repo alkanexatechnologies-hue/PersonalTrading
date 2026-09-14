@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { dataFile } from "../config/dataDir";
 
 // ============================ Telegram Bot API provider ============================
 // Replaces the former WhatsApp sender as the application's delivery channel.
@@ -20,7 +21,9 @@ import path from "path";
 // is never returned to the frontend, never written to a log line, and never
 // included in an error message - errors are scrubbed before they leave this file.
 
-const FILE = path.join(process.cwd(), "data", "telegram-config.json");
+// Persisted on DATA_DIR (the mounted disk in production) so the Telegram
+// configuration survives a restart/redeploy. See config/dataDir.ts.
+const FILE = dataFile("telegram-config.json");
 const API = "https://api.telegram.org";
 
 /** Network timeout. A hung Telegram call must never hold up a trading tick. */

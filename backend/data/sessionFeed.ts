@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { DATA_DIR, dataFile } from "../config/dataDir";
 import { getProvider, setActiveProvider } from "./index";
 import { GrowwProvider } from "./growwProvider";
 
@@ -11,11 +12,16 @@ import { GrowwProvider } from "./growwProvider";
 
 let growwToken = (process.env.GROWW_ACCESS_TOKEN || "").trim();
 
-const FLAGS_FILE = path.join(process.cwd(), "data", "feed-flags.json");
+const FLAGS_FILE = dataFile("feed-flags.json");
 // The Groww access token is the ONLY Groww credential. It is a live broker
 // credential in plaintext on disk, so it is owner-read/write only and
 // gitignored - it must never reach Git, a log line, or the frontend.
-const TOKEN_FILE = path.join(process.cwd(), ".groww_token");
+// Persisted on DATA_DIR (the mounted disk in production) so it survives a
+// restart/redeploy instead of forcing a re-paste. LEGACY_TOKEN_FILE is the
+// old repo-root location: still READ as a one-time fallback so an existing
+// token is never lost, but new writes always go to the DATA_DIR path.
+const TOKEN_FILE = dataFile(".groww_token");
+const LEGACY_TOKEN_FILE = path.join(process.cwd(), ".groww_token");
 
 export interface FeedFlags {
   groww: boolean;
@@ -54,6 +60,9 @@ export function forgetGrowwToken() {
 // token the admin just disconnected.
 export function deletePersistedGrowwToken(): void {
   try { fs.unlinkSync(TOKEN_FILE); } catch { /* already gone */ }
+  // Also clear the legacy repo-root copy, else readPersistedGrowwToken() would
+  // re-migrate it on the next boot and silently reconnect after a disconnect.
+  try { fs.unlinkSync(LEGACY_TOKEN_FILE); } catch { /* already gone */ }
 }
 
 // Persist the access token so it survives restarts (server.ts reads it on boot).
@@ -64,14 +73,25 @@ export function persistGrowwToken(token: string): void {
   const t = (token || "").trim();
   if (!t) return;
   try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(TOKEN_FILE, t, { encoding: "utf-8", mode: 0o600 });
     fs.chmodSync(TOKEN_FILE, 0o600);
   } catch { /* non-fatal: the in-memory token still works for this session */ }
 }
 
-// The token saved on disk, if any (used on boot to auto-reconnect).
+// The token saved on disk, if any (used on boot to auto-reconnect). Reads the
+// DATA_DIR path first; if empty, falls back to the legacy repo-root file and
+// migrates it onto DATA_DIR so the next restart finds it in the new location.
 export function readPersistedGrowwToken(): string {
-  try { return fs.readFileSync(TOKEN_FILE, "utf-8").trim(); } catch { return ""; }
+  try {
+    const t = fs.readFileSync(TOKEN_FILE, "utf-8").trim();
+    if (t) return t;
+  } catch { /* not in the new location - try legacy below */ }
+  try {
+    const legacy = fs.readFileSync(LEGACY_TOKEN_FILE, "utf-8").trim();
+    if (legacy) { persistGrowwToken(legacy); return legacy; }
+  } catch { /* none anywhere */ }
+  return "";
 }
 
 // Strips the access token out of any string before it reaches a response, a log
