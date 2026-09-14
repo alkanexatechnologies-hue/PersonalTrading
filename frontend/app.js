@@ -1902,16 +1902,16 @@ const MODE_NAV = {
     { nav: "more", ico: "☰", lbl: "More" },
   ],
   option: [
-    { nav: "oicommand", ico: "🎯", lbl: "OI Cmd" },
+    { nav: "oicommand", ico: "🎯", lbl: "Dashboard" },
     { nav: "paper", ico: "🧪", lbl: "Paper" },
-    { nav: "toppicks", ico: "📈", lbl: "Top Pick" },
+    { nav: "liquiditystatus", ico: "🌊", lbl: "Liquidity" },
     { nav: "watchlist", ico: "📋", lbl: "List" },
     { nav: "more", ico: "☰", lbl: "More" },
   ],
   stockOption: [
-    { nav: "stockoptions", ico: "📊", lbl: "Stk Opt" },
-    { nav: "paper", ico: "🧪", lbl: "Paper" },
     { nav: "toppicks", ico: "📈", lbl: "Top Pick" },
+    { nav: "earlymoves", ico: "⚡", lbl: "Early" },
+    { nav: "stockoptions", ico: "📊", lbl: "Stk Opt" },
     { nav: "watchlist", ico: "📋", lbl: "List" },
     { nav: "more", ico: "☰", lbl: "More" },
   ],
@@ -1968,13 +1968,14 @@ function setupMobileNav() {
 // ---------- desk mode (Option Trading vs Stock Swing Trading) ----------
 const MODE_KEY = "nsa_mode";
 const VALID_MODES = ["decisionflow", "option", "stockOption", "swing", "dhanbacktest"];
-const MODE_FIRST = { decisionflow: "decisionflow", option: "oicommand", stockOption: "stockoptions", swing: "news", dhanbacktest: "dhanbacktest" };
+const MODE_FIRST = { decisionflow: "decisionflow", option: "oicommand", stockOption: "toppicks", swing: "news", dhanbacktest: "dhanbacktest" };
 const MODE_TABS = {
   decisionflow: ["decisionflow"],
-  option: ["oicommand", "paper", "toppicks", "liquiditystatus", "earlymoves", "strategylab"],
-  // Paper Desk and Top Pick are shared with Option Trading (same panels, already
-  // pool-filtered/labelled by kind) rather than duplicated for this desk.
-  stockOption: ["stockoptions", "paper", "toppicks"],
+  // Index Option Trading: Option Top Pick + Early Moves now live on the Stock
+  // Option desk instead, so they're dropped here.
+  option: ["oicommand", "paper", "liquiditystatus", "strategylab"],
+  // Stock Option Trading sequence: Option Top Pick -> Early Moves -> Stock Options.
+  stockOption: ["toppicks", "earlymoves", "stockoptions"],
   swing: ["news", "bullrank", "todaymovers", "stock", "bigmove", "movetiming"],
   dhanbacktest: ["dhanbacktest"],
 };
