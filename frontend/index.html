@@ -694,6 +694,14 @@
               <span id="oic-status" class="wl-sub"></span>
               <button id="oic-log-btn" class="ghost" title="Decision Log — every GO/WAIT flip, module state change, and trade emit / veto / dedup">🧾 Log</button>
             </div>
+            <!-- Horizontal NIFTY command terminal (presentation only). Filled by
+                 renderNiftyTerminal() purely from the SAME /api/oi-command payload
+                 (Master Trade Selector ext.arbitration, walls, expectedMove,
+                 recommendation) + /api/liquidity-status (score/stage/bias/
+                 structure/confirmations/trigger/invalidation) + /api/quotes
+                 (change%). No new calculation. Desktop/tablet only; mobile keeps
+                 the purpose-built hero above. -->
+            <div id="nifty-terminal" class="nterm"></div>
             <!-- Mobile-only trader decision screen (Part 26: "mobile trader decision
                  screen", not a shrunk desktop dashboard). Hidden on desktop via CSS;
                  filled in by renderMobileTraderHero() from the SAME /api/oi-command

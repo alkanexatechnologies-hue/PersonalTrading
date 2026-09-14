@@ -5084,6 +5084,232 @@ async function renderMobileTraderHero(d, sym) {
   });
 }
 
+// ---------- Horizontal NIFTY command terminal (presentation only) ----------
+// Reuses existing engines/data only: /api/oi-command (Master Trade Selector
+// ext.arbitration, OI walls, expectedMove projection, recommendation/best
+// option, spot, freshness) + /api/liquidity-status (score, stage, bias,
+// VWAP/EMA/RSI structure, RVOL, confirmations, trigger/invalidation) + a light
+// /api/quotes for change%. No trading decision is computed here - every value
+// is read straight from those payloads and only laid out.
+const NT_STAGE = { QUIET: "q", BUILDING: "b", "BREAKOUT WATCH": "bw", "EARLY MOVE": "em", DEVELOPING: "dv", "STRONG MOVE": "sm", EXTENDED: "ex", "REVERSAL WATCH": "rw" };
+function ntStageFromLs(ls) {
+  // Same mapping the backend watchlist scanner uses, for display parity.
+  const ms = ls.moveStage, act = ls.traderAction, score = ls.liquidityFlowScore?.score ?? 0;
+  if (ms === "EXTENDED") return "EXTENDED";
+  if (ms === "EXHAUSTION" || ms === "REVERSAL_WATCH") return "REVERSAL WATCH";
+  if (ms === "STRONG_MOVE") return "STRONG MOVE";
+  if (act === "WAIT FOR BREAKOUT" || act === "WAIT FOR BREAKDOWN") return "BREAKOUT WATCH";
+  if (ms === "DEVELOPING") return "DEVELOPING";
+  if (ms === "EARLY_MOVE") return "EARLY MOVE";
+  if (ms === "PULLBACK") return "BUILDING";
+  return score >= 25 ? "BUILDING" : "QUIET";
+}
+function ntDot(state) { return `<span class="nt-dot nt-dot-${state}"></span>`; }
+function ntMeter(score) {
+  const s = Math.max(0, Math.min(100, Math.round(score || 0)));
+  const cls = s >= 66 ? "hi" : s >= 40 ? "mid" : "lo";
+  return `<span class="nt-meter"><span class="nt-meter-fill nt-meter-${cls}" style="width:${s}%"></span></span>`;
+}
+function ntRow(name, icon, valTxt, stateCls) {
+  return `<div class="nt-flow-row"><span class="nt-flow-n">${name}</span><span class="nt-flow-v ${stateCls || ""}">${icon} ${valTxt}</span></div>`;
+}
+function ntNum(n, dp = 0) { return (n == null || isNaN(n)) ? "—" : fmt(n, dp); }
+
+async function renderNiftyTerminal(d, sym) {
+  const box = el("nifty-terminal");
+  if (!box) return;
+  // Pull the liquidity-status engine + a quote in parallel; both degrade to
+  // "DATA UNAVAILABLE" cells rather than blocking the oi-command-derived cells.
+  let ls = null, quote = null;
+  try { ls = await fetchJSON("/api/liquidity-status/" + encodeURIComponent(sym), 15000); if (ls && ls.error) ls = null; } catch (_) {}
+  try { const q = await fetchJSON("/api/quotes?symbols=" + encodeURIComponent(sym), 8000); quote = (q && q.quotes && q.quotes[sym]) || null; } catch (_) {}
+
+  const name = d.name || sym;
+  const spot = d.spot != null ? d.spot : (ls && ls.spot);
+  const chgPct = quote ? quote.changePercent : null;
+  const chgAbs = quote ? quote.change : null;
+  const chgCls = chgPct > 0 ? "up" : chgPct < 0 ? "down" : "neu";
+  const age = d.dataAgeSec != null ? Math.round(d.dataAgeSec) : null;
+  const marketOpen = d.refresh?.marketOpen !== false;
+  const stale = !!d.stale && marketOpen || (ls && (ls.freshness?.oiStale || ls.freshness?.liveFeedStale));
+  const ageTxt = age == null ? "—" : age < 90 ? age + "s" : age < 3600 ? Math.round(age / 60) + "m" : age < 86400 ? Math.round(age / 3600) + "h" : Math.round(age / 86400) + "d";
+  const freshTxt = age == null ? "DATA —" : !marketOpen ? `MARKET CLOSED · ${ageTxt}` : stale ? `⚠ STALE ${ageTxt}` : `● LIVE ${ageTxt}`;
+  const freshCls = age == null ? "na" : stale ? "warn" : "ok";
+
+  // --- header facts (from ls; graceful when ls missing) ---
+  const score = ls ? (ls.liquidityFlowScore?.score ?? 0) : null;
+  const quality = ls ? ls.directionalConfidence?.quality : null;
+  const bias = ls ? ls.directionBias : (d.oiDirection === "UP" ? "Bullish" : d.oiDirection === "DOWN" ? "Bearish" : "Neutral");
+  const biasArrow = bias === "Bullish" ? "▲ UP" : bias === "Bearish" ? "▼ DOWN" : bias === "Conflict" ? "⚠ CONFLICT" : "• FLAT";
+  const biasCls = bias === "Bullish" ? "up" : bias === "Bearish" ? "down" : "neu";
+  const stage = ls ? ntStageFromLs(ls) : "—";
+  const scoreDot = score == null ? "na" : score >= 66 ? "ok" : score >= 40 ? "warn" : "lo";
+
+  // --- market flow (ls structure + rvol; OI from oi-command) ---
+  const st = ls && ls.structure;
+  const oiDir = d.oiDirection; // existing OI interpretation - not recomputed
+  const oiTxt = oiDir === "UP" ? "↑ Bullish" : oiDir === "DOWN" ? "↓ Bearish" : "• Flat";
+  const oiCls = oiDir === "UP" ? "up" : oiDir === "DOWN" ? "down" : "neu";
+  const rvol = ls ? ls.rvol : null;
+  const volTxt = rvol == null ? "—" : rvol >= 2 ? "↑ Strong" : rvol >= 1.3 ? "↑ Good" : rvol >= 0.7 ? "• Normal" : "↓ Weak";
+  const volCls = rvol == null ? "neu" : rvol >= 1.3 ? "up" : rvol < 0.7 ? "down" : "neu";
+  const rsi = st ? st.rsi : null;
+  const momTxt = rsi == null ? "—" : rsi >= 55 ? "↑ Positive" : rsi <= 45 ? "↓ Negative" : "• Neutral";
+  const momCls = rsi == null ? "neu" : rsi >= 55 ? "up" : rsi <= 45 ? "down" : "neu";
+  const vwapUp = st && st.vwapStatus && st.vwapStatus.indexOf("Above") === 0;
+  const vwapDn = st && st.vwapStatus && st.vwapStatus.indexOf("Below") === 0;
+  const vwapTxt = !st ? "—" : vwapUp ? "✓ Above" : vwapDn ? "✕ Below" : "• Choppy";
+  const emaTxt = !st ? "—" : st.emaStructure === "Strong Bullish" ? "✓ 9>21>50" : st.emaStructure === "Strong Bearish" ? "✕ 9<21<50" : "• Mixed";
+  const emaCls = !st ? "neu" : st.emaStructure === "Strong Bullish" ? "up" : st.emaStructure === "Strong Bearish" ? "down" : "neu";
+
+  // --- structure (ls key levels + distances) ---
+  const kl = ls && ls.keyLevels ? ls.keyLevels : [];
+  const sup = kl.find((l) => l.label === "KEY SUPPORT");
+  const res = kl.find((l) => l.label === "KEY RESISTANCE");
+  const dSup = ls ? ls.distanceToSupportPts : null;
+  const dRes = ls ? ls.distanceToResistancePts : null;
+
+  // --- liquidity walls (existing OI-wall calc, oi-command) ---
+  const W = d.walls;
+  const putWall = W && W.bestS ? W.bestS.strike : (sup ? sup.price : null);
+  const callWall = W && W.bestR ? W.bestR.strike : (res ? res.price : null);
+  const wallRoom = (putWall != null && callWall != null) ? Math.round(callWall - putWall) : null;
+  const roomToOpp = bias === "Bearish"
+    ? (putWall != null && spot != null ? Math.round(spot - putWall) : null)
+    : (callWall != null && spot != null ? Math.round(callWall - spot) : null);
+  const wallsAvail = putWall != null || callWall != null;
+
+  // --- point projection (existing expectedMove; NEVER fabricated) ---
+  const em = d.expectedMove; // { low, high, dir } in points, or absent
+  let projHtml;
+  if (em && (em.low != null || em.high != null) && em.dir) {
+    const lo = Math.round(Math.abs(em.low)), hi = Math.round(Math.abs(em.high));
+    const sign = em.dir < 0 ? "−" : "+";
+    const pxLo = spot != null ? ntNum(spot + em.dir * Math.abs(em.low), 0) : "—";
+    const pxHi = spot != null ? ntNum(spot + em.dir * Math.abs(em.high), 0) : "—";
+    const conf = score != null ? score + "%" : "—";
+    projHtml = `<div class="nt-proj-row"><span>Expected move</span><b>${sign}${lo} → ${sign}${hi} pts</b></div>
+      <div class="nt-proj-row"><span>Expected price</span><b>${pxLo} → ${pxHi}</b></div>
+      <div class="nt-proj-row"><span>Direction</span><b class="${biasCls}">${biasArrow}</b></div>
+      <div class="nt-proj-row"><span>Confidence</span><b>${conf}</b></div>`;
+  } else {
+    projHtml = `<div class="nt-na">NO EDGE · LOW CONFIDENCE<div class="wl-sub">Not enough evidence to project a range.</div></div>`;
+  }
+
+  // --- confirmation matrix (ls confirmations) ---
+  let confHtml;
+  if (ls && ls.confirmations) {
+    const items = [...ls.confirmations.confirmed.map((c) => ({ label: c.label, ok: true })),
+                   ...ls.confirmations.remaining.map((c) => ({ label: c.label, ok: false }))];
+    confHtml = items.slice(0, 7).map((it) => `<div class="nt-cf-row"><span>${it.label}</span><b class="${it.ok ? "ok" : "pend"}">${it.ok ? "✓" : "⏳"}</b></div>`).join("");
+  } else {
+    confHtml = `<div class="nt-na">DATA UNAVAILABLE</div>`;
+  }
+
+  // --- master action (EXISTING Master Trade Selector verdict, unchanged) ---
+  const arb = d.ext && d.ext.arbitration;
+  const masterWord = arb ? arb.verdict : (ls ? String(ls.traderAction) : "WAIT");
+  const masterReason = arb ? (arb.reason || "") : (ls ? ls.traderActionDetail : "");
+  const mCls = /GO|TAKE|PREPARE/i.test(masterWord) ? "go" : /CONFLICT|AVOID|INVALID/i.test(masterWord) ? "avoid" : "wait";
+  const trigger = ls && ls.trigger ? ls.trigger.level : null;
+  const inval = ls && ls.invalidation ? ls.invalidation.level : null;
+  const nextLevel = bias === "Bearish" ? (sup ? sup.price : null) : (res ? res.price : null);
+
+  // --- best option play (existing recommendation leg; guardrails preserved) ---
+  const leg = (d.recommendation && d.recommendation.directional) || d.setup || null;
+  const legLive = leg && leg.optionType && leg.optionType !== "—" && leg.take;
+  const premChg = leg && leg.optionType === "PE" ? d.putLtpChgPct : d.callLtpChgPct;
+  let optHtml;
+  if (leg && leg.optionType && leg.optionType !== "—") {
+    optHtml = `<div class="nt-opt-head">${leg.strike ? ntNum(leg.strike, 0) + " " + leg.optionType : leg.optionType}</div>
+      <div class="nt-opt-facts">
+        <span>Premium <b>${leg.ltp != null ? "₹" + ntNum(leg.ltp, 2) : "—"}</b></span>
+        <span>Prem mom <b class="${premChg > 0 ? "up" : premChg < 0 ? "down" : "neu"}">${premChg == null ? "—" : (premChg > 0 ? "↑" : premChg < 0 ? "↓" : "•")}</b></span>
+        <span>OI <b class="${oiCls}">${oiTxt}</b></span>
+      </div>
+      <div class="nt-opt-status ${legLive ? "ok" : "pend"}">${legLive ? "OPTION CONFIRMED" : "PREMIUM CONFIRMATION PENDING"}</div>`;
+  } else {
+    optHtml = `<div class="nt-na">NO OPTION EDGE</div>`;
+  }
+
+  // --- visual projection bar (support | spot | trigger | resistance) ---
+  const barLo = sup ? sup.price : putWall;
+  const barHi = res ? res.price : callWall;
+  let barHtml = "";
+  if (barLo != null && barHi != null && spot != null && barHi > barLo) {
+    const pct = (v) => Math.max(0, Math.min(100, ((v - barLo) / (barHi - barLo)) * 100));
+    const trigMark = trigger != null && trigger >= barLo && trigger <= barHi ? `<span class="nt-bar-mark nt-bar-trig" style="left:${pct(trigger)}%" title="Trigger ${ntNum(trigger)}"></span>` : "";
+    barHtml = `<div class="nt-bar">
+      <span class="nt-bar-track"></span>
+      <span class="nt-bar-mark nt-bar-spot" style="left:${pct(spot)}%" title="Spot ${ntNum(spot)}"></span>
+      ${trigMark}
+      <span class="nt-bar-lbl nt-bar-l">S ${ntNum(barLo)}</span>
+      <span class="nt-bar-lbl nt-bar-r">R ${ntNum(barHi)}</span>
+    </div>`;
+  }
+
+  const headerStageCls = stage === "—" ? "q" : (NT_STAGE[stage] || "q");
+  box.className = "nterm nterm-" + headerStageCls;
+  box.innerHTML = `
+    <div class="nt-head">
+      <span class="nt-sym">${name}</span>
+      <span class="nt-spot">${ntNum(spot, spot != null && spot < 1000 ? 2 : 0)}</span>
+      ${chgPct != null ? `<span class="nt-chg ${chgCls}">${chgPct >= 0 ? "▲ +" : "▼ "}${chgAbs != null ? ntNum(Math.abs(chgAbs), 0) + " " : ""}(${chgPct >= 0 ? "+" : "-"}${fmt(Math.abs(chgPct))}%)</span>` : ""}
+      <span class="nt-hsep"></span>
+      <span class="nt-h-item">${ntDot(freshCls)} <b class="nt-fresh nt-fresh-${freshCls}">${freshTxt}</b></span>
+      <span class="nt-h-item">LIQUIDITY <b>${score == null ? "—" : score}</b> ${score == null ? "" : ntMeter(score)} ${ntDot(scoreDot)}</span>
+      <span class="nt-h-item">TREND <b class="${biasCls}">${biasArrow}</b></span>
+      <span class="nt-h-item">STAGE <b class="nt-stage nt-stage-${headerStageCls}">${stage}</b></span>
+      ${quality ? `<span class="nt-h-item">SIGNAL <b>${quality}</b></span>` : ""}
+    </div>
+    <div class="nt-cols">
+      <div class="nt-col">
+        <div class="nt-col-h">MARKET FLOW</div>
+        ${ntRow("OI", "", oiTxt, oiCls)}
+        ${ntRow("Volume", "", volTxt, volCls)}
+        ${ntRow("Momentum", rsi != null ? "RSI " + Math.round(rsi) : "", momTxt, momCls)}
+        ${ntRow("VWAP", "", vwapTxt, vwapUp ? "up" : vwapDn ? "down" : "neu")}
+        ${ntRow("EMA 9/21", "", emaTxt, emaCls)}
+      </div>
+      <div class="nt-col">
+        <div class="nt-col-h">STRUCTURE</div>
+        <div class="nt-struct">
+          <div class="nt-st-row nt-st-r"><span>R</span><b>${res ? ntNum(res.price) : "—"}</b><i>${dRes != null ? "+" + Math.abs(Math.round(dRes)) + " pts" : ""}</i></div>
+          <div class="nt-st-row nt-st-spot"><span>SPOT</span><b>${ntNum(spot)}</b><i>●</i></div>
+          <div class="nt-st-row nt-st-s"><span>S</span><b>${sup ? ntNum(sup.price) : "—"}</b><i>${dSup != null ? "−" + Math.abs(Math.round(dSup)) + " pts" : ""}</i></div>
+        </div>
+        ${barHtml}
+      </div>
+      <div class="nt-col">
+        <div class="nt-col-h">LIQUIDITY WALLS</div>
+        ${wallsAvail ? `
+          ${ntRow("PUT wall", "", putWall != null ? ntNum(putWall) : "—", "up")}
+          ${ntRow("CALL wall", "", callWall != null ? ntNum(callWall) : "—", "down")}
+          ${ntRow("Between", "", wallRoom != null ? wallRoom + " pts" : "—", "neu")}
+          ${ntRow("Room→opp", "", roomToOpp != null ? roomToOpp + " pts" : "—", "neu")}
+        ` : `<div class="nt-na">WALL DATA UNAVAILABLE</div>`}
+      </div>
+      <div class="nt-col">
+        <div class="nt-col-h">POINT PROJECTION</div>
+        ${projHtml}
+      </div>
+      <div class="nt-col">
+        <div class="nt-col-h">CONFIRMATION</div>
+        ${confHtml}
+      </div>
+      <div class="nt-col nt-col-opt">
+        <div class="nt-col-h">BEST OPTION PLAY</div>
+        ${optHtml}
+      </div>
+    </div>
+    <div class="nt-foot">
+      <span class="nt-foot-item">TRIGGER <b>${trigger != null ? "> " + ntNum(trigger) : "—"}</b></span>
+      <span class="nt-foot-item">INVALIDATION <b>${inval != null ? "< " + ntNum(inval) : "—"}</b></span>
+      <span class="nt-foot-item">NEXT LEVEL <b>${nextLevel != null ? ntNum(nextLevel) : "—"}</b></span>
+      <span class="nt-foot-master nt-master-${mCls}">MASTER ACTION: <b>${masterWord}</b>${masterReason ? ` <i>${masterReason}</i>` : ""}</span>
+    </div>`;
+}
+
 async function loadOiCommand() {
   const box = el("oicommand");
   const sym = (el("oic-symbol") && el("oic-symbol").value) || "^NSEI";
@@ -5106,6 +5332,9 @@ async function loadOiCommand() {
     // liquidity-status/paper-state) and must never block or delay the desktop
     // render above - it degrades each piece independently on its own errors.
     renderMobileTraderHero(d, sym);
+    // Horizontal command terminal (desktop/tablet): presentation only, from the
+    // same payload plus the liquidity-status engine + a quote for change%.
+    renderNiftyTerminal(d, sym);
     // Freshness: the OI/candle data behind this screen is cached server-side
     // (routes/api.ts already computes dataAgeSec/refresh) - surface it so "is
     // this actually live" is visible rather than implicit.

@@ -3453,3 +3453,105 @@ body.oi-focus .cockpit-strip #mind-bar {
 
 .mth-risk-banner { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); background: rgba(217,164,65,0.1); border: 1px solid rgba(217,164,65,0.35); border-radius: var(--radius-md); padding: var(--space-3); margin-top: var(--space-3); font-size: var(--font-sm); flex-wrap: wrap; }
 .mth-risk-link { background: transparent; border: none; color: var(--warn); font-weight: 700; font-size: var(--font-sm); cursor: pointer; min-height: 44px; padding: 0 4px; }
+
+/* ============ Horizontal NIFTY command terminal (presentation only) ============ */
+.nterm { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--panel-2); margin-bottom: 8px; font-size: 12px; overflow: hidden; }
+/* Subtle state theming on the left edge — attention states without flashing. */
+.nterm-bw, .nterm-em { border-left: 3px solid var(--warn); }
+.nterm-dv, .nterm-sm { border-left: 3px solid var(--bullish); }
+.nterm-ex, .nterm-rw { border-left: 3px solid var(--bearish); }
+.nterm-q, .nterm-b { border-left: 3px solid var(--border); }
+
+.nt-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 7px 12px; border-bottom: 1px solid var(--border); background: linear-gradient(90deg, rgba(59,130,246,0.06), transparent); }
+.nt-sym { font-weight: 800; font-size: 14px; letter-spacing: 0.3px; }
+.nt-spot { font-weight: 800; font-size: 18px; font-variant-numeric: tabular-nums; }
+.nt-chg { font-weight: 700; font-size: 12px; }
+.nt-chg.up { color: var(--bullish); } .nt-chg.down { color: var(--bearish); } .nt-chg.neu { color: var(--muted); }
+.nt-hsep { flex: 1; }
+.nt-h-item { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); letter-spacing: 0.3px; white-space: nowrap; }
+.nt-h-item b { color: var(--text); font-size: 12px; }
+.nt-h-item b.up { color: var(--bullish); } .nt-h-item b.down { color: var(--bearish); } .nt-h-item b.neu { color: var(--muted); }
+.nt-fresh-ok { color: var(--bullish); } .nt-fresh-warn { color: var(--warn); } .nt-fresh-na { color: var(--muted); }
+
+.nt-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.nt-dot-ok { background: var(--bullish); } .nt-dot-warn { background: var(--warn); } .nt-dot-lo { background: var(--bearish); } .nt-dot-na { background: var(--muted); }
+
+.nt-meter { display: inline-block; width: 46px; height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; vertical-align: middle; }
+.nt-meter-fill { display: block; height: 100%; }
+.nt-meter-hi { background: var(--bullish); } .nt-meter-mid { background: var(--warn); } .nt-meter-lo { background: var(--bearish); }
+
+.nt-stage { font-weight: 800; padding: 1px 7px; border-radius: 999px; font-size: 11px; }
+.nt-stage-q { background: rgba(138,151,173,0.18); color: #9aa7bd; }
+.nt-stage-b { background: rgba(59,130,246,0.16); color: #6ea8ff; }
+.nt-stage-bw { background: rgba(217,164,65,0.18); color: var(--warn); }
+.nt-stage-em { background: rgba(22,199,132,0.16); color: var(--bullish); }
+.nt-stage-dv { background: rgba(22,199,132,0.22); color: var(--bullish); }
+.nt-stage-sm { background: rgba(22,199,132,0.32); color: var(--bullish); }
+.nt-stage-ex { background: rgba(234,57,67,0.18); color: var(--bearish); }
+.nt-stage-rw { background: rgba(234,57,67,0.22); color: #ff6b73; }
+
+.nt-cols { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; }
+.nt-col { padding: 8px 10px; border-right: 1px solid var(--border); min-width: 0; }
+.nt-col:last-child { border-right: none; }
+.nt-col-h { font-size: 10px; font-weight: 800; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; }
+.nt-flow-row { display: flex; justify-content: space-between; gap: 6px; padding: 2px 0; }
+.nt-flow-n { color: var(--muted); }
+.nt-flow-v { font-weight: 700; font-variant-numeric: tabular-nums; }
+.nt-flow-v.up { color: var(--bullish); } .nt-flow-v.down { color: var(--bearish); } .nt-flow-v.neu { color: var(--text); }
+
+.nt-struct { display: flex; flex-direction: column; gap: 2px; }
+.nt-st-row { display: grid; grid-template-columns: 22px 1fr auto; align-items: baseline; gap: 6px; font-variant-numeric: tabular-nums; }
+.nt-st-row span { color: var(--muted); font-size: 10px; }
+.nt-st-row b { font-weight: 700; }
+.nt-st-row i { font-size: 10px; color: var(--muted); font-style: normal; }
+.nt-st-r b { color: var(--bearish); } .nt-st-s b { color: var(--bullish); }
+.nt-st-spot { border-top: 1px dashed var(--border); border-bottom: 1px dashed var(--border); padding: 2px 0; }
+.nt-st-spot b { color: var(--text); font-weight: 800; }
+
+.nt-bar { position: relative; height: 26px; margin-top: 8px; }
+.nt-bar-track { position: absolute; top: 12px; left: 0; right: 0; height: 3px; background: var(--border); border-radius: 2px; }
+.nt-bar-mark { position: absolute; top: 8px; width: 3px; height: 11px; border-radius: 2px; transform: translateX(-50%); }
+.nt-bar-spot { background: var(--text); width: 8px; height: 8px; border-radius: 50%; top: 9px; }
+.nt-bar-trig { background: var(--warn); }
+.nt-bar-lbl { position: absolute; top: 20px; font-size: 9px; color: var(--muted); }
+.nt-bar-l { left: 0; } .nt-bar-r { right: 0; }
+
+.nt-proj-row { display: flex; justify-content: space-between; gap: 6px; padding: 2px 0; }
+.nt-proj-row span { color: var(--muted); }
+.nt-proj-row b { font-weight: 700; font-variant-numeric: tabular-nums; }
+.nt-proj-row b.up { color: var(--bullish); } .nt-proj-row b.down { color: var(--bearish); } .nt-proj-row b.neu { color: var(--muted); }
+
+.nt-cf-row { display: flex; justify-content: space-between; gap: 6px; padding: 2px 0; }
+.nt-cf-row span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nt-cf-row b.ok { color: var(--bullish); } .nt-cf-row b.pend { color: var(--warn); }
+
+.nt-opt-head { font-weight: 800; font-size: 13px; }
+.nt-opt-facts { display: flex; flex-direction: column; gap: 1px; margin: 3px 0; }
+.nt-opt-facts span { display: flex; justify-content: space-between; color: var(--muted); }
+.nt-opt-facts b { font-weight: 700; }
+.nt-opt-facts b.up { color: var(--bullish); } .nt-opt-facts b.down { color: var(--bearish); } .nt-opt-facts b.neu { color: var(--muted); }
+.nt-opt-status { font-size: 10px; font-weight: 800; margin-top: 3px; padding: 2px 6px; border-radius: 4px; display: inline-block; }
+.nt-opt-status.ok { background: rgba(22,199,132,0.16); color: var(--bullish); }
+.nt-opt-status.pend { background: rgba(217,164,65,0.16); color: var(--warn); }
+
+.nt-na { color: var(--muted); font-size: 11px; font-weight: 700; padding: 4px 0; }
+
+.nt-foot { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 7px 12px; border-top: 1px solid var(--border); background: rgba(255,255,255,0.02); }
+.nt-foot-item { font-size: 11px; color: var(--muted); letter-spacing: 0.3px; white-space: nowrap; }
+.nt-foot-item b { color: var(--text); font-variant-numeric: tabular-nums; }
+.nt-foot-master { margin-left: auto; font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 6px; }
+.nt-foot-master b { font-size: 13px; font-weight: 800; letter-spacing: 0.3px; }
+.nt-foot-master i { font-style: normal; font-weight: 500; color: var(--muted); font-size: 11px; }
+.nt-master-go { background: rgba(22,199,132,0.14); color: var(--bullish); }
+.nt-master-wait { background: rgba(217,164,65,0.14); color: var(--warn); }
+.nt-master-avoid { background: rgba(234,57,67,0.14); color: var(--bearish); }
+
+/* Tablet: compress to 3 columns, keep the hierarchy. */
+@media (max-width: 1100px) {
+  .nt-cols { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .nt-col:nth-child(3n) { border-right: none; }
+  .nt-col { border-bottom: 1px solid var(--border); }
+}
+/* Mobile: the purpose-built hero above already carries the primary read, so the
+   dense terminal is hidden rather than shrunk into unreadability. */
+@media (max-width: 640px) { .nterm { display: none; } }
