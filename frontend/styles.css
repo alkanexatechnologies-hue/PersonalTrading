@@ -3729,3 +3729,9 @@ body.oi-focus #panel-oicommand.active { display: flex; flex: 1; min-height: 0; f
 body.oi-focus #panel-oicommand.active #oic-df-stage { overflow-y: auto; }
 /* On a normal (non-oi-focus) render, give the flow a sensible min height. */
 #oic-flow.df { min-height: 60vh; }
+
+/* Cockpit section labels — name each zone of the Master Trade Selector. */
+.mts-sec { display: flex; align-items: baseline; gap: 10px; margin: 14px 0 7px; padding-bottom: 5px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.mts-sec:first-of-type { margin-top: 4px; }
+.mts-sec-n { font-size: 12px; font-weight: 800; letter-spacing: .4px; color: var(--text); text-transform: uppercase; }
+.mts-sec-d { font-size: 11px; color: var(--muted); }
