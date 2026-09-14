@@ -5337,9 +5337,16 @@ const DF_STEPS = [
   { n: 10, t: "Journal", s: "What happened?" },
   { n: 11, t: "Daily Review", s: "How did the day go?" },
   { n: 12, t: "20-Session", s: "Is the edge real?" },
+  { n: 13, t: "OI Details", s: "Where is the open interest?" },
 ];
-const DF_SYM = "^NSEI";
-state.df = state.df || { step: 1, data: null, loading: false };
+// All F&O indices selectable via the flow's header filter.
+const DF_INDICES = [
+  { sym: "^NSEI", label: "NIFTY 50" },
+  { sym: "^NSEBANK", label: "NIFTY BANK" },
+  { sym: "^CNXFIN", label: "FIN NIFTY" },
+  { sym: "^NSEMDCP50", label: "MIDCAP NIFTY" },
+];
+state.df = state.df || { step: 1, data: null, loading: false, sym: "^NSEI" };
 
 function dfNum(n, dp) { return (n == null || isNaN(n)) ? "—" : fmt(n, dp == null ? (Math.abs(n) < 1000 ? 2 : 0) : dp); }
 function dfRow(k, v, cls) { return `<div class="df-row"><span class="df-k">${k}</span><span class="df-v ${cls || ""}">${v}</span></div>`; }
@@ -5350,11 +5357,20 @@ function initDecisionFlow() {
   const rail = el("df-rail");
   if (rail && !rail.dataset.built) {
     rail.dataset.built = "1";
-    rail.innerHTML = `<div class="df-rail-h">Decision Flow</div>` +
+    rail.innerHTML = `<div class="df-rail-h">Decision Flow</div>
+      <div class="df-filter"><label for="df-index">Index</label>
+        <select id="df-index" class="df-index">${DF_INDICES.map((i) => `<option value="${i.sym}"${i.sym === state.df.sym ? " selected" : ""}>${i.label}</option>`).join("")}</select></div>` +
       DF_STEPS.map((s) => `<button type="button" class="df-step${s.n === state.df.step ? " active" : ""}" data-df="${s.n}">
         <span class="df-step-n">${s.n}</span><span class="df-step-t">${s.t}<small>${s.s}</small></span></button>`).join("") +
       `<div class="df-rail-note">Each step reads the existing engine — the flow only sequences what's already there. Advisory only.</div>`;
     rail.querySelectorAll("[data-df]").forEach((b) => b.addEventListener("click", () => dfSelect(+b.getAttribute("data-df"))));
+    const sel = el("df-index");
+    if (sel) sel.addEventListener("change", () => {
+      state.df.sym = sel.value;
+      state.df.data = null;                 // clear stale symbol's data so nothing bleeds across
+      renderDfScreen();                     // show the loading state immediately for the new index
+      loadDecisionFlowData();
+    });
   }
   loadDecisionFlowData();
 }
@@ -5373,20 +5389,23 @@ function startDecisionFlowLive() {
 async function loadDecisionFlowData() {
   if (state.df.loading) return;
   state.df.loading = true;
+  const sym = state.df.sym || "^NSEI";
   try {
     const [oi, ls, scan, paper, q] = await Promise.all([
-      fetchJSON("/api/oi-command?symbol=" + encodeURIComponent(DF_SYM), 25000).catch(() => null),
-      fetchJSON("/api/liquidity-status/" + encodeURIComponent(DF_SYM), 15000).catch(() => null),
+      fetchJSON("/api/oi-command?symbol=" + encodeURIComponent(sym), 25000).catch(() => null),
+      fetchJSON("/api/liquidity-status/" + encodeURIComponent(sym), 15000).catch(() => null),
       fetchJSON("/api/watchlist/scan", 60000).catch(() => null),
       fetchJSON("/api/paper/state", 8000).catch(() => null),
-      fetchJSON("/api/quotes?symbols=" + encodeURIComponent(DF_SYM), 8000).catch(() => null),
+      fetchJSON("/api/quotes?symbols=" + encodeURIComponent(sym), 8000).catch(() => null),
     ]);
+    // Ignore a response that arrived after the user switched index again.
+    if ((state.df.sym || "^NSEI") !== sym) { state.df.loading = false; return; }
     state.df.data = {
       oi: oi && !oi.error ? oi : null,
       ls: ls && !ls.error ? ls : null,
       scan: scan && !scan.error ? scan : null,
       paper: paper && !paper.error ? paper : null,
-      quote: q && q.quotes ? q.quotes[DF_SYM] : null,
+      quote: q && q.quotes ? q.quotes[sym] : null,
     };
   } catch (_) { /* keep last */ }
   finally { state.df.loading = false; renderDfScreen(); }
@@ -5675,6 +5694,51 @@ const DF_SCREENS = {
         Aggregates the Journal (step 10) across sessions from the existing audit logs (option-top-pick, liquidity-status, decision-log): cumulative P&L, win-rate & avg-R trend, direction accuracy, and 5M/15M/30M projection-range hit-rate — plus WAIT-discipline and false-signal counts. Purpose is validation, not tuning.<br><br>
         <span class="wl-sub">Charts render here once ≥1 session of forward data is logged. This view reads existing logs only — it never changes the strategy.</span>
       </div>`,
+
+  13: (D) => {
+    const oi = D.oi, S = (oi && oi.oiSummary) || null, chain = (oi && oi.oiChain) || [];
+    if (!oi || (!S && !chain.length)) return dfHead(13, "OI Details", "Where is the open interest?") + `<div class="df-na">OI DATA UNAVAILABLE — no option-chain read for this index right now.</div>`;
+    const dir = oi.oiDirection, conf = oi.oiConfidence;
+    const dirTxt = dir === "UP" ? "▲ BULLISH" : dir === "DOWN" ? "▼ BEARISH" : "• FLAT";
+    const dirCls = dir === "UP" ? "up" : dir === "DOWN" ? "down" : "neu";
+    const pcr = S ? S.pcr : null;
+    const pcrCls = pcr == null ? "neu" : pcr >= 1.1 ? "up" : pcr <= 0.9 ? "down" : "neu";
+    const feverCls = S && S.feverSide === "PUT" ? "up" : S && S.feverSide === "CALL" ? "down" : "neu";
+    // Chain slice around ATM (max ~11 rows), most OI-heavy strikes stay visible.
+    const rows = chain.slice(0, 21);
+    const oiN = (n) => n == null ? "—" : Math.abs(n) >= 1e7 ? (n / 1e7).toFixed(2) + "Cr" : Math.abs(n) >= 1e5 ? (n / 1e5).toFixed(2) + "L" : Math.abs(n) >= 1e3 ? (n / 1e3).toFixed(1) + "K" : String(Math.round(n));
+    const pctTxt = (p) => p == null ? "" : (p >= 0 ? "+" : "") + fmt(p, 1) + "%";
+    const body = rows.map((r) => `<tr class="${r.atm ? "df-atm" : ""}">
+        <td class="${(r.ce.oiChgPct || 0) < 0 ? "up" : ""}">${pctTxt(r.ce.oiChgPct)}</td>
+        <td>${oiN(r.ce.oi)}</td>
+        <td class="sym">${dfNum(r.strike, 0)}${r.atm ? " ·ATM" : ""}</td>
+        <td>${oiN(r.pe.oi)}</td>
+        <td class="${(r.pe.oiChgPct || 0) > 0 ? "up" : ""}">${pctTxt(r.pe.oiChgPct)}</td>
+      </tr>`).join("");
+    return dfHead(13, "OI Details · " + (oi.name || "") , "Where is the open interest sitting, and which side is building? — from the existing OI engine.") + `
+      <div class="df-cc-top" style="grid-template-columns:repeat(4,1fr)">
+        <div class="df-stat"><div class="df-lab">OI Verdict</div><div class="df-big ${dirCls}" style="font-size:17px">${dirTxt}</div><div class="df-sub">confidence ${conf != null ? conf : "—"}${conf != null ? "/100" : ""}</div></div>
+        <div class="df-stat"><div class="df-lab">PCR</div><div class="df-big mono ${pcrCls}">${pcr != null ? fmt(pcr, 2) : "—"}</div><div class="df-sub">${pcr == null ? "" : pcr >= 1.1 ? "put-heavy · bullish" : pcr <= 0.9 ? "call-heavy · bearish" : "balanced"}</div></div>
+        <div class="df-stat"><div class="df-lab">Max Pain</div><div class="df-big mono">${S && S.maxPain != null ? dfNum(S.maxPain, 0) : "—"}</div><div class="df-sub">expiry ${S && S.expiry ? S.expiry : "—"}</div></div>
+        <div class="df-stat"><div class="df-lab">CE / PE fever</div><div class="df-big mono ${feverCls}">${S && S.callPct != null ? S.callPct + "/" + S.putPct + "%" : "—"}</div><div class="df-sub">${S && S.feverSide ? S.feverSide + " side" : ""}</div></div>
+      </div>
+      <div class="df-panel" style="margin-bottom:12px"><div class="df-panel-h">Writing walls</div>
+        <div class="df-oi-walls">
+          ${dfRow("Call wall (resistance)", S && S.callWall ? dfNum(S.callWall.strike, 0) + "  ·  " + oiN(S.callWall.oi) : "—", "down")}
+          ${dfRow("Put wall (support)", S && S.putWall ? dfNum(S.putWall.strike, 0) + "  ·  " + oiN(S.putWall.oi) : "—", "up")}
+          ${dfRow("Net CE OI Δ", S && S.netCeChg != null ? oiN(S.netCeChg) : "—", (S && S.netCeChg < 0) ? "up" : "down")}
+          ${dfRow("Net PE OI Δ", S && S.netPeChg != null ? oiN(S.netPeChg) : "—", (S && S.netPeChg > 0) ? "up" : "down")}
+        </div>
+        ${S && S.fever ? `<p class="df-say muted" style="margin-top:6px">${S.fever}</p>` : ""}
+      </div>
+      <div class="df-panel"><div class="df-panel-h">Option chain around ATM · <span class="down">CE ← calls</span> / <span class="up">puts → PE</span></div>
+        <div class="df-twrap"><table class="df-oi-chain">
+          <thead><tr><th>CE Δ%</th><th>CE OI</th><th class="df-oi-strike">Strike</th><th>PE OI</th><th>PE Δ%</th></tr></thead>
+          <tbody>${body || `<tr><td colspan="5" class="neu">chain unavailable</td></tr>`}</tbody>
+        </table></div>
+      </div>
+      <p class="df-note">Read from the existing OI engine (same chain that drives the arbiter): CALL columns on the left, PUT on the right, ATM row highlighted. Rising put OI at a strike builds support; rising call OI builds resistance. Advisory only.</p>`;
+  },
 };
 
 async function loadOiCommand() {
