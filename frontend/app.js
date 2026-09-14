@@ -63,6 +63,10 @@ async function init() {
   state.tpUniverse = "index";
   initOiCommand();
   startOiCommandLive();
+  // Trader Dashboard leads with the sequenced flow (same component as the
+  // Decision Flow desk); the classic cockpit above stays behind the toggle.
+  dfInitInstance("oic");
+  dfStartLive("oic");
   startSessionKeeper();
 
   setTimeout(() => loadIndexDesk(), 1500);
@@ -75,6 +79,13 @@ async function init() {
   setTimeout(() => loadTopPicks(true), 2500);
   setTimeout(() => loadOptionTopPick(), 5000); // scans ~60 stocks - stays clear of the earlier, cheaper staggered loaders
   if (el("otp-refresh")) el("otp-refresh").addEventListener("click", loadOptionTopPick);
+  // Trader Dashboard: toggle between the sequenced flow (default) and the classic cockpit.
+  if (el("oic-classic-toggle")) el("oic-classic-toggle").addEventListener("click", () => {
+    const panel = el("panel-oicommand");
+    const on = panel.classList.toggle("show-classic");
+    el("oic-classic-toggle").textContent = on ? "Sequenced flow ▴" : "Classic cockpit ▾";
+    if (on) { initOiCommand(); startOiCommandLive(); }   // spin up the classic loaders on first reveal
+  });
   if (el("ls-refresh")) el("ls-refresh").addEventListener("click", loadLiquidityStatusScreen);
   if (el("ls-symbol")) el("ls-symbol").addEventListener("change", loadLiquidityStatusScreen);
   if (el("ls-scan-refresh")) el("ls-scan-refresh").addEventListener("click", loadLiquidityMovers);
@@ -1880,7 +1891,7 @@ function switchTab(name) {
   if (name === "dhanbacktest" && !state.dhanBacktestInit) { state.dhanBacktestInit = true; initDhanBacktest(); }
   document.body.classList.toggle("oi-focus", name === "oicommand");
   renderWatchlist();
-  if (name === "oicommand") { initOiCommand(); startOiCommandLive(); startAdvisoryTracking(); loadAdvisoryAccuracy(15); }
+  if (name === "oicommand") { initOiCommand(); startOiCommandLive(); startAdvisoryTracking(); loadAdvisoryAccuracy(15); dfInitInstance("oic"); dfStartLive("oic"); }
   if (name === "earlymoves") { loadEarlyMoves(); startEarlyMovesTab(); }
   if (name === "tradermind") { initTraderMindTab(); startTraderMindLive(); }
   if (name === "strategylab") initStrategyLab();
@@ -5354,43 +5365,57 @@ function dfRow(k, v, cls) { return `<div class="df-row"><span class="df-k">${k}<
 function dfBiasArrow(b) { return b === "Bullish" ? "▲ BULLISH" : b === "Bearish" ? "▼ BEARISH" : b === "Conflict" ? "⚠ CONFLICT" : "• NEUTRAL"; }
 function dfBiasCls(b) { return b === "Bullish" ? "up" : b === "Bearish" ? "down" : "neu"; }
 
-function initDecisionFlow() {
-  const rail = el("df-rail");
+// The flow is mounted in two places from ONE codebase: the Decision Flow desk
+// ("flow") and the Index Option Trading Trader Dashboard ("oic"). Each instance
+// has its own rail/stage elements and its own step/symbol/data state.
+const DF_INST = {
+  flow: { rail: "df-rail", stage: "df-stage", panel: "panel-decisionflow", state: { step: 1, sym: "^NSEI", data: null, loading: false }, timer: null },
+  oic: { rail: "oic-df-rail", stage: "oic-df-stage", panel: "panel-oicommand", state: { step: 1, sym: "^NSEI", data: null, loading: false }, timer: null },
+};
+
+function dfInitInstance(id) {
+  const I = DF_INST[id];
+  const rail = el(I.rail);
   if (rail && !rail.dataset.built) {
     rail.dataset.built = "1";
+    const selId = id + "-df-index";
     rail.innerHTML = `<div class="df-rail-h">Decision Flow</div>
-      <div class="df-filter"><label for="df-index">Index</label>
-        <select id="df-index" class="df-index">${DF_INDICES.map((i) => `<option value="${i.sym}"${i.sym === state.df.sym ? " selected" : ""}>${i.label}</option>`).join("")}</select></div>` +
-      DF_STEPS.map((s) => `<button type="button" class="df-step${s.n === state.df.step ? " active" : ""}" data-df="${s.n}">
+      <div class="df-filter"><label for="${selId}">Index</label>
+        <select id="${selId}" class="df-index">${DF_INDICES.map((i) => `<option value="${i.sym}"${i.sym === I.state.sym ? " selected" : ""}>${i.label}</option>`).join("")}</select></div>` +
+      DF_STEPS.map((s) => `<button type="button" class="df-step${s.n === I.state.step ? " active" : ""}" data-df="${s.n}">
         <span class="df-step-n">${s.n}</span><span class="df-step-t">${s.t}<small>${s.s}</small></span></button>`).join("") +
       `<div class="df-rail-note">Each step reads the existing engine — the flow only sequences what's already there. Advisory only.</div>`;
-    rail.querySelectorAll("[data-df]").forEach((b) => b.addEventListener("click", () => dfSelect(+b.getAttribute("data-df"))));
-    const sel = el("df-index");
+    rail.querySelectorAll("[data-df]").forEach((b) => b.addEventListener("click", () => dfSelect(id, +b.getAttribute("data-df"))));
+    const sel = el(selId);
     if (sel) sel.addEventListener("change", () => {
-      state.df.sym = sel.value;
-      state.df.data = null;                 // clear stale symbol's data so nothing bleeds across
-      renderDfScreen();                     // show the loading state immediately for the new index
-      loadDecisionFlowData();
+      I.state.sym = sel.value;
+      I.state.data = null;                 // clear stale symbol's data so nothing bleeds across
+      dfRender(id);                        // show the loading state immediately for the new index
+      dfLoad(id);
     });
   }
-  loadDecisionFlowData();
+  dfLoad(id);
 }
-function dfSelect(n) {
-  state.df.step = n;
-  document.querySelectorAll("#df-rail .df-step").forEach((e) => e.classList.toggle("active", +e.getAttribute("data-df") === n));
-  renderDfScreen();
+function dfSelect(id, n) {
+  const I = DF_INST[id];
+  I.state.step = n;
+  const rail = el(I.rail);
+  if (rail) rail.querySelectorAll(".df-step").forEach((e) => e.classList.toggle("active", +e.getAttribute("data-df") === n));
+  dfRender(id);
 }
-function startDecisionFlowLive() {
-  if (state.dfTimer) return;
-  state.dfTimer = setInterval(() => {
-    const pn = document.getElementById("panel-decisionflow");
-    if (pn && pn.classList.contains("active") && isMarketOpen()) loadDecisionFlowData();
+function dfStartLive(id) {
+  const I = DF_INST[id];
+  if (I.timer) return;
+  I.timer = setInterval(() => {
+    const pn = document.getElementById(I.panel);
+    if (pn && pn.classList.contains("active") && isMarketOpen()) dfLoad(id);
   }, 20 * 1000);
 }
-async function loadDecisionFlowData() {
-  if (state.df.loading) return;
-  state.df.loading = true;
-  const sym = state.df.sym || "^NSEI";
+async function dfLoad(id) {
+  const I = DF_INST[id];
+  if (I.state.loading) return;
+  I.state.loading = true;
+  const sym = I.state.sym || "^NSEI";
   try {
     const [oi, ls, scan, paper, q] = await Promise.all([
       fetchJSON("/api/oi-command?symbol=" + encodeURIComponent(sym), 25000).catch(() => null),
@@ -5399,9 +5424,8 @@ async function loadDecisionFlowData() {
       fetchJSON("/api/paper/state", 8000).catch(() => null),
       fetchJSON("/api/quotes?symbols=" + encodeURIComponent(sym), 8000).catch(() => null),
     ]);
-    // Ignore a response that arrived after the user switched index again.
-    if ((state.df.sym || "^NSEI") !== sym) { state.df.loading = false; return; }
-    state.df.data = {
+    if ((I.state.sym || "^NSEI") !== sym) { I.state.loading = false; return; } // superseded by a newer index pick
+    I.state.data = {
       oi: oi && !oi.error ? oi : null,
       ls: ls && !ls.error ? ls : null,
       scan: scan && !scan.error ? scan : null,
@@ -5409,22 +5433,25 @@ async function loadDecisionFlowData() {
       quote: q && q.quotes ? q.quotes[sym] : null,
     };
   } catch (_) { /* keep last */ }
-  finally { state.df.loading = false; renderDfScreen(); }
+  finally { I.state.loading = false; dfRender(id); }
 }
-
-function renderDfScreen() {
-  const stage = el("df-stage");
+function dfRender(id) {
+  const I = DF_INST[id];
+  const stage = el(I.stage);
   if (!stage) return;
-  const D = state.df.data;
+  const D = I.state.data;
   if (!D) { stage.innerHTML = `<div class="wl-sub" style="padding:20px">Loading live data…</div>`; return; }
-  const n = state.df.step;
+  const n = I.state.step;
   const fn = DF_SCREENS[n];
   stage.innerHTML = fn ? fn(D) : `<div class="df-planned">Screen ${n} — coming next.</div>`;
   stage.scrollTop = 0;
-  // wire any action buttons
-  stage.querySelectorAll("[data-df-goto]").forEach((b) => b.addEventListener("click", () => dfSelect(+b.getAttribute("data-df-goto"))));
+  stage.querySelectorAll("[data-df-goto]").forEach((b) => b.addEventListener("click", () => dfSelect(id, +b.getAttribute("data-df-goto"))));
   stage.querySelectorAll("[data-df-desk]").forEach((b) => b.addEventListener("click", () => { chooseMode(b.getAttribute("data-df-desk")); setTimeout(() => switchTab(b.getAttribute("data-df-tab")), 60); }));
 }
+
+// Backward-compatible wrappers for the Decision Flow desk.
+function initDecisionFlow() { dfInitInstance("flow"); }
+function startDecisionFlowLive() { dfStartLive("flow"); }
 
 function dfHead(num, title, q) {
   return `<div class="df-scr-head"><span class="df-scr-num">${String(num).padStart(2, "0")}</span><h2>${title}</h2></div><p class="df-scr-q"><em>${q}</em></p>`;

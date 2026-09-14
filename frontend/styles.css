@@ -3715,3 +3715,17 @@ body.oi-focus #panel-decisionflow.active .df-stage { overflow-y: auto; }
 body.mode-decisionflow #cockpit-strip,
 body.mode-decisionflow #opp-bar,
 body.mode-decisionflow #index-strip { display: none !important; }
+
+/* ===== Trader Dashboard: sequenced flow primary, classic cockpit on toggle ===== */
+.oic-viewbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 2px 0 8px; flex-shrink: 0; }
+.oic-viewbar b { font-size: 14px; font-weight: 700; }
+#oic-classic-toggle { font-size: 12px; }
+/* Flow is the default Trader Dashboard view; the dense cockpit is hidden until toggled. */
+#panel-oicommand:not(.show-classic) .oic-cockpit { display: none; }
+#panel-oicommand.show-classic #oic-flow { display: none; }
+/* Size the flow to fill the panel (which is a flex column under oi-focus). */
+body.oi-focus #panel-oicommand.active { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+#oic-flow.df { flex: 1; min-height: 0; }
+body.oi-focus #panel-oicommand.active #oic-df-stage { overflow-y: auto; }
+/* On a normal (non-oi-focus) render, give the flow a sensible min height. */
+#oic-flow.df { min-height: 60vh; }

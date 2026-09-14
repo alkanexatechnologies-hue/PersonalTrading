@@ -691,6 +691,17 @@
 
         <!-- ================= TAB: Trader Dashboard (single-symbol OI-change command screen) ================= -->
         <div class="tab-panel active" id="panel-oicommand">
+          <!-- View switch: the sequenced Decision-Flow view is primary; the classic
+               dense cockpit (.oic-cockpit below) is one tap away. -->
+          <div class="oic-viewbar">
+            <b>🎯 Trader Dashboard</b>
+            <button type="button" id="oic-classic-toggle" class="ghost">Classic cockpit ▾</button>
+          </div>
+          <!-- Sequenced flow (same component as the Decision Flow desk), instance "oic". -->
+          <div class="df oic-flow-wrap" id="oic-flow">
+            <nav class="df-rail" id="oic-df-rail" aria-label="Trader dashboard flow steps"></nav>
+            <main class="df-stage" id="oic-df-stage"><div class="wl-sub" style="padding:20px">Loading…</div></main>
+          </div>
           <div class="oic-cockpit">
             <div class="oic-toolbar">
               <b>Trader Dashboard</b>
