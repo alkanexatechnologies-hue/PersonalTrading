@@ -2016,9 +2016,16 @@ body.oi-focus .signal-block { padding: 6px 12px; font-size: 13px; }
   #mobile-nav button .mn-ico { font-size: 18px; line-height: 1; }
   #mobile-nav button.active { color: var(--blue); }
 
-  /* Risk footer sits just above the bottom nav (stays always visible). */
+  /* Risk footer sits just above the bottom nav (stays always visible) on every
+     mobile screen EXCEPT the Trader Dashboard, where the mobile hero's own
+     compact banner (.mth-risk-banner, after the SCALP card) already covers
+     the same requirement - showing both would duplicate the same warning
+     twice on one screen. The mandatory first-use consent modal and the full
+     on-demand disclosure modal are untouched; only this redundant second
+     copy of the same short warning line is hidden. */
   .risk-footer { bottom: 56px; padding: 5px 10px; font-size: 10px; }
   .risk-footer .rf-warn { min-width: 0; }
+  body.oi-focus .risk-footer { display: none; }
 
   /* Larger, touch-friendly controls inside content. */
   .tab-flow, #tab-flow-wrap { font-size: 12px; }
@@ -3331,10 +3338,31 @@ body.oi-focus .cockpit-strip #mind-bar {
 
 @media (max-width: 640px) {
   .mth-hero { display: block; padding: 0 0 var(--space-3); }
+  /* html/body are locked to height:100% (this whole app scrolls internally
+     per-panel, not as one long page), so making ancestors overflow:visible
+     doesn't help - #mobile-th-hero needs to be its OWN internally-scrolling
+     region, exactly like #oicommand already is on desktop, not fight that
+     architecture. Without this it was flex-shrunk to fit .oic-cockpit's
+     leftover space (min-height:0 lets a flex item collapse below its content
+     height) and silently clipped - present in the DOM, invisible on screen. */
+  .mth-hero { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   /* The existing desktop-detail content stays in the DOM (nothing is deleted)
      but starts collapsed on mobile until the trader asks for it. */
   body.oi-focus #oic-backtest, body.oi-focus #oicommand { display: none; }
-  body.oi-focus.mth-details-open #oic-backtest, body.oi-focus.mth-details-open #oicommand { display: block; }
+  body.oi-focus.mth-details-open #oic-backtest, body.oi-focus.mth-details-open #oicommand { display: block; height: auto; overflow: visible; }
+
+  /* Part 6/7 - the secondary widgets above the tabs (Trader Mind bar, Ask bar,
+     opportunity bar, index strip) are exactly the "everything else is
+     secondary" content the spec calls out - on the Trader Dashboard they were
+     eating most of the above-the-fold height, pushing the actual spot/
+     Directional/Setup/Scalp cards below the fold on a phone. Hidden here
+     (not deleted - still one tap away via View Full Details); every other
+     mobile tab keeps them exactly as before. */
+  body.oi-focus #cockpit-strip, body.oi-focus #ask-bar, body.oi-focus #opp-bar, body.oi-focus #index-strip { display: none; }
+  body.oi-focus.mth-details-open #cockpit-strip { display: flex; }
+  body.oi-focus.mth-details-open #ask-bar { display: block; }
+  body.oi-focus.mth-details-open #opp-bar { display: flex; }
+  body.oi-focus.mth-details-open.mode-option #index-strip { display: flex; }
 }
 
 .mth-symbol-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-1); }
