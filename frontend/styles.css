@@ -2007,6 +2007,10 @@ body.oi-focus .signal-block { padding: 6px 12px; font-size: 13px; }
   #mobile-nav {
     display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 130;
     height: 56px; background: var(--panel); border-top: 1px solid var(--border);
+    /* iPhone home-indicator clearance. env() resolves to 0 on Android and on
+       non-notched iPhones, so the bar keeps its normal 56px there. */
+    height: calc(56px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
   #mobile-nav button {
     flex: 1; min-width: 0; background: transparent; border: none; color: var(--muted);
@@ -3338,13 +3342,38 @@ body.oi-focus .cockpit-strip #mind-bar {
 
 @media (max-width: 640px) {
   .mth-hero { display: block; padding: 0 0 var(--space-3); }
-  /* On mobile the Option Trading panel scrolls as ONE page (the .content
-     scroll container), not a stack of nested internal-scroll regions. The
-     desktop layout makes #panel-oicommand -> .oic-cockpit -> #oicommand a
-     chain of flex/overflow containers each sized to one viewport; on mobile
-     that chain fought itself and left the last card + risk banner clipped
-     with dead space below. Here the panel and cockpit become normal block
-     flow so the hero flows naturally and .content scrolls the whole thing. */
+  /* The desktop app is a locked 100vh shell: html/body are height:100% with
+     body{overflow:hidden} (plus body.oi-focus{overflow:hidden}), and every
+     panel is a nested flex/overflow container sized to one viewport. That
+     shell blocks native page scrolling, so on mobile the Option Trading
+     screen replaces it outright: the DOCUMENT scrolls, top to bottom, and
+     every container in the chain becomes ordinary block flow with auto
+     height. Scoped to body.oi-focus + <=640px, so desktop/tablet and every
+     other mobile tab keep the original shell untouched. */
+  html { height: auto; min-height: 100%; }
+  body.oi-focus { display: block; height: auto; overflow: visible; overflow-x: hidden; }
+  /* The 44px/116px bottom padding reserves room for the fixed risk-footer +
+     bottom nav. The risk-footer is hidden on this screen (the hero carries its
+     own compact banner), so only the nav needs clearing - otherwise the page
+     ends in a large empty gap. Safe-area inset keeps it clear of the iPhone
+     home indicator as well. */
+  body.oi-focus .layout { display: block; height: auto; min-height: 0; padding-bottom: 0; }
+  body.oi-focus .tab-panel.active { padding-bottom: 0 !important; }
+  body.oi-focus .content {
+    /* Just enough to clear the fixed nav (+ iPhone home indicator) - no more,
+       so the page ends right under the risk banner instead of a dead gap. */
+    padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px)) !important;
+    padding-left: 10px; padding-right: 10px; padding-top: 4px;
+  }
+  body.oi-focus .mth-hero { padding-bottom: 0; }
+  body.oi-focus .topbar { padding-top: calc(4px + env(safe-area-inset-top, 0px)); }
+  /* CLAUDE.md floor: never below 12px on mobile. */
+  body.oi-focus .mth-card-title .wl-sub,
+  body.oi-focus .mth-badge,
+  body.oi-focus .mth-score,
+  body.oi-focus .mth-updated,
+  body.oi-focus .mth-brand span { font-size: 12px; }
+  body.oi-focus .content { display: block; height: auto; min-height: 0; overflow: visible; }
   body.oi-focus #panel-oicommand.active { display: block; height: auto; overflow: visible; }
   body.oi-focus .oic-cockpit { display: block; height: auto; overflow: visible; }
   .mth-hero { overflow: visible; }
