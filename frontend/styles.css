@@ -3740,3 +3740,17 @@ body.oi-focus #panel-oicommand.active #oic-df-stage { overflow-y: auto; }
 .mts-sec-t { display: flex; flex-direction: column; gap: 1px; line-height: 1.2; }
 .mts-sec-t { font-size: 13px; font-weight: 800; letter-spacing: .3px; color: var(--text); }
 .mts-sec-t small { font-size: 11px; font-weight: 400; letter-spacing: 0; color: var(--muted); }
+
+/* Cockpit stepper — a horizontal rail of Decision-Flow-style steps; one body
+   (screen) shown at a time. */
+.mts-steprail { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 10px; margin-bottom: 10px; border-bottom: 1px solid var(--border); -webkit-overflow-scrolling: touch; }
+.mts-stepbtn { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 8px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; cursor: pointer; color: var(--text); font: inherit; text-align: left; }
+.mts-stepbtn:hover { border-color: var(--border2, #2e3a4f); }
+.mts-stepbtn.active { border-color: var(--blue); background: rgba(59,130,246,.12); }
+.mts-stepbtn .mts-step-n { flex: 0 0 auto; width: 22px; height: 22px; border: 1px solid var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: var(--mono, "IBM Plex Mono", monospace); font-size: 11px; font-weight: 700; color: var(--muted); }
+.mts-stepbtn.active .mts-step-n { color: var(--blue); border-color: var(--blue); }
+.mts-stepbtn .mts-step-t { display: flex; flex-direction: column; line-height: 1.15; font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+.mts-stepbtn .mts-step-t small { font-size: 10px; font-weight: 400; color: var(--muted); }
+.mts-step-body[hidden] { display: none !important; }
+/* On phones the step subtitles are dropped so the rail stays compact. */
+@media (max-width: 640px) { .mts-stepbtn .mts-step-t small { display: none; } }

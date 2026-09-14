@@ -6435,7 +6435,6 @@ function renderMasterSelector(d) {
         <div class="mts-title">🎯 Master Trade Selector</div>
         <div class="mts-head-actions">
           <button type="button" class="mts-log-link" id="mts-oi-toggle">📊 OI Details</button>
-          <button type="button" class="mts-log-link" id="mts-log">🧾 View log</button>
         </div>
       </div>
 
@@ -6603,6 +6602,80 @@ function renderMasterSelector(d) {
   if (rel) { rel.textContent = "verdict: " + verdict; rel.className = "rel-badge " + (vcls === "go" ? "rel-high" : vcls === "conflict" ? "rel-est" : "rel-med"); }
   const clr = el("oic-clarity");
   if (clr) clr.textContent = "clarity: " + (X.setupQuality != null ? X.setupQuality : "—");
+
+  // Turn the section labels into a Decision-Flow-style stepper: a rail of steps
+  // at the top, one screen visible at a time.
+  cockpitStepify(box);
+}
+
+// Convert the flat cockpit (section labels + stacked content) into a stepped
+// view like the Decision Flow desk: each "mts-sec" label becomes a rail step,
+// and only the selected step's content is shown. Re-runs on every 15s render;
+// the active step is remembered in state.cockpitStep.
+function cockpitStepify(box) {
+  const mts = box && box.querySelector(".mts");
+  if (!mts) return;
+  const head = mts.querySelector(".mts-head");
+  const kids = [...mts.children];
+  const secEls = kids.filter((k) => k.classList.contains("mts-sec"));
+  if (secEls.length < 2) return;
+
+  // Group each section label with the content nodes that follow it.
+  const segments = [];
+  let cur = null;
+  for (const k of kids) {
+    if (k === head) continue;
+    if (k.classList.contains("mts-sec")) {
+      const numEl = k.querySelector(".mts-sec-n");
+      const tEl = k.querySelector(".mts-sec-t");
+      cur = {
+        n: numEl ? numEl.textContent.trim() : String(segments.length + 1),
+        name: tEl && tEl.childNodes[0] ? tEl.childNodes[0].textContent.trim() : "",
+        q: (k.querySelector(".mts-sec-t small") || {}).textContent || "",
+        sec: k, nodes: [],
+      };
+      segments.push(cur);
+    } else if (cur) {
+      cur.nodes.push(k);
+    }
+  }
+  if (!segments.length) return;
+
+  const active = Math.min(Math.max(state.cockpitStep || 0, 0), segments.length - 1);
+  state.cockpitStep = active;
+
+  // Move each segment's content into its own body wrapper (appendChild moves nodes).
+  const bodies = segments.map((seg, i) => {
+    const body = document.createElement("div");
+    body.className = "mts-step-body";
+    body.dataset.step = i;
+    seg.nodes.forEach((nd) => body.appendChild(nd));
+    return body;
+  });
+  // Drop the now-empty inline labels.
+  segments.forEach((seg) => seg.sec.remove());
+
+  // Build the horizontal step rail and mount it right under the head.
+  const rail = document.createElement("div");
+  rail.className = "mts-steprail";
+  rail.innerHTML = segments.map((seg, i) =>
+    `<button type="button" class="mts-stepbtn${i === active ? " active" : ""}" data-step="${i}">
+       <span class="mts-step-n">${seg.n}</span>
+       <span class="mts-step-t">${seg.name}<small>${seg.q}</small></span>
+     </button>`).join("");
+  if (head) head.after(rail); else mts.prepend(rail);
+  bodies.forEach((b) => mts.appendChild(b));
+
+  const apply = () => {
+    bodies.forEach((b, i) => { b.hidden = i !== state.cockpitStep; });
+    rail.querySelectorAll("[data-step]").forEach((b) => b.classList.toggle("active", +b.getAttribute("data-step") === state.cockpitStep));
+  };
+  rail.querySelectorAll("[data-step]").forEach((b) => b.addEventListener("click", () => {
+    state.cockpitStep = +b.getAttribute("data-step");
+    apply();
+    mts.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }));
+  apply();
 }
 
 // ---------- Guidance agent narration feed (read-only, event-driven server-side) ----------
