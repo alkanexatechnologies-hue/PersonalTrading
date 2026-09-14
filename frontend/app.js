@@ -69,6 +69,7 @@ async function init() {
   setTimeout(() => startIndexStrip(), 2500);
   setTimeout(() => { loadTraderMind(); setInterval(loadTraderMind, 20 * 1000); }, 3500);
   setTimeout(() => loadWatchlistBadges(), 4500);
+  setTimeout(() => loadWatchlistScan(), 6500); // heavy per-symbol scan — last, after the cheaper loaders
 
   // Heavy scans are staggered so Groww is not hammered on login (no hang).
   setTimeout(() => loadTopPicks(true), 2500);
@@ -779,9 +780,11 @@ function watchlistOrder() {
   const indices = state.symbols.filter((s) => s.type === "index");
   const equities = state.symbols.filter((s) => s.type !== "index");
   equities.sort((a, b) => {
-    const sa = Math.abs(state.wlData[a.symbol]?.score ?? 0);
-    const sb = Math.abs(state.wlData[b.symbol]?.score ?? 0);
-    return sb - sa; // strongest signal first
+    // Prefer the early-warning Watch Score (0-100) when the scan has run;
+    // otherwise fall back to the older |signal| ordering.
+    const sa = state.watchScan[a.symbol]?.score ?? Math.abs(state.wlData[a.symbol]?.score ?? 0);
+    const sb = state.watchScan[b.symbol]?.score ?? Math.abs(state.wlData[b.symbol]?.score ?? 0);
+    return sb - sa; // strongest opportunity first
   });
   return [...indices, ...equities];
 }
@@ -796,6 +799,31 @@ function volBadge(rvol) {
   const tip = rvol >= 1.3 ? "अच्छा volume — move में दम (conviction, trade ठीक)" : rvol >= 0.7 ? "सामान्य volume" : "कम volume — false-move risk, सावधानी";
   return `<span class="vol-pill ${cls}" title="Relative volume ${rvol}x — ${tip}">${icon} Vol ${rvol}x</span>`;
 }
+// Compact early-warning strip for a watched stock: Stage · Score · Bias, then
+// Action, then Trigger / Invalidation. Purely presents the backend scan row
+// (backend/watchlist/scanner.ts) - no BUY is generated here. A stale/missing
+// feed renders as DATA UNAVAILABLE / WAIT, never a live read.
+const WL_STAGE_CLS = { "QUIET": "q", "BUILDING": "b", "BREAKOUT WATCH": "bw", "EARLY MOVE": "em", "DEVELOPING": "dv", "STRONG MOVE": "sm", "EXTENDED": "ex", "REVERSAL WATCH": "rw" };
+const WL_ACTION_CLS = { "TAKE": "take", "BREAKOUT READY": "ready", "WAIT FOR PULLBACK": "pull", "AVOID CHASING": "avoid", "WATCH": "watch" };
+function watchScanHtml(w) {
+  if (!w) return "";
+  if (w.dataState !== "OK") {
+    return `<div class="wl-ew wl-ew-na" title="${(w.note || "").replace(/"/g, "&quot;")}">⚠ DATA UNAVAILABLE · WAIT</div>`;
+  }
+  const biasCls = w.bias === "Bullish" ? "up" : w.bias === "Bearish" ? "down" : "neu";
+  const trig = w.trigger != null ? fmt(w.trigger, 0) : "—";
+  const inval = w.invalidation != null ? fmt(w.invalidation, 0) : "—";
+  return `<div class="wl-ew" title="${(w.note || "").replace(/"/g, "&quot;")}">
+    <div class="wl-ew-top">
+      <span class="wl-stage wl-stage-${WL_STAGE_CLS[w.stage] || "q"}">${w.stage}</span>
+      <span class="wl-score">${Math.round(w.score)}<i>/100</i></span>
+      <span class="wl-bias ${biasCls}">${w.bias}</span>
+    </div>
+    <div class="wl-ew-mid"><span class="wl-act wl-act-${WL_ACTION_CLS[w.action] || "watch"}">${w.action}</span></div>
+    <div class="wl-ew-lv"><span>Trigger <b>${trig}</b></span><span>Invalidation <b>${inval}</b></span></div>
+  </div>`;
+}
+
 function renderWatchlist() {
   const box = el("watchlist-items");
   box.innerHTML = "";
@@ -860,7 +888,8 @@ function renderWatchlist() {
       item.innerHTML = `
         <div><div class="wl-name">${s.name}</div><div class="wl-sub">${s.symbol}</div>${rgTag}${vTag}</div>
         <div class="wl-right"><div class="wl-price" id="wlp-${cssId(s.symbol)}">${priceTxt}</div>
-        <div class="wl-badge" id="wlb-${cssId(s.symbol)}" style="background:#1a2130;color:#8a97ad">${label}</div></div>`;
+        <div class="wl-badge" id="wlb-${cssId(s.symbol)}" style="background:#1a2130;color:#8a97ad">${label}</div></div>
+        ${watchScanHtml(state.watchScan[s.symbol])}`;
     }
     item.addEventListener("click", () => openStock(s.symbol));
     box.appendChild(item);
@@ -910,11 +939,32 @@ async function loadWatchlistBadges() {
   }
 }
 
+// Early-warning scan: per-watched-stock Watch Score / stage / bias / trigger /
+// invalidation / action, reusing the backend Liquidity Status engine (no new
+// signal logic here). Populates state.watchScan[symbol]; renderWatchlist() reads
+// it to enrich each equity row and rank the strongest opportunities on top.
+state.watchScan = state.watchScan || {};
+let watchScanBusy = false;
+async function loadWatchlistScan() {
+  if (watchScanBusy) return;
+  watchScanBusy = true;
+  try {
+    const d = await fetchJSON("/api/watchlist/scan", 60000);
+    if (d && Array.isArray(d.rows)) {
+      const next = {};
+      for (const r of d.rows) next[r.symbol] = r;
+      state.watchScan = next;
+      renderWatchlist();
+    }
+  } catch (_) { /* keep last scan; rows fall back to the plain badge */ }
+  finally { watchScanBusy = false; }
+}
+
 // Auto-refresh watchlist prices/signals every 60s while the market is open.
 function startWatchlistAutoRefresh() {
   setInterval(() => {
     loadIndexDesk();
-    if (isMarketOpen() || isFeedWindow()) loadWatchlistBadges();
+    if (isMarketOpen() || isFeedWindow()) { loadWatchlistBadges(); loadWatchlistScan(); }
   }, 60 * 1000);
 }
 

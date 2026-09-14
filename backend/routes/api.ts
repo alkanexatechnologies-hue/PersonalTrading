@@ -173,6 +173,7 @@ import { scanOptionTopPick, evaluateStockBothTracks } from "../optionTopPick/sca
 import { OptionTopPickDeps } from "../optionTopPick/types";
 import { evaluateLiquidityStatus } from "../liquidityStatus/engine";
 import { scanLiquidityStatus } from "../liquidityStatus/scanner";
+import { scanWatchlist } from "../watchlist/scanner";
 import { getLiquidityStatusAuditLog } from "../liquidityStatus/auditLog";
 import { LiquidityStatusDeps } from "../liquidityStatus/types";
 import { dayHighLow } from "../indicators/dayRange";
@@ -4829,6 +4830,26 @@ router.get("/liquidity-status/:symbol/audit", (req: Request, res: Response) => {
     res.json({ entries: getLiquidityStatusAuditLog({ symbol: req.params.symbol, limit: Number(req.query.limit) || 50 }) });
   } catch (e: any) {
     res.status(500).json({ error: e?.message || "Failed to read audit log" });
+  }
+});
+
+// ============================ Watchlist early-warning scanner (backend/watchlist/) ============================
+// Reuses the Liquidity Status engine per watched symbol; only the universe
+// differs (the watchlist = indices + F&O equities the sidebar shows, not just
+// equities), so it gets its own deps that reuse the same cached readers.
+const watchlistDeps: LiquidityStatusDeps = {
+  ...liquidityStatusDeps,
+  listEligibleStocks: () => DEFAULT_SYMBOLS.filter((d) => d.type === "index" || (d.type === "equity" && d.fno)),
+};
+
+router.get("/watchlist/scan", async (_req: Request, res: Response) => {
+  try {
+    // Heavy (candles + OI per symbol) — cached like the other scans so the
+    // sidebar's periodic refreshes and multiple viewers stay within the Groww budget.
+    const result = await cached("watchlist:scan", 60_000, () => scanWatchlist(watchlistDeps));
+    res.json(result);
+  } catch (e: any) {
+    res.status(502).json({ error: e?.message || "Watchlist scan failed" });
   }
 });
 

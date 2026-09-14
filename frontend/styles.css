@@ -98,6 +98,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap; /* lets the early-warning strip wrap to its own full-width row */
   padding: 8px 10px;
   border-radius: 8px;
   cursor: pointer;
@@ -145,6 +146,32 @@ body {
   display: inline-block;
   margin-top: 2px;
 }
+
+/* Watchlist early-warning strip (per watched stock) */
+.wl-ew { flex: 1 1 100%; width: 100%; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); display: flex; flex-direction: column; gap: 4px; }
+.wl-ew-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.wl-stage { font-size: 9px; font-weight: 800; letter-spacing: 0.3px; padding: 2px 6px; border-radius: 999px; white-space: nowrap; }
+.wl-stage-q { background: rgba(138,151,173,0.18); color: #9aa7bd; }
+.wl-stage-b { background: rgba(59,130,246,0.16); color: #6ea8ff; }
+.wl-stage-bw { background: rgba(240,185,11,0.16); color: #f0b90b; }
+.wl-stage-em { background: rgba(22,199,132,0.16); color: #16c784; }
+.wl-stage-dv { background: rgba(22,199,132,0.22); color: #16c784; }
+.wl-stage-sm { background: rgba(22,199,132,0.30); color: #16c784; }
+.wl-stage-ex { background: rgba(234,57,67,0.18); color: #ea3943; }
+.wl-stage-rw { background: rgba(234,57,67,0.20); color: #ff6b73; }
+.wl-score { font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.wl-score i { font-size: 9px; font-weight: 600; color: var(--muted); font-style: normal; }
+.wl-bias { font-size: 10px; font-weight: 700; }
+.wl-bias.up { color: #16c784; } .wl-bias.down { color: #ea3943; } .wl-bias.neu { color: var(--muted); }
+.wl-act { font-size: 10px; font-weight: 800; letter-spacing: 0.3px; padding: 2px 8px; border-radius: 4px; display: inline-block; }
+.wl-act-take { background: #16c784; color: #06110c; }
+.wl-act-ready { background: rgba(240,185,11,0.18); color: #f0b90b; }
+.wl-act-pull { background: rgba(240,185,11,0.14); color: #e6c14a; }
+.wl-act-avoid { background: rgba(234,57,67,0.16); color: #ea3943; }
+.wl-act-watch { background: rgba(138,151,173,0.16); color: #9aa7bd; }
+.wl-ew-lv { display: flex; justify-content: space-between; gap: 8px; font-size: 10px; color: var(--muted); }
+.wl-ew-lv b { color: var(--text); font-variant-numeric: tabular-nums; }
+.wl-ew-na { font-size: 10px; font-weight: 700; color: #e6c14a; }
 
 .content { flex: 1; padding: 8px 20px; min-width: 0; min-height: 0; overflow: auto; }
 .content-head { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 14px; }
