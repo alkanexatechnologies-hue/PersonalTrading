@@ -4981,128 +4981,106 @@ function mthBadge(confidence) {
   return "WEAK";
 }
 function mthAction(leg) {
-  if (!leg || !leg.optionType || leg.optionType === "—" || !leg.take) return "AVOID";
+  // Maps the EXISTING OiTradeLeg gate flags onto the four display states the
+  // spec asks for. No new logic: take/algoReady are already decided upstream
+  // by recommendOiTrades(); an absent leg is reported honestly, never guessed.
+  if (!leg || leg.confidence == null) return "DATA UNAVAILABLE";
+  if (!leg.optionType || leg.optionType === "—") return "NO EDGE";
+  if (!leg.take) return "NO EDGE";
   return leg.algoReady ? "TAKE" : "WAIT";
 }
 function mthActionClass(action) {
   return action === "TAKE" ? "mth-act-take" : action === "WAIT" ? "mth-act-wait" : "mth-act-avoid";
 }
 
-function renderMthTradeCard(title, subtitle, icon, colorCls, leg, symName) {
+/** One strategy card. `headlineFor` differs per strategy (Directional shows the
+ * option side to buy, Setup/Scalp show the direction), everything else is shared. */
+function renderMthCard(cfg, leg, symName) {
   leg = leg || {};
-  const conf = leg.confidence || 0;
+  const conf = leg.confidence;
   const action = mthAction(leg);
-  const headline = leg.take && leg.optionType && leg.optionType !== "—" ? `BUY ${leg.optionType}` : "NO TRADE";
-  const sideCls = leg.optionType === "PE" ? "bearish" : leg.optionType === "CE" ? "bullish" : "neutral";
-  const reason = (leg.reasons && leg.reasons[0]) || (leg.skipReasons && leg.skipReasons[0]) || "Not enough confirmation yet.";
-  const facts = [
-    leg.ltp != null ? `<span>LTP <b>₹${fmt(leg.ltp)}</b></span>` : "",
-    leg.target != null ? `<span>Target <b>₹${fmt(leg.target)}</b></span>` : "",
-    leg.stop != null ? `<span>Stop <b>₹${fmt(leg.stop)}</b></span>` : "",
-  ].filter(Boolean).join("");
-  return `<article class="mth-card ${colorCls}">
+  const live = leg.optionType && leg.optionType !== "—" && leg.take;
+  const headline = cfg.headlineFor(leg, live);
+  const sideCls = !live ? "neutral" : leg.optionType === "PE" ? "bearish" : "bullish";
+  const reason = (leg.reasons && leg.reasons[0]) || (leg.skipReasons && leg.skipReasons[0]) || "No sufficiently strong setup right now.";
+  return `<article class="mth-card ${cfg.colorCls}">
     <div class="mth-card-head">
-      <div class="mth-card-title">${icon} ${title}<span class="wl-sub">${subtitle}</span></div>
-      <div class="mth-badges"><span class="mth-badge">${mthBadge(conf)}</span><span class="mth-score">${Math.round(conf)}/100</span></div>
+      <div class="mth-card-title">${cfg.icon} ${cfg.title}<span class="wl-sub">${cfg.subtitle}</span></div>
+      <div class="mth-badges">
+        <span class="mth-badge">${conf == null ? "—" : mthBadge(conf)}</span>
+        <span class="mth-score">${conf == null ? "—" : Math.round(conf) + "/100"}</span>
+      </div>
     </div>
     <div class="mth-headline ${sideCls}">${headline}</div>
-    ${leg.strike ? `<div class="wl-sub">${symName} ${fmt(leg.strike, 0)} ${leg.optionType}</div>` : ""}
-    ${facts ? `<div class="mth-facts">${facts}</div>` : ""}
+    ${leg.strike ? `<div class="mth-instrument">${symName} ${fmt(leg.strike, 0)} ${leg.optionType}</div>` : ""}
     <button type="button" class="mth-action ${mthActionClass(action)}">${action}</button>
     <div class="mth-reason">${reason}</div>
+    <button type="button" class="mth-details-link" data-mth-details="${cfg.key}">View Details →</button>
   </article>`;
 }
 
-function renderMthSetupCard(leg, ls, symName) {
-  leg = leg || {};
-  const conf = leg.confidence || 0;
-  const action = mthAction(leg);
-  const headline = leg.take && leg.optionType && leg.optionType !== "—" ? (leg.optionType === "CE" ? "BULLISH" : "BEARISH") : "NEUTRAL";
-  const sideCls = headline === "BULLISH" ? "bullish" : headline === "BEARISH" ? "bearish" : "neutral";
-  const reason = (leg.reasons && leg.reasons[0]) || (leg.skipReasons && leg.skipReasons[0]) || "No clean technical setup yet.";
-  const st = ls && ls.structure;
-  const emaTxt = st ? (st.emaStructure === "Strong Bullish" ? "9 > 21 > 50" : st.emaStructure === "Strong Bearish" ? "9 < 21 < 50" : "Mixed") : "—";
-  const vwapTxt = st ? (st.vwapStatus.startsWith("Above") ? "Above ▲" : st.vwapStatus.startsWith("Below") ? "Below ▼" : "Choppy") : "—";
-  const rsiTxt = st && st.rsi != null ? Math.round(st.rsi) : "—";
-  return `<article class="mth-card mth-setup">
-    <div class="mth-card-head">
-      <div class="mth-card-title">📊 SETUP<span class="wl-sub">Regular trade opportunity</span></div>
-      <div class="mth-badges"><span class="mth-badge">${mthBadge(conf)}</span><span class="mth-score">${Math.round(conf)}/100</span></div>
-    </div>
-    <div class="mth-headline ${sideCls}">${headline}</div>
-    <div class="wl-sub">${symName} (Spot)</div>
-    <div class="mth-facts"><span>EMA <b>${emaTxt}</b></span><span>VWAP <b>${vwapTxt}</b></span><span>RSI <b>${rsiTxt}</b></span></div>
-    <button type="button" class="mth-action ${mthActionClass(action)}">${action}</button>
-    <div class="mth-reason">${reason}</div>
-  </article>`;
-}
-
-function renderMthBiasCard(ls) {
-  if (!ls) return `<div class="mth-card mth-bias neutral"><div class="wl-sub">Market bias unavailable right now.</div></div>`;
-  const dir = ls.directionBias;
-  const cls = dir === "Bullish" ? "bullish" : dir === "Bearish" ? "bearish" : dir === "Conflict" ? "conflict" : "neutral";
-  const icon = dir === "Bullish" ? "🐂" : dir === "Bearish" ? "🐻" : dir === "Conflict" ? "⚠️" : "⚪";
-  const vwapTxt = ls.structure.vwapStatus.startsWith("Above") ? "Above" : ls.structure.vwapStatus.startsWith("Below") ? "Below" : "Choppy";
-  return `<div class="mth-card mth-bias ${cls}">
-    <div class="mth-bias-head">${icon} MARKET BIAS <b>${String(dir).toUpperCase()}</b></div>
-    <div class="mth-facts">
-      <span>Confidence <b>${ls.directionalConfidence.score}/100</b></span>
-      <span>Move Stage <b>${ls.moveStage.replace(/_/g, " ")}</b></span>
-      <span>VWAP <b>${vwapTxt}</b></span>
-    </div>
-    <div class="mth-reason">${ls.systemView}</div>
-  </div>`;
-}
+const MTH_CARDS = [
+  {
+    key: "directional", title: "DIRECTIONAL", subtitle: "Higher conviction trade", icon: "🎯", colorCls: "mth-directional",
+    headlineFor: (leg, live) => (live ? `BUY ${leg.optionType}` : "WAIT"),
+  },
+  {
+    key: "setup", title: "SETUP", subtitle: "Regular trade opportunity", icon: "📊", colorCls: "mth-setup",
+    headlineFor: (leg, live) => (live ? (leg.optionType === "CE" ? "BULLISH" : "BEARISH") : "NEUTRAL"),
+  },
+  {
+    key: "scalp", title: "SCALP", subtitle: "Short-term opportunity", icon: "⚡", colorCls: "mth-scalp",
+    headlineFor: (leg, live) => (live ? (leg.optionType === "CE" ? "BULLISH" : "BEARISH") : "NEUTRAL"),
+  },
+];
 
 async function renderMobileTraderHero(d, sym) {
   const box = el("mobile-th-hero");
   if (!box) return;
   const symName = (el("oic-symbol") && el("oic-symbol").selectedOptions[0] && el("oic-symbol").selectedOptions[0].textContent) || sym;
 
+  // Only extra call is the live quote for the price-change line; everything
+  // else comes from the /api/oi-command payload this tab already fetched.
   let quote = null;
   try {
     const q = await fetchJSON("/api/quotes?symbols=" + encodeURIComponent(sym), 8000);
     quote = (q && q.quotes && q.quotes[sym]) || null;
-  } catch (_) { /* fall back to d.spot below */ }
-
-  let ls = null;
-  try { ls = await fetchJSON("/api/liquidity-status/" + encodeURIComponent(sym), 15000); } catch (_) { /* bias card degrades gracefully */ }
-
-  let openTrade = null;
-  try {
-    if (!state.paperState) state.paperState = await fetchJSON("/api/paper/state", 8000);
-    openTrade = (state.paperState.open || []).find((p) => p.kind === "indexOption" && p.symbol === sym);
-  } catch (_) { /* no open-trade banner if this fails - never blocks the rest */ }
+  } catch (_) { /* falls back to d.spot below */ }
 
   const spot = quote && quote.price != null ? quote.price : d.spot;
+  const chgAbs = quote && quote.change != null ? quote.change : null;
   const chgPct = quote ? quote.changePercent : null;
   const chgCls = chgPct > 0 ? "up" : chgPct < 0 ? "down" : "";
   const age = d.dataAgeSec != null ? Math.round(d.dataAgeSec) : null;
   const live = d.refresh?.marketOpen !== false && age != null && age < 60;
   const rec = d.recommendation || {};
+  const legs = { directional: rec.directional, setup: d.setup, scalp: rec.scalp };
+
+  const chgText = chgPct == null ? "" :
+    `${chgPct >= 0 ? "▲ +" : "▼ "}${chgAbs != null ? fmt(Math.abs(chgAbs)) + " " : ""}(${chgPct >= 0 ? "+" : "-"}${fmt(Math.abs(chgPct))}%)`;
 
   box.innerHTML = `
-    <div class="mth-symbol-row"><span class="mth-symbol">${symName}</span>${openTrade ? '<span class="mth-open-badge">OPEN TRADE</span>' : ""}</div>
+    <div class="mth-brand">MarketPil<span>Option Trading</span></div>
+    <div class="mth-symbol-row"><span class="mth-symbol">${symName}</span>
+      ${age != null ? `<span class="mth-updated">${live ? '<span class="live-dot"></span> ' : ""}${age}s ago</span>` : ""}</div>
     <div class="mth-spot">${spot != null ? fmt(spot) : "—"}</div>
-    ${chgPct != null ? `<div class="mth-chg ${chgCls}">${chgPct >= 0 ? "▲ +" : "▼ "}${fmt(Math.abs(chgPct))}%</div>` : ""}
-    ${age != null ? `<div class="mth-updated">${live ? '<span class="live-dot"></span> ' : ""}Updated ${age}s ago</div>` : ""}
-    ${openTrade ? `<div class="mth-opentrade">OPEN TRADE — ${symName} ${openTrade.strike || ""} ${openTrade.optionType || ""} · <b>HOLD</b> (one trade at a time — no new BUY while this is open)</div>` : ""}
-    ${renderMthBiasCard(ls)}
-    ${renderMthTradeCard("DIRECTIONAL", "Higher conviction trade", "🎯", "mth-directional", rec.directional, symName)}
-    ${renderMthSetupCard(d.setup, ls, symName)}
-    ${renderMthTradeCard("SCALP", "Short-term opportunity", "⚡", "mth-scalp", rec.scalp, symName)}
+    ${chgText ? `<div class="mth-chg ${chgCls}">${chgText}</div>` : ""}
+    ${MTH_CARDS.map((cfg) => renderMthCard(cfg, legs[cfg.key], symName)).join("")}
     <div class="mth-risk-banner">
       <span>⚠ Trading involves risk. Signals are decision-support only.</span>
       <button type="button" id="mth-view-disclosure" class="mth-risk-link">View Disclosure ›</button>
-    </div>
-    <button type="button" id="mth-toggle-details" class="mth-details-toggle">▾ View Full Details</button>`;
+    </div>`;
 
   const dbtn = el("mth-view-disclosure");
   if (dbtn) dbtn.addEventListener("click", () => { const b = el("open-risk-disclosure"); if (b) b.click(); });
-  const tbtn = el("mth-toggle-details");
-  if (tbtn) tbtn.addEventListener("click", () => {
-    document.body.classList.toggle("mth-details-open");
-    tbtn.textContent = document.body.classList.contains("mth-details-open") ? "▴ Hide Full Details" : "▾ View Full Details";
+  // "View Details" reveals the existing full desktop analysis already rendered
+  // in #oicommand below - no second detail view, nothing new computed.
+  box.querySelectorAll("[data-mth-details]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.body.classList.add("mth-details-open");
+      const target = el("oicommand");
+      if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   });
 }
 
