@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
+import { dataFile } from "../config/dataDir";
 import { sendCredentialsEmail } from "./mailer";
 import { notify, notificationsReady } from "../integrations/notificationService";
 
@@ -31,7 +32,9 @@ export interface StoredCredentials {
   passwordless?: boolean;
 }
 
-const FILE = path.join(process.cwd(), "data", "auth-credentials.json");
+// Persisted on DATA_DIR (a mounted disk in production) so a restart/redeploy
+// keeps the same login instead of regenerating a random password. See dataDir.ts.
+const FILE = dataFile("auth-credentials.json");
 const IST_OFFSET_MS = 19_800_000;
 
 function istDateStr(d = new Date()): string {

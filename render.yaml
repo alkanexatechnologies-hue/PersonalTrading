@@ -2,16 +2,35 @@ services:
   - type: web
     name: nsa-intraday-assistant
     runtime: node
-    plan: free
+    # PERSISTENCE: a Persistent Disk (below) is REQUIRED for admin-created user
+    # accounts to survive restart/redeploy, and Render only allows disks on a
+    # paid plan. The free tier has an EPHEMERAL filesystem - on the free tier the
+    # admin login can still be pinned via LOGIN_USER/LOGIN_PASS env vars, but
+    # users.json (created users) cannot persist without the disk.
+    plan: starter
     autoDeploy: true
     buildCommand: npm ci
     startCommand: npm start
     healthCheckPath: /health
+    # Persistent Disk: keeps the auth/login data (admin credentials,
+    # admin-created users, login audit) across restarts, redeploys and GitHub
+    # deploys. DATA_DIR (below) points the auth stores at this mount. A deploy
+    # NEVER recreates or wipes this disk - it is separate from the code checkout.
+    disk:
+      name: nsa-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: NODE_VERSION
         value: 22.19.0
+      # --- Persistent data location: auth credentials, users and login audit
+      # are written here. Must match the disk mountPath above so they land on
+      # the Persistent Disk instead of the ephemeral container filesystem. ---
+      - key: DATA_DIR
+        value: /var/data
       # --- Required for real login (otherwise a random password is generated
-      # on every restart and only visible in the Render log) ---
+      # on every restart and only visible in the Render log). Setting these
+      # pins a stable admin login that survives restarts even without the disk. ---
       - key: LOGIN_USER
         sync: false
       - key: LOGIN_PASS

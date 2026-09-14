@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { dataFile } from "../config/dataDir";
 
 // ============================ Login audit log ============================
 // Append-only JSONL (same pattern as backend/data/liveSnapshotRecorder.ts).
@@ -26,7 +27,9 @@ export interface AuditEvent {
   detail?: string; // e.g. "created user X", "disabled user Y", "invalid password" - NEVER a token/password/secret value
 }
 
-const FILE = path.join(process.cwd(), "data", "login_audit.jsonl");
+// Persisted on DATA_DIR (a mounted disk in production) alongside the accounts
+// it audits, so the login history survives restart/redeploy too. See dataDir.ts.
+const FILE = dataFile("login_audit.jsonl");
 
 export function logAuditEvent(e: Omit<AuditEvent, "at">): void {
   try {

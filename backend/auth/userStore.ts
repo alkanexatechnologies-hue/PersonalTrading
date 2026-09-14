@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
+import { dataFile } from "../config/dataDir";
 import { hashPassword } from "./passwordHash";
 
 // ============================ Admin-managed user store ============================
@@ -31,7 +32,9 @@ export interface UserRecord {
 export type PublicUser = Omit<UserRecord, "passwordHash">;
 export type EffectiveStatus = "ACTIVE" | "DISABLED" | "EXPIRED" | "NOT_STARTED";
 
-const FILE = path.join(process.cwd(), "data", "users.json");
+// Persisted on DATA_DIR (a mounted disk in production) so admin-created user
+// accounts survive restart/redeploy instead of resetting to empty. See dataDir.ts.
+const FILE = dataFile("users.json");
 
 function istDateStr(d = new Date()): string {
   return new Date(d.getTime() + 19_800_000).toISOString().slice(0, 10);
