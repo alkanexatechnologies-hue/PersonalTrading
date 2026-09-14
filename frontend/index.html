@@ -156,6 +156,12 @@
         </div>
 
         <div class="mg-btns">
+          <article class="mg-btn mg-decisionflow" data-mode="decisionflow" role="button" tabindex="0">
+            <span class="mg-ico">🧭</span>
+            <span class="mg-t">Decision Flow</span>
+            <span class="mg-d">Guided sequence: Market Command → Map → Watchlist → Trader Mind → Setup → Best Option → Confirmation → Execution → Live Position → Journal → Daily Review → 20-Session</span>
+            <button type="button" class="mg-cta">Open Decision Flow →</button>
+          </article>
           <article class="mg-btn mg-option" data-mode="option" role="button" tabindex="0">
             <span class="mg-ico">🎯</span>
             <span class="mg-t">Option Trading</span>
@@ -470,6 +476,7 @@
 
           <button class="tab grp-swing" data-tab="movetiming" data-group="swing">Move Timing</button>
           <button class="tab" data-tab="dhanbacktest" data-group="dhanbacktest">🧪 Backtest (Dhan)</button>
+          <button class="tab tab-primary" data-tab="decisionflow" data-group="decisionflow">🧭 Decision Flow</button>
         </div>
         <div id="tab-flow-wrap">
           <button id="tab-flow-toggle" class="pill-btn">🔍 How this tab works — logic flow ▾</button>
@@ -1250,6 +1257,13 @@
           </div>
         </div><!-- /panel-liquiditystatus -->
 
+        <!-- ================= TAB: Decision Flow (guided sequence over existing engines) ================= -->
+        <div class="tab-panel" id="panel-decisionflow">
+          <div class="df">
+            <nav class="df-rail" id="df-rail" aria-label="Decision flow steps"></nav>
+            <main class="df-stage" id="df-stage"><div class="wl-sub" style="padding:20px">Loading Decision Flow…</div></main>
+          </div>
+        </div><!-- /panel-decisionflow -->
 
         <!-- ================= Bull % Rank (historical up-day bias) ================= -->
         <div class="tab-panel" id="panel-bullrank">

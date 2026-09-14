@@ -1872,6 +1872,7 @@ function switchTab(name) {
 
   if (name === "toppicks" && !state.topPicksLoaded) { state.topPicksLoaded = true; loadTopPicks(); }
   if (name === "liquiditystatus" && !state.liquidityStatusLoaded) { state.liquidityStatusLoaded = true; loadLiquidityStatusScreen(); }
+  if (name === "decisionflow") { initDecisionFlow(); startDecisionFlowLive(); }
   if (name === "bullrank" && !state.bullRankLoaded) { state.bullRankLoaded = true; loadBullRank(); }
   if (name === "stockoptions" && !state.stockOptionsInit) { state.stockOptionsInit = true; initStockOptions(); }
 
@@ -1895,6 +1896,11 @@ function switchTab(name) {
 // Per-desk mobile bottom-nav layouts (4 quick tabs + Watchlist + More is too many;
 // we use 3 mode tabs + Watchlist + More so the watchlist stays reachable on phones).
 const MODE_NAV = {
+  decisionflow: [
+    { nav: "decisionflow", ico: "🧭", lbl: "Flow" },
+    { nav: "watchlist", ico: "📋", lbl: "List" },
+    { nav: "more", ico: "☰", lbl: "More" },
+  ],
   option: [
     { nav: "oicommand", ico: "🎯", lbl: "OI Cmd" },
     { nav: "paper", ico: "🧪", lbl: "Paper" },
@@ -1961,9 +1967,10 @@ function setupMobileNav() {
 
 // ---------- desk mode (Option Trading vs Stock Swing Trading) ----------
 const MODE_KEY = "nsa_mode";
-const VALID_MODES = ["option", "stockOption", "swing", "dhanbacktest"];
-const MODE_FIRST = { option: "oicommand", stockOption: "stockoptions", swing: "news", dhanbacktest: "dhanbacktest" };
+const VALID_MODES = ["decisionflow", "option", "stockOption", "swing", "dhanbacktest"];
+const MODE_FIRST = { decisionflow: "decisionflow", option: "oicommand", stockOption: "stockoptions", swing: "news", dhanbacktest: "dhanbacktest" };
 const MODE_TABS = {
+  decisionflow: ["decisionflow"],
   option: ["oicommand", "paper", "toppicks", "liquiditystatus", "earlymoves", "strategylab"],
   // Paper Desk and Top Pick are shared with Option Trading (same panels, already
   // pool-filtered/labelled by kind) rather than duplicated for this desk.
@@ -5309,6 +5316,366 @@ async function renderNiftyTerminal(d, sym) {
       <span class="nt-foot-master nt-master-${mCls}">MASTER ACTION: <b>${masterWord}</b>${masterReason ? ` <i>${masterReason}</i>` : ""}</span>
     </div>`;
 }
+
+// ==================== DECISION FLOW DESK ====================
+// A guided sequence over the EXISTING engines - no new scoring/trading logic.
+// One fetch of /api/oi-command (Master Trade Selector, walls, expectedMove,
+// recommendation), /api/liquidity-status (score/stage/bias/structure/
+// confirmations/trigger/invalidation), /api/watchlist/scan (ranked scanner),
+// /api/paper/state (open/closed positions) and /api/quotes (change%) powers all
+// screens. Everything is read-only and degrades to "—"/DATA UNAVAILABLE.
+const DF_STEPS = [
+  { n: 1, t: "Market Command", s: "Is today worth trading?" },
+  { n: 2, t: "Market Map", s: "Where can it move?" },
+  { n: 3, t: "Watchlist", s: "Best opportunity?" },
+  { n: 4, t: "Trader Mind", s: "Why is it a setup?" },
+  { n: 5, t: "Setup Decision", s: "Trade now?" },
+  { n: 6, t: "Best Option", s: "Which contract?" },
+  { n: 7, t: "Confirmation", s: "All conditions met?" },
+  { n: 8, t: "Execution", s: "Place the trade" },
+  { n: 9, t: "Live Position", s: "Hold or exit?" },
+  { n: 10, t: "Journal", s: "What happened?" },
+  { n: 11, t: "Daily Review", s: "How did the day go?" },
+  { n: 12, t: "20-Session", s: "Is the edge real?" },
+];
+const DF_SYM = "^NSEI";
+state.df = state.df || { step: 1, data: null, loading: false };
+
+function dfNum(n, dp) { return (n == null || isNaN(n)) ? "—" : fmt(n, dp == null ? (Math.abs(n) < 1000 ? 2 : 0) : dp); }
+function dfRow(k, v, cls) { return `<div class="df-row"><span class="df-k">${k}</span><span class="df-v ${cls || ""}">${v}</span></div>`; }
+function dfBiasArrow(b) { return b === "Bullish" ? "▲ BULLISH" : b === "Bearish" ? "▼ BEARISH" : b === "Conflict" ? "⚠ CONFLICT" : "• NEUTRAL"; }
+function dfBiasCls(b) { return b === "Bullish" ? "up" : b === "Bearish" ? "down" : "neu"; }
+
+function initDecisionFlow() {
+  const rail = el("df-rail");
+  if (rail && !rail.dataset.built) {
+    rail.dataset.built = "1";
+    rail.innerHTML = `<div class="df-rail-h">Decision Flow</div>` +
+      DF_STEPS.map((s) => `<button type="button" class="df-step${s.n === state.df.step ? " active" : ""}" data-df="${s.n}">
+        <span class="df-step-n">${s.n}</span><span class="df-step-t">${s.t}<small>${s.s}</small></span></button>`).join("") +
+      `<div class="df-rail-note">Each step reads the existing engine — the flow only sequences what's already there. Advisory only.</div>`;
+    rail.querySelectorAll("[data-df]").forEach((b) => b.addEventListener("click", () => dfSelect(+b.getAttribute("data-df"))));
+  }
+  loadDecisionFlowData();
+}
+function dfSelect(n) {
+  state.df.step = n;
+  document.querySelectorAll("#df-rail .df-step").forEach((e) => e.classList.toggle("active", +e.getAttribute("data-df") === n));
+  renderDfScreen();
+}
+function startDecisionFlowLive() {
+  if (state.dfTimer) return;
+  state.dfTimer = setInterval(() => {
+    const pn = document.getElementById("panel-decisionflow");
+    if (pn && pn.classList.contains("active") && isMarketOpen()) loadDecisionFlowData();
+  }, 20 * 1000);
+}
+async function loadDecisionFlowData() {
+  if (state.df.loading) return;
+  state.df.loading = true;
+  try {
+    const [oi, ls, scan, paper, q] = await Promise.all([
+      fetchJSON("/api/oi-command?symbol=" + encodeURIComponent(DF_SYM), 25000).catch(() => null),
+      fetchJSON("/api/liquidity-status/" + encodeURIComponent(DF_SYM), 15000).catch(() => null),
+      fetchJSON("/api/watchlist/scan", 60000).catch(() => null),
+      fetchJSON("/api/paper/state", 8000).catch(() => null),
+      fetchJSON("/api/quotes?symbols=" + encodeURIComponent(DF_SYM), 8000).catch(() => null),
+    ]);
+    state.df.data = {
+      oi: oi && !oi.error ? oi : null,
+      ls: ls && !ls.error ? ls : null,
+      scan: scan && !scan.error ? scan : null,
+      paper: paper && !paper.error ? paper : null,
+      quote: q && q.quotes ? q.quotes[DF_SYM] : null,
+    };
+  } catch (_) { /* keep last */ }
+  finally { state.df.loading = false; renderDfScreen(); }
+}
+
+function renderDfScreen() {
+  const stage = el("df-stage");
+  if (!stage) return;
+  const D = state.df.data;
+  if (!D) { stage.innerHTML = `<div class="wl-sub" style="padding:20px">Loading live data…</div>`; return; }
+  const n = state.df.step;
+  const fn = DF_SCREENS[n];
+  stage.innerHTML = fn ? fn(D) : `<div class="df-planned">Screen ${n} — coming next.</div>`;
+  stage.scrollTop = 0;
+  // wire any action buttons
+  stage.querySelectorAll("[data-df-goto]").forEach((b) => b.addEventListener("click", () => dfSelect(+b.getAttribute("data-df-goto"))));
+  stage.querySelectorAll("[data-df-desk]").forEach((b) => b.addEventListener("click", () => { chooseMode(b.getAttribute("data-df-desk")); setTimeout(() => switchTab(b.getAttribute("data-df-tab")), 60); }));
+}
+
+function dfHead(num, title, q) {
+  return `<div class="df-scr-head"><span class="df-scr-num">${String(num).padStart(2, "0")}</span><h2>${title}</h2></div><p class="df-scr-q"><em>${q}</em></p>`;
+}
+function dfMasterStatus(D) {
+  const ls = D.ls, arb = D.oi && D.oi.ext && D.oi.ext.arbitration;
+  const v = arb ? arb.verdict : (ls ? ls.traderAction : null);
+  if (!v) return { word: "DATA UNAVAILABLE", cls: "wait", why: "Live feed not available right now." };
+  if (/GO|TAKE|PREPARE/i.test(v)) return { word: "TRADEABLE", cls: "go", why: (arb && arb.reason) || (ls && ls.traderActionDetail) || "" };
+  if (/CONFLICT|AVOID/i.test(v)) return { word: "HIGH RISK / AVOID", cls: "avoid", why: (arb && arb.reason) || (ls && ls.conflict && ls.conflict.reason) || "" };
+  return { word: "WAIT FOR SETUP", cls: "wait", why: (arb && arb.reason) || (ls && ls.traderActionDetail) || "" };
+}
+
+const DF_SCREENS = {
+  1: (D) => {
+    const ls = D.ls, oi = D.oi, q = D.quote;
+    const spot = oi ? oi.spot : (ls && ls.spot);
+    const chg = q ? q.changePercent : null;
+    const score = ls ? (ls.liquidityFlowScore && ls.liquidityFlowScore.score) : null;
+    const bias = ls ? ls.directionBias : (oi && oi.oiDirection === "UP" ? "Bullish" : oi && oi.oiDirection === "DOWN" ? "Bearish" : "Neutral");
+    const st = ls && ls.structure;
+    const stage = ls ? ntStageFromLs(ls) : "—";
+    const regime = (oi && oi.ext && oi.ext.regime) || "—";
+    const em = oi && oi.expectedMove;
+    const kl = (ls && ls.keyLevels) || [];
+    const sup = kl.find((l) => l.label === "KEY SUPPORT"), res = kl.find((l) => l.label === "KEY RESISTANCE");
+    const W = oi && oi.walls;
+    const ms = dfMasterStatus(D);
+    let proj;
+    if (em && (em.low != null || em.high != null) && em.dir) {
+      const sign = em.dir < 0 ? "−" : "+";
+      proj = dfRow("Expected move", `<b>${sign}${Math.round(Math.abs(em.low))} → ${sign}${Math.round(Math.abs(em.high))} pts</b>`, "") +
+        dfRow("Expected price", spot != null ? `${dfNum(spot + em.dir * Math.abs(em.low), 0)} → ${dfNum(spot + em.dir * Math.abs(em.high), 0)}` : "—") +
+        dfRow("Direction", dfBiasArrow(bias), dfBiasCls(bias)) +
+        dfRow("Confidence", score != null ? score + "%" : "—");
+    } else {
+      proj = `<div class="df-na">NO EDGE · LOW CONFIDENCE<div class="wl-sub">Direction flat — no projected range.</div></div>`;
+    }
+    return dfHead(1, "Morning Market Command", "Is today's environment worth trading?") + `
+      <div class="df-cc-top">
+        <div class="df-stat"><div class="df-lab">Market Regime</div><div class="df-big ${dfBiasCls(bias)}">${String(regime).toUpperCase()}</div></div>
+        <div class="df-stat"><div class="df-lab">NIFTY Bias</div><div class="df-big ${dfBiasCls(bias)}">${dfBiasArrow(bias)}</div></div>
+        <div class="df-stat"><div class="df-lab">Stage</div><div class="df-big" style="font-size:16px">${stage}</div></div>
+        <div class="df-stat"><div class="df-lab">Liquidity</div><div class="df-big mono">${score == null ? "—" : score}<span style="font-size:12px;color:var(--muted)">/100</span></div><div class="df-sub">${score == null ? "" : ntMeter(score) + " OI + volume"}</div></div>
+      </div>
+      <div class="df-cc-cols">
+        <div class="df-panel"><div class="df-panel-h">NIFTY</div>
+          ${dfRow("Spot", dfNum(spot))}
+          ${dfRow("Change", chg == null ? "—" : (chg >= 0 ? "+" : "") + fmt(chg) + "%", chg > 0 ? "up" : chg < 0 ? "down" : "neu")}
+          ${dfRow("VWAP", st ? (st.vwapStatus.indexOf("Above") === 0 ? "Above ✓" : st.vwapStatus.indexOf("Below") === 0 ? "Below ✕" : "Choppy") : "—", st && st.vwapStatus.indexOf("Above") === 0 ? "up" : "neu")}
+          ${dfRow("EMA 9/21/50", st ? (st.emaStructure === "Strong Bullish" ? "9>21>50 ✓" : st.emaStructure === "Strong Bearish" ? "9<21<50 ✕" : "Mixed") : "—", st ? dfBiasCls(st.emaStructure === "Strong Bullish" ? "Bullish" : st.emaStructure === "Strong Bearish" ? "Bearish" : "Neutral") : "")}
+          ${dfRow("Momentum", st && st.rsi != null ? "RSI " + Math.round(st.rsi) : "—", st && st.rsi >= 55 ? "up" : st && st.rsi <= 45 ? "down" : "neu")}
+        </div>
+        <div class="df-panel"><div class="df-panel-h">Structure</div>
+          ${dfRow("Resistance", res ? dfNum(res.price, 0) : "—", "down")}
+          ${dfRow("Call wall", W && W.bestR ? dfNum(W.bestR.strike, 0) : "—", "down")}
+          ${dfRow("Put wall", W && W.bestS ? dfNum(W.bestS.strike, 0) : "—", "up")}
+          ${dfRow("Support", sup ? dfNum(sup.price, 0) : "—", "up")}
+          ${dfRow("Room ↑", (res && spot != null) ? Math.round(res.price - spot) + " pts" : "—")}
+        </div>
+        <div class="df-panel"><div class="df-panel-h">Point Projection</div>${proj}</div>
+        <div class="df-panel"><div class="df-panel-h">Freshness</div>
+          ${dfRow("Data age", oi && oi.dataAgeSec != null ? Math.round(oi.dataAgeSec) + "s" : "—", (oi && oi.stale) ? "warn" : "up")}
+          ${dfRow("Session", (oi && oi.refresh && oi.refresh.marketOpen === false) ? "CLOSED" : "OPEN")}
+          ${dfRow("OI baseline", ls && ls.freshness && ls.freshness.oiStale ? "STALE" : "OK", ls && ls.freshness && ls.freshness.oiStale ? "warn" : "up")}
+        </div>
+      </div>
+      <div class="df-master df-master-${ms.cls}"><span class="df-master-word">${ms.word}</span><span class="df-master-why">${ms.why || ""}</span></div>`;
+  },
+
+  2: (D) => {
+    const ls = D.ls, oi = D.oi;
+    const spot = oi ? oi.spot : (ls && ls.spot);
+    const kl = (ls && ls.keyLevels) || [];
+    const sup = kl.find((l) => l.label === "KEY SUPPORT"), res = kl.find((l) => l.label === "KEY RESISTANCE");
+    const sup2 = kl.find((l) => l.label === "SECOND SUPPORT"), res2 = kl.find((l) => l.label === "SECOND RESISTANCE");
+    const W = oi && oi.walls;
+    const trig = ls && ls.trigger ? ls.trigger.level : null;
+    const inval = ls && ls.invalidation ? ls.invalidation.level : null;
+    const lvl = (price, tag, cls, room) => price == null ? "" : `<div class="df-lvl ${cls}"><span class="df-price mono">${dfNum(price, 0)}</span><span class="df-tag">${tag}</span><span class="df-room mono">${room}</span></div>`;
+    const roomTxt = (p) => (p != null && spot != null) ? (p >= spot ? "+" : "") + Math.round(p - spot) : "";
+    return dfHead(2, "Market Map", "Where is price likely to move, and what proves it wrong?") + `
+      <div class="df-map">
+        ${lvl(res2 ? res2.price : null, "2nd resistance", "res", roomTxt(res2 && res2.price))}
+        ${lvl(res ? res.price : null, "Resistance", "res", roomTxt(res && res.price))}
+        ${lvl(W && W.bestR ? W.bestR.strike : null, "Call wall / Trigger", "trig", roomTxt(W && W.bestR && W.bestR.strike))}
+        <div class="df-lvl df-lvl-spot"><span class="df-price mono">${dfNum(spot, 0)}</span><span class="df-tag" style="color:var(--text)">◉ Spot${ls && ls.structure && ls.structure.vwapValue ? " · VWAP " + dfNum(ls.structure.vwapValue, 0) : ""}</span><span class="df-room">—</span></div>
+        ${lvl(W && W.bestS ? W.bestS.strike : null, "Put wall / Support", "sup", roomTxt(W && W.bestS && W.bestS.strike))}
+        ${lvl(sup ? sup.price : null, "Support", "sup", roomTxt(sup && sup.price))}
+        ${lvl(sup2 ? sup2.price : null, "2nd support", "sup", roomTxt(sup2 && sup2.price))}
+        <div class="df-map-foot">
+          <div><span class="df-k">Trigger</span><span class="df-v up">${trig != null ? "> " + dfNum(trig, 0) : "—"}</span></div>
+          <div><span class="df-k">Invalidation</span><span class="df-v down">${inval != null ? "< " + dfNum(inval, 0) : "—"}</span></div>
+          <div><span class="df-k">Upside room</span><span class="df-v up">${res && spot != null ? "+" + Math.round(res.price - spot) + " pts" : "—"}</span></div>
+          <div><span class="df-k">Downside room</span><span class="df-v down">${sup && spot != null ? "−" + Math.round(spot - sup.price) + " pts" : "—"}</span></div>
+        </div>
+      </div>`;
+  },
+
+  3: (D) => {
+    const rows = (D.scan && D.scan.rows) || [];
+    if (!rows.length) return dfHead(3, "Liquidity Watchlist", "Where is the strongest opportunity?") + `<div class="df-na">Scanner has no rows yet — market data unavailable.</div>`;
+    const badge = (txt, cls) => `<span class="df-badge ${cls}">${txt}</span>`;
+    const stageCls = (s) => /STRONG|DEVELOP/.test(s) ? "b-up" : /EXTEND|REVERSAL/.test(s) ? "b-dn" : /BREAKOUT/.test(s) ? "b-wait" : "b-neu";
+    const actCls = (a) => a === "TAKE" ? "b-up" : a === "BREAKOUT READY" ? "b-up" : a === "AVOID CHASING" ? "b-dn" : "b-neu";
+    const body = rows.slice(0, 12).map((r, i) => {
+      if (r.dataState !== "OK") return `<tr><td class="rank">${i + 1}</td><td class="sym">${r.name}</td><td>—</td><td>—</td><td colspan="6" class="neu">${badge("DATA UNAVAILABLE", "b-neu")}</td><td>${badge("WAIT", "b-neu")}</td></tr>`;
+      return `<tr><td class="rank">${i + 1}</td><td class="sym">${r.name}</td><td>${dfNum(r.price)}</td><td>${r.score}</td>
+        <td class="${dfBiasCls(r.bias)}">${r.bias}</td><td>${badge(r.stage, stageCls(r.stage))}</td>
+        <td>${r.trigger != null ? dfNum(r.trigger) : "—"}</td><td class="down">${r.invalidation != null ? dfNum(r.invalidation) : "—"}</td>
+        <td>${badge(r.action, actCls(r.action))}</td></tr>`;
+    }).join("");
+    return dfHead(3, "Liquidity Watchlist", "Where is the strongest opportunity? — ranked by the existing Liquidity Score.") + `
+      <div class="df-twrap"><table>
+        <thead><tr><th>#</th><th>Symbol</th><th>Price</th><th>Score</th><th>Bias</th><th>Stage</th><th>Trigger</th><th>Invalid.</th><th>Action</th></tr></thead>
+        <tbody>${body}</tbody></table></div>
+      <p class="df-note">Rows come from the Watchlist early-warning scanner (reuses the Liquidity Status engine). Ranked by score; stale feeds show DATA UNAVAILABLE — never an automatic BUY.</p>`;
+  },
+
+  4: (D) => {
+    const ls = D.ls;
+    if (!ls) return dfHead(4, "Trader Mind · NIFTY", "Why is this a setup?") + `<div class="df-na">DATA UNAVAILABLE</div>`;
+    const st = ls.structure, ev = ls.evidence || [];
+    const evTxt = ev.length ? ev.map((e) => `${e.side} ${e.strike || ""}: ${e.interpretation}`).join(" · ") : "OI baseline not established yet";
+    return dfHead(4, "Trader Mind · NIFTY", "Why does the system see this as an opportunity? — an explanation, not a new strategy.") + `
+      <div class="df-two">
+        <div class="df-panel"><div class="df-panel-h">Evidence</div>
+          ${dfRow("Liquidity", (ls.liquidityFlowScore && ls.liquidityFlowScore.score) + " · " + (ls.directionalConfidence && ls.directionalConfidence.quality), "")}
+          ${dfRow("Trend / EMA", st ? st.emaStructure : "—", dfBiasCls(st && st.emaStructure === "Strong Bullish" ? "Bullish" : st && st.emaStructure === "Strong Bearish" ? "Bearish" : "Neutral"))}
+          ${dfRow("VWAP", st ? st.vwapStatus : "—")}
+          ${dfRow("Momentum", st && st.rsi != null ? "RSI " + Math.round(st.rsi) : "—")}
+          ${dfRow("RVOL", ls.rvol != null ? ls.rvol.toFixed(2) + "×" : "—", ls.rvol >= 1.3 ? "up" : "neu")}
+          ${dfRow("Move stage", ls.moveStage ? ls.moveStage.replace(/_/g, " ") : "—")}
+        </div>
+        <div class="df-panel"><div class="df-panel-h">Plain-language read</div>
+          <p class="df-say">${ls.systemView || "—"}</p>
+          <p class="df-say muted">${ls.traderPreparation || ""}</p>
+          <p class="df-say" style="color:var(--amber)">OI evidence: ${evTxt}</p>
+        </div>
+      </div>`;
+  },
+
+  5: (D) => {
+    const ls = D.ls, oi = D.oi;
+    const arb = oi && oi.ext && oi.ext.arbitration;
+    const word = arb ? arb.verdict : (ls ? String(ls.traderAction) : "DATA UNAVAILABLE");
+    const wcls = /GO|TAKE|PREPARE/i.test(word) ? "up" : /CONFLICT|AVOID/i.test(word) ? "down" : "warn";
+    const conf = ls && ls.confirmations;
+    let reasons = "";
+    if (conf) {
+      reasons = conf.confirmed.map((c) => `<div class="df-chk ok"><span class="df-ico">✓</span><span class="df-clab">${c.label}</span><span class="df-cst">confirmed</span></div>`).join("") +
+        conf.remaining.map((c) => `<div class="df-chk pend"><span class="df-ico">⏳</span><span class="df-clab">${c.label}</span><span class="df-cst">pending</span></div>`).join("");
+    } else reasons = `<div class="df-na">DATA UNAVAILABLE</div>`;
+    const trig = ls && ls.trigger ? ls.trigger.level : null, inval = ls && ls.invalidation ? ls.invalidation.level : null;
+    return dfHead(5, "Setup · Master Trade Selector", "Should I trade now? — the existing Master decision, unchanged.") + `
+      <div class="df-two">
+        <div class="df-panel df-setup-l">
+          <div class="df-panel-h">Master Decision</div>
+          <div class="df-setup-word ${wcls}">${word}</div>
+          <div class="df-lvlrow">
+            <div><span class="df-k">Trigger</span><span class="df-v up">${trig != null ? "> " + dfNum(trig, 0) : "—"}</span></div>
+            <div><span class="df-k">Invalidation</span><span class="df-v down">${inval != null ? "< " + dfNum(inval, 0) : "—"}</span></div>
+          </div>
+          ${arb && arb.reason ? `<p class="df-say muted">${arb.reason}</p>` : ""}
+        </div>
+        <div class="df-panel"><div class="df-panel-h">Reasons</div>${reasons}</div>
+      </div>
+      <p class="df-note">This is the existing Master Trade Selector verdict + confirmation reasons, shown larger. Its logic is not modified.</p>`;
+  },
+
+  6: (D) => {
+    const oi = D.oi;
+    const leg = (oi && oi.recommendation && oi.recommendation.directional) || (oi && oi.setup) || null;
+    if (!leg || !leg.optionType || leg.optionType === "—") return dfHead(6, "Best Option Play", "Which contract fits?") + `<div class="df-na">NO OPTION EDGE — no valid underlying setup right now.</div>`;
+    const legLive = leg.take;
+    const premChg = leg.optionType === "PE" ? oi.putLtpChgPct : oi.callLtpChgPct;
+    return dfHead(6, "Best Option Play", "If confirmed, which contract? — from the existing Option Engine, guardrails intact.") + `
+      <div class="df-panel" style="max-width:640px">
+        <div class="df-opt-head"><span class="df-opt-strike mono">${leg.strike ? dfNum(leg.strike, 0) + " " + leg.optionType : leg.optionType}</span>
+          <span class="df-badge ${dfBiasCls(leg.optionType === "CE" ? "Bullish" : "Bearish")}">${leg.optionType === "CE" ? "▲ BULLISH" : "▼ BEARISH"}</span>
+          <span class="df-badge ${legLive ? "b-up" : "b-wait"}">${legLive ? "OPTION CONFIRMED" : "PREMIUM CONFIRMATION PENDING"}</span></div>
+        <div class="df-two" style="grid-template-columns:1fr 1fr">
+          <div>${dfRow("Premium (LTP)", leg.ltp != null ? "₹" + dfNum(leg.ltp, 2) : "—")}
+            ${dfRow("Premium momentum", premChg == null ? "—" : premChg > 0 ? "↑ rising" : premChg < 0 ? "↓ falling" : "• flat", premChg > 0 ? "up" : premChg < 0 ? "down" : "neu")}
+            ${dfRow("Confidence", leg.confidence != null ? leg.confidence + "/100" : "—")}</div>
+          <div>${dfRow("Target", leg.target != null ? "₹" + dfNum(leg.target, 2) : "—", "up")}
+            ${dfRow("Stop", leg.stop != null ? "₹" + dfNum(leg.stop, 2) : "—", "down")}
+            ${dfRow("Horizon", leg.horizon || "intraday")}</div>
+        </div>
+      </div>
+      <p class="df-note">The option appears only when a valid underlying setup exists — never just because NIFTY is bullish. Existing option-buying guardrails remain active; fields not in the feed (Delta/IV) are omitted rather than invented.</p>`;
+  },
+
+  7: (D) => {
+    const ls = D.ls;
+    if (!ls || !ls.confirmations) return dfHead(7, "Trade Confirmation", "Are all required conditions satisfied?") + `<div class="df-na">DATA UNAVAILABLE</div>`;
+    const items = [...ls.confirmations.confirmed.map((c) => ({ l: c.label, ok: true })), ...ls.confirmations.remaining.map((c) => ({ l: c.label, ok: false }))];
+    const allOk = ls.confirmations.remaining.length === 0;
+    const checks = items.map((it) => `<div class="df-chk ${it.ok ? "ok" : "pend"}"><span class="df-ico">${it.ok ? "✓" : "⏳"}</span><span class="df-clab">${it.l}</span><span class="df-cst">${it.ok ? "confirmed" : "pending"}</span></div>`).join("");
+    return dfHead(7, "Trade Confirmation", "Are all required conditions satisfied before execution?") + `
+      <div class="df-panel" style="max-width:760px">
+        <div class="df-checks">${checks}</div>
+        <div class="df-master df-master-${allOk ? "go" : "wait"}" style="margin-top:14px"><span class="df-master-word">${allOk ? "TAKE" : "WAIT"}</span>
+          <span class="df-master-why">${allOk ? "All tracked conditions satisfied." : ls.confirmations.remaining.length + " condition(s) still pending. This gate prevents accidental execution."}</span></div>
+      </div>`;
+  },
+
+  8: (D) => {
+    const oi = D.oi;
+    const leg = (oi && oi.recommendation && oi.recommendation.directional) || (oi && oi.setup) || null;
+    const legTxt = leg && leg.optionType && leg.optionType !== "—" ? `${dfNum(leg.strike, 0)} ${leg.optionType} @ ₹${dfNum(leg.ltp, 2)}` : "no active option candidate";
+    return dfHead(8, "Trade Execution", "Place the trade — quantity and max-loss from the existing capital-risk rule.") + `
+      <div class="df-panel" style="max-width:560px">
+        <div class="df-opt-head"><span class="df-opt-strike mono" style="font-size:18px">${legTxt}</span></div>
+        <p class="df-say muted">Execution runs on the existing <b>AI Paper Desk</b> under its capital-risk sizing and guardrails. <b>LIVE_ORDER_EXECUTION=false</b> stays enforced — this is paper only.</p>
+        <div class="df-btns"><button type="button" class="df-btn go" data-df-desk="option" data-df-tab="paper">Open AI Paper Desk →</button><button type="button" class="df-btn ghost" data-df-goto="5">Back to Setup</button></div>
+      </div>`;
+  },
+
+  9: (D) => {
+    const paper = D.paper;
+    const open = (paper && paper.open || []).filter((p) => p.kind === "indexOption");
+    if (!open.length) return dfHead(9, "Live Position", "Hold or exit?") + `<div class="df-na">No open index-option position. When a paper trade is live it appears here.</div>`;
+    const rows = open.map((p) => `<div class="df-pos-strip">
+        <div class="df-pos-cell"><div class="df-k">Option</div><div class="df-v">${p.strike || ""} ${p.optionType || ""}</div></div>
+        <div class="df-pos-cell"><div class="df-k">Entry</div><div class="df-v">₹${dfNum(p.entry, 2)}</div></div>
+        <div class="df-pos-cell"><div class="df-k">Current</div><div class="df-v">₹${dfNum(p.ltp != null ? p.ltp : p.current, 2)}</div></div>
+        <div class="df-pos-cell"><div class="df-k">P&L</div><div class="df-v ${(p.pnl || 0) >= 0 ? "up" : "down"}">${p.pnl != null ? (p.pnl >= 0 ? "+" : "") + "₹" + dfNum(p.pnl, 0) : "—"}</div></div>
+        <div class="df-pos-cell"><div class="df-k">Target</div><div class="df-v">${p.target != null ? "₹" + dfNum(p.target, 2) : "—"}</div></div>
+        <div class="df-pos-cell"><div class="df-k">Stop</div><div class="df-v down">${p.stop != null ? "₹" + dfNum(p.stop, 2) : "—"}</div></div>
+      </div>`).join("");
+    return dfHead(9, "Live Position", "Hold or exit? — the existing trade-management logic remains the authority.") + rows +
+      `<p class="df-note">Read live from the AI Paper Desk. Hold/exit decisions stay with the existing trade-management engine.</p>`;
+  },
+
+  10: (D) => {
+    const paper = D.paper;
+    const closed = (paper && (paper.closed || paper.recent) || []).slice(0, 8);
+    if (!closed.length) return dfHead(10, "Trade Result · Journal", "What happened?") + `<div class="df-na">No closed trades yet today.</div>`;
+    const body = closed.map((t) => {
+      const pnl = t.pnl != null ? t.pnl : (t.pnlAbs != null ? t.pnlAbs : null);
+      const win = pnl != null ? (pnl > 0 ? "WIN" : pnl < 0 ? "LOSS" : "BE") : "—";
+      return `<tr><td class="sym">${t.symbol || t.strike || "—"} ${t.optionType || ""}</td><td>₹${dfNum(t.entry, 2)}</td><td>₹${dfNum(t.exit != null ? t.exit : t.exitPrice, 2)}</td>
+        <td class="${pnl >= 0 ? "up" : "down"}">${pnl != null ? (pnl >= 0 ? "+" : "") + "₹" + dfNum(pnl, 0) : "—"}</td>
+        <td><span class="df-badge ${win === "WIN" ? "b-up" : win === "LOSS" ? "b-dn" : "b-neu"}">${win}</span></td></tr>`;
+    }).join("");
+    return dfHead(10, "Trade Result · Journal", "What happened, and how good was the signal?") + `
+      <div class="df-twrap"><table><thead><tr><th>Trade</th><th>Entry</th><th>Exit</th><th>P&L</th><th>Result</th></tr></thead><tbody>${body}</tbody></table></div>
+      <p class="df-note">Live from the AI Paper Desk's closed trades. Full excursion / signal-quality tagging feeds the 20-session validation (step 12).</p>`;
+  },
+
+  11: (D) => {
+    const paper = D.paper;
+    const s = paper && paper.summary ? paper.summary : paper || {};
+    return dfHead(11, "Daily Trading Review", "How did the session go? — read, don't over-fit to one day.") + `
+      <div class="df-cc-top" style="grid-template-columns:repeat(4,1fr)">
+        <div class="df-stat"><div class="df-lab">Trades</div><div class="df-big mono">${s.tradesToday != null ? s.tradesToday : (s.totalTrades != null ? s.totalTrades : "—")}</div></div>
+        <div class="df-stat"><div class="df-lab">Wins</div><div class="df-big mono up">${s.wins != null ? s.wins : "—"}</div></div>
+        <div class="df-stat"><div class="df-lab">Losses</div><div class="df-big mono down">${s.losses != null ? s.losses : "—"}</div></div>
+        <div class="df-stat"><div class="df-lab">P&L</div><div class="df-big mono ${(s.pnlToday || s.totalPnl || 0) >= 0 ? "up" : "down"}">${(s.pnlToday != null ? s.pnlToday : s.totalPnl) != null ? "₹" + dfNum(s.pnlToday != null ? s.pnlToday : s.totalPnl, 0) : "—"}</div></div>
+      </div>
+      <p class="df-note">Summary from the AI Paper Desk. Projection-accuracy and WAIT-discipline breakdowns are compiled in the 20-session validation. Do not tune the strategy from a single day.</p>`;
+  },
+
+  12: () => dfHead(12, "20-Session Validation", "Is the edge real across a forward window? — analytics, separate from daily noise.") + `
+      <div class="df-planned">
+        <b>Forward-test tracker (sessions 1–20).</b><br>
+        Aggregates the Journal (step 10) across sessions from the existing audit logs (option-top-pick, liquidity-status, decision-log): cumulative P&L, win-rate & avg-R trend, direction accuracy, and 5M/15M/30M projection-range hit-rate — plus WAIT-discipline and false-signal counts. Purpose is validation, not tuning.<br><br>
+        <span class="wl-sub">Charts render here once ≥1 session of forward data is logged. This view reads existing logs only — it never changes the strategy.</span>
+      </div>`,
+};
 
 async function loadOiCommand() {
   const box = el("oicommand");

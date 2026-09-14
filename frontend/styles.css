@@ -3555,3 +3555,150 @@ body.oi-focus .cockpit-strip #mind-bar {
 /* Mobile: the purpose-built hero above already carries the primary read, so the
    dense terminal is hidden rather than shrunk into unreadability. */
 @media (max-width: 640px) { .nterm { display: none; } }
+
+/* ==================== DECISION FLOW DESK ==================== */
+/* Responsive across mobile / tablet / laptop / big screen. Reuses the app's
+   dark tokens. The rail is a left column on wide screens, a horizontal scroller
+   on phones. */
+#panel-decisionflow { min-width: 0; }
+.df { display: grid; grid-template-columns: 236px 1fr; gap: 0; min-height: 60vh; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--panel); }
+.df-rail { background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 10px 0; }
+.df-rail-h { padding: 2px 16px 10px; font-size: 10px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+.df-step { display: grid; grid-template-columns: 26px 1fr; align-items: center; gap: 10px; padding: 7px 14px; cursor: pointer;
+  background: transparent; border: none; border-left: 2px solid transparent; text-align: left; color: var(--text); font: inherit; width: 100%; }
+.df-step:hover { background: var(--panel-2); }
+.df-step.active { background: var(--panel-2); border-left-color: var(--blue); }
+.df-step-n { width: 24px; height: 24px; border: 1px solid var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono, "IBM Plex Mono", monospace); font-size: 11px; font-weight: 700; color: var(--muted); }
+.df-step.active .df-step-n { color: var(--blue); border-color: var(--blue); background: rgba(59,130,246,.14); }
+.df-step-t { font-size: 12.5px; font-weight: 600; line-height: 1.2; }
+.df-step-t small { display: block; font-size: 10px; color: var(--muted); font-weight: 400; }
+.df-rail-note { margin-top: auto; padding: 12px 16px 4px; font-size: 10.5px; color: var(--muted); line-height: 1.5; border-top: 1px solid var(--border); }
+
+.df-stage { padding: 16px 18px 26px; overflow-x: hidden; min-width: 0; }
+.df-scr-head { display: flex; align-items: baseline; gap: 10px; }
+.df-scr-num { font-family: var(--mono, monospace); font-size: 12px; color: var(--blue); font-weight: 700; }
+.df-scr-head h2 { margin: 0; font-size: 18px; font-weight: 700; }
+.df-scr-q { color: var(--muted); font-size: 12.5px; margin: 3px 0 14px; }
+.df-scr-q em { font-style: normal; color: var(--text); }
+
+.df-panel { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+.df-panel-h { font-size: 10px; letter-spacing: .8px; text-transform: uppercase; color: var(--muted); font-weight: 700; margin-bottom: 8px; }
+.df-row { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; font-size: 13px; }
+.df-k { color: var(--muted); } .df-v { font-family: var(--mono, monospace); font-weight: 600; font-variant-numeric: tabular-nums; }
+.df-v.up, .df-big.up { color: var(--green); } .df-v.down, .df-big.down { color: var(--red); }
+.df-v.warn { color: var(--amber); } .df-v.neu { color: var(--muted); }
+.df-na { color: var(--muted); font-size: 12.5px; font-weight: 600; padding: 14px 4px; }
+.df-note { font-size: 11px; color: var(--muted); margin-top: 12px; line-height: 1.5; max-width: 720px; }
+.df-say { font-size: 13px; line-height: 1.6; margin: 0 0 8px; }
+.df-say.muted { color: var(--muted); }
+
+.df-cc-top { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px; }
+.df-cc-cols { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.df-stat { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+.df-lab { font-size: 10px; letter-spacing: .6px; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+.df-big { font-family: var(--mono, monospace); font-size: 19px; font-weight: 700; margin-top: 3px; line-height: 1.1; }
+.df-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+.df-master { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; border-radius: 10px; padding: 12px 16px; margin-top: 10px; border: 1px solid var(--border); }
+.df-master-word { font-size: 20px; font-weight: 800; letter-spacing: .5px; }
+.df-master-why { font-size: 12.5px; color: var(--muted); }
+.df-master-go { background: linear-gradient(90deg, rgba(22,199,132,.14), transparent); border-color: rgba(22,199,132,.3); }
+.df-master-go .df-master-word { color: var(--green); }
+.df-master-wait { background: linear-gradient(90deg, rgba(240,185,11,.12), transparent); border-color: rgba(240,185,11,.28); }
+.df-master-wait .df-master-word { color: var(--amber); }
+.df-master-avoid { background: linear-gradient(90deg, rgba(234,57,67,.12), transparent); border-color: rgba(234,57,67,.3); }
+.df-master-avoid .df-master-word { color: var(--red); }
+
+.df-two { display: grid; grid-template-columns: 1.05fr .95fr; gap: 12px; }
+
+/* market map */
+.df-map { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; max-width: 640px; }
+.df-lvl { display: grid; grid-template-columns: 92px 1fr auto; align-items: center; gap: 14px; padding: 8px 0; }
+.df-lvl + .df-lvl { border-top: 1px dashed var(--border); }
+.df-price { font-size: 15px; font-weight: 700; } .df-lvl-spot .df-price { font-size: 18px; }
+.df-tag { font-size: 11px; letter-spacing: .3px; text-transform: uppercase; font-weight: 600; color: var(--muted); }
+.df-lvl.res .df-tag { color: var(--red); } .df-lvl.sup .df-tag { color: var(--green); } .df-lvl.trig .df-tag { color: var(--amber); }
+.df-room { font-family: var(--mono, monospace); font-size: 11px; color: var(--muted); text-align: right; }
+.df-lvl-spot { background: var(--panel-3, #212a3b); margin: 4px -10px; padding: 10px; border-radius: 8px; }
+.df-map-foot { display: flex; gap: 22px; flex-wrap: wrap; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.df-map-foot .df-k { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; }
+.df-map-foot .df-v { font-size: 14px; }
+
+/* tables */
+.df-twrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+.df-twrap table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 12.5px; }
+.df-twrap th { font-size: 10px; letter-spacing: .5px; text-transform: uppercase; color: var(--muted); font-weight: 700; text-align: left; padding: 9px 11px; border-bottom: 1px solid var(--border); background: var(--panel); }
+.df-twrap td { padding: 9px 11px; border-bottom: 1px solid var(--border); font-family: var(--mono, monospace); font-variant-numeric: tabular-nums; }
+.df-twrap tr:last-child td { border-bottom: none; }
+.df-twrap td.sym { font-family: inherit; font-weight: 600; } .df-twrap td.rank { color: var(--muted); }
+.df-twrap td.up { color: var(--green); } .df-twrap td.down { color: var(--red); } .df-twrap td.neu { color: var(--muted); }
+.df-badge { font-size: 10px; font-weight: 700; letter-spacing: .3px; padding: 2px 7px; border-radius: 999px; white-space: nowrap; }
+.df-badge.b-up { background: rgba(22,199,132,.15); color: var(--green); } .df-badge.b-dn { background: rgba(234,57,67,.15); color: var(--red); }
+.df-badge.b-wait { background: rgba(240,185,11,.15); color: var(--amber); } .df-badge.b-neu { background: rgba(138,151,173,.16); color: var(--muted); }
+
+/* checklist */
+.df-checks { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
+.df-chk { display: flex; align-items: center; gap: 9px; padding: 6px 0; font-size: 13px; border-bottom: 1px solid var(--border); }
+.df-ico { width: 18px; text-align: center; font-weight: 700; } .df-chk.ok .df-ico { color: var(--green); } .df-chk.pend .df-ico { color: var(--amber); }
+.df-clab { flex: 1; } .df-cst { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); }
+
+/* setup */
+.df-setup-l { display: flex; flex-direction: column; justify-content: center; gap: 10px; }
+.df-setup-word { font-size: 26px; font-weight: 800; letter-spacing: .5px; }
+.df-setup-word.up { color: var(--green); } .df-setup-word.down { color: var(--red); } .df-setup-word.warn { color: var(--amber); }
+.df-lvlrow { display: flex; gap: 22px; flex-wrap: wrap; }
+.df-lvlrow .df-k { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; }
+.df-lvlrow .df-v { font-size: 15px; }
+
+/* option / exec */
+.df-opt-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.df-opt-strike { font-size: 22px; font-weight: 800; }
+.df-btns { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+.df-btn { font: inherit; font-size: 13px; font-weight: 700; padding: 11px 20px; border-radius: 8px; border: none; cursor: pointer; min-height: 44px; }
+.df-btn.go { background: var(--green); color: #04120b; } .df-btn.ghost { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+
+/* position */
+.df-pos-strip { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 10px; }
+.df-pos-cell { background: var(--panel-2); padding: 10px 12px; }
+.df-pos-cell .df-k { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; }
+.df-pos-cell .df-v { font-size: 15px; margin-top: 2px; }
+.df-pos-cell .df-v.up { color: var(--green); } .df-pos-cell .df-v.down { color: var(--red); }
+
+.df-planned { color: var(--muted); font-size: 12.5px; background: var(--panel-2); border: 1px dashed var(--border); border-radius: 10px; padding: 16px 18px; max-width: 680px; line-height: 1.6; }
+.df-planned b { color: var(--text); }
+
+/* let the flow panel use the whole desk height like the other oi-focus panels */
+body.oi-focus #panel-decisionflow.active { display: flex; flex: 1; min-height: 0; }
+body.oi-focus #panel-decisionflow.active .df { flex: 1; min-height: 0; }
+body.oi-focus #panel-decisionflow.active .df-stage { overflow-y: auto; }
+
+/* Big screen: cap the reading width so cards don't stretch into dead space. */
+@media (min-width: 1700px) { .df { max-width: 1560px; } }
+
+/* Laptop/tablet: 2-up stat/column grids. */
+@media (max-width: 1200px) {
+  .df-cc-top, .df-cc-cols { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 900px) {
+  .df { grid-template-columns: 1fr; }
+  .df-rail { flex-direction: row; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--border); padding: 6px; }
+  .df-rail-h, .df-rail-note { display: none; }
+  .df-step { border-left: none; border-bottom: 2px solid transparent; white-space: nowrap; padding: 6px 10px; }
+  .df-step.active { border-left: none; border-bottom-color: var(--blue); }
+  .df-step-t small { display: none; }
+  .df-two, .df-checks { grid-template-columns: 1fr; }
+  .df-pos-strip { grid-template-columns: 1fr 1fr 1fr; }
+}
+@media (max-width: 560px) {
+  .df-cc-top, .df-cc-cols { grid-template-columns: 1fr 1fr; }
+  .df-pos-strip { grid-template-columns: 1fr 1fr; }
+  .df-stage { padding: 12px 12px 22px; }
+  .df-master-word { font-size: 18px; }
+}
+
+/* Decision Flow desk: hide the Option-desk cockpit/opportunity chrome so the
+   flow is the whole screen (those belong to the Option Trading desk). */
+body.mode-decisionflow #cockpit-strip,
+body.mode-decisionflow #opp-bar,
+body.mode-decisionflow #index-strip { display: none !important; }
