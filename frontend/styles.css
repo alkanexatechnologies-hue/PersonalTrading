@@ -893,7 +893,6 @@ button.ghost.active { background: var(--blue); border-color: var(--blue); color:
 /* Trader Dashboard — cockpit: GO stays sticky, the rest scrolls on laptop */
 body.oi-focus { overflow: hidden; }
 body.oi-focus .disclaimer,
-body.oi-focus .ask-bar,
 body.oi-focus .opp-bar,
 body.oi-focus #tab-flow-wrap { display: none !important; }
 body.oi-focus .watchlist {
@@ -1470,27 +1469,10 @@ body.oi-focus #panel-toppicks .tp-hide-outlook { display: none !important; }
 .em-ignite { animation: emflash 1.6s ease-in-out infinite; }
 @keyframes emflash { 0%, 100% { background: transparent; } 50% { background: rgba(234, 57, 67, 0.14); } }
 
-/* ---------- ASK bar (natural-language Q&A on the selected stock) ---------- */
-.ask-bar { background: linear-gradient(90deg, #10203a, #0e1626); border: 1px solid var(--border); border-radius: 10px; padding: 5px 10px; margin-bottom: 5px; }
-.ask-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.ask-title { font-weight: 800; font-size: 14px; white-space: nowrap; }
+/* Compact dark <select> styling, shared by the Stock Options, Trader Mind and
+   option-chart timeframe pickers (originally introduced for the removed Ask
+   bar; kept because those selects still use the class). */
 .ask-symbol { background: #0e1626; border: 1px solid var(--border); color: var(--text, #e6edf3); border-radius: 6px; padding: 6px 8px; font-size: 13px; min-width: 140px; }
-.ask-input { flex: 1 1 320px; background: #0b1220; border: 1px solid var(--border); color: var(--text, #e6edf3); border-radius: 6px; padding: 8px 10px; font-size: 13px; }
-.ask-input:focus { outline: none; border-color: var(--blue, #3b82f6); }
-.ask-btn { background: var(--blue, #3b82f6); color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-weight: 700; cursor: pointer; white-space: nowrap; }
-.ask-btn:disabled { opacity: 0.6; cursor: default; }
-.ask-answer { margin-top: 8px; padding: 10px 12px; background: #0b1220; border: 1px solid var(--border); border-left: 4px solid var(--blue, #3b82f6); border-radius: 8px; }
-.ask-head { font-size: 14px; line-height: 1.55; }
-.ask-bullets { margin: 8px 0 4px; padding-left: 18px; }
-.ask-bullets li { font-size: 12.5px; line-height: 1.6; margin-bottom: 2px; }
-.ask-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 6px; flex-wrap: wrap; }
-.ask-open { background: transparent; border: 1px solid var(--border); color: #cbd5e1; border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; white-space: nowrap; }
-.ask-open:hover { border-color: var(--blue, #3b82f6); }
-
-/* Ask answer: highlight the day-range bullet in green */
-.ask-bullets li .ask-range { color: #16c784; font-weight: 700; }
-.ask-bullets li .ask-range b { color: #16c784; }
-.ask-bullets li:has(.ask-range) { background: rgba(22, 199, 132, 0.10); border-radius: 5px; padding: 1px 4px; }
 
 /* 1-Hour Breakout Watch relocated into the (right) watchlist sidebar */
 #watchlist #tp-breakout { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 8px; }
@@ -1510,10 +1492,6 @@ body.oi-focus #panel-toppicks .tp-hide-outlook { display: none !important; }
    their container instead of spilling outside the grid. */
 #toppicks, #bigmove, #earlymoves, #paper { overflow-x: auto; max-width: 100%; }
 #bigmove .sw-plan, #paper .sw-plan { min-width: max-content; }
-
-/* Ask answer: market-condition (per-timeframe regime) bullet */
-.ask-bullets li .ask-mkt { color: #cbd5e1; font-weight: 600; }
-.ask-bullets li:has(.ask-mkt) { background: rgba(59, 130, 246, 0.08); border-radius: 5px; padding: 1px 4px; }
 
 /* Watchlist per-symbol market-condition tag (current interval) */
 .wl-regime { font-size: 9px; margin-top: 3px; padding: 1px 6px; border-radius: 4px; display: inline-block; font-weight: 700; }
@@ -3393,7 +3371,7 @@ body.oi-focus .cockpit-strip #mind-bar {
      Directional/Setup/Scalp cards below the fold on a phone. Hidden here
      (not deleted - still one tap away via View Full Details); every other
      mobile tab keeps them exactly as before. */
-  body.oi-focus #cockpit-strip, body.oi-focus #ask-bar, body.oi-focus #opp-bar, body.oi-focus #index-strip { display: none; }
+  body.oi-focus #cockpit-strip, body.oi-focus #opp-bar, body.oi-focus #index-strip { display: none; }
   /* Section 6: on the mobile Option Trading screen the informational topbar
      pills (market/Groww feed/best-15m/regime/success/early) are secondary
      clutter that shrinks the room for the three cards. Hidden here so the
@@ -3402,7 +3380,6 @@ body.oi-focus .cockpit-strip #mind-bar {
   body.oi-focus #market-status, body.oi-focus #feed-groww, body.oi-focus #best-trade,
   body.oi-focus #regime-ind, body.oi-focus #success-ind, body.oi-focus #early-ind { display: none; }
   body.oi-focus.mth-details-open #cockpit-strip { display: flex; }
-  body.oi-focus.mth-details-open #ask-bar { display: block; }
   body.oi-focus.mth-details-open #opp-bar { display: flex; }
   body.oi-focus.mth-details-open.mode-option #index-strip { display: flex; }
 }

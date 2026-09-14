@@ -63,7 +63,6 @@ async function init() {
   state.tpUniverse = "index";
   initOiCommand();
   startOiCommandLive();
-  initAsk();
   startSessionKeeper();
 
   setTimeout(() => loadIndexDesk(), 1500);
@@ -406,54 +405,6 @@ async function updateBestTrade() {
   } catch {
     node.textContent = "best 15m: —";
   }
-}
-
-// ---------- ASK bar: type a question, answered from the selected stock's LIVE data ----------
-function populateAskSymbols() {
-  const sel = el("ask-symbol");
-  if (!sel || !state.symbols || !state.symbols.length) return;
-  if (sel.options.length > 1) return; // already populated — KEEP the user's current selection (don't reset)
-  const idx = state.symbols.filter((s) => s.type === "index");
-  const eq = state.symbols.filter((s) => s.type !== "index");
-  const grp = (label, arr) => arr.length ? `<optgroup label="${label}">${arr.map((s) => `<option value="${s.symbol}">${s.name}</option>`).join("")}</optgroup>` : "";
-  sel.innerHTML = grp("Indices", idx) + grp("Stocks", eq);
-  if (state.active) sel.value = state.active;
-}
-function initAsk() {
-  populateAskSymbols();
-  const btn = el("ask-btn"), inp = el("ask-input");
-  if (btn) { btn.setAttribute("type", "button"); btn.addEventListener("click", (e) => { e.preventDefault(); runAsk(); }); }
-  if (inp) inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); runAsk(); } });
-}
-function showAsk(html) { const box = el("ask-answer"); if (box) { box.style.display = "block"; box.innerHTML = html; } }
-async function runAsk() {
-  populateAskSymbols();
-  const sel = el("ask-symbol"), inp = el("ask-input"), btn = el("ask-btn");
-  const sym = sel && sel.value ? sel.value : state.active;
-  const q = inp ? inp.value.trim() : "";
-  if (!sym) { showAsk('<span class="down">पहले कोई stock/index चुनें।</span>'); return; }
-  if (!q) { showAsk('<span class="wl-sub">सवाल लिखें — जैसे: "kya buy karu?", "target kitna?", "stop?", "support resistance?", "OI?", "abhi entry sahi hai?"</span>'); return; }
-  if (btn) { btn.disabled = true; btn.textContent = "…"; }
-  showAsk('<span class="wl-sub">Live data check kar raha hoon…</span>');
-  try {
-    const d = await fetch(`/api/ask?symbol=${encodeURIComponent(sym)}&q=${encodeURIComponent(q)}`).then((r) => r.json());
-    if (d.error) { showAsk('<span class="down">' + d.error + "</span>"); return; }
-    renderAskAnswer(d);
-  } catch (e) { showAsk('<span class="down">Fail: ' + e.message + "</span>"); }
-  finally { if (btn) { btn.disabled = false; btn.textContent = "पूछें"; } }
-}
-function renderAskAnswer(d) {
-  const bullets = (d.bullets || []).map((b) => `<li>${b}</li>`).join("");
-  const mk = d.marketOpen ? "" : ' <span class="wl-sub">(market बंद — पिछला session)</span>';
-  const at = new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" });
-  showAsk(
-    `<div class="ask-head">${d.answer}${mk}</div>` +
-    (bullets ? `<ul class="ask-bullets">${bullets}</ul>` : "") +
-    `<div class="ask-foot"><span class="wl-sub">${d.disclaimer || ""} · snapshot @ ${at} (auto-update नहीं — दोबारा पूछें)</span> <button class="ask-open" data-sym="${d.symbol}">📊 ${d.name} विस्तार में खोलें</button></div>`
-  );
-  const box = el("ask-answer");
-  const ob = box && box.querySelector(".ask-open");
-  if (ob) ob.addEventListener("click", () => openStock(d.symbol));
 }
 
 // NSE market hours: Mon-Fri, 09:15-15:30 IST.
@@ -1963,7 +1914,7 @@ const MODE_KEY = "nsa_mode";
 const VALID_MODES = ["option", "stockOption", "swing", "dhanbacktest"];
 const MODE_FIRST = { option: "oicommand", stockOption: "stockoptions", swing: "news", dhanbacktest: "dhanbacktest" };
 const MODE_TABS = {
-  option: ["oicommand", "paper", "toppicks", "liquiditystatus", "earlymoves", "tradermind", "strategylab"],
+  option: ["oicommand", "paper", "toppicks", "liquiditystatus", "earlymoves", "strategylab"],
   // Paper Desk and Top Pick are shared with Option Trading (same panels, already
   // pool-filtered/labelled by kind) rather than duplicated for this desk.
   stockOption: ["stockoptions", "paper", "toppicks"],
@@ -2172,7 +2123,6 @@ function openStock(symbol, timeframe) {
 // ---------- symbol selection ----------
 function selectSymbol(symbol) {
   state.active = symbol;
-  const askSel = el("ask-symbol"); if (askSel && [...askSel.options].some((o) => o.value === symbol)) askSel.value = symbol;
   document.querySelectorAll(".wl-item").forEach((n) => n.classList.remove("active"));
   const node = el("wl-" + cssId(symbol));
   if (node) node.classList.add("active");
