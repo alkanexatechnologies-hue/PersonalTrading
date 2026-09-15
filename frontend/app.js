@@ -52,18 +52,21 @@ async function init() {
   startClock();
 
   state.symbols = state.symbols || [];
-  await loadSymbolsAndWatchlist();
-  startWatchlistAutoRefresh();
 
   // Trader Dashboard is the default tab for Monday live testing of the OI model
-  // - keep it immediate so it gets first claim on the Groww throttle. Everything
-  // else below used to fire in the same tick and fight OI Command for the same
-  // 2-concurrent Groww slot right when someone is watching a loading spinner;
-  // staggered the same way loadTopPicks/loadTopOpportunities already are below.
+  // - fire its fetch FIRST, before anything else, so it gets first claim on the
+  // Groww 2-concurrent throttle while someone is watching the loading spinner.
+  // initOiCommand fetches its own underlyings (/api/backtest/option/underlyings)
+  // and does NOT depend on state.symbols, so loadSymbolsAndWatchlist (below) must
+  // not block it - awaiting /api/symbols first used to add seconds to first paint.
   state.tpUniverse = "index";
   initOiCommand();
   startOiCommandLive();
   startSessionKeeper();
+
+  // Symbols + watchlist populate the main chart's picker (not on the Trader
+  // Dashboard critical path) - load them after the cockpit fetch is in flight.
+  loadSymbolsAndWatchlist().then(startWatchlistAutoRefresh);
 
   setTimeout(() => loadIndexDesk(), 1500);
   setTimeout(() => startIndexStrip(), 2500);
@@ -5771,14 +5774,21 @@ async function loadOiCommand() {
     // a permanent, stuck "invalid login" screen. Leave the panel as it was
     // and let the next 15s auto-refresh (startOiCommandLive) retry instead.
     if (d && d.error === "Unauthorized. Please log in.") { if (st) st.textContent = ""; return; }
-    // Liquidity detection for the same symbol (observation only; no trading gate).
-    await loadLiquidityStatus(sym);
     if (!d.available && !d.bulletin) { if (box) box.innerHTML = `<div class="wl-sub">${d.message || d.error || "उपलब्ध नहीं"}</div>`; if (st) st.textContent = ""; return; }
+    // Paint the cockpit IMMEDIATELY from the oi-command payload. The liquidity
+    // detection card is an EXTRA feed call the cockpit doesn't need to first-
+    // paint, so it no longer blocks this render (it used to add seconds on the
+    // slow first load). Fetch it in the background and re-render once it lands;
+    // the stepper preserves its selected step across re-renders via cockpitStep.
     renderLive("oicommand", () => renderMasterSelector(d));
-    // Fire-and-forget: the mobile hero makes its own small extra calls (quotes/
-    // liquidity-status/paper-state) and must never block or delay the desktop
-    // render above - it degrades each piece independently on its own errors.
-    renderMobileTraderHero(d, sym);
+    loadLiquidityStatus(sym).then(() => {
+      const stillSame = ((el("oic-symbol") && el("oic-symbol").value) || "^NSEI") === sym;
+      const pn = document.getElementById("panel-oicommand");
+      if (stillSame && pn && pn.classList.contains("active")) renderLive("oicommand", () => renderMasterSelector(d));
+    }).catch(() => {});
+    // Mobile hero: only on phone widths (it's display:none on desktop, and it
+    // makes 3 extra API calls that otherwise contend on the feed for nothing).
+    if (window.innerWidth <= 640) renderMobileTraderHero(d, sym);
     // Freshness: the OI/candle data behind this screen is cached server-side
     // (routes/api.ts already computes dataAgeSec/refresh) - surface it so "is
     // this actually live" is visible rather than implicit.
