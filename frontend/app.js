@@ -6709,6 +6709,9 @@ function renderMasterSelector(d) {
   // Present the cockpit as a vertical step rail (like the Decision Flow desk):
   // the section labels become a left-hand rail, one screen shown at a time.
   cockpitStepify(box);
+
+  // Mount/refresh the strategy candlestick chart (persistent node — see mountStrategyChart).
+  try { mountStrategyChart((el("oic-symbol") && el("oic-symbol").value) || "^NSEI"); } catch (_) { /* chart is best-effort */ }
 }
 
 // Trader Specific Strategies — the final cockpit section. Reads the read-only
@@ -6805,12 +6808,107 @@ function renderStrategiesSection(sel, ctx) {
 
   return `<div class="mts-strat">
       ${cards}
+      <div id="strat-chart-slot" class="strat-chart-slot"></div>
       ${body}
       <div class="strat-rank-head">Strategy ranking</div>
       <div class="strat-rank-list">${rankHtml}</div>
       ${evidence}
       <div class="strat-advisory">Advisory only · "best" = best-supported for today's condition, <b>not a profit guarantee</b>. No order is placed.</div>
     </div>`;
+}
+
+// ---- Strategy candlestick chart (TradingView Lightweight Charts, like Groww/Dhan) ----
+// A persistent chart node is created once and MOVED into the panel's slot on each
+// cockpit re-render, so the 15s innerHTML rebuild never destroys/recreates the chart
+// (no flicker). Candles + EMA9/EMA21/VWAP + volume + the opening-range band, with a
+// live O/H/L/C crosshair legend for "clear details". Reuses /api/candles + alignSeries.
+let stratChart = null, stratChartEl = null, stratS = {}, stratChartSym = null, stratFetchAt = 0, stratRO = null, stratORLines = [], stratLastCandle = null, stratOverlayNow = {};
+function updateStratLegend(param) {
+  const lg = stratChartEl && stratChartEl.querySelector("#strat-chart-legend");
+  if (!lg) return;
+  let c = stratLastCandle;
+  if (param && param.time && stratS.candle) { const v = param.seriesData && param.seriesData.get(stratS.candle); if (v) c = v; }
+  if (!c) { lg.innerHTML = '<span class="wl-sub">Loading chart…</span>'; return; }
+  const chg = stratLastCandle ? (c.close - (c.open)) : 0;
+  const cls = c.close >= c.open ? "up" : "down";
+  const n = (v) => (v == null ? "—" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: 2 }));
+  lg.innerHTML = `<b>${stratChartSym === "^NSEBANK" ? "BANK NIFTY" : stratChartSym === "^CNXFIN" ? "FIN NIFTY" : stratChartSym === "^NSEI" ? "NIFTY 50" : (stratChartSym || "")}</b> · 5m`
+    + ` <span class="slg">O <b>${n(c.open)}</b></span><span class="slg">H <b>${n(c.high)}</b></span><span class="slg">L <b>${n(c.low)}</b></span>`
+    + `<span class="slg">C <b class="${cls}">${n(c.close)}</b></span>`
+    + `<span class="slg" style="color:#f0b90b">EMA9 ${n(stratOverlayNow.ema9)}</span><span class="slg" style="color:#5b9bd5">EMA21 ${n(stratOverlayNow.ema21)}</span><span class="slg" style="color:#a855f7">VWAP ${n(stratOverlayNow.vwap)}</span>`;
+}
+function drawStratOR(c) {
+  // Opening range = high/low of the first 6 bars (09:15-09:45) of the current IST day.
+  stratORLines.forEach((l) => { try { stratS.candle.removePriceLine(l); } catch (_) {} });
+  stratORLines = [];
+  const istDate = (t) => new Date((t + 19800) * 1000).toISOString().slice(0, 10);
+  if (!c.length) return;
+  const today = istDate(c[c.length - 1].time);
+  const day = c.filter((x) => istDate(x.time) === today).slice(0, 6);
+  if (day.length < 2) return;
+  const hi = Math.max(...day.map((x) => x.high)), lo = Math.min(...day.map((x) => x.low));
+  stratORLines.push(stratS.candle.createPriceLine({ price: hi, color: "rgba(138,151,173,0.6)", lineWidth: 1, lineStyle: 2, title: "OR High" }));
+  stratORLines.push(stratS.candle.createPriceLine({ price: lo, color: "rgba(138,151,173,0.6)", lineWidth: 1, lineStyle: 2, title: "OR Low" }));
+}
+async function loadStratChartData(sym) {
+  try {
+    const d = await fetch(`/api/candles/${encodeURIComponent(sym)}?interval=5m`).then((r) => r.json());
+    if (!d || !Array.isArray(d.candles) || !d.candles.length) return;
+    const c = d.candles;
+    stratS.candle.setData(c.map((x) => ({ time: x.time, open: x.open, high: x.high, low: x.low, close: x.close })));
+    if (d.overlays) {
+      stratS.ema9.setData(alignSeries(c, d.overlays.ema9 || []));
+      stratS.ema21.setData(alignSeries(c, d.overlays.ema21 || []));
+      stratS.vwap.setData(alignSeries(c, d.overlays.vwap || []));
+      const li = (a) => (Array.isArray(a) ? [...a].reverse().find((v) => v != null) : null);
+      stratOverlayNow = { ema9: li(d.overlays.ema9), ema21: li(d.overlays.ema21), vwap: li(d.overlays.vwap) };
+    }
+    stratS.vol.setData(c.map((x) => ({ time: x.time, value: x.volume || 0, color: x.close >= x.open ? "rgba(22,199,132,0.35)" : "rgba(234,57,67,0.35)" })));
+    drawStratOR(c);
+    stratLastCandle = c[c.length - 1];
+    stratChart.timeScale().fitContent();
+    updateStratLegend(null);
+  } catch (_) { /* leave last-good chart */ }
+}
+// Called when the stepper reveals the strategy step: size the chart to the now-
+// visible canvas and re-load so a series set while hidden actually paints.
+function revealStratChart() {
+  if (!stratChart || !stratChartEl) return;
+  const cv = stratChartEl.querySelector(".strat-chart-canvas");
+  if (cv && cv.clientWidth > 0) { stratChart.applyOptions({ width: cv.clientWidth }); loadStratChartData(stratChartSym || "^NSEI"); }
+}
+function mountStrategyChart(sym) {
+  const slot = el("strat-chart-slot");
+  if (!slot || typeof LightweightCharts === "undefined") return;
+  if (!stratChartEl) {
+    stratChartEl = document.createElement("div");
+    stratChartEl.className = "strat-chart";
+    const legend = document.createElement("div"); legend.className = "strat-chart-legend"; legend.id = "strat-chart-legend"; legend.innerHTML = '<span class="wl-sub">Loading chart…</span>';
+    const canvas = document.createElement("div"); canvas.className = "strat-chart-canvas";
+    stratChartEl.appendChild(legend); stratChartEl.appendChild(canvas);
+    stratChart = LightweightCharts.createChart(canvas, chartOpts(canvas.clientWidth || 640, 320));
+    stratS.candle = stratChart.addCandlestickSeries({ upColor: "#16c784", downColor: "#ea3943", wickUpColor: "#16c784", wickDownColor: "#ea3943", borderVisible: false });
+    stratS.ema9 = stratChart.addLineSeries({ color: "#f0b90b", lineWidth: 1 });
+    stratS.ema21 = stratChart.addLineSeries({ color: "#5b9bd5", lineWidth: 1 });
+    stratS.vwap = stratChart.addLineSeries({ color: "#a855f7", lineWidth: 1, lineStyle: 2 });
+    stratS.vol = stratChart.addHistogramSeries({ priceScaleId: "vol", priceFormat: { type: "volume" } });
+    stratChart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
+    stratChart.subscribeCrosshairMove((p) => updateStratLegend(p));
+    // Auto-resize to the slot (also handles the stepper showing/hiding the panel).
+    // When the stepper reveals the panel the canvas goes 0 -> real width: resize,
+    // refit, and load data if it hasn't loaded yet (the chart was built hidden).
+    if (typeof ResizeObserver !== "undefined") {
+      stratRO = new ResizeObserver(() => {
+        const w = canvas.clientWidth;
+        if (w > 0) { stratChart.applyOptions({ width: w }); stratChart.timeScale().fitContent(); if (!stratLastCandle) loadStratChartData(stratChartSym || "^NSEI"); }
+      });
+      stratRO.observe(canvas);
+    }
+  }
+  // Move the persistent chart node into the freshly-rendered slot (survives the rebuild).
+  if (stratChartEl.parentNode !== slot) { slot.innerHTML = ""; slot.appendChild(stratChartEl); const cv = stratChartEl.querySelector(".strat-chart-canvas"); if (cv && cv.clientWidth > 0) stratChart.applyOptions({ width: cv.clientWidth }); }
+  const now = Date.now();
+  if (sym !== stratChartSym || now - stratFetchAt > 30000) { stratChartSym = sym; stratFetchAt = now; loadStratChartData(sym); }
 }
 
 // Turn the cockpit's stacked, labelled sections into a vertical stepper: a
@@ -6884,6 +6982,10 @@ function cockpitStepify(box) {
     state.cockpitStep = +b.getAttribute("data-step");
     apply();
     stage.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    // If the revealed step holds the strategy chart, force a resize + refit +
+    // reload once it is actually visible (lightweight-charts won't paint a
+    // series that was setData'd while the container was zero-size/hidden).
+    requestAnimationFrame(() => { try { if (typeof revealStratChart === "function" && document.getElementById("strat-chart-slot")) revealStratChart(); } catch (_) {} });
   }));
   apply();
 }
