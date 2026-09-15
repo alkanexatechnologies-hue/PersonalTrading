@@ -1311,13 +1311,10 @@ function setupCompliance() {
     el("consent-modal").classList.add("hidden");
   });
 
-  // Footer links → full disclosure modal.
-  const openDisc = (scrollToReg) => {
-    el("disclosure-modal").classList.remove("hidden");
-    if (scrollToReg) { const a = el("reg-disclosure-anchor"); if (a) a.scrollIntoView({ block: "start" }); }
-  };
-  if (el("open-risk-disclosure")) el("open-risk-disclosure").addEventListener("click", () => openDisc(false));
-  if (el("open-reg-disclosure")) el("open-reg-disclosure").addEventListener("click", () => openDisc(true));
+  // Footer link → full disclosure modal (Risk Disclosure only; the separate
+  // SEBI/Regulatory Disclosure entry point was removed on request).
+  const openDisc = () => { el("disclosure-modal").classList.remove("hidden"); };
+  if (el("open-risk-disclosure")) el("open-risk-disclosure").addEventListener("click", () => openDisc());
   if (el("disclosure-close")) el("disclosure-close").addEventListener("click", () => el("disclosure-modal").classList.add("hidden"));
 
   // Per-signal risk note collapse toggle.

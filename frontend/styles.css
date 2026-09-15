@@ -31,6 +31,10 @@ body {
   background: var(--bg);
   color: var(--text);
   font-size: 13px;
+  /* Stop iOS Safari from auto-inflating text (esp. in landscape), which threw
+     off every fixed-height card/row on iPhone while Android/desktop were fine. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 .topbar {
@@ -73,6 +77,15 @@ body {
 
 html, body { height: 100%; }
 body {
+  /* iPhone fix: the app is a locked (overflow:hidden) full-height shell. iOS
+     Safari's dynamic address/tool bar makes height:100%/100vh TALLER than the
+     visible area, so the fixed bottom nav + risk footer were pushed below the
+     fold and content was cut off — on iPhone only (Android/desktop were fine
+     because their viewport doesn't shrink like this). 100dvh tracks the
+     *visible* viewport so the shell matches what the user actually sees; the
+     100vh line above it is the fallback for older iOS (<15.4) without dvh. */
+  height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -2032,7 +2045,9 @@ body.oi-focus .signal-block { padding: 6px 12px; font-size: 13px; }
      twice on one screen. The mandatory first-use consent modal and the full
      on-demand disclosure modal are untouched; only this redundant second
      copy of the same short warning line is hidden. */
-  .risk-footer { bottom: 56px; padding: 5px 10px; font-size: 10px; }
+  /* Sit above the bottom nav, including the nav's home-indicator (safe-area)
+     extension on notched iPhones so the footer never tucks under the nav. */
+  .risk-footer { bottom: calc(56px + env(safe-area-inset-bottom, 0px)); padding: 5px 10px; font-size: 10px; }
   .risk-footer .rf-warn { min-width: 0; }
   body.oi-focus .risk-footer { display: none; }
 
