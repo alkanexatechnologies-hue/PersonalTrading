@@ -1890,6 +1890,12 @@ function switchTab(name) {
 
   if (name === "paper") { loadPaper(); startPaperLive(); }
   if (name === "news") loadNews();
+  if (name === "aipdash") loadAiPaperScreen("dashboard", "aipdash-body", "aipdash-note");
+  if (name === "aipanalysis") loadAiPaperScreen("analysis", "aipanalysis-body", "aipanalysis-note");
+  if (name === "aipsignals") loadAiPaperScreen("signals", "aipsignals-body", "aipsignals-note");
+  if (name === "aipreview") loadAiPaperScreen("review", "aipreview-body", "aipreview-note");
+  if (name === "aipperf") loadAiPaperScreen("performance", "aipperf-body", "aipperf-note");
+  if (name === "aipvalid") loadAiPaperScreen("validation", "aipvalid-body", "aipvalid-note");
   syncMobileNav(name);
 }
 
@@ -1925,12 +1931,21 @@ const MODE_NAV = {
     { nav: "watchlist", ico: "📋", lbl: "List" },
     { nav: "more", ico: "☰", lbl: "More" },
   ],
+  aipaper: [
+    { nav: "aipdash", ico: "🤖", lbl: "Home" },
+    { nav: "aipsignals", ico: "📡", lbl: "Signals" },
+    { nav: "paper", ico: "🧪", lbl: "Paper" },
+    { nav: "aipperf", ico: "📊", lbl: "Perf" },
+    { nav: "more", ico: "☰", lbl: "More" },
+  ],
 };
 
 function renderMobileNav(mode) {
   const nav = el("mobile-nav");
   if (!nav) return;
-  const items = MODE_NAV[mode] || MODE_NAV.option;
+  // Drop nav items for screens this user isn't permitted to see (AI Paper Desk
+  // per-screen gating) - "watchlist"/"more" are not screens so always pass.
+  const items = (MODE_NAV[mode] || MODE_NAV.option).filter((i) => screenPermitted(i.nav));
   nav.innerHTML = items
     .map((i) => `<button type="button" data-nav="${i.nav}"><span class="mn-ico">${i.ico}</span>${i.lbl}</button>`)
     .join("");
@@ -1970,18 +1985,41 @@ function setupMobileNav() {
 
 // ---------- desk mode (Option Trading vs Stock Swing Trading) ----------
 const MODE_KEY = "nsa_mode";
-const VALID_MODES = ["decisionflow", "option", "stockOption", "swing", "dhanbacktest"];
-const MODE_FIRST = { decisionflow: "decisionflow", option: "oicommand", stockOption: "toppicks", swing: "news", dhanbacktest: "dhanbacktest" };
+const VALID_MODES = ["decisionflow", "option", "stockOption", "swing", "dhanbacktest", "aipaper"];
+const MODE_FIRST = { decisionflow: "decisionflow", option: "oicommand", stockOption: "toppicks", swing: "news", dhanbacktest: "dhanbacktest", aipaper: "aipdash" };
 const MODE_TABS = {
   decisionflow: ["decisionflow"],
   // Index Option Trading: Option Top Pick + Early Moves now live on the Stock
-  // Option desk instead, so they're dropped here.
-  option: ["oicommand", "paper", "liquiditystatus", "strategylab"],
+  // Option desk, and AI Paper Trading moved to its own AI Paper Desk, so all
+  // three are dropped here.
+  option: ["oicommand", "liquiditystatus", "strategylab"],
   // Stock Option Trading sequence: Option Top Pick -> Early Moves -> Stock Options.
   stockOption: ["toppicks", "earlymoves", "stockoptions"],
   swing: ["news", "bullrank", "todaymovers", "stock", "bigmove", "movetiming"],
   dhanbacktest: ["dhanbacktest"],
+  // AI Paper Desk: its own top-level desk. "paper" is the AI Paper Trading
+  // screen (reuses #panel-paper). Each tab is additionally permission-gated per
+  // screen via SCREEN_PERMISSION_MAP + applyMode (server-enforced too).
+  aipaper: ["aipdash", "aipanalysis", "aipsignals", "paper", "aipreview", "aipperf", "aipvalid"],
 };
+
+// Per-screen permission gate for AI Paper Desk tabs. A non-admin user only sees
+// the tabs whose permission they hold; the backend enforces the same with a 403
+// (requirePermission) so hiding the tab is a convenience, not the boundary.
+// Tabs not listed here are desk-level gated only (no per-screen permission).
+const SCREEN_PERMISSION_MAP = {
+  aipdash: "aiPaperDashboard", aipanalysis: "aiPaperAnalysis", aipsignals: "aiPaperSignals",
+  paper: "aiPaperTrade", aipreview: "aiPaperReview", aipperf: "aiPaperPerformance", aipvalid: "aiPaperValidation",
+};
+// True if the current user may see a tab/screen: admin always; otherwise only
+// screens with no per-screen gate, or whose permission the user holds. The
+// backend enforces the same gate with a 403 - this only controls visibility.
+function screenPermitted(tab) {
+  const p = SCREEN_PERMISSION_MAP[tab];
+  if (!p) return true;
+  if (state.role === "admin") return true;
+  return (state.permissions || []).includes(p);
+}
 
 function setupModeGate() {
   // Desk cards are <article role="button"> (not a real <button>) so the CTA
@@ -2029,14 +2067,21 @@ function applyMode(mode) {
   // Option Trading), so this is driven from MODE_TABS directly rather than the
   // older grp-option/grp-swing CSS classes, which only ever encoded a strict
   // one-tab-one-desk mapping.
-  const allowed = new Set(MODE_TABS[mode] || []);
+  // Tabs allowed in this desk = MODE_TABS membership, further narrowed by any
+  // per-screen permission (SCREEN_PERMISSION_MAP) the user does not hold. Admin
+  // has implicit full access. The backend enforces the same gate with a 403, so
+  // this is a UX convenience, not the security boundary.
+  const deskTabs = (MODE_TABS[mode] || []).filter(screenPermitted);
+  const allowed = new Set(deskTabs);
   document.querySelectorAll("#tabs .tab").forEach((t) => {
     t.classList.toggle("hidden", !allowed.has(t.getAttribute("data-tab")));
   });
-  // If the active tab isn't part of this desk, jump to the desk's first tab.
+  // If the active tab isn't part of this desk (or is no longer permitted), jump
+  // to the desk's first PERMITTED tab. A desk with zero permitted screens (admin
+  // gave the desk but no screens) falls back to the desk's nominal first tab.
   const active = document.querySelector("#tabs .tab.active");
   const activeTab = active ? active.getAttribute("data-tab") : null;
-  if (!activeTab || !allowed.has(activeTab)) switchTab(MODE_FIRST[mode]);
+  if (!activeTab || !allowed.has(activeTab)) switchTab(deskTabs[0] || MODE_FIRST[mode]);
   else syncMobileNav(activeTab);
 }
 
@@ -4215,6 +4260,66 @@ async function loadPaper() {
     renderLive("paper", () => renderPaper(s));
   } catch (e) {
     el("paper").textContent = "Failed to load: " + e.message;
+  }
+}
+
+// ---------- AI Paper Desk (read-only scaffold screens) ----------
+// Each screen fetches its own permission-gated endpoint. A 403 (admin revoked
+// the screen) or 401 (session gone) is shown as a clear access message rather
+// than a blank panel - the nav already hides tabs the user can't see, so this
+// is the defence-in-depth path for a direct navigation / revoked-mid-session.
+function aiPerfCards(perf) {
+  const pools = (perf && perf.pools) || [];
+  const fmt = (v, money) => (v == null ? "—" : money ? "₹" + Number(v).toLocaleString("en-IN") : Number(v).toLocaleString("en-IN"));
+  const label = { indexOption: "Index Options", stockOption: "Stock Options", intraday: "Stock Intraday" };
+  if (!pools.length) return '<div class="wl-sub">No paper run yet. Start a run from the AI Paper Trading screen to see figures here.</div>';
+  return pools.map((p) => `
+    <div class="mtg-card aip-card">
+      <h5>${label[p.pool] || p.pool}</h5>
+      <div class="aip-stat"><span>Equity</span><b>${fmt(p.equity, true)}</b></div>
+      <div class="aip-stat"><span>Start capital</span><b>${fmt(p.startCapital, true)}</b></div>
+      <div class="aip-stat"><span>Realised P&L</span><b class="${(p.realizedPnl || 0) >= 0 ? "pos" : "neg"}">${fmt(p.realizedPnl, true)}</b></div>
+      <div class="aip-stat"><span>Open positions</span><b>${fmt(p.openPositions)}</b></div>
+      <div class="aip-stat"><span>Trades</span><b>${fmt(p.trades)}</b></div>
+    </div>`).join("");
+}
+
+async function loadAiPaperScreen(screen, bodyId, noteId) {
+  const body = el(bodyId);
+  const note = el(noteId);
+  if (!body) return;
+  body.innerHTML = '<div class="wl-sub">Loading…</div>';
+  let d;
+  try {
+    // Own timeout so a saturated browser connection pool (many slow background
+    // feed calls in flight) surfaces a retry affordance instead of an endless
+    // "Loading…". The route itself is instant server-side.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 9000);
+    let r;
+    try { r = await fetch("/api/ai-paper/" + screen, { signal: ctrl.signal }); }
+    finally { clearTimeout(timer); }
+    if (r.status === 401) { body.innerHTML = '<div class="wl-sub">Session expired — please log in again.</div>'; return; }
+    if (r.status === 403) { body.innerHTML = '<div class="wl-sub">You don’t have access to this screen. Ask your administrator to enable it.</div>'; return; }
+    d = await r.json();
+  } catch (e) {
+    const aborted = e && e.name === "AbortError";
+    body.innerHTML = `<div class="mtg-card aip-card aip-placeholder"><div class="wl-sub">${aborted ? "Server busy — data feed is under load." : "Failed to load: " + (e.message || e)}</div><button type="button" class="pill-btn" onclick="loadAiPaperScreen('${screen}','${bodyId}','${noteId}')" style="margin-top:10px">Retry</button></div>`;
+    return;
+  }
+  if (note) note.textContent = d.note || "";
+  // Screens with real read-only data now: dashboard / performance / review show
+  // the paper pools. Analysis / signals / validation are structured placeholders
+  // until their deeper analytics are wired in (see the note under each).
+  if (d.perf) {
+    body.innerHTML = aiPerfCards(d.perf);
+  } else {
+    const blurb = {
+      analysis: "Market structure, regime and directional bias read from the existing analysis engines will appear here.",
+      signals: "AI-surfaced signals and insights (observation only) will appear here.",
+      validation: "Validation metrics and what the AI is learning from paper results will appear here.",
+    }[screen] || "Content will appear here.";
+    body.innerHTML = `<div class="mtg-card aip-card aip-placeholder"><div class="wl-sub">${blurb}</div></div>`;
   }
 }
 
@@ -10030,7 +10135,7 @@ async function setupLoginGate() {
 // Hides mode-gate desk cards a "user" role isn't permitted for. Backend
 // enforcement (requirePermission) is the REAL gate (routes/api.ts) - this is
 // only so a restricted user doesn't see a button that would just 403.
-const DESK_PERMISSION_MAP = { option: "oiAnalysis", stockOption: "tradingDashboard", swing: "marketAnalysis", dhanbacktest: "backtesting" };
+const DESK_PERMISSION_MAP = { option: "oiAnalysis", stockOption: "tradingDashboard", swing: "marketAnalysis", dhanbacktest: "backtesting", aipaper: "aiPaperDesk" };
 // Credential-rotation is ADMIN ONLY - hiding it here is a UX convenience
 // only, never the real security boundary. The actual enforcement is
 // server-side (requireAdmin on every /api/admin/* and provider route,
@@ -10081,6 +10186,12 @@ async function doLogout() {
 const PERMISSION_LABELS = {
   tradingDashboard: "Trading Dashboard", marketAnalysis: "Market Analysis", oiAnalysis: "OI Analysis",
   aiSignals: "AI Signals", backtesting: "Backtesting", tradeJournal: "Trade Journal", adminReports: "Admin Reports",
+  // AI Paper Desk — desk gate + one per screen (admin can toggle independently).
+  aiPaperDesk: "AI Paper Desk (access)",
+  aiPaperDashboard: "AI Paper · Dashboard", aiPaperAnalysis: "AI Paper · Market Analysis",
+  aiPaperSignals: "AI Paper · Signals & Insights", aiPaperTrade: "AI Paper · Paper Trading",
+  aiPaperReview: "AI Paper · Trade Review", aiPaperPerformance: "AI Paper · Performance",
+  aiPaperValidation: "AI Paper · Validation & Learning",
 };
 
 // Opened on demand from Home's "⚙ Admin Settings" menu (renderHomeIdentity()) -

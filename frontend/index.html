@@ -165,7 +165,7 @@
           <article class="mg-btn mg-option" data-mode="option" role="button" tabindex="0">
             <span class="mg-ico">🎯</span>
             <span class="mg-t">Index Option Trading</span>
-            <span class="mg-d">Trader Dashboard · AI Paper Desk · Liquidity Status · Master Strategy Lab</span>
+            <span class="mg-d">Trader Dashboard · Liquidity Status · Master Strategy Lab</span>
             <button type="button" class="mg-cta">Open Index Option Trading →</button>
           </article>
           <article class="mg-btn mg-stockoption" data-mode="stockOption" role="button" tabindex="0">
@@ -185,6 +185,12 @@
             <span class="mg-t">Backtest (Dhan Data)</span>
             <span class="mg-d">2-year historical strategy testing — EMA/Momentum/RSI/MACD/Bollinger/Supertrend/Market Regime (technical logic only, no OI)</span>
             <button type="button" class="mg-cta">Open Backtest →</button>
+          </article>
+          <article class="mg-btn mg-aipaper" data-mode="aipaper" role="button" tabindex="0">
+            <span class="mg-ico">🤖</span>
+            <span class="mg-t">AI Paper Desk</span>
+            <span class="mg-d">Dashboard · AI Market Analysis · AI Signals &amp; Insights · AI Paper Trading · Trade Review · Performance · Validation &amp; Learning — reads the engines, never overrides them</span>
+            <button type="button" class="mg-cta">Open AI Paper Desk →</button>
           </article>
         </div>
         <button type="button" id="mg-close" class="mg-close hidden">✕ Close</button>
@@ -460,7 +466,7 @@
         <div id="index-strip" class="index-strip"></div>
         <div class="tabs" id="tabs">
           <button class="tab tab-primary active grp-option" data-tab="oicommand" data-group="option">🎯 Trader Dashboard</button>
-          <button class="tab grp-option" data-tab="paper" data-group="option">AI Paper Desk</button>
+          <button class="tab" data-tab="paper" data-group="aipaper">🧪 AI Paper Trading</button>
           <button class="tab grp-option" data-tab="toppicks" data-group="option">Option Top Pick</button>
           <button class="tab grp-option" data-tab="liquiditystatus" data-group="option">🌊 Liquidity Status</button>
           <button class="tab grp-option" data-tab="earlymoves" data-group="option">⚡ Early Moves</button>
@@ -477,6 +483,13 @@
           <button class="tab grp-swing" data-tab="movetiming" data-group="swing">Move Timing</button>
           <button class="tab" data-tab="dhanbacktest" data-group="dhanbacktest">🧪 Backtest (Dhan)</button>
           <button class="tab tab-primary" data-tab="decisionflow" data-group="decisionflow">🧭 Decision Flow</button>
+          <!-- AI Paper Desk screens (own desk; each tab is permission-gated server-side) -->
+          <button class="tab tab-primary" data-tab="aipdash" data-group="aipaper">🤖 Dashboard</button>
+          <button class="tab" data-tab="aipanalysis" data-group="aipaper">🧠 AI Market Analysis</button>
+          <button class="tab" data-tab="aipsignals" data-group="aipaper">📡 AI Signals &amp; Insights</button>
+          <button class="tab" data-tab="aipreview" data-group="aipaper">📝 AI Trade Review</button>
+          <button class="tab" data-tab="aipperf" data-group="aipaper">📊 AI Performance</button>
+          <button class="tab" data-tab="aipvalid" data-group="aipaper">🎓 AI Validation &amp; Learning</button>
         </div>
         <div id="tab-flow-wrap">
           <button id="tab-flow-toggle" class="pill-btn">🔍 How this tab works — logic flow ▾</button>
@@ -1256,6 +1269,56 @@
             <main class="df-stage" id="df-stage"><div class="wl-sub" style="padding:20px">Loading Decision Flow…</div></main>
           </div>
         </div><!-- /panel-decisionflow -->
+
+        <!-- ================= AI Paper Desk screens =================
+             Own top-level desk. AI Paper Trading reuses #panel-paper. The six
+             panels below are structured scaffolds: they read real data from the
+             existing engines (never modifying them) and clearly label the deeper
+             analytics still being wired in. Each is permission-gated server-side. -->
+        <div class="tab-panel" id="panel-aipdash">
+          <div class="aip-wrap">
+            <div class="aip-head">
+              <div><h3>🤖 AI Paper Desk — Dashboard</h3><div class="wl-sub">Read-only overview of the AI paper simulation. This desk observes the trading engines; it never overrides Master Strategy, the Trade Selector, the Option Engine, Risk Management or Live Execution.</div></div>
+            </div>
+            <div class="aip-grid" id="aipdash-body"><div class="wl-sub">Loading…</div></div>
+            <p class="aip-note" id="aipdash-note"></p>
+          </div>
+        </div>
+        <div class="tab-panel" id="panel-aipanalysis">
+          <div class="aip-wrap">
+            <div class="aip-head"><div><h3>🧠 AI Market Analysis</h3><div class="wl-sub">AI read of market structure, regime and bias — sourced read-only from the existing analysis engines.</div></div></div>
+            <div class="aip-grid" id="aipanalysis-body"><div class="wl-sub">Loading…</div></div>
+            <p class="aip-note" id="aipanalysis-note"></p>
+          </div>
+        </div>
+        <div class="tab-panel" id="panel-aipsignals">
+          <div class="aip-wrap">
+            <div class="aip-head"><div><h3>📡 AI Signals &amp; Insights</h3><div class="wl-sub">AI-surfaced signals and insights. Observation only — these do not place or modify any order.</div></div></div>
+            <div class="aip-grid" id="aipsignals-body"><div class="wl-sub">Loading…</div></div>
+            <p class="aip-note" id="aipsignals-note"></p>
+          </div>
+        </div>
+        <div class="tab-panel" id="panel-aipreview">
+          <div class="aip-wrap">
+            <div class="aip-head"><div><h3>📝 AI Trade Review</h3><div class="wl-sub">Review of the AI paper trades — what was taken, and why.</div></div></div>
+            <div class="aip-grid" id="aipreview-body"><div class="wl-sub">Loading…</div></div>
+            <p class="aip-note" id="aipreview-note"></p>
+          </div>
+        </div>
+        <div class="tab-panel" id="panel-aipperf">
+          <div class="aip-wrap">
+            <div class="aip-head"><div><h3>📊 AI Performance</h3><div class="wl-sub">Equity, realised P&amp;L and trade counts across the paper pools — derived read-only from the paper state.</div></div></div>
+            <div class="aip-grid" id="aipperf-body"><div class="wl-sub">Loading…</div></div>
+            <p class="aip-note" id="aipperf-note"></p>
+          </div>
+        </div>
+        <div class="tab-panel" id="panel-aipvalid">
+          <div class="aip-wrap">
+            <div class="aip-head"><div><h3>🎓 AI Validation &amp; Learning</h3><div class="wl-sub">How the AI is validated and what it is learning from the paper results. Learning stays inside AI Paper Desk — it does not retrain or alter the live engines.</div></div></div>
+            <div class="aip-grid" id="aipvalid-body"><div class="wl-sub">Loading…</div></div>
+            <p class="aip-note" id="aipvalid-note"></p>
+          </div>
+        </div>
 
         <!-- ================= Bull % Rank (historical up-day bias) ================= -->
         <div class="tab-panel" id="panel-bullrank">

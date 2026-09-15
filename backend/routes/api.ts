@@ -6306,6 +6306,59 @@ router.get("/paper/stop", (_req: Request, res: Response) => res.json(stopPaper()
 router.get("/paper/auto", (req: Request, res: Response) => res.json(setAutoTrade(req.query.on === "true", istDateStr())));
 router.get("/paper/reset", (_req: Request, res: Response) => res.json(resetPaper()));
 router.get("/paper/state", (_req: Request, res: Response) => res.json(getPaperSummary()));
+
+// ============================ AI Paper Desk (read-only) ============================
+// AI Paper Desk is its own top-level desk. Every screen has its OWN permission
+// gate (requirePermission), enforced server-side — a user without the screen's
+// permission gets a real 403 even by typing the URL, not just a hidden tab.
+//
+// READ-ONLY CONTRACT: these routes only READ from the existing engines
+// (getPaperSummary is a pure getter). They must NEVER call the mutating paths of
+// Master Strategy, Master Trade Selector, the Option Engine, Risk Management or
+// Live Execution — AI Paper Desk observes and learns from those engines, it does
+// not drive them. That is why nothing below calls startPaper/setAutoTrade/
+// tickPaper/openManual/etc. Keep it that way when these scaffolds are fleshed out.
+function aiPaperPerf() {
+  const s: any = safeCall(() => getPaperSummary(), {});
+  const pools = ["indexOption", "stockOption", "intraday"].map((k) => {
+    const p = s?.[k] || {};
+    return {
+      pool: k,
+      startCapital: p.startCapital ?? null,
+      equity: p.equity ?? p.capital ?? null,
+      realizedPnl: p.realizedPnl ?? null,
+      openPositions: Array.isArray(p.open) ? p.open.length : (p.openCount ?? null),
+      trades: Array.isArray(p.history) ? p.history.length : (p.tradeCount ?? null),
+    };
+  });
+  return { pools, generatedAt: Date.now() };
+}
+function safeCall<T>(fn: () => T, fallback: T): T { try { return fn(); } catch { return fallback; } }
+
+const AI_SCAFFOLD_NOTE = "Structured scaffold — this screen's deep analytics are wired to fill in next. Data shown is read directly from the existing engines; AI Paper Desk never modifies them.";
+
+router.get("/ai-paper/dashboard", requirePermission("aiPaperDashboard"), (_req: Request, res: Response) => {
+  res.json({ screen: "dashboard", perf: aiPaperPerf(), note: AI_SCAFFOLD_NOTE });
+});
+router.get("/ai-paper/analysis", requirePermission("aiPaperAnalysis"), (_req: Request, res: Response) => {
+  res.json({ screen: "analysis", note: AI_SCAFFOLD_NOTE, generatedAt: Date.now() });
+});
+router.get("/ai-paper/signals", requirePermission("aiPaperSignals"), (_req: Request, res: Response) => {
+  res.json({ screen: "signals", note: AI_SCAFFOLD_NOTE, generatedAt: Date.now() });
+});
+router.get("/ai-paper/paper-trade", requirePermission("aiPaperTrade"), (_req: Request, res: Response) => {
+  // Reuse the existing paper state read — the AI Paper Trading screen observes it.
+  res.json({ screen: "paperTrade", paper: safeCall(() => getPaperSummary(), null), note: AI_SCAFFOLD_NOTE });
+});
+router.get("/ai-paper/review", requirePermission("aiPaperReview"), (_req: Request, res: Response) => {
+  res.json({ screen: "review", perf: aiPaperPerf(), note: AI_SCAFFOLD_NOTE });
+});
+router.get("/ai-paper/performance", requirePermission("aiPaperPerformance"), (_req: Request, res: Response) => {
+  res.json({ screen: "performance", perf: aiPaperPerf(), note: AI_SCAFFOLD_NOTE });
+});
+router.get("/ai-paper/validation", requirePermission("aiPaperValidation"), (_req: Request, res: Response) => {
+  res.json({ screen: "validation", note: AI_SCAFFOLD_NOTE, generatedAt: Date.now() });
+});
 // MANUAL TRADING: user opens a trade (index/stock + entry price + comment); system
 // applies a trailing SL, marks it live, holds through the month, saves to history.
 router.get("/paper/manual/open", (req: Request, res: Response) => {

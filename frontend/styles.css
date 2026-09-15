@@ -2415,6 +2415,31 @@ body.mode-option .index-strip { display: flex; }
 .mg-dhanbacktest:hover { border-color: #f59e0b; }
 .mg-dhanbacktest .mg-t { color: #fbbf24; }
 .mg-dhanbacktest .mg-cta { border-color: rgba(245,158,11,0.5); color: #fbbf24; }
+.mg-aipaper { border-color: rgba(20,184,166,0.35); }
+.mg-aipaper:hover { border-color: #14b8a6; }
+.mg-aipaper .mg-t { color: #2dd4bf; }
+.mg-aipaper .mg-cta { border-color: rgba(20,184,166,0.5); color: #2dd4bf; }
+
+/* ===== AI Paper Desk scaffold screens ===== */
+.aip-wrap { padding: 14px 16px 28px; max-width: 1200px; margin: 0 auto; }
+.aip-head { margin-bottom: 14px; }
+.aip-head h3 { margin: 0 0 4px; }
+/* Responsive card grid: fills available width, collapses to one column on phones. */
+.aip-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.aip-card { padding: 14px 16px; }
+.aip-card h5 { margin: 0 0 10px; font-size: var(--font-sm); }
+.aip-stat { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 4px 0; border-bottom: 1px solid var(--border); font-size: var(--font-sm); }
+.aip-stat:last-child { border-bottom: none; }
+.aip-stat span { color: var(--muted); }
+.aip-stat b { font-variant-numeric: tabular-nums; }
+.aip-stat b.pos { color: var(--green); }
+.aip-stat b.neg { color: var(--red); }
+.aip-placeholder { grid-column: 1 / -1; }
+.aip-note { margin-top: 16px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+@media (max-width: 640px) {
+  .aip-wrap { padding: 12px 14px 24px; }
+  .aip-grid { grid-template-columns: 1fr; }
+}
 .mg-close {
   margin-top: 22px; background: transparent; border: 1px solid var(--border);
   color: var(--muted); padding: 9px 18px; border-radius: 10px; font-weight: 600; min-height: 44px;

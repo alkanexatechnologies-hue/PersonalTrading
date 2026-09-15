@@ -13,8 +13,30 @@ import { hashPassword } from "./passwordHash";
 // read-modify-write with a temp-file+rename, same pattern as credentials.ts's
 // save().
 
-export type Permission = "tradingDashboard" | "marketAnalysis" | "oiAnalysis" | "aiSignals" | "backtesting" | "tradeJournal" | "adminReports";
-export const ALL_PERMISSIONS: Permission[] = ["tradingDashboard", "marketAnalysis", "oiAnalysis", "aiSignals", "backtesting", "tradeJournal", "adminReports"];
+// Feature-level permissions gate individual screens/APIs. The first seven are
+// the original feature gates. The `aiPaper*` block was added when AI Paper Desk
+// became its own top-level desk (separate from Index Option Trading):
+//   - aiPaperDesk      — the DESK-LEVEL gate. A user needs this to see/enter the
+//                        AI Paper Desk at all. Admin assigns/revokes it per user.
+//   - aiPaper<Screen>  — one per screen INSIDE the desk, so admin can also edit
+//                        individual screen permissions within AI Paper Desk.
+// Every one of these is enforced server-side via requirePermission (routes/api.ts),
+// never merely hidden in the UI.
+export type Permission =
+  | "tradingDashboard" | "marketAnalysis" | "oiAnalysis" | "aiSignals" | "backtesting" | "tradeJournal" | "adminReports"
+  | "aiPaperDesk"
+  | "aiPaperDashboard" | "aiPaperAnalysis" | "aiPaperSignals" | "aiPaperTrade" | "aiPaperReview" | "aiPaperPerformance" | "aiPaperValidation";
+export const ALL_PERMISSIONS: Permission[] = [
+  "tradingDashboard", "marketAnalysis", "oiAnalysis", "aiSignals", "backtesting", "tradeJournal", "adminReports",
+  "aiPaperDesk",
+  "aiPaperDashboard", "aiPaperAnalysis", "aiPaperSignals", "aiPaperTrade", "aiPaperReview", "aiPaperPerformance", "aiPaperValidation",
+];
+
+// The AI Paper Desk screen gates, in display order. Exported so routes and the
+// admin UI can group them under the desk without re-listing the strings.
+export const AI_PAPER_SCREEN_PERMISSIONS: Permission[] = [
+  "aiPaperDashboard", "aiPaperAnalysis", "aiPaperSignals", "aiPaperTrade", "aiPaperReview", "aiPaperPerformance", "aiPaperValidation",
+];
 
 export interface UserRecord {
   userId: string;
