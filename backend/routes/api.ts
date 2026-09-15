@@ -143,6 +143,10 @@ import { recordAdvisorySuggestion } from "../advisory/recorder";
 import { readSuggestions, rewriteSuggestions, WINDOWS_MIN } from "../advisory/suggestionLog";
 import { resolveRecord } from "../advisory/outcomeResolver";
 import { buildAccuracyReport } from "../advisory/accuracy";
+import { getOrLockDaily } from "../strategies/selector";
+import { liveEvidence } from "../strategies/evidence";
+import { recordDaily, readSessions } from "../strategies/sessionStore";
+import { ConditionSnapshot } from "../strategies/types";
 import { LIQUIDITY_CONFIG, NOT_DEFINED } from "../liquidity/liquidityConfig";
 import { buildLiquidityLevels, nearestLevel } from "../liquidity/liquidityLevels";
 import { detectLiquidity, atr14Of, entryAfterSweepConcept } from "../liquidity/sweepDetector";
@@ -3882,7 +3886,8 @@ async function extForOiPayload(payload: any): Promise<any> {
     return {
       hasIdea,
       arbitration,
-      regime: ext.regime.marketRegime, regimeNote: ext.regime.note,
+      regime: ext.regime.marketRegime, regimeDir: ext.regime.regimeDir, regimeNote: ext.regime.note,
+      burstState: inp.burstState,
       liquidityState: ext.liquidity.liquidityState, liquidityScore: ext.liquidity.liquidityScore,
       sentimentState: ext.sentiment.sentimentState, sentimentScore: ext.sentiment.sentimentScore,
       premiumState: ext.premium.premiumState,
@@ -3978,10 +3983,47 @@ router.get("/oi-command", requirePermission("oiAnalysis"), async (req: Request, 
       }));
     } catch (e) { console.error("[advisoryRecorder] failed:", e instanceof Error ? e.message : e); }
 
-    res.json(ext ? { ...data, ext } : data);
+    // ---- Trader Specific Strategies (read-only lens; final cockpit section) ----
+    // Builds a ConditionSnapshot from what the engines ALREADY produced (ext + the
+    // cached Liquidity Status under the SAME "ls:" key the liquidity screen uses, so
+    // it's a cache hit, not a new fetch), picks the day's best-matched strategy (or
+    // WAIT), records the 20-session row, and attaches the result to the payload. It
+    // NEVER overrides the Master Trade Selector — masterAction only mirrors ext's
+    // own verdict. Fully wrapped so a failure here can never break the cockpit.
+    let strategies: any = null;
+    try {
+      let ls: any = null;
+      try { ls = await cached(`ls:${def.symbol}`, 15_000, () => evaluateLiquidityStatus(def.symbol, liquidityStatusDeps)); } catch { ls = null; }
+      const em = (data as any).expectedMove;
+      const emPts = em && (em.low != null || em.high != null) ? Math.round((Math.abs(em.low ?? 0) + Math.abs(em.high ?? 0)) / 2) : null;
+      const staleNow = !!(data && data.stale) && !(data && data.refresh && data.refresh.marketOpen === false);
+      const snap: ConditionSnapshot = {
+        symbol: def.symbol, istDate: istDateStr(),
+        regime: ext?.regime ?? null, regimeDir: ext?.regimeDir ?? null, burstState: ext?.burstState ?? null,
+        moveStage: ls?.moveStage ?? null, directionBias: ls?.directionBias ?? null,
+        openingBias: ext?.openingBias ?? null, withinFirst30: !!ext?.withinFirst30,
+        sentimentState: ext?.sentimentState ?? null, wallReactionState: ext?.wallReactionState ?? null,
+        atWall: !!ext?.atWall, liquidityState: ext?.liquidityState ?? null,
+        spot: data?.spot ?? null, expectedMovePts: emPts,
+        wallSupport: data?.oi?.support ?? null, wallResistance: data?.oi?.resistance ?? null,
+        masterVerdict: ext?.arbitration?.verdict ?? null, dataStale: staleNow,
+      };
+      strategies = getOrLockDaily(snap, liveEvidence);
+      try { recordDaily(strategies, snap); } catch { /* best-effort session log */ }
+    } catch (e) { console.error("[traderStrategies] failed:", e instanceof Error ? e.message : e); strategies = null; }
+
+    res.json(ext ? { ...data, ext, strategies } : { ...data, strategies });
   } catch (e: any) {
     res.status(502).json({ error: e?.message || "oi-command failed" });
   }
+});
+
+// Trader Specific Strategies — 20-session test log (read-only). Returns recorded
+// daily selections + their observed outcome for the summary view.
+router.get("/strategies/sessions", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
+  const symbol = req.query.symbol ? String(req.query.symbol) : undefined;
+  const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 40));
+  res.json({ sessions: readSessions(symbol, limit) });
 });
 
 // Decision Log — the extension's trust layer (GO/WAIT flips, regime/liquidity/

@@ -6657,6 +6657,12 @@ function renderMasterSelector(d) {
         </div>
         <div id="adv-accuracy"><span class="wl-sub">Loading measured outcomes…</span></div>
       </div>
+
+      <!-- Final section: Trader Specific Strategies — the day's best-matched
+           strategy for the CURRENT market condition (or WAIT). Read-only lens;
+           never overrides the Master Trade Selector above. -->
+      ${secLabel(7, "Trader Specific Strategies", "Which strategy fits today? — daily market-condition pick")}
+      ${renderStrategiesSection(d.strategies)}
     </div>`;
 
   // The accuracy card is re-created on every render, so re-bind and refill it.
@@ -6703,6 +6709,69 @@ function renderMasterSelector(d) {
   // Present the cockpit as a vertical step rail (like the Decision Flow desk):
   // the section labels become a left-hand rail, one screen shown at a time.
   cockpitStepify(box);
+}
+
+// Trader Specific Strategies — the final cockpit section. Reads the read-only
+// daily selection the backend attached to the oi-command payload (d.strategies).
+// Trader-facing: shows today's condition → best-matched strategy → quality → why
+// → confirmation → trigger → invalidation → expected move → master action, plus a
+// compact 3-row ranking. Honest about "no suitable strategy" and cold-start.
+function renderStrategiesSection(sel) {
+  if (!sel) {
+    return `<div class="mts-strat"><div class="wl-sub">Strategy read unavailable right now — it appears once market data is live.</div></div>`;
+  }
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  const qCls = (q) => (q === "HIGH" ? "q-high" : q === "MEDIUM" ? "q-med" : "q-low");
+  const p = sel.preferred;
+
+  // Header: today's market condition (always shown).
+  const condHtml = `<div class="strat-cond"><span class="strat-cond-lab">Today's market condition</span>
+      <span class="strat-cond-val">${esc(sel.condition && sel.condition.label)}</span></div>`;
+
+  // Body: the preferred pick, or the WAIT state when nothing clears the gate.
+  let body;
+  if (!p) {
+    body = `<div class="strat-wait">
+        <div class="strat-wait-word">NO SUITABLE STRATEGY TODAY</div>
+        <div class="strat-wait-sub">→ WAIT / NO TRADE — no strategy has a strong enough edge for today's condition. Not forcing a trade.</div>
+      </div>`;
+  } else {
+    const rows = [
+      ["Best matched strategy", `<b class="strat-name">${esc(p.name)}</b>`],
+      ["Strategy quality", `<span class="strat-q ${qCls(p.quality)}">${esc(p.quality)}</span> <span class="wl-sub">match ${p.score} — a support score, not a win rate</span>`],
+      ["Why it matches", `<span>${(p.why || []).map(esc).map((w) => `• ${w}`).join("<br>") || "—"}</span>`],
+      ["Required confirmation", `<span>${esc(p.requiredConfirmation)}</span>`],
+      ["Trigger", `<span>${esc(p.trigger)}</span>`],
+      ["Invalidation", `<span>${esc(p.invalidation)}</span>`],
+      ["Expected move", `<span>${esc(sel.expectedMove && sel.expectedMove.label)}</span>`],
+      ["Master action", `<span>${esc(sel.masterAction)}</span>`],
+    ].map(([k, v]) => `<div class="strat-row"><span>${k}</span><div>${v}</div></div>`).join("");
+    body = `<div class="strat-pick"><div class="strat-pick-head">TODAY'S PREFERRED STRATEGY</div>${rows}</div>`;
+  }
+
+  // Compact ranking: Preferred / Alternative / Not suitable.
+  const tierLabel = { PREFERRED: "1 · Preferred", ALTERNATIVE: "2 · Alternative", NOT_SUITABLE: "Not suitable" };
+  const tierCls = { PREFERRED: "t-pref", ALTERNATIVE: "t-alt", NOT_SUITABLE: "t-no" };
+  const ranked = (sel.ranking || []).slice().sort((a, b) => {
+    const ord = { PREFERRED: 0, ALTERNATIVE: 1, NOT_SUITABLE: 2 };
+    return (ord[a.tier] - ord[b.tier]) || (b.score - a.score);
+  });
+  const rankHtml = ranked.map((r) => `<div class="strat-rank ${tierCls[r.tier]}">
+      <span class="strat-rank-tier">${tierLabel[r.tier]}</span>
+      <span class="strat-rank-name">${esc(r.name)}</span>
+      <span class="strat-rank-score">${r.eligible ? r.score : "—"}</span>
+    </div>`).join("");
+
+  const histNote = sel.historySufficient ? "" : `<div class="strat-note">${esc(sel.note)}</div>`;
+
+  return `<div class="mts-strat">
+      ${condHtml}
+      ${body}
+      <div class="strat-rank-head">Strategy ranking</div>
+      <div class="strat-rank-list">${rankHtml}</div>
+      ${histNote}
+      <div class="strat-advisory">Advisory only · "best" = best-supported for today's condition, not a profit guarantee. No order is placed.</div>
+    </div>`;
 }
 
 // Turn the cockpit's stacked, labelled sections into a vertical stepper: a
