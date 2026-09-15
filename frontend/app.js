@@ -63,10 +63,6 @@ async function init() {
   state.tpUniverse = "index";
   initOiCommand();
   startOiCommandLive();
-  // Trader Dashboard leads with the sequenced flow (same component as the
-  // Decision Flow desk); the classic cockpit above stays behind the toggle.
-  dfInitInstance("oic");
-  dfStartLive("oic");
   startSessionKeeper();
 
   setTimeout(() => loadIndexDesk(), 1500);
@@ -79,13 +75,6 @@ async function init() {
   setTimeout(() => loadTopPicks(true), 2500);
   setTimeout(() => loadOptionTopPick(), 5000); // scans ~60 stocks - stays clear of the earlier, cheaper staggered loaders
   if (el("otp-refresh")) el("otp-refresh").addEventListener("click", loadOptionTopPick);
-  // Trader Dashboard: toggle between the sequenced flow (default) and the classic cockpit.
-  if (el("oic-classic-toggle")) el("oic-classic-toggle").addEventListener("click", () => {
-    const panel = el("panel-oicommand");
-    const on = panel.classList.toggle("show-classic");
-    el("oic-classic-toggle").textContent = on ? "Sequenced flow ▴" : "Classic cockpit ▾";
-    if (on) { initOiCommand(); startOiCommandLive(); }   // spin up the classic loaders on first reveal
-  });
   if (el("ls-refresh")) el("ls-refresh").addEventListener("click", loadLiquidityStatusScreen);
   if (el("ls-symbol")) el("ls-symbol").addEventListener("change", loadLiquidityStatusScreen);
   if (el("ls-scan-refresh")) el("ls-scan-refresh").addEventListener("click", loadLiquidityMovers);
@@ -1891,7 +1880,7 @@ function switchTab(name) {
   if (name === "dhanbacktest" && !state.dhanBacktestInit) { state.dhanBacktestInit = true; initDhanBacktest(); }
   document.body.classList.toggle("oi-focus", name === "oicommand");
   renderWatchlist();
-  if (name === "oicommand") { initOiCommand(); startOiCommandLive(); startAdvisoryTracking(); loadAdvisoryAccuracy(15); dfInitInstance("oic"); dfStartLive("oic"); }
+  if (name === "oicommand") { initOiCommand(); startOiCommandLive(); startAdvisoryTracking(); loadAdvisoryAccuracy(15); }
   if (name === "earlymoves") { loadEarlyMoves(); startEarlyMovesTab(); }
   if (name === "tradermind") { initTraderMindTab(); startTraderMindLive(); }
   if (name === "strategylab") initStrategyLab();
@@ -5370,7 +5359,6 @@ function dfBiasCls(b) { return b === "Bullish" ? "up" : b === "Bearish" ? "down"
 // has its own rail/stage elements and its own step/symbol/data state.
 const DF_INST = {
   flow: { rail: "df-rail", stage: "df-stage", panel: "panel-decisionflow", state: { step: 1, sym: "^NSEI", data: null, loading: false }, timer: null },
-  oic: { rail: "oic-df-rail", stage: "oic-df-stage", panel: "panel-oicommand", state: { step: 1, sym: "^NSEI", data: null, loading: false }, timer: null },
 };
 
 function dfInitInstance(id) {
@@ -5791,9 +5779,6 @@ async function loadOiCommand() {
     // liquidity-status/paper-state) and must never block or delay the desktop
     // render above - it degrades each piece independently on its own errors.
     renderMobileTraderHero(d, sym);
-    // Horizontal command terminal (desktop/tablet): presentation only, from the
-    // same payload plus the liquidity-status engine + a quote for change%.
-    renderNiftyTerminal(d, sym);
     // Freshness: the OI/candle data behind this screen is cached server-side
     // (routes/api.ts already computes dataAgeSec/refresh) - surface it so "is
     // this actually live" is visible rather than implicit.
@@ -6602,80 +6587,6 @@ function renderMasterSelector(d) {
   if (rel) { rel.textContent = "verdict: " + verdict; rel.className = "rel-badge " + (vcls === "go" ? "rel-high" : vcls === "conflict" ? "rel-est" : "rel-med"); }
   const clr = el("oic-clarity");
   if (clr) clr.textContent = "clarity: " + (X.setupQuality != null ? X.setupQuality : "—");
-
-  // Turn the section labels into a Decision-Flow-style stepper: a rail of steps
-  // at the top, one screen visible at a time.
-  cockpitStepify(box);
-}
-
-// Convert the flat cockpit (section labels + stacked content) into a stepped
-// view like the Decision Flow desk: each "mts-sec" label becomes a rail step,
-// and only the selected step's content is shown. Re-runs on every 15s render;
-// the active step is remembered in state.cockpitStep.
-function cockpitStepify(box) {
-  const mts = box && box.querySelector(".mts");
-  if (!mts) return;
-  const head = mts.querySelector(".mts-head");
-  const kids = [...mts.children];
-  const secEls = kids.filter((k) => k.classList.contains("mts-sec"));
-  if (secEls.length < 2) return;
-
-  // Group each section label with the content nodes that follow it.
-  const segments = [];
-  let cur = null;
-  for (const k of kids) {
-    if (k === head) continue;
-    if (k.classList.contains("mts-sec")) {
-      const numEl = k.querySelector(".mts-sec-n");
-      const tEl = k.querySelector(".mts-sec-t");
-      cur = {
-        n: numEl ? numEl.textContent.trim() : String(segments.length + 1),
-        name: tEl && tEl.childNodes[0] ? tEl.childNodes[0].textContent.trim() : "",
-        q: (k.querySelector(".mts-sec-t small") || {}).textContent || "",
-        sec: k, nodes: [],
-      };
-      segments.push(cur);
-    } else if (cur) {
-      cur.nodes.push(k);
-    }
-  }
-  if (!segments.length) return;
-
-  const active = Math.min(Math.max(state.cockpitStep || 0, 0), segments.length - 1);
-  state.cockpitStep = active;
-
-  // Move each segment's content into its own body wrapper (appendChild moves nodes).
-  const bodies = segments.map((seg, i) => {
-    const body = document.createElement("div");
-    body.className = "mts-step-body";
-    body.dataset.step = i;
-    seg.nodes.forEach((nd) => body.appendChild(nd));
-    return body;
-  });
-  // Drop the now-empty inline labels.
-  segments.forEach((seg) => seg.sec.remove());
-
-  // Build the horizontal step rail and mount it right under the head.
-  const rail = document.createElement("div");
-  rail.className = "mts-steprail";
-  rail.innerHTML = segments.map((seg, i) =>
-    `<button type="button" class="mts-stepbtn${i === active ? " active" : ""}" data-step="${i}">
-       <span class="mts-step-n">${seg.n}</span>
-       <span class="mts-step-t">${seg.name}<small>${seg.q}</small></span>
-     </button>`).join("");
-  if (head) head.after(rail); else mts.prepend(rail);
-  bodies.forEach((b) => mts.appendChild(b));
-
-  const apply = () => {
-    bodies.forEach((b, i) => { b.hidden = i !== state.cockpitStep; });
-    rail.querySelectorAll("[data-step]").forEach((b) => b.classList.toggle("active", +b.getAttribute("data-step") === state.cockpitStep));
-  };
-  rail.querySelectorAll("[data-step]").forEach((b) => b.addEventListener("click", () => {
-    state.cockpitStep = +b.getAttribute("data-step");
-    apply();
-    mts.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }));
-  apply();
 }
 
 // ---------- Guidance agent narration feed (read-only, event-driven server-side) ----------
