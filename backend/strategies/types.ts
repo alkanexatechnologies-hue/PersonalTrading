@@ -44,6 +44,11 @@ export interface ConditionSnapshot {
   wallResistance: number | null;
   masterVerdict: string | null;    // GO / WAIT / CONFLICT from the Master Trade Selector arbiter
   dataStale: boolean;
+  // Set when the additive gated Trending path (regimeGate.ts) supplied this
+  // Trending read (the existing detector did not). Transparency only — the
+  // existing detector's read always wins when it already says Trending.
+  regimeSource?: "existing" | "gated";
+  gatedTrendNote?: string;
 }
 
 export type StrategyQuality = "HIGH" | "MEDIUM" | "LOW";

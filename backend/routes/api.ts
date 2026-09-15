@@ -147,6 +147,7 @@ import { getOrLockDaily } from "../strategies/selector";
 import { liveEvidence } from "../strategies/evidence";
 import { recordDaily, readSessions } from "../strategies/sessionStore";
 import { ConditionSnapshot } from "../strategies/types";
+import { gatedTrend, sessionOpenFrom, GATED_TREND_ENABLED } from "../strategies/regimeGate";
 import { LIQUIDITY_CONFIG, NOT_DEFINED } from "../liquidity/liquidityConfig";
 import { buildLiquidityLevels, nearestLevel } from "../liquidity/liquidityLevels";
 import { detectLiquidity, atr14Of, entryAfterSweepConcept } from "../liquidity/sweepDetector";
@@ -4007,7 +4008,21 @@ router.get("/oi-command", requirePermission("oiAnalysis"), async (req: Request, 
         spot: data?.spot ?? null, expectedMovePts: emPts,
         wallSupport: data?.oi?.support ?? null, wallResistance: data?.oi?.resistance ?? null,
         masterVerdict: ext?.arbitration?.verdict ?? null, dataStale: staleNow,
+        regimeSource: ext?.regime === "Trending" ? "existing" : undefined,
       };
+      // ADDITIVE gated Trending path (feature-flagged, strategy-layer only). If the
+      // existing detector did NOT already say Trending, try the validated gated route
+      // so Trend/Pullback can become eligible on genuine trend conditions. This never
+      // touches ext/computeMarketRegime — the Master Trade Selector is unaffected.
+      if (GATED_TREND_ENABLED && snap.regime !== "Trending" && !snap.dataStale) {
+        try {
+          const c5 = await getCandlesCached(def.symbol, "5m");
+          const dailyC = await getDailyCached(def.symbol, 40);
+          const dATRv = dailyC && dailyC.length >= 15 ? last(atr(dailyC, 14)) : null;
+          const g = gatedTrend(c5 || [], dATRv, sessionOpenFrom(c5 || []));
+          if (g.trend && g.dir) { snap.regime = "Trending"; snap.regimeDir = g.dir; snap.regimeSource = "gated"; snap.gatedTrendNote = g.note; }
+        } catch { /* best-effort: gate never breaks the cockpit */ }
+      }
       strategies = getOrLockDaily(snap, liveEvidence);
       try { recordDaily(strategies, snap); } catch { /* best-effort session log */ }
     } catch (e) { console.error("[traderStrategies] failed:", e instanceof Error ? e.message : e); strategies = null; }
