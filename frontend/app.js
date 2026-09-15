@@ -6662,7 +6662,7 @@ function renderMasterSelector(d) {
            strategy for the CURRENT market condition (or WAIT). Read-only lens;
            never overrides the Master Trade Selector above. -->
       ${secLabel(7, "Trader Specific Strategies", "Which strategy fits today? — daily market-condition pick")}
-      ${renderStrategiesSection(d.strategies)}
+      ${renderStrategiesSection(d.strategies, { verdict, suggestion, chosenLeg, finalScore })}
     </div>`;
 
   // The accuracy card is re-created on every render, so re-bind and refill it.
@@ -6716,19 +6716,33 @@ function renderMasterSelector(d) {
 // Trader-facing: shows today's condition → best-matched strategy → quality → why
 // → confirmation → trigger → invalidation → expected move → master action, plus a
 // compact 3-row ranking. Honest about "no suitable strategy" and cold-start.
-function renderStrategiesSection(sel) {
+function renderStrategiesSection(sel, ctx) {
   if (!sel) {
     return `<div class="mts-strat"><div class="wl-sub">Strategy read unavailable right now — it appears once market data is live.</div></div>`;
   }
+  ctx = ctx || {};
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  const money = (v) => (v == null ? "—" : "₹" + Number(v).toLocaleString("en-IN"));
   const qCls = (q) => (q === "HIGH" ? "q-high" : q === "MEDIUM" ? "q-med" : "q-low");
   const p = sel.preferred;
+  const cond = sel.condition || {};
+  const regimeWord = cond.regime === "Trending" ? "Trend" : cond.regime === "Compressed" ? "Compressed" : cond.regime === "Transitioning" ? "Transitioning" : "—";
+  const dir = sel.ranking && p ? "" : "";
+  // Move potential mirrors the preferred setup's quality (HIGH/MED/LOW) — NOT a
+  // probability of profit. When WAITing there is no potential to show.
+  const movePot = p ? p.quality : "—";
+  const movePotCls = p ? qCls(p.quality) : "q-low";
 
-  // Header: today's market condition (always shown).
-  const condHtml = `<div class="strat-cond"><span class="strat-cond-lab">Today's market condition</span>
-      <span class="strat-cond-val">${esc(sel.condition && sel.condition.label)}</span></div>`;
+  // ---- header metric cards (data-driven; honest labels, no fabricated win rate) ----
+  const cards = `<div class="strat-cards">
+      <div class="strat-card"><span class="strat-card-lab">Today's market condition</span><span class="strat-card-val">${esc(cond.label || "—")}</span><span class="strat-card-sub">${esc(cond.detail || "")}${sel.regimeSource === "gated" ? " · gated-trend path" : ""}</span></div>
+      <div class="strat-card"><span class="strat-card-lab">Move potential</span><span class="strat-card-val ${movePotCls}">${esc(movePot)}</span><span class="strat-card-sub">setup strength</span></div>
+      <div class="strat-card"><span class="strat-card-lab">Condition match</span><span class="strat-card-val">${p ? p.score : "—"}</span><span class="strat-card-sub">support score, not a win rate</span></div>
+      <div class="strat-card strat-card-strat"><span class="strat-card-lab">Best strategy</span><span class="strat-card-val">${p ? esc(p.name) : "WAIT"}</span><span class="strat-card-sub">${p ? esc(p.blurb || "") : "no strong edge today"}</span></div>
+      <div class="strat-card"><span class="strat-card-lab">Master action</span><span class="strat-card-val">${esc((ctx.verdict) || (p ? "PREPARE" : "WAIT"))}</span><span class="strat-card-sub">from Master Trade Selector</span></div>
+    </div>`;
 
-  // Body: the preferred pick, or the WAIT state when nothing clears the gate.
+  // ---- body: preferred setup + why, or WAIT ----
   let body;
   if (!p) {
     body = `<div class="strat-wait">
@@ -6736,20 +6750,38 @@ function renderStrategiesSection(sel) {
         <div class="strat-wait-sub">→ WAIT / NO TRADE — no strategy has a strong enough edge for today's condition. Not forcing a trade.</div>
       </div>`;
   } else {
-    const rows = [
-      ["Best matched strategy", `<b class="strat-name">${esc(p.name)}</b>`],
-      ["Strategy quality", `<span class="strat-q ${qCls(p.quality)}">${esc(p.quality)}</span> <span class="wl-sub">match ${p.score} — a support score, not a win rate</span>`],
-      ["Why it matches", `<span>${(p.why || []).map(esc).map((w) => `• ${w}`).join("<br>") || "—"}</span>`],
-      ["Required confirmation", `<span>${esc(p.requiredConfirmation)}</span>`],
-      ["Trigger", `<span>${esc(p.trigger)}</span>`],
-      ["Invalidation", `<span>${esc(p.invalidation)}</span>`],
-      ["Expected move", `<span>${esc(sel.expectedMove && sel.expectedMove.label)}</span>`],
-      ["Master action", `<span>${esc(sel.masterAction)}</span>`],
-    ].map(([k, v]) => `<div class="strat-row"><span>${k}</span><div>${v}</div></div>`).join("");
-    body = `<div class="strat-pick"><div class="strat-pick-head">TODAY'S PREFERRED STRATEGY</div>${rows}</div>`;
+    // Trade setup card reads the Master Trade Selector's existing advisory leg
+    // (read-only) — the strategy layer defers the actual option/entry to MTS.
+    const leg = ctx.chosenLeg;
+    const actionable = ctx.suggestion && String(ctx.suggestion).startsWith("BUY") && leg && leg.strike != null;
+    const setup = actionable
+      ? `<div class="strat-setup">
+          <div class="strat-setup-head">Trade setup <span class="wl-sub">— from Master Trade Selector advisory (read-only)</span></div>
+          <div class="strat-srow"><span>Direction</span><b>${esc(leg.optionType === "PE" ? "BUY PUT (Bearish)" : "BUY CALL (Bullish)")}</b></div>
+          <div class="strat-srow"><span>Strategy</span><b>${esc(p.name)}</b></div>
+          <div class="strat-srow"><span>Strike</span><b>${esc(leg.strike)} ${esc(leg.optionType || "")}</b></div>
+          <div class="strat-srow"><span>Entry</span><b>${money(leg.ltp)}</b></div>
+          <div class="strat-srow"><span>Stop loss</span><b class="down">${money(leg.stop)}</b></div>
+          <div class="strat-srow"><span>Target</span><b class="up">${money(leg.target)}</b></div>
+          <div class="strat-srow"><span>Expected move</span><b>${esc(sel.expectedMove && sel.expectedMove.label)}</b></div>
+          <div class="strat-srow"><span>Confidence at signal</span><b>${ctx.finalScore != null ? ctx.finalScore : (leg.confidence != null ? leg.confidence : "—")} <span class="wl-sub">· a score, not a success rate</span></b></div>
+        </div>`
+      : `<div class="strat-setup strat-setup-wait">
+          <div class="strat-setup-head">Trade setup</div>
+          <div class="wl-sub">Strategy matched, but no confirmed option trade yet — waiting for the trigger below. No order is placed.</div>
+          <div class="strat-srow"><span>Expected move</span><b>${esc(sel.expectedMove && sel.expectedMove.label)}</b></div>
+        </div>`;
+    const why = `<div class="strat-why">
+        <div class="strat-why-head">Why this strategy today</div>
+        <ul class="strat-why-list">${(p.why || []).map((w) => `<li>✓ ${esc(w)}</li>`).join("") || "<li>—</li>"}</ul>
+        <div class="strat-srow"><span>Required confirmation</span><div>${esc(p.requiredConfirmation)}</div></div>
+        <div class="strat-srow"><span>Trigger</span><div>${esc(p.trigger)}</div></div>
+        <div class="strat-srow"><span>Invalidation</span><div class="down">${esc(p.invalidation)}</div></div>
+      </div>`;
+    body = `<div class="strat-two">${setup}${why}</div>`;
   }
 
-  // Compact ranking: Preferred / Alternative / Not suitable.
+  // ---- ranking (Preferred / Alternative / Not suitable) ----
   const tierLabel = { PREFERRED: "1 · Preferred", ALTERNATIVE: "2 · Alternative", NOT_SUITABLE: "Not suitable" };
   const tierCls = { PREFERRED: "t-pref", ALTERNATIVE: "t-alt", NOT_SUITABLE: "t-no" };
   const ranked = (sel.ranking || []).slice().sort((a, b) => {
@@ -6762,15 +6794,22 @@ function renderStrategiesSection(sel) {
       <span class="strat-rank-score">${r.eligible ? r.score : "—"}</span>
     </div>`).join("");
 
-  const histNote = sel.historySufficient ? "" : `<div class="strat-note">${esc(sel.note)}</div>`;
+  // ---- evidence / historical edge (honest: cold-start shows 'building') ----
+  const ev = p && p.evidence ? p.evidence : null;
+  const evidence = `<div class="strat-evidence">
+      <div class="strat-why-head">Historical edge in similar conditions</div>
+      ${ev && ev.sufficientHistory
+        ? `<div class="wl-sub">Validated on ${ev.sampleSize} similar session(s): ${ev.hitRate != null ? Math.round(ev.hitRate * 100) + "% matched" : "—"}. ${esc(ev.note)}</div>`
+        : `<div class="wl-sub">Insufficient history yet${ev ? " (" + ev.sampleSize + " similar sessions recorded)" : ""} — ranked on current-condition match only. Edge fills in as paper sessions accrue.</div>`}
+    </div>`;
 
   return `<div class="mts-strat">
-      ${condHtml}
+      ${cards}
       ${body}
       <div class="strat-rank-head">Strategy ranking</div>
       <div class="strat-rank-list">${rankHtml}</div>
-      ${histNote}
-      <div class="strat-advisory">Advisory only · "best" = best-supported for today's condition, not a profit guarantee. No order is placed.</div>
+      ${evidence}
+      <div class="strat-advisory">Advisory only · "best" = best-supported for today's condition, <b>not a profit guarantee</b>. No order is placed.</div>
     </div>`;
 }
 

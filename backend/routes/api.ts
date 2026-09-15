@@ -4024,6 +4024,7 @@ router.get("/oi-command", requirePermission("oiAnalysis"), async (req: Request, 
         } catch { /* best-effort: gate never breaks the cockpit */ }
       }
       strategies = getOrLockDaily(snap, liveEvidence);
+      if (strategies) strategies.regimeSource = snap.regimeSource || "existing"; // transparency for the UI
       try { recordDaily(strategies, snap); } catch { /* best-effort session log */ }
     } catch (e) { console.error("[traderStrategies] failed:", e instanceof Error ? e.message : e); strategies = null; }
 

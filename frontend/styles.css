@@ -2796,9 +2796,34 @@ body.mode-option .index-strip { display: flex; }
 .strat-rank.t-no { opacity: 0.6; }
 .strat-note { font-size: 12px; color: var(--muted); font-style: italic; }
 .strat-advisory { font-size: 11px; color: var(--muted); border-top: 1px dashed var(--border); padding-top: 8px; }
+
+/* ---- Groww/Dhan-style card panel ---- */
+.strat-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.strat-card { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; }
+.strat-card-strat { border-color: rgba(20,184,166,0.4); }
+.strat-card-lab { font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--muted); }
+.strat-card-val { font-size: 16px; font-weight: 800; color: var(--text); line-height: 1.15; }
+.strat-card-val.q-high { color: #16c784; } .strat-card-val.q-med { color: #f0a63a; } .strat-card-val.q-low { color: var(--muted); }
+.strat-card-sub { font-size: 10px; color: var(--muted); }
+.strat-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.strat-setup, .strat-why, .strat-evidence { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--panel-2); }
+.strat-setup { border-color: rgba(22,199,132,0.35); }
+.strat-setup-wait { border-color: var(--border); }
+.strat-setup-head, .strat-why-head { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px; color: var(--muted); margin-bottom: 8px; }
+.strat-srow { display: grid; grid-template-columns: 130px 1fr; gap: 10px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.strat-srow:last-child { border-bottom: none; }
+.strat-srow > span { color: var(--muted); font-size: 12px; }
+.strat-srow b { font-variant-numeric: tabular-nums; }
+.strat-srow b.up, .strat-srow .up { color: var(--green); } .strat-srow b.down, .strat-srow .down { color: var(--red); }
+.strat-why-list { margin: 0 0 8px; padding-left: 2px; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.strat-why-list li { font-size: 13px; color: var(--green); }
+.strat-evidence { margin-top: 10px; background: transparent; }
+@media (max-width: 820px) { .strat-two { grid-template-columns: 1fr; } }
 @media (max-width: 640px) {
   .strat-row { grid-template-columns: 1fr; gap: 2px; }
   .strat-rank { grid-template-columns: 92px 1fr auto; }
+  .strat-srow { grid-template-columns: 1fr; gap: 1px; }
+  .strat-cards { grid-template-columns: 1fr 1fr; }
 }
 
 @media (max-width: 820px) {
