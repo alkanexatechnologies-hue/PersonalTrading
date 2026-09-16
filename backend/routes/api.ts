@@ -148,6 +148,7 @@ import { liveEvidence } from "../strategies/evidence";
 import { recordDaily, readSessions } from "../strategies/sessionStore";
 import { ConditionSnapshot } from "../strategies/types";
 import { gatedTrend, sessionOpenFrom, GATED_TREND_ENABLED } from "../strategies/regimeGate";
+import { runStrategyReplay } from "../strategies/replay";
 import { LIQUIDITY_CONFIG, NOT_DEFINED } from "../liquidity/liquidityConfig";
 import { buildLiquidityLevels, nearestLevel } from "../liquidity/liquidityLevels";
 import { detectLiquidity, atr14Of, entryAfterSweepConcept } from "../liquidity/sweepDetector";
@@ -4040,6 +4041,35 @@ router.get("/strategies/sessions", requirePermission("oiAnalysis"), (req: Reques
   const symbol = req.query.symbol ? String(req.query.symbol) : undefined;
   const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 40));
   res.json({ sessions: readSessions(symbol, limit) });
+});
+
+// Strategy Replay — runs the EXISTING engines + selector + gated path over one
+// session's REAL candles (Dhan historical, no-look-ahead) and returns the staged
+// events + validated timing verdict for the UI. Analysis/read-only; no trades.
+router.get("/strategy-replay", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  try {
+    const symbol = String(req.query.symbol || "^NSEI");
+    const def = findSymbolDef(symbol);
+    if (!def) return res.status(400).json({ error: "valid F&O symbol चाहिए" });
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : istDateStr();
+    const sec = await lookupDhanSecurity(def.nseSymbol || def.symbol);
+    if (!sec) return res.json({ available: false, message: `No Dhan instrument mapping found for ${def.symbol}.`, symbol: def.symbol, name: def.name, date });
+    const nextDay = new Date(new Date(date + "T00:00:00Z").getTime() + 86400000).toISOString().slice(0, 10);
+    // Dhan's daily endpoint is unreliable for indices, so derive prior-day daily
+    // bars (only used for ATR) by resampling a wider 5m fetch — one intraday call.
+    const startWide = new Date(new Date(date + "T00:00:00Z").getTime() - 45 * 86400000).toISOString().slice(0, 10);
+    const c5wide = await cached(`strat-replay-5m:${def.symbol}:${date}`, 10 * 60_000, () => fetchDhanCandles(sec, "5", startWide, nextDay));
+    const istDay = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(0, 10);
+    const byDay: Record<string, typeof c5wide> = {};
+    for (const b of c5wide || []) { const s = b.time % 86400; if (s >= 13500 && s <= 36000) { const d = istDay(b.time); (byDay[d] = byDay[d] || []).push(b); } }
+    const sess = (byDay[date] || []).slice().sort((a, b) => a.time - b.time);
+    const prevDaily = Object.keys(byDay).filter((d) => d < date && byDay[d].length >= 20).sort()
+      .map((d) => { const bs = byDay[d].slice().sort((a, b) => a.time - b.time); return { time: bs[0].time, open: bs[0].open, high: Math.max(...bs.map((x) => x.high)), low: Math.min(...bs.map((x) => x.low)), close: bs[bs.length - 1].close } as any; });
+    if (!sess.length) return res.json({ available: false, message: `No session data for ${def.name} on ${date} (holiday, weekend, or not yet traded).`, symbol: def.symbol, name: def.name, date });
+    res.json(runStrategyReplay(def.symbol, def.name, sess, prevDaily));
+  } catch (e: any) {
+    res.status(502).json({ error: e?.message || "strategy-replay failed" });
+  }
 });
 
 // Decision Log — the extension's trust layer (GO/WAIT flips, regime/liquidity/
