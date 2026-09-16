@@ -1884,6 +1884,7 @@ function switchTab(name) {
   if (name === "earlymoves") { loadEarlyMoves(); startEarlyMovesTab(); }
   if (name === "tradermind") { initTraderMindTab(); startTraderMindLive(); }
   if (name === "strategylab") initStrategyLab();
+  if (name === "stratreplay") initStrategyReplay();
 
   if (name === "paper") { loadPaper(); startPaperLive(); }
   if (name === "news") loadNews();
@@ -1989,7 +1990,7 @@ const MODE_TABS = {
   // Index Option Trading: Option Top Pick + Early Moves now live on the Stock
   // Option desk, and AI Paper Trading moved to its own AI Paper Desk, so all
   // three are dropped here.
-  option: ["oicommand", "liquiditystatus", "strategylab"],
+  option: ["oicommand", "liquiditystatus", "strategylab", "stratreplay"],
   // Stock Option Trading sequence: Option Top Pick -> Early Moves -> Stock Options.
   stockOption: ["toppicks", "earlymoves", "stockoptions"],
   swing: ["news", "bullrank", "todaymovers", "stock", "bigmove", "movetiming"],
@@ -6876,6 +6877,139 @@ function revealStratChart() {
   if (!stratChart || !stratChartEl) return;
   const cv = stratChartEl.querySelector(".strat-chart-canvas");
   if (cv && cv.clientWidth > 0) { stratChart.applyOptions({ width: cv.clientWidth }); loadStratChartData(stratChartSym || "^NSEI"); }
+}
+
+// ============================ Strategy Replay tab (real engine output) ============================
+// Renders /api/strategy-replay: a full session run through the EXISTING engines +
+// selector (no look-ahead) with staged event markers on the chart, the real
+// decision, and the validated timing verdict. Every value is engine-derived;
+// nothing is hard-coded. Missing data shows "DATA UNAVAILABLE".
+let srpChart = null, srpInit = false;
+const SRP_INDICES = [["^NSEI", "NIFTY 50"], ["^NSEBANK", "NIFTY BANK"], ["^CNXFIN", "FIN NIFTY"], ["^NSEMDCP50", "MIDCAP NIFTY"]];
+function initStrategyReplay() {
+  if (!srpInit) {
+    srpInit = true;
+    const sel = el("srp-symbol");
+    if (sel) sel.innerHTML = SRP_INDICES.map((x) => `<option value="${x[0]}">${x[1]}</option>`).join("");
+    const dt = el("srp-date");
+    if (dt && !dt.value) dt.value = "2026-09-15"; // last validated session; user can change
+    if (el("srp-run")) el("srp-run").addEventListener("click", loadStrategyReplay);
+    if (sel) sel.addEventListener("change", loadStrategyReplay);
+  }
+  if (!state.srpLoaded) { state.srpLoaded = true; loadStrategyReplay(); }
+}
+async function loadStrategyReplay() {
+  const body = el("srp-body"); if (!body) return;
+  const sym = (el("srp-symbol") && el("srp-symbol").value) || "^NSEI";
+  const date = (el("srp-date") && el("srp-date").value) || "2026-09-15";
+  body.innerHTML = '<div class="wl-sub" style="padding:24px">Replaying the session through the engines…</div>';
+  let d;
+  try { d = await fetch(`/api/strategy-replay?symbol=${encodeURIComponent(sym)}&date=${encodeURIComponent(date)}`).then((r) => r.json()); }
+  catch (e) { body.innerHTML = `<div class="wl-sub" style="padding:24px">Failed to load: ${e.message}</div>`; return; }
+  if (!d || d.available === false) { body.innerHTML = `<div class="wl-sub" style="padding:24px">${(d && d.message) || "No replay available for this symbol/date."}</div>`; return; }
+  renderStrategyReplay(d);
+}
+function srpHM(t) { return t == null ? "—" : new Date((t + 19800) * 1000).toISOString().slice(11, 16); }
+function renderStrategyReplay(d) {
+  const body = el("srp-body"); if (!body) return;
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  const money = (v) => (v == null ? "—" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: 2 }));
+  const dec = d.decision, tm = d.timing;
+  const vCls = { TIMELY: "v-timely", EARLY: "v-early", LATE: "v-late", FALSE: "v-false", MISSED: "v-missed", NO_TRADE: "v-none", IN_PROGRESS: "v-none" }[tm.verdict] || "v-none";
+  const vLabel = { TIMELY: "TIMELY", EARLY: "EARLY", LATE: "LATE", FALSE: "FALSE SIGNAL", MISSED: "MISSED", NO_TRADE: "NO TRADE (correct WAIT)", IN_PROGRESS: "IN PROGRESS" }[tm.verdict] || tm.verdict;
+  const dirWord = dec.direction === "up" ? "BUY CALL (Bullish)" : dec.direction === "down" ? "BUY PUT (Bearish)" : "—";
+  const takeCls = dec.masterAction === "TAKE" ? "srp-take" : "srp-wait";
+
+  // metric cards
+  const cards = `<div class="srp-cards">
+      <div class="srp-card"><span class="srp-lab">Market condition</span><span class="srp-val">${esc(dec.condition)}</span><span class="srp-sub">${esc(dec.regime || "")}${dec.regimeSource === "gated" ? " · gated" : ""}</span></div>
+      <div class="srp-card"><span class="srp-lab">Move developing?</span><span class="srp-val ${dec.moveDeveloping ? "up" : ""}">${dec.moveDeveloping ? "YES" : "No"}</span><span class="srp-sub">stage-based</span></div>
+      <div class="srp-card"><span class="srp-lab">Model confidence</span><span class="srp-val">${dec.conditionMatchScore != null ? dec.conditionMatchScore : "—"}</span><span class="srp-sub">condition match · not a win rate</span></div>
+      <div class="srp-card"><span class="srp-lab">Best strategy</span><span class="srp-val" style="color:#2dd4bf">${esc(dec.strategy || "None — WAIT")}</span><span class="srp-sub">most suitable today</span></div>
+      <div class="srp-card ${takeCls}"><span class="srp-lab">Master action</span><span class="srp-val">${dec.masterAction}</span><span class="srp-sub">${dec.direction ? esc(dirWord) : "no confirmed trade"}</span></div>
+    </div>`;
+
+  // timing verdict banner + sequence
+  const seq = `<div class="srp-seq">
+      <div class="srp-seq-step"><span>Market started</span><b>${srpHM(tm.moveStartTime)}</b></div><span class="srp-arrow">→</span>
+      <div class="srp-seq-step"><span>System detected</span><b>${srpHM(tm.detectTime)}</b></div><span class="srp-arrow">→</span>
+      <div class="srp-seq-step"><span>Trend confirmed</span><b>${srpHM(tm.confirmTime)}</b></div><span class="srp-arrow">→</span>
+      <div class="srp-seq-step"><span>Trade trigger</span><b>${srpHM(tm.triggerTime)}</b></div>
+    </div>`;
+  const detectedFirst = tm.detectTime != null && tm.moveStartTime != null && tm.detectTime <= tm.moveStartTime;
+  const banner = `<div class="srp-verdict ${vCls}">
+      <div class="srp-verdict-word">${vLabel}</div>
+      <div class="srp-verdict-note">${esc(tm.note)}${tm.mfePts != null ? ` · captured MFE ${tm.mfePts} / MAE ${tm.maePts} pts` : ""}${detectedFirst ? " · system anticipated the move" : ""}</div>
+    </div>`;
+
+  // trade setup (option data unavailable for historical dates)
+  const setup = `<div class="srp-setup">
+      <div class="srp-setup-hd">Trade setup <span class="wl-sub">— from the existing system</span></div>
+      <div class="srp-srow"><span>Direction</span><b class="${dec.direction === "down" ? "down" : dec.direction === "up" ? "up" : ""}">${esc(dirWord)}</b></div>
+      <div class="srp-srow"><span>Strategy</span><b>${esc(dec.strategy || "—")}</b></div>
+      <div class="srp-srow"><span>Trigger (spot)</span><b>${money(dec.triggerSpot)}</b></div>
+      <div class="srp-srow"><span>Invalidation (spot)</span><b class="amber">${money(dec.invalidationSpot)}</b></div>
+      <div class="srp-srow"><span>Expected move</span><b>≈ ${dec.expectedMovePts != null ? dec.expectedMovePts + " pts (1× ATR)" : "—"}</b></div>
+      <div class="srp-srow"><span>Option / strike / LTP</span><b class="srp-unavail">DATA UNAVAILABLE</b></div>
+      <div class="srp-srow"><span>Entry / SL / Target</span><b class="srp-unavail">DATA UNAVAILABLE</b></div>
+      <div class="srp-note">No historical intraday option chain for this date, so strike/LTP/entry/SL/target cannot be shown. In live mode these come from the Option Engine.</div>
+    </div>`;
+  const why = `<div class="srp-why"><div class="srp-setup-hd">Why the system reached this decision</div>
+      <ul>${(dec.why || []).map((w) => `<li>✓ ${esc(w)}</li>`).join("") || "<li>—</li>"}</ul></div>`;
+
+  body.innerHTML = `${banner}${cards}
+    <div class="srp-main">
+      <div class="srp-chartcard">
+        <div class="srp-chart-legend" id="srp-legend"></div>
+        <div id="srp-price"></div>
+        <div class="subhdr" style="font-size:11px;color:var(--muted);margin-top:4px">RSI (14)</div>
+        <div id="srp-rsi"></div>
+        <div class="subhdr" style="font-size:11px;color:var(--muted)">Volume</div>
+        <div id="srp-vol"></div>
+        ${seq}
+      </div>
+      <div>${setup}${why}</div>
+    </div>`;
+
+  srpDrawChart(d);
+}
+function srpDrawChart(d) {
+  const pxEl = el("srp-price"); if (!pxEl || typeof LightweightCharts === "undefined") return;
+  if (srpChart) { try { srpChart.forEach && srpChart.forEach((c) => c.remove()); } catch (_) {} }
+  const mk = (elm, h) => LightweightCharts.createChart(elm, chartOpts(elm.clientWidth || 800, h));
+  const chart = mk(pxEl, 340);
+  const cs = chart.addCandlestickSeries({ upColor: "#16c784", downColor: "#ea3943", wickUpColor: "#16c784", wickDownColor: "#ea3943", borderVisible: false });
+  cs.setData(d.candles);
+  chart.addLineSeries({ color: "#3b82f6", lineWidth: 1 }).setData(alignSeries(d.candles, d.ema9));
+  chart.addLineSeries({ color: "#f0b90b", lineWidth: 1 }).setData(alignSeries(d.candles, d.ema21));
+  chart.addLineSeries({ color: "#a855f7", lineWidth: 1, lineStyle: 2 }).setData(alignSeries(d.candles, d.vwap));
+  if (d.orHigh != null) cs.createPriceLine({ price: d.orHigh, color: "rgba(138,151,173,.5)", lineWidth: 1, lineStyle: 2, title: "OR High" });
+  if (d.orLow != null) cs.createPriceLine({ price: d.orLow, color: "rgba(138,151,173,.5)", lineWidth: 1, lineStyle: 2, title: "OR Low" });
+  if (d.decision.invalidationSpot != null) cs.createPriceLine({ price: d.decision.invalidationSpot, color: "rgba(240,166,58,.7)", lineWidth: 1, lineStyle: 0, title: "Invalidation" });
+  // event markers (real times/spots from the engine run)
+  const mkColor = { MOVE_START: "#f0b90b", SYSTEM_DETECTED: "#3b82f6", TREND_CONFIRMED: "#2dd4bf", GOOD_MOVE: "#16c784", TRADE_TRIGGER: d.decision.direction === "down" ? "#ea3943" : "#16c784" };
+  const mkShape = { MOVE_START: "circle", SYSTEM_DETECTED: "arrowDown", TREND_CONFIRMED: "circle", GOOD_MOVE: "circle", TRADE_TRIGGER: "arrowDown" };
+  const markers = (d.events || []).filter((e) => e.time != null && mkColor[e.kind]).map((e) => ({ time: e.time, position: e.kind === "TRADE_TRIGGER" ? "belowBar" : "aboveBar", color: mkColor[e.kind], shape: mkShape[e.kind] || "circle", text: e.label }));
+  markers.sort((a, b) => a.time - b.time);
+  cs.setMarkers(markers);
+  chart.timeScale().fitContent();
+  const rsiEl = el("srp-rsi"), volEl = el("srp-vol");
+  const rc = mk(rsiEl, 90); const rs = rc.addLineSeries({ color: "#e879f9", lineWidth: 1 }); rs.setData(alignSeries(d.candles, d.rsi));
+  rs.createPriceLine({ price: 70, color: "rgba(234,57,67,.5)", lineWidth: 1, lineStyle: 2, title: "70" });
+  rs.createPriceLine({ price: 30, color: "rgba(22,199,132,.5)", lineWidth: 1, lineStyle: 2, title: "30" }); rc.timeScale().fitContent();
+  const vc = mk(volEl, 80); const vs = vc.addHistogramSeries({ priceFormat: { type: "volume" } });
+  const cmap = {}; d.candles.forEach((c) => (cmap[c.time] = c));
+  vs.setData((d.volume || []).map((x) => ({ time: x.time, value: x.value, color: (cmap[x.time] && cmap[x.time].close >= cmap[x.time].open) ? "rgba(22,199,132,.4)" : "rgba(234,57,67,.4)" }))); vc.timeScale().fitContent();
+  // legend on crosshair
+  const lg = el("srp-legend");
+  const setLg = (c) => { if (lg) lg.innerHTML = c ? `<b>${d.name} · 5m</b> <span class="lg">O ${c.open} H ${c.high} L ${c.low} C <b class="${c.close >= c.open ? "up" : "down"}">${c.close}</b></span> <span style="color:#3b82f6">EMA9</span> <span style="color:#f0b90b">EMA21</span> <span style="color:#a855f7">VWAP</span>` : ""; };
+  chart.subscribeCrosshairMove((p) => { const c = p && p.time && p.seriesData ? p.seriesData.get(cs) : null; setLg(c || d.candles[d.candles.length - 1]); });
+  setLg(d.candles[d.candles.length - 1]);
+  // sync time scales
+  let sy = false; const sync = (src, dsts) => src.timeScale().subscribeVisibleLogicalRangeChange((r) => { if (sy || !r) return; sy = true; dsts.forEach((x) => x.timeScale().setVisibleLogicalRange(r)); sy = false; });
+  sync(chart, [rc, vc]); sync(rc, [chart, vc]); sync(vc, [chart, rc]);
+  srpChart = [chart, rc, vc];
+  if (!window.__srpResize) { window.__srpResize = true; window.addEventListener("resize", () => { if (!srpChart) return; const w = el("srp-price"); if (w) srpChart.forEach((c) => c.applyOptions({ width: w.clientWidth })); }); }
 }
 function mountStrategyChart(sym) {
   const slot = el("strat-chart-slot");

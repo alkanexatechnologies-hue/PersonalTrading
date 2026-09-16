@@ -471,6 +471,7 @@
           <button class="tab grp-option" data-tab="liquiditystatus" data-group="option">🌊 Liquidity Status</button>
           <button class="tab grp-option" data-tab="earlymoves" data-group="option">⚡ Early Moves</button>
           <button class="tab grp-option" data-tab="strategylab" data-group="option">🔬 Master Strategy Lab</button>
+          <button class="tab grp-option" data-tab="stratreplay" data-group="option">📽 Strategy Replay</button>
           <button class="tab" data-tab="stockoptions" data-group="stockOption">📊 Stock Options</button>
           <button class="tab grp-swing" data-tab="news" data-group="swing">Market News</button>
           <button class="tab grp-swing" data-tab="bullrank" data-group="swing">Bull % Rank</button>
@@ -1269,6 +1270,24 @@
             <main class="df-stage" id="df-stage"><div class="wl-sub" style="padding:20px">Loading Decision Flow…</div></main>
           </div>
         </div><!-- /panel-decisionflow -->
+
+        <!-- ================= Strategy Replay (real engine output, no-look-ahead) ================= -->
+        <div class="tab-panel" id="panel-stratreplay">
+          <div class="srp-wrap">
+            <div class="srp-toolbar">
+              <div>
+                <h3 style="margin:0">📽 Strategy Replay</h3>
+                <div class="wl-sub">Replays a full session through the existing engines (no look-ahead) and shows where the move started vs when the system detected, confirmed and triggered — with the validated timing verdict.</div>
+              </div>
+              <div class="srp-controls">
+                <select id="srp-symbol"></select>
+                <input type="date" id="srp-date" />
+                <button id="srp-run" class="pill-btn">Replay</button>
+              </div>
+            </div>
+            <div id="srp-body"><div class="wl-sub" style="padding:24px">Choose a symbol and date, then press Replay.</div></div>
+          </div>
+        </div>
 
         <!-- ================= AI Paper Desk screens =================
              Own top-level desk. AI Paper Trading reuses #panel-paper. The six
