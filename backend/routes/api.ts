@@ -276,6 +276,14 @@ async function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>): Prom
   _inflight.set(key, p);
   return p as Promise<T>;
 }
+// Read-only peek at an already-warm cache entry (no fetch). Used by the Trader
+// Specific Strategies block on the oi-command hot path so it adds ZERO extra
+// Groww calls there - it reuses data other screens/polls already fetched, and
+// degrades gracefully (null) when a cache is cold.
+function peekFresh<T = any>(key: string, maxAgeMs: number): T | null {
+  const h = _cache.get(key);
+  return h && Date.now() - h.ts < maxAgeMs ? (h.v as T) : null;
+}
 // Phase 3.3 (stale-data parity with the OI path): age since `key` was last
 // FETCHED LIVE and succeeded — _cache's timestamp only advances on a successful
 // fn() call (see `cached` above), so during a provider outage being served from
@@ -3994,8 +4002,9 @@ router.get("/oi-command", requirePermission("oiAnalysis"), async (req: Request, 
     // own verdict. Fully wrapped so a failure here can never break the cockpit.
     let strategies: any = null;
     try {
-      let ls: any = null;
-      try { ls = await cached(`ls:${def.symbol}`, 15_000, () => evaluateLiquidityStatus(def.symbol, liquidityStatusDeps)); } catch { ls = null; }
+      // Reuse the Liquidity Status only if another flow already computed it (no
+      // fetch here) - keeps the oi-command hot path free of extra Groww calls.
+      const ls: any = peekFresh(`ls:${def.symbol}`, 60_000);
       const em = (data as any).expectedMove;
       const emPts = em && (em.low != null || em.high != null) ? Math.round((Math.abs(em.low ?? 0) + Math.abs(em.high ?? 0)) / 2) : null;
       const staleNow = !!(data && data.stale) && !(data && data.refresh && data.refresh.marketOpen === false);
@@ -4015,13 +4024,18 @@ router.get("/oi-command", requirePermission("oiAnalysis"), async (req: Request, 
       // existing detector did NOT already say Trending, try the validated gated route
       // so Trend/Pullback can become eligible on genuine trend conditions. This never
       // touches ext/computeMarketRegime — the Master Trade Selector is unaffected.
+      // Uses only ALREADY-WARM 5m/daily caches (peek, no fetch) so the cockpit
+      // path never adds Groww load. When the 5m cache is cold the gate simply
+      // does not fire this poll (regime stays as the existing detector said).
       if (GATED_TREND_ENABLED && snap.regime !== "Trending" && !snap.dataStale) {
         try {
-          const c5 = await getCandlesCached(def.symbol, "5m");
-          const dailyC = await getDailyCached(def.symbol, 40);
-          const dATRv = dailyC && dailyC.length >= 15 ? last(atr(dailyC, 14)) : null;
-          const g = gatedTrend(c5 || [], dATRv, sessionOpenFrom(c5 || []));
-          if (g.trend && g.dir) { snap.regime = "Trending"; snap.regimeDir = g.dir; snap.regimeSource = "gated"; snap.gatedTrendNote = g.note; }
+          const c5 = peekFresh<any[]>(`c:${def.symbol}:5m`, 60_000);
+          const dailyC = peekFresh<any[]>(`d:${def.symbol}:40`, 15 * 60_000);
+          if (c5 && c5.length && dailyC && dailyC.length >= 15) {
+            const dATRv = last(atr(dailyC, 14));
+            const g = gatedTrend(c5, dATRv, sessionOpenFrom(c5));
+            if (g.trend && g.dir) { snap.regime = "Trending"; snap.regimeDir = g.dir; snap.regimeSource = "gated"; snap.gatedTrendNote = g.note; }
+          }
         } catch { /* best-effort: gate never breaks the cockpit */ }
       }
       strategies = getOrLockDaily(snap, liveEvidence);
