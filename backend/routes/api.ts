@@ -42,7 +42,7 @@ export function growwSignalsAllowed(): { allowed: boolean; reason: string } {
   if (!feed.growwOn) return { allowed: false, reason: "Groww disconnected" };
   if (!feed.marketOpen) return { allowed: false, reason: "Market closed — no live signals" };
   const age = getGrowwHealth().dataAgeSec;
-  if (age != null && age > 30) return { allowed: false, reason: "Groww data stale" };
+  if (age == null || age > 30) return { allowed: false, reason: "Groww data stale / not yet received" };
   return { allowed: true, reason: "" };
 }
 import { withTimeout } from "../util/timeout";
@@ -238,13 +238,6 @@ export function requirePermission(perm: Permission) {
 // The day-outlook and hourly scans hit overlapping symbols and run back-to-back;
 // caching candles / daily / OI avoids re-fetching the same data every time.
 const _cache = new Map<string, { ts: number; v: any }>();
-// Last successful value per key, kept beyond the TTL. When the provider throws
-// (Groww 429 rate-limit, transient network error) we serve this instead of
-// letting the error bubble up and silently DROP the symbol from a scan. Without
-// this, a single 429 on NIFTY's candle fetch was enough to make the paper engine
-// skip NIFTY entirely for that tick (the "NIFTY opportunity missed" bug).
-const _lastGood = new Map<string, { ts: number; v: any }>();
-const LAST_GOOD_MAX_MS = 30 * 60_000; // serve stale-but-usable data up to 30 min on provider errors
 // In-flight coalescing: if several callers ask for the SAME key before the first
 // fetch resolves (tick + banner + scheduler hitting one symbol at once), they all
 // share the single pending fetch instead of each firing one - a big 429 reducer.
@@ -253,7 +246,6 @@ const _inflight = new Map<string, Promise<any>>();
 // briefly (90s) when empty - so a rate-limited/empty scan retries soon instead
 // of being stuck showing "no swing" for 10 minutes.
 let _swingTop: { ts: number; v: any[] } | null = null;
-const isEmpty = (v: any) => v == null || (Array.isArray(v) && v.length === 0);
 async function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
   const hit = _cache.get(key);
   if (hit && Date.now() - hit.ts < ttlMs) return hit.v as T;
@@ -263,11 +255,10 @@ async function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>): Prom
     try {
       const v = await withTimeout(fn(), 18_000, key);
       _cache.set(key, { ts: Date.now(), v });
-      if (!isEmpty(v)) _lastGood.set(key, { ts: Date.now(), v });
       return v;
     } catch (e) {
-      const lg = _lastGood.get(key);
-      if (lg && Date.now() - lg.ts < LAST_GOOD_MAX_MS) return lg.v; // resilience: stale beats dropped
+      // Do not serve last-good candles/quotes as a successful fetch — callers
+      // must see the failure instead of treating minutes-old bars as live.
       throw e;
     } finally {
       _inflight.delete(key);
@@ -285,10 +276,8 @@ function peekFresh<T = any>(key: string, maxAgeMs: number): T | null {
   return h && Date.now() - h.ts < maxAgeMs ? (h.v as T) : null;
 }
 // Phase 3.3 (stale-data parity with the OI path): age since `key` was last
-// FETCHED LIVE and succeeded — _cache's timestamp only advances on a successful
-// fn() call (see `cached` above), so during a provider outage being served from
-// _lastGood this keeps growing, unlike a candle's own bar timestamp which only
-// reflects normal bar-close lag. null when nothing has ever been fetched for `key`.
+        // FETCHED LIVE and succeeded — _cache's timestamp only advances on a successful
+        // fn() call (see `cached` above). null when nothing has ever been fetched for `key`.
 function cacheAgeMs(key: string): number | null {
   const hit = _cache.get(key);
   return hit ? Date.now() - hit.ts : null;
@@ -312,7 +301,11 @@ const TTL_OI = 90_000; // option chain: 90s (was 60s) - eases Groww rate-limit p
 const getCandlesCached = (symbol: string, interval: Interval) =>
   cached(`c:${symbol}:${interval}`, interval === "1d" ? TTL_DAILY : TTL_INTRADAY, () => fetchCandles(symbol, interval));
 const getDailyCached = (symbol: string, days = 40) =>
-  cached(`d:${symbol}:${days}`, TTL_DAILY, () => getProvider().getCandles(symbol, "1d", days));
+  cached(`d:${symbol}:${days}`, TTL_DAILY, () => {
+    const feed = syncSessionProvider();
+    if (feed.skipLive) throw new Error("Groww feed off / not configured");
+    return getProvider().getCandles(symbol, "1d", days);
+  });
 // Clean-move rating per symbol (cached 10 min) - how cleanly it trends, used to
 // prefer clean directional movers for option trades (paper + best-trade).
 const getCleanRatingCached = (symbol: string, name: string) =>
@@ -377,9 +370,9 @@ const oiHasPremiums = (oi: any): boolean =>
      oi.topStrikes.some((s: any) => (s.ceLtp != null && s.ceLtp > 0) || (s.peLtp != null && s.peLtp > 0)));
 // Last option chain that actually had premiums (kept beyond TTL for resilience).
 const _lastGoodOi = new Map<string, { ts: number; v: OiAnalysis }>();
-const OI_LASTGOOD_MS = 5 * 60_000; // serve a recent premium-bearing chain when the fresh one is degraded
+const OI_LASTGOOD_MS = 90_000; // never serve a chain older than the stale threshold as live OI
 // Bespoke OI cache: prefer fresh chains WITH premiums; otherwise fall back to the
-// most recent premium-bearing chain (up to 5 min) instead of a degraded/empty one.
+// most recent premium-bearing chain (up to 90s) instead of a degraded/empty one.
 function oiRefreshMeta(symbol: string, extra?: Record<string, any>) {
   const feed = syncSessionProvider();
   const age = (k: string) => {
@@ -414,9 +407,10 @@ function oiQuality(p: {
   const notes: string[] = [];
   if (p.bars >= 30) score += 18; else notes.push("few candles");
   if (p.oiSource === "groww") { score += 32; notes.push("live Groww OI"); }
-  else if (p.oiSource === "file") { score += 18; notes.push("saved chain"); }
-  else if (p.oiSource === "snapshot") { score += 10; notes.push("last session PCR/walls"); }
-  else notes.push("no OI chain");
+    else if (p.oiSource === "last-good") { score += 18; notes.push("last-good chain"); }
+    else if (p.oiSource === "file") { score += 18; notes.push("saved chain"); }
+    else if (p.oiSource === "snapshot") { score += 10; notes.push("last session PCR/walls"); }
+    else notes.push("no OI chain");
   if (p.hasPremiums) score += 10;
   if (p.hasBaseline) score += 8;
   if (!p.stale) score += 8; else notes.push("stale");
@@ -435,7 +429,7 @@ const getOiCached = async (def: SymbolDef): Promise<OiAnalysis> => {
     const disk = loadLastOiJson(def.symbol);
     if (disk && disk.available) return disk;
     const lg = _lastGoodOi.get(key);
-    if (lg) return lg.v;
+    if (lg) return markOiLastGood(lg.v);
   }
   const hit = _cache.get(key);
   if (hit && Date.now() - hit.ts < TTL_OI && oiHasPremiums(hit.v)) return hit.v as OiAnalysis;
@@ -451,12 +445,12 @@ const getOiCached = async (def: SymbolDef): Promise<OiAnalysis> => {
       }
       const lg = _lastGoodOi.get(key); // degraded (no premiums) -> use recent good chain
       const lgOk = lg && (isMarketOpenIST() ? Date.now() - lg.ts < OI_LASTGOOD_MS : true);
-      if (lg && lgOk) return lg.v;
+      if (lg && lgOk) return markOiLastGood(lg.v);
       _cache.set(key, { ts: Date.now(), v: oi });
       return oi;
     } catch (e) {
       const lg = _lastGoodOi.get(key);
-      if (lg && Date.now() - lg.ts < OI_LASTGOOD_MS) return lg.v;
+      if (lg && Date.now() - lg.ts < OI_LASTGOOD_MS) return markOiLastGood(lg.v);
       throw e;
     } finally {
       _inflight.delete(key);
@@ -477,6 +471,23 @@ function daysFor(interval: Interval): number {
   return CONFIG.historyDaysByInterval[interval] ?? 30;
 }
 
+function markOiLastGood<T extends OiAnalysis>(oi: T): T {
+  try { Object.defineProperty(oi, "_servedFromLastGood", { value: true, enumerable: false, configurable: true }); } catch { /* ignore */ }
+  return oi;
+}
+function oiServedFromLastGood(oi: OiAnalysis | null | undefined): boolean {
+  return !!(oi && (oi as any)._servedFromLastGood);
+}
+
+function growwAuthFailed(e: unknown): boolean {
+  const { code } = classifyGrowwError(e);
+  return code === "INVALID_TOKEN" || code === "AUTH_FAILED";
+}
+function disconnectGrowwFeedOnAuthFailure(e: unknown): void {
+  if (!growwAuthFailed(e)) return;
+  try { setFeedFlags({ groww: false }); } catch { /* ignore */ }
+}
+
 async function fetchCandles(symbol: string, interval: Interval) {
   const feed = syncSessionProvider();
   if (feed.skipLive) throw new Error("Groww feed off / not configured — using last cache");
@@ -488,6 +499,7 @@ async function fetchCandles(symbol: string, interval: Interval) {
     return c;
   } catch (e) {
     recordGrowwFail();
+    disconnectGrowwFeedOnAuthFailure(e);
     throw e;
   }
 }
@@ -502,9 +514,12 @@ router.get("/data-status", async (_req: Request, res: Response) => {
   try {
     const q = await getProvider().getQuote(refSymbol);
     refPrice = q?.price ?? null;
-    lastTick = q?.marketTime ?? null; // epoch seconds of the last trade
-  } catch {
-    /* ignore */
+    lastTick = q?.marketTime && q.marketTime > 0 ? q.marketTime : null;
+    // LIVE health must reflect an actual exchange timestamp, not HTTP success.
+    if (lastTick) recordGrowwOk(0);
+  } catch (e) {
+    recordGrowwFail();
+    disconnectGrowwFeedOnAuthFailure(e);
   }
   // Market regime: the ONE MarketRegimeEngine (fractal + ATR, Phase 1.1) — was
   // previously an independent NIFTY-only ADX calculation here. `state` is
@@ -576,7 +591,7 @@ router.get("/data-status", async (_req: Request, res: Response) => {
     dataSource: "GROWW",
     signalsBlocked,
     signalsBlockedReason,
-    live: provider.name === "groww" && feed.marketOpen && feed.growwOn,
+    live: provider.name === "groww" && feed.marketOpen && feed.growwOn && health.dataAgeSec != null && health.dataAgeSec <= 30,
     marketOpen: isTradingTimeIST(),
     regime,
     tradeZone,
@@ -587,7 +602,7 @@ router.get("/data-status", async (_req: Request, res: Response) => {
     lastTickAgeSec: lastTick ? Math.max(0, nowSec - lastTick) : null,
     // How often each layer refreshes (seconds), so the UI can show the cadence.
     cadence: {
-      quotesSec: 20,
+      quotesSec: 3,
       oiSec: 90,
       dailySec: 600,
       alertsSec: 1800,
@@ -795,7 +810,9 @@ router.post("/feed", requireAdmin, (req: Request, res: Response) => {
 router.post("/groww/forget-token", requireAdmin, (req: Request, res: Response) => {
   forgetGrowwToken();
   deletePersistedGrowwToken();
+  try { setActiveProvider("groww", ""); } catch { /* singleton cleared to empty token */ }
   setFeedFlags({ groww: false });
+  clearQuoteLastGood();
   const admin = getSession(bearerToken(req));
   logAuditEvent({ type: "GROWW_DISCONNECTED", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "groww", result: "success" });
   return res.json({ ok: true, tokenMasked: getGrowwTokenMasked(), configured: hasGrowwToken(), message: "Saved token removed. Paste a fresh Groww access token to reconnect." });
@@ -880,35 +897,64 @@ router.get("/symbols", (_req: Request, res: Response) => {
 // Quote for one symbol.
 router.get("/quote/:symbol", async (req: Request, res: Response) => {
   try {
+    const feed = syncSessionProvider();
+    if (feed.skipLive) return res.status(503).json({ error: "Groww feed off / not configured" });
+    const t0 = Date.now();
     const quote = await getProvider().getQuote(req.params.symbol);
+    if (quote?.marketTime && quote.marketTime > 0) recordGrowwOk(Date.now() - t0);
     res.json(quote);
   } catch (e: any) {
+    recordGrowwFail();
+    disconnectGrowwFeedOnAuthFailure(e);
     res.status(502).json({ error: e?.message || "Failed to fetch quote" });
   }
 });
 
-// Batch LIVE quotes for many symbols (for the 1-second app-wide price refresh).
-// Per-symbol cached ~1.2s so per-second polling doesn't hammer the Groww feed.
-const lastGoodQuote: Record<string, any> = {}; // last non-null quote per symbol (resilience)
+// Batch LIVE quotes for many symbols (for the 3-second app-wide price refresh).
+// Per-symbol cached ~3s so polling doesn't hammer the Groww feed.
+const lastGoodQuote: Record<string, { v: any; ts: number }> = {};
+const LAST_GOOD_QUOTE_MAX_MS = 15_000;
+function clearQuoteLastGood() {
+  for (const k of Object.keys(lastGoodQuote)) delete lastGoodQuote[k];
+}
+function quoteLastGoodFresh(sym: string): any | null {
+  const lg = lastGoodQuote[sym];
+  if (!lg || Date.now() - lg.ts > LAST_GOOD_QUOTE_MAX_MS) return null;
+  return lg.v;
+}
 router.get("/quotes", async (req: Request, res: Response) => {
   const symbols = String(req.query.symbols || "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 60);
   const quotes: Record<string, any> = {};
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  // Limit concurrency to 5 Groww calls at a time (cached 3s per symbol) so the
-  // live ticker never bursts the feed and rate-limits the other tabs. On a
-  // transient failure, serve the LAST GOOD price so the UI never blanks/flickers.
+  const feed = syncSessionProvider();
+  if (feed.skipLive) {
+    for (const sym of symbols) {
+      const lg = quoteLastGoodFresh(sym);
+      quotes[sym] = lg ? { ...lg, stale: true } : null;
+    }
+    return res.json({ ts: Math.floor(Date.now() / 1000), marketOpen: isTradingTimeIST(), quotes });
+  }
   for (let i = 0; i < symbols.length; i += 5) {
     const chunk = symbols.slice(i, i + 5);
     await Promise.all(chunk.map(async (sym) => {
       try {
         const v = await cached(`liveq:${sym}`, 3000, async () => {
           const q = await getProvider().getQuote(sym);
-          return { price: q?.price ?? null, changePercent: q?.changePercent ?? null, marketTime: q?.marketTime ?? null };
+          return { price: q?.price ?? null, changePercent: q?.changePercent ?? null, marketTime: q?.marketTime && q.marketTime > 0 ? q.marketTime : null };
         });
-        if (v && v.price != null) { lastGoodQuote[sym] = v; quotes[sym] = v; }
-        else quotes[sym] = lastGoodQuote[sym] ? { ...lastGoodQuote[sym], stale: true } : v;
-      } catch {
-        quotes[sym] = lastGoodQuote[sym] ? { ...lastGoodQuote[sym], stale: true } : null;
+        if (v && v.price != null) {
+          lastGoodQuote[sym] = { v, ts: Date.now() };
+          quotes[sym] = v;
+          if (v.marketTime) recordGrowwOk(0);
+        } else {
+          const lg = quoteLastGoodFresh(sym);
+          quotes[sym] = lg ? { ...lg, stale: true } : v;
+        }
+      } catch (e) {
+        recordGrowwFail();
+        disconnectGrowwFeedOnAuthFailure(e);
+        const lg = quoteLastGoodFresh(sym);
+        quotes[sym] = lg ? { ...lg, stale: true } : null;
       }
     }));
     if (i + 5 < symbols.length) await sleep(40);
@@ -1382,6 +1428,8 @@ router.get("/oi/:symbol", async (req: Request, res: Response) => {
     const def = findSymbolDef(req.params.symbol);
     if (!def) return res.status(404).json({ error: "Unknown symbol." });
     const provider = getProvider();
+    const feed = syncSessionProvider();
+    if (feed.skipLive) return res.status(503).json({ error: "Groww feed off / not configured" });
     // Prefer Groww's real option-chain OI when connected; else NSE public API.
     if (provider.name === "groww") {
       res.json(await growwOiAnalysis(provider as GrowwProvider, def));
@@ -3326,9 +3374,12 @@ async function buildOiCommand(def: SymbolDef): Promise<any> {
       const nowSec = Math.floor(Date.now() / 1000);
       const oiAsOf = oi.asOf || nowSec;
       const dataAgeSec = Math.max(0, nowSec - oiAsOf);
+      const c5Age = cacheAgeMs(`c:${def.symbol}:5m`);
+      const c15Age = cacheAgeMs(`c:${def.symbol}:15m`);
+      const candleStale = (c5Age != null && c5Age > 90_000) || (c15Age != null && c15Age > 90_000);
       const payload: any = {
         available: true, dataSource: "GROWW", symbol: def.symbol, name: def.name, expiry: oi.expiry, asOf: nowSec, oiAsOf, dataAgeSec,
-        stale: dataAgeSec > 90,
+        stale: dataAgeSec > 90 || candleStale || oiServedFromLastGood(oi),
         spot: Math.round(spot * 100) / 100,
         oiDirection: bullish ? "UP" : bearish ? "DOWN" : "FLAT",
         oiVerdict: oc.oiVerdict, oiMoveScore: oc.oiConfidence, oiReasons: oc.oiReasons,
@@ -3559,7 +3610,7 @@ async function buildOiCommand(def: SymbolDef): Promise<any> {
         payload.bulletin
       );
       const feed = syncSessionProvider();
-      payload.oiSource = feed.marketOpen ? "groww" : "file";
+      payload.oiSource = !feed.marketOpen ? "file" : oiServedFromLastGood(oi) ? "last-good" : "groww";
       payload.refresh = oiRefreshMeta(def.symbol, { oiSource: payload.oiSource });
       payload.lastBarDate = oiBarIstDate(c15arr.length ? c15arr[c15arr.length - 1] : null);
       payload.quality = oiQuality({
@@ -6122,6 +6173,7 @@ function paperDeps(force = false): TickDeps {
     nowEpoch: Math.floor(Date.now() / 1000),
     getSpot: async (symbol: string) => {
       try {
+        if (syncSessionProvider().skipLive) return null;
         // Cache quotes ~1s so per-second polling doesn't hammer the feed.
         return await cached(`q:${symbol}`, 1000, async () => {
           const q = await getProvider().getQuote(symbol);
@@ -6692,6 +6744,20 @@ export function startHourlyScheduler() {
   hourlySchedulerStarted = true;
   try { syncSessionProvider(); } catch { /* ignore */ }
   setInterval(() => { try { syncSessionProvider(); } catch { /* ignore */ } }, 30_000);
+  // Boot: a saved token was loaded without a Groww probe. Validate now; if it
+  // is expired/rejected, turn the live feed off (file kept so the admin can
+  // paste a replacement). Does not block listen().
+  void (async () => {
+    if (!hasGrowwToken()) return;
+    try {
+      const v = await validateGrowwToken();
+      if (v.ok) { recordGrowwOk(v.latencyMs); recordConnectionSuccess("groww"); }
+      else { setFeedFlags({ groww: false }); recordGrowwFail(); }
+    } catch {
+      try { setFeedFlags({ groww: false }); } catch { /* ignore */ }
+      recordGrowwFail();
+    }
+  })();
   // Daily login-credential rotation (08:00 IST) - checked every minute so the
   // 08:00 boundary is caught promptly without polling too often; the rotation
   // itself is a no-op unless today hasn't rotated yet (see credentials.ts).

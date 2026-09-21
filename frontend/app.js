@@ -437,6 +437,8 @@ function startSessionKeeper() {
     else if (name === "toppicks") loadTopPicks(true);
     else if (name === "paper") loadPaper();
     else if (name === "earlymoves") loadEarlyMoves();
+    else if (name === "liquiditystatus") loadLiquidityStatusScreen();
+    else if (name === "stock" && state.active) loadSymbol(state.active);
   }, 30 * 1000);
 }
 
@@ -728,9 +730,10 @@ function startLiveTicker() {
     try {
       const d = await fetch("/api/quotes?symbols=" + encodeURIComponent(syms.join(","))).then((r) => r.json());
       const q = d.quotes || {};
-      // Live watchlist prices - update the number only (no color flip = no flicker).
+      // Live watchlist prices - skip stale last-good prints so they are not shown as live.
       (state.symbols || []).forEach((s) => {
-        const px = q[s.symbol] && q[s.symbol].price;
+        const row = q[s.symbol];
+        const px = row && !row.stale && row.price;
         if (px == null) return;
         const cell = el("wlp-" + cssId(s.symbol));
         if (cell && cell.textContent !== fmt(px)) cell.textContent = fmt(px);
@@ -738,7 +741,7 @@ function startLiveTicker() {
       });
       // Live spot + real-time "against/reversed" warning on the opportunity chips.
       (state.oppData || []).forEach((p) => {
-        const px = q[p.symbol] && q[p.symbol].price;
+        const px = q[p.symbol] && !q[p.symbol].stale && q[p.symbol].price;
         const live = el("opplive-" + cssId(p.symbol));
         if (px != null && live) {
           const toT = p.spotTarget ? ((p.direction === "Bullish" ? p.spotTarget - px : px - p.spotTarget) / px) * 100 : null;
@@ -1831,14 +1834,20 @@ async function refreshIndexStrip() {
     const quotes = await Promise.all(
       INDEX_STRIP_SYMBOLS.map((s) => fetch(`/api/quote/${encodeURIComponent(s.symbol)}`).then((r) => r.json()).catch(() => null))
     );
+    const nowSec = Math.floor(Date.now() / 1000);
     const items = INDEX_STRIP_SYMBOLS.map((s, i) => {
       const q = quotes[i];
-      if (!q || q.price == null) return `<span class="is-item"><b>${s.label}</b> <span class="wl-sub">—</span></span>`;
+      if (!q || q.price == null || q.error) return `<span class="is-item"><b>${s.label}</b> <span class="wl-sub">—</span></span>`;
       const chg = q.changePercent;
       const cls = chg > 0 ? "up" : chg < 0 ? "down" : "";
       return `<span class="is-item"><b>${s.label}</b> ${fmt(q.price)} <span class="is-chg ${cls}">${chg >= 0 ? "+" : ""}${fmt(chg)}%</span></span>`;
     }).join("");
-    box.innerHTML = items + `<span class="is-item wl-sub">${isMarketOpen() ? '<span class="live-dot"></span> live' : "market closed"}</span>`;
+    const tickAges = INDEX_STRIP_SYMBOLS.map((_, i) => {
+      const t = quotes[i] && quotes[i].marketTime;
+      return t && t > 0 ? nowSec - t : null;
+    });
+    const stripLive = isMarketOpen() && tickAges.some((a) => a != null && a <= 90);
+    box.innerHTML = items + `<span class="is-item wl-sub">${stripLive ? '<span class="live-dot"></span> live' : isMarketOpen() ? "delayed" : "market closed"}</span>`;
   } catch (_) { /* ignore transient */ }
 }
 function startIndexStrip() {
@@ -1859,7 +1868,7 @@ function switchTab(name) {
   document.querySelectorAll(".tab-panel").forEach((p) =>
     p.classList.toggle("active", p.id === "panel-" + name)
   );
-  if (name === "stock") resizeCharts();
+  if (name === "stock") { resizeCharts(); startStockLive(); }
   if (name === "swing" && !state.swingLoaded) { state.swingLoaded = true; loadSwing(); }
 
   if (name === "frequent" && !state.frequentLoaded) { state.frequentLoaded = true; loadFrequent(); }
@@ -1871,7 +1880,7 @@ function switchTab(name) {
   if (name === "todaymovers" && !state.todayMoversLoaded) { state.todayMoversLoaded = true; loadTodayMovers(); }
 
   if (name === "toppicks" && !state.topPicksLoaded) { state.topPicksLoaded = true; loadTopPicks(); }
-  if (name === "liquiditystatus" && !state.liquidityStatusLoaded) { state.liquidityStatusLoaded = true; loadLiquidityStatusScreen(); }
+  if (name === "liquiditystatus") { if (!state.liquidityStatusLoaded) { state.liquidityStatusLoaded = true; loadLiquidityStatusScreen(); } startLiquidityStatusLive(); }
   if (name === "decisionflow") { initDecisionFlow(); startDecisionFlowLive(); }
   if (name === "bullrank" && !state.bullRankLoaded) { state.bullRankLoaded = true; loadBullRank(); }
   if (name === "stockoptions" && !state.stockOptionsInit) { state.stockOptionsInit = true; initStockOptions(); }
@@ -5911,6 +5920,20 @@ function startOiCommandLive() {
     if (pn && pn.classList.contains("active") && isMarketOpen()) loadOiCommand();
   }, 15 * 1000); // auto-refresh every 15s (matches the mockup)
 }
+function startLiquidityStatusLive() {
+  if (state.lsTimer) return;
+  state.lsTimer = setInterval(() => {
+    const pn = document.getElementById("panel-liquiditystatus");
+    if (pn && pn.classList.contains("active") && isMarketOpen()) loadLiquidityStatusScreen();
+  }, 15 * 1000);
+}
+function startStockLive() {
+  if (state.stockTimer) return;
+  state.stockTimer = setInterval(() => {
+    const pn = document.getElementById("panel-stock");
+    if (pn && pn.classList.contains("active") && isMarketOpen() && state.active) loadSymbol(state.active);
+  }, 15 * 1000);
+}
 function oicPaperGate(d) {
   const rec = d.recommendation || {};
   const dir = rec.directional || {};
@@ -7619,7 +7642,9 @@ function renderTopPicks(data) {
   if (st) {
     const when = new Date((data.generatedAt || Date.now() / 1000) * 1000).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const label = uni === "index" ? `${data.scannedIndex || 0} indices · leftover first` : `${data.scanned || 0} stocks · leftover first`;
-    st.innerHTML = `${data.marketOpen ? '<span class="live-dot"></span> LIVE' : "closed"} · ${label} · ${(data.timeframes || []).join("/")} <span class="upd-badge">⟳ ${when}</span>`;
+    const ageSec = data.generatedAt ? Math.max(0, Math.floor(Date.now() / 1000) - data.generatedAt) : null;
+    const showLive = data.marketOpen && ageSec != null && ageSec <= 90;
+    st.innerHTML = `${showLive ? '<span class="live-dot"></span> LIVE' : data.marketOpen ? "delayed" : "closed"} · ${label} · ${(data.timeframes || []).join("/")} <span class="upd-badge">⟳ ${when}</span>`;
   }
   const dirPill = (d) => d === "Bullish" ? '<span class="risk-pill up">▲ Bull</span>' : d === "Bearish" ? '<span class="risk-pill down">▼ Bear</span>' : '<span class="risk-pill">◆ Neutral</span>';
   const timingPill = (t) => t === "READY TO MOVE" ? '<span class="risk-pill up">🟢 READY TO MOVE</span>' : t === "UNDERWAY" ? '<span class="risk-pill">🟡 UNDERWAY</span>' : t === "EXTENDED" ? '<span class="risk-pill down">🔴 EXTENDED</span>' : '<span class="wl-sub">-</span>';

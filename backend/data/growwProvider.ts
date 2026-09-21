@@ -316,10 +316,11 @@ export class GrowwProvider implements MarketDataProvider {
     const prevClose = ohlc.close != null ? num(ohlc.close) : price - change;
 
     // last_trade_time may be epoch seconds or milliseconds - normalise to seconds.
-    let marketTime = Math.floor(Date.now() / 1000);
+    // Do NOT default to Date.now(): a missing trade time would look like a 0s-old tick.
+    let marketTime = 0;
     if (q.last_trade_time) {
       const t = Number(q.last_trade_time);
-      marketTime = t > 1e12 ? Math.floor(t / 1000) : Math.floor(t);
+      if (Number.isFinite(t) && t > 0) marketTime = t > 1e12 ? Math.floor(t / 1000) : Math.floor(t);
     }
 
     return {

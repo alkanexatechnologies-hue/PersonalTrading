@@ -157,7 +157,7 @@ export function syncSessionProvider(): FeedSync {
   const skipLive = !growwOn;
 
   try {
-    if (growwOn && getProvider().name !== "groww") setActiveProvider("groww", growwToken);
+    if (growwOn) setActiveProvider("groww", growwToken);
   } catch { /* keep last */ }
 
   let reason: string;

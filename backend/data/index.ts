@@ -18,7 +18,9 @@ export function getProvider(): MarketDataProvider {
 // Kept for API compatibility with the connect flow. Only Groww is accepted as a
 // market-data provider; any other name is ignored (Groww stays active).
 export function setActiveProvider(_name: "groww", token?: string): MarketDataProvider {
-  provider = new GrowwProvider(token || process.env.GROWW_ACCESS_TOKEN);
+  // `token !== undefined` (including "") must win: forget-token passes an empty
+  // string so the singleton cannot keep a previous Bearer or fall back to env.
+  provider = new GrowwProvider(token !== undefined ? token : process.env.GROWW_ACCESS_TOKEN);
   return provider;
 }
 

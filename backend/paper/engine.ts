@@ -852,7 +852,6 @@ export interface ExtDecision {
 export function runExtPipeline(inp: ExtInputs, idea: OptionIdea, dedupStore: DedupRecord[], nowEpoch: number): ExtDecision {
   // Phase 3.3: stale-data veto, parity with the OI path's >90s chain-age check
   // (oi/oiTrade.ts). Checked first, before scoring — a stale candles15m feed
-  // (served from the 30-min stale-but-usable fallback during a provider outage)
   // means every downstream read (regime, wall reaction, premium trend) is
   // computed off data the live market has already moved past.
   if (inp.dataStale) {
