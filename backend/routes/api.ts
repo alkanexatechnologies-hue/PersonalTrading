@@ -180,6 +180,7 @@ import { scanWatchlist } from "../watchlist/scanner";
 import { getLiquidityStatusAuditLog } from "../liquidityStatus/auditLog";
 import { LiquidityStatusDeps } from "../liquidityStatus/types";
 import { dayHighLow } from "../indicators/dayRange";
+import { detectMarketStructure, nearestValidOB, priceRelativeToOB, OrderBlock } from "../liquidity/orderBlock";
 import { Interval, NextDayPick, Opportunity, TradeAlert, OiAnalysis } from "../types";
 
 const router = Router();
@@ -295,6 +296,10 @@ function relVolNow(candles: any[]): number | null {
 const TTL_INTRADAY = 30_000;
 const TTL_DAILY = 10 * 60_000;
 const TTL_OI = 90_000; // option chain: 90s (was 60s) - eases Groww rate-limit pressure
+// Market Command is a live trading screen: candles refresh fast (5s) via a
+// dedicated cache key so the global 30s candle cache used by heavier/background
+// consumers is untouched. OI/liquidity keep their own 15s caches (rate-limit heavy).
+const TTL_MC_CANDLES = 5_000;
 const getCandlesCached = (symbol: string, interval: Interval) =>
   cached(`c:${symbol}:${interval}`, interval === "1d" ? TTL_DAILY : TTL_INTRADAY, () => fetchCandles(symbol, interval));
 const getDailyCached = (symbol: string, days = 40) =>
@@ -4065,6 +4070,281 @@ router.get("/oi-command", requirePermission("oiAnalysis"), async (req: Request, 
     res.json(ext ? { ...data, ext, strategies } : { ...data, strategies });
   } catch (e: any) {
     res.status(502).json({ error: e?.message || "oi-command failed" });
+  }
+});
+
+// ===================== MARKET COMMAND =====================
+// Single endpoint powering the Market Command live trading screen.
+// Aggregates: candles + indicator overlays, Order Block detection,
+// the existing OI Command pipeline, Liquidity Status, and the
+// Master Trade Selector arbiter — all from a single poll.
+router.get("/market-command", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  const symbol = String(req.query.symbol || "^NSEI");
+  const interval = parseInterval(req.query.interval) as Interval;
+  const def = findSymbolDef(symbol);
+  if (!def || !def.fno) return res.status(400).json({ error: "Valid F&O symbol required" });
+
+  // Replay / backtest mode: ?date=yyyy-mm-dd loads that past session's REAL Dhan
+  // candles and detects the Order Blocks the system would have flagged that day.
+  // Historical option-chain data does not exist, so OI / Master Selector / live
+  // signals are NOT evaluated (never fabricated) — this is a technical replay,
+  // and the response is clearly marked historical (never shown as LIVE).
+  const dateParam = String(req.query.date || "");
+  const isHistorical = /^\d{4}-\d{2}-\d{2}$/.test(dateParam);
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  try {
+    // 1. Candles — live feed, or a specific past session in replay mode.
+    let candles: any[];
+    if (isHistorical) {
+      const sec = await lookupDhanSecurity(def.nseSymbol || def.symbol);
+      if (!sec) return res.json({ error: `No Dhan instrument mapping for ${def.symbol}.`, available: false });
+      // 5m / 15m / 60m are native; 30m is resampled from 15m below.
+      const dhanIv: DhanBacktestInterval = interval === "5m" ? "5" : interval === "60m" ? "60" : "15";
+      const start = new Date(new Date(dateParam + "T00:00:00Z").getTime() - 12 * 86400000).toISOString().slice(0, 10);
+      const nextDay = new Date(new Date(dateParam + "T00:00:00Z").getTime() + 86400000).toISOString().slice(0, 10);
+      const endSec = Math.floor(new Date(nextDay + "T00:00:00Z").getTime() / 1000);
+      let raw = await cached(`mc-hist:${def.symbol}:${dhanIv}:${dateParam}`, 10 * 60_000, () => fetchDhanCandles(sec, dhanIv, start, nextDay));
+      raw = (raw || []).filter((c: any) => c.time < endSec);
+      if (interval === "30m") {
+        // 15m → 30m: merge pairs.
+        const merged: any[] = [];
+        for (let i = 0; i < raw.length; i += 2) {
+          const a = raw[i], b = raw[i + 1] || raw[i];
+          merged.push({ time: a.time, open: a.open, high: Math.max(a.high, b.high), low: Math.min(a.low, b.low), close: b.close, volume: (a.volume || 0) + (b.volume || 0) });
+        }
+        raw = merged;
+      }
+      const istDay = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(0, 10);
+      if (!raw.some((c: any) => istDay(c.time) === dateParam)) {
+        return res.json({ error: `No trading data for ${def.name} on ${dateParam} (holiday, weekend, or not yet traded).`, available: false });
+      }
+      candles = raw;
+    } else {
+      candles = await cached(`mc-c:${symbol}:${interval}`, interval === "1d" ? TTL_DAILY : TTL_MC_CANDLES, () => fetchCandles(symbol, interval));
+    }
+    if (!candles || candles.length < 5) return res.json({ error: "Not enough candle data", available: false });
+
+    const closes = candles.map((c: any) => c.close);
+    const ema21Arr = ema(closes, 21);
+    const ema50Arr = ema(closes, 50);
+    const vwapArr = vwap(candles);
+    const ema9Arr = ema(closes, 9);
+    const atr14Arr = atr(candles, 14);
+    const currentAtr = last(atr14Arr) || candles[candles.length - 1].close * 0.0015;
+    const spot = candles[candles.length - 1].close;
+    const lastTime = candles[candles.length - 1].time;
+
+    // 2. Order Block detection (new module) — VWAP-aware, two-stage (Pre/Confirmed)
+    const ms = detectMarketStructure(candles, interval === "1m" ? 2 : 3, vwapArr);
+    const freshOBs = ms.orderBlocks.filter((ob: OrderBlock) => ob.status === "Fresh");
+    const oiDir = null as string | null; // filled below from OI command
+    const direction = ms.currentStructure === "Bullish" ? "Bullish" : ms.currentStructure === "Bearish" ? "Bearish" : null;
+    const nearOB = nearestValidOB(ms.orderBlocks, spot, direction);
+    const obRelation = nearOB ? priceRelativeToOB(spot, nearOB, currentAtr) : "Away";
+
+    // 3-4. OI Command + Liquidity Status — LIVE ONLY, and skipped in the fast
+    // chart-only view (?view=chart) so the chart paints without waiting on the
+    // heavy option-chain pipeline. Historical replay also skips these (no past
+    // option chain exists — never fabricated). OI and liquidity are independent,
+    // so they run in parallel; ext depends on OI and follows it.
+    const viewChart = req.query.view === "chart";
+    const skipOi = isHistorical || viewChart;
+    let oiData: any = null;
+    let ext: any = null;
+    let ls: any = null;
+    if (!skipOi) {
+      const [oiRes, lsRes] = await Promise.allSettled([
+        cached(`oi-command:${def.symbol}`, 15_000, () => buildOiCommand(def)),
+        cached(`ls:${def.symbol}`, 15_000, () => evaluateLiquidityStatus(symbol, liquidityStatusDeps)),
+      ]);
+      oiData = oiRes.status === "fulfilled" ? oiRes.value : null;
+      ls = lsRes.status === "fulfilled" ? lsRes.value : null;
+      if (oiData) {
+        try { ext = await cached(`oi-command-ext:${def.symbol}`, 15_000, () => extForOiPayload(oiData)); } catch { ext = null; }
+      }
+    }
+
+    // 5. Build the Market Command response
+    const arbVerdict = ext?.arbitration?.verdict || "WAIT";
+    const arbReason = ext?.arbitration?.reason || "";
+    const recDir = oiData?.recommendation?.directional || {};
+    const recScalp = oiData?.recommendation?.scalp || {};
+    const rec = recDir.take ? recDir : recScalp.take ? recScalp : null;
+
+    // Decision logic: evaluate existing engines
+    const dataStale = !!(oiData?.stale) && isMarketOpenIST();
+    const oiDirection = oiData?.oiDirection || "FLAT";
+    const obValid = nearOB && nearOB.status === "Fresh";
+    const obInRange = obRelation === "Inside" || obRelation === "Approaching";
+
+    // Confirmation checks from existing engines
+    const confirmations: { label: string; passed: boolean }[] = [];
+    confirmations.push({ label: "OI Direction", passed: oiDirection !== "FLAT" });
+    confirmations.push({ label: "Order Block", passed: !!(obValid && obInRange) });
+    confirmations.push({ label: "Market Structure", passed: ms.currentStructure !== "Ranging" });
+    confirmations.push({ label: "Master Selector", passed: arbVerdict === "GO" });
+    confirmations.push({ label: "Data Fresh", passed: !dataStale });
+
+    const emaConf = ls?.structure;
+    if (emaConf) {
+      confirmations.push({ label: "VWAP Aligned", passed: emaConf.vwapStatus === "Above+Rising" || emaConf.vwapStatus === "Below+Falling" });
+      confirmations.push({ label: "EMA Structure", passed: emaConf.emaStructure === "Strong Bullish" || emaConf.emaStructure === "Strong Bearish" });
+    } else {
+      // Candle-derived VWAP confirmation (also works in replay where liquidity
+      // status is unavailable): price is decisively on one side of VWAP.
+      confirmations.push({ label: "VWAP Aligned", passed: ms.vwapStatus !== "At" });
+    }
+
+    const allConfirmed = confirmations.every((c) => c.passed);
+    const hasDirection = oiDirection !== "FLAT";
+
+    // Structure-derived technical direction (used for replay, where there is no OI).
+    const techDirection = ms.currentStructure === "Bullish" ? "BULLISH" : ms.currentStructure === "Bearish" ? "BEARISH" : "NEUTRAL";
+
+    // Final TAKE/WAIT decision
+    let finalAction: "TAKE" | "WAIT" | "NO TRADE" | "DATA STALE" | "REPLAY" = "WAIT";
+    let finalReason = "";
+    if (isHistorical) {
+      finalAction = "REPLAY";
+      const obCount = ms.orderBlocks.filter((ob: OrderBlock) => ob.status !== "Invalid").length;
+      finalReason = `Historical replay of ${dateParam} — technical only (no live OI). ${obCount} Order Block${obCount === 1 ? "" : "s"} detected; structure ${ms.currentStructure}.`;
+    } else if (dataStale) {
+      finalAction = "DATA STALE";
+      finalReason = "Live data is stale — wait for fresh feed.";
+    } else if (!hasDirection) {
+      finalAction = "WAIT";
+      finalReason = "No directional edge from OI.";
+    } else if (nearOB?.status === "Invalid") {
+      finalAction = "NO TRADE";
+      finalReason = "Order Block invalidated — structure broken.";
+    } else if (arbVerdict === "CONFLICT") {
+      finalAction = "WAIT";
+      finalReason = "Engine conflict — models disagree.";
+    } else if (allConfirmed && rec?.take) {
+      finalAction = "TAKE";
+      finalReason = arbReason || "All confirmations passed.";
+    } else {
+      const missing = confirmations.filter((c) => !c.passed).map((c) => c.label);
+      finalAction = "WAIT";
+      finalReason = missing.length ? `Missing: ${missing.join(", ")}` : "Setup not ready.";
+    }
+
+    // Entry/SL/Target from existing OI recommendation
+    const entry = rec?.ltp ?? null;
+    const stopLoss = rec?.stop ?? oiData?.management?.stopLoss ?? null;
+    const target1 = rec?.target ?? oiData?.management?.targetLo ?? null;
+    const target2 = oiData?.management?.targetHi ?? null;
+    const optionType = rec?.optionType || oiData?.setup?.optionType || "—";
+    const strike = rec?.strike || oiData?.setup?.strike || null;
+    // Spot-level SL/targets for chart price lines
+    const spotSL = rec?.spotStop ?? oiData?.management?.invalidation ?? null;
+    const spotT1 = rec?.spotTarget ?? null;
+    const spotT2 = oiData?.management?.resistance ?? null;
+    const spotEntry = rec?.spotTarget ? { low: Math.min(spot, rec.spotTarget), high: Math.max(spot, rec.spotTarget) } : oiData?.levels ? { low: oiData.levels.orbLow || spot - currentAtr, high: oiData.levels.orbHigh || spot } : null;
+
+    // Assemble indicator overlay data aligned to candle times
+    const align = (arr: any[]) => candles.map((_: any, i: number) => arr[i] ?? null);
+
+    res.json({
+      available: true,
+      symbol, name: def.name, interval, spot: Math.round(spot * 100) / 100,
+      asOf: nowSec, lastCandleTime: lastTime,
+      historical: isHistorical,
+      asOfDate: isHistorical ? dateParam : null,
+      partial: viewChart, // chart-only fast payload: OI/command still loading
+      dataStale,
+      dhanLive: isHistorical ? false : !!(syncSessionProvider().dhanOn),
+      dataAgeSec: oiData?.dataAgeSec ?? null,
+
+      // Candles for the chart
+      candles: candles.map((c: any) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume || 0 })),
+
+      // Indicator overlays (arrays aligned to candles)
+      overlays: {
+        ema9: align(ema9Arr),
+        ema21: align(ema21Arr),
+        ema50: align(ema50Arr),
+        vwap: align(vwapArr),
+      },
+
+      // Market Structure + Order Blocks
+      structure: {
+        current: ms.currentStructure,
+        pre: ms.preStructure,
+        vwapStatus: ms.vwapStatus,
+        directionChange: ms.directionChange,
+        bosEvents: ms.bosEvents.slice(-6).map((b: any) => ({ direction: b.direction, level: Math.round(b.level * 100) / 100, stage: b.stage, time: candles[b.breakIndex]?.time || b.breakTime })),
+        swingPoints: ms.swingPoints.slice(-10).map((p: any) => ({ type: p.type, price: Math.round(p.price * 100) / 100, time: candles[p.index]?.time || p.time })),
+      },
+      orderBlocks: ms.orderBlocks.filter((ob: OrderBlock) => ob.status !== "Invalid").slice(-8).map((ob: OrderBlock) => ({
+        side: ob.side, high: Math.round(ob.high * 100) / 100, low: Math.round(ob.low * 100) / 100,
+        time: ob.time, status: ob.status, stage: ob.stage, vwapAligned: ob.vwapAligned, bosTime: ob.bosTime,
+      })),
+      activeOB: nearOB ? {
+        side: nearOB.side, high: Math.round(nearOB.high * 100) / 100, low: Math.round(nearOB.low * 100) / 100,
+        status: nearOB.status, stage: nearOB.stage, vwapAligned: nearOB.vwapAligned, priceRelation: obRelation,
+      } : null,
+
+      // Sweep detection from liquidity status
+      sweep: ls?.detection ? {
+        eventType: ls.detection.eventType,
+        direction: ls.detection.direction,
+        sweep: ls.detection.sweep,
+      } : null,
+
+      // OI data summary
+      oi: {
+        direction: oiDirection,
+        verdict: oiData?.oiVerdict || "Neutral",
+        confidence: oiData?.oiMoveScore || 0,
+        pcr: oiData?.pcr ?? null,
+        maxPain: oiData?.maxPain ?? null,
+        support: oiData?.management?.support ?? null,
+        resistance: oiData?.management?.resistance ?? null,
+        expiry: oiData?.expiry || null,
+      },
+
+      // Levels
+      levels: oiData?.levels || {},
+
+      // Command panel data
+      command: {
+        finalAction,
+        finalReason,
+        direction: isHistorical ? techDirection : (oiDirection === "UP" ? "BULLISH" : oiDirection === "DOWN" ? "BEARISH" : "NEUTRAL"),
+        // Two-stage structure read (VWAP + candle movement)
+        structureConfirmed: ms.currentStructure,
+        structurePre: ms.preStructure,
+        vwapStatus: ms.vwapStatus,
+        directionChange: ms.directionChange,
+        obStage: nearOB ? nearOB.stage : null,
+        obStatus: nearOB ? `${nearOB.side} · ${nearOB.stage} · ${nearOB.status}` : "None detected",
+        confirmations,
+        entryZone: spotEntry ? `${Math.round((spotEntry.low) * 100) / 100} – ${Math.round((spotEntry.high) * 100) / 100}` : "—",
+        entry: entry != null ? Math.round(entry * 100) / 100 : null,
+        stopLoss: stopLoss != null ? Math.round(stopLoss * 100) / 100 : null,
+        target1: target1 != null ? Math.round(target1 * 100) / 100 : null,
+        target2: target2 != null ? Math.round(target2 * 100) / 100 : null,
+        optionType,
+        strike,
+        optionLtp: entry,
+        arbVerdict,
+        regime: ext?.regime || "—",
+        spotSL: spotSL != null ? Math.round(spotSL * 100) / 100 : null,
+        spotT1: spotT1 != null ? Math.round(spotT1 * 100) / 100 : null,
+        spotT2: spotT2 != null ? Math.round(spotT2 * 100) / 100 : null,
+      },
+
+      // Master Trade Selector summary
+      masterSelector: ext?.arbitration ? {
+        verdict: ext.arbitration.verdict,
+        reason: ext.arbitration.reason,
+        primary: ext.arbitration.primary ? { mode: ext.arbitration.primary.mode, direction: ext.arbitration.primary.direction, score: ext.arbitration.primary.finalScore } : null,
+      } : null,
+    });
+  } catch (e: any) {
+    res.status(502).json({ error: e?.message || "market-command failed", available: false });
   }
 });
 

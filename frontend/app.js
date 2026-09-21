@@ -1835,7 +1835,7 @@ function switchTab(name) {
 
   if (name === "toppicks" && !state.topPicksLoaded) { state.topPicksLoaded = true; loadTopPicks(); }
   if (name === "liquiditystatus") { if (!state.liquidityStatusLoaded) { state.liquidityStatusLoaded = true; loadLiquidityStatusScreen(); } startLiquidityStatusLive(); }
-  if (name === "decisionflow") { initDecisionFlow(); startDecisionFlowLive(); }
+  if (name === "marketcommand") { initMarketCommand(); startMarketCommandLive(); }
   if (name === "bullrank" && !state.bullRankLoaded) { state.bullRankLoaded = true; loadBullRank(); }
   if (name === "stockoptions" && !state.stockOptionsInit) { state.stockOptionsInit = true; initStockOptions(); }
 
@@ -1866,8 +1866,8 @@ function switchTab(name) {
 // Per-desk mobile bottom-nav layouts (4 quick tabs + Watchlist + More is too many;
 // we use 3 mode tabs + Watchlist + More so the watchlist stays reachable on phones).
 const MODE_NAV = {
-  decisionflow: [
-    { nav: "decisionflow", ico: "🧭", lbl: "Flow" },
+  marketcommand: [
+    { nav: "marketcommand", ico: "⚡", lbl: "Command" },
     { nav: "watchlist", ico: "📋", lbl: "List" },
     { nav: "more", ico: "☰", lbl: "More" },
   ],
@@ -1946,10 +1946,10 @@ function setupMobileNav() {
 
 // ---------- desk mode (Option Trading vs Stock Swing Trading) ----------
 const MODE_KEY = "nsa_mode";
-const VALID_MODES = ["decisionflow", "option", "stockOption", "swing", "dhanbacktest", "aipaper"];
-const MODE_FIRST = { decisionflow: "decisionflow", option: "oicommand", stockOption: "toppicks", swing: "news", dhanbacktest: "dhanbacktest", aipaper: "aipdash" };
+const VALID_MODES = ["marketcommand", "option", "stockOption", "swing", "dhanbacktest", "aipaper"];
+const MODE_FIRST = { marketcommand: "marketcommand", option: "oicommand", stockOption: "toppicks", swing: "news", dhanbacktest: "dhanbacktest", aipaper: "aipdash" };
 const MODE_TABS = {
-  decisionflow: ["decisionflow"],
+  marketcommand: ["marketcommand"],
   // Index Option Trading: Option Top Pick + Early Moves now live on the Stock
   // Option desk, and AI Paper Trading moved to its own AI Paper Desk, so all
   // three are dropped here.
@@ -5504,6 +5504,569 @@ function dfRender(id) {
 // Backward-compatible wrappers for the Decision Flow desk.
 function initDecisionFlow() { dfInitInstance("flow"); }
 function startDecisionFlowLive() { dfStartLive("flow"); }
+
+// ===================== MARKET COMMAND =====================
+// Live Order Block trading screen with candlestick chart + command panel.
+// Reuses: /api/market-command → OI Command + Liquidity Status + Order Block + Master Selector.
+const MC = {
+  sym: "^NSEI", tf: "15m", chart: null, candleSeries: null,
+  ema9Series: null, ema21Series: null, ema50Series: null, vwapSeries: null,
+  obMarkers: [], priceLine: null, timer: null, loading: false, lastData: null,
+  show: { vwap: true, ema21: true, ema50: true, ema9: false, ob: true, vol: true },
+  replayDate: null, // yyyy-mm-dd when replaying a past session; null = live
+};
+
+function initMarketCommand() {
+  if (MC.chart) return; // already init
+  const container = el("mc-chart-container");
+  if (!container || typeof LightweightCharts === "undefined") return;
+
+  // Wire index buttons
+  el("mc-idx-btns")?.querySelectorAll(".mc-idx").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      el("mc-idx-btns").querySelectorAll(".mc-idx").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      MC.sym = btn.getAttribute("data-sym");
+      MC._fitKey = null;
+      loadMarketCommand(!MC.replayDate); // fast chart first (live only)
+    });
+  });
+
+  // Wire timeframe buttons
+  el("mc-tf-btns")?.querySelectorAll(".mc-tf").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      el("mc-tf-btns").querySelectorAll(".mc-tf").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      MC.tf = btn.getAttribute("data-tf");
+      MC._fitKey = null;
+      loadMarketCommand(!MC.replayDate);
+    });
+  });
+
+  // Wire indicator toggles
+  ["vwap", "ema21", "ema50", "ema9", "ob", "vol"].forEach((k) => {
+    const cb = el("mc-tog-" + k);
+    if (cb) cb.addEventListener("change", () => {
+      MC.show[k] = cb.checked;
+      applyMCOverlays();
+    });
+  });
+
+  // Wire fullscreen
+  const fsBtn = el("mc-fullscreen");
+  if (fsBtn) fsBtn.addEventListener("click", () => {
+    const wrap = el("panel-marketcommand")?.querySelector(".mc-wrap");
+    if (wrap) {
+      wrap.classList.toggle("mc-fullscreen-active");
+      if (MC.chart) setTimeout(() => MC.chart.applyOptions({ width: container.clientWidth }), 50);
+    }
+  });
+
+  // Wire replay / backtest controls
+  const rToggle = el("mc-replay-toggle");
+  const rPop = el("mc-replay-pop");
+  const rDate = el("mc-replay-date");
+  if (rToggle && rPop) {
+    // Default the date input to yesterday.
+    if (rDate && !rDate.value) {
+      const y = new Date(Date.now() - 86400000);
+      rDate.value = y.toISOString().slice(0, 10);
+      rDate.max = new Date().toISOString().slice(0, 10);
+    }
+    rToggle.addEventListener("click", () => { rPop.hidden = !rPop.hidden; });
+    el("mc-replay-load")?.addEventListener("click", () => {
+      const dt = rDate?.value;
+      if (!dt) return;
+      MC.replayDate = dt;
+      MC._fitKey = null;                 // re-frame chart for the replay session
+      rPop.hidden = true;
+      rToggle.classList.add("active");
+      rToggle.textContent = "↺ " + dt;
+      loadMarketCommand();
+    });
+    el("mc-replay-live")?.addEventListener("click", () => {
+      MC.replayDate = null;
+      MC._fitKey = null;
+      rPop.hidden = true;
+      rToggle.classList.remove("active");
+      rToggle.textContent = "↺ Replay";
+      loadMarketCommand();
+    });
+  }
+
+  // Wire collapsible sections
+  document.querySelectorAll("[data-mc-toggle]").forEach((trigger) => {
+    trigger.addEventListener("click", () => {
+      const targetId = trigger.getAttribute("data-mc-toggle");
+      const target = document.getElementById(targetId);
+      if (!target) return;
+      const isCollapsed = target.classList.toggle("collapsed");
+      // Update all buttons that point to the same target
+      document.querySelectorAll(`[data-mc-toggle="${targetId}"].mc-collapse-btn`).forEach((btn) => {
+        btn.classList.toggle("collapsed", isCollapsed);
+        btn.textContent = isCollapsed ? "▶" : "▼";
+      });
+    });
+  });
+
+  // Create chart (TradingView dark theme — high-visibility candles)
+  const chartH = Math.max(container.clientHeight, 450);
+  MC.chart = LightweightCharts.createChart(container, {
+    width: container.clientWidth, height: chartH,
+    layout: { background: { type: "solid", color: "#131722" }, textColor: "#b2b5be", fontSize: 12 },
+    grid: { vertLines: { color: "#1e222d" }, horzLines: { color: "#1e222d" } },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal, vertLine: { color: "#758696", width: 1, style: 3, labelBackgroundColor: "#2a2e39" }, horzLine: { color: "#758696", width: 1, style: 3, labelBackgroundColor: "#2a2e39" } },
+    rightPriceScale: { borderColor: "#2a2e39", scaleMargins: { top: 0.08, bottom: 0.28 } },
+    localization: { timeFormatter: (t) => fmtIST(t, true) },
+    timeScale: { borderColor: "#2a2e39", timeVisible: true, secondsVisible: false, tickMarkFormatter: (t) => fmtIST(t, false), barSpacing: 12 },
+  });
+
+  MC.candleSeries = MC.chart.addCandlestickSeries({
+    upColor: "#16c784", downColor: "#ea3943", borderVisible: false,
+    wickUpColor: "#16c784", wickDownColor: "#ea3943",
+  });
+
+  // Volume histogram pinned to the bottom of the price pane
+  MC.volSeries = MC.chart.addHistogramSeries({ priceScaleId: "vol", priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false });
+  MC.chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
+
+  // Crosshair OHLC sync
+  MC.chart.subscribeCrosshairMove((param) => {
+    if (!param || !param.time || !MC._candles) return;
+    const c = MC._candles.find((x) => x.time === param.time);
+    if (!c) return;
+    const oE = el("mc-ohlc-o"), hE = el("mc-ohlc-h"), lE = el("mc-ohlc-l"), cE = el("mc-ohlc-c");
+    if (oE) oE.textContent = c.open?.toFixed(2);
+    if (hE) hE.textContent = c.high?.toFixed(2);
+    if (lE) lE.textContent = c.low?.toFixed(2);
+    if (cE) cE.textContent = c.close?.toFixed(2);
+    const v = (MC._volumes || []).find((x) => x.time === param.time);
+    const vE = el("mc-leg-vol-v");
+    if (vE && v) vE.textContent = mcFmtVol(v.value);
+  });
+
+  MC.ema9Series = MC.chart.addLineSeries({ color: "#ffa657", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+  MC.ema21Series = MC.chart.addLineSeries({ color: "#58a6ff", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+  MC.ema50Series = MC.chart.addLineSeries({ color: "#bc8cff", lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
+  MC.vwapSeries = MC.chart.addLineSeries({ color: "#d29922", lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
+
+  window.addEventListener("resize", () => {
+    if (MC.chart) MC.chart.applyOptions({ width: container.clientWidth, height: Math.max(container.clientHeight, 450) });
+  });
+
+  loadMarketCommand(true); // fast chart first, then full
+}
+
+function startMarketCommandLive() {
+  if (MC.timer) return;
+  // Live refresh: 5s while the market is open (fast, low-delay), 30s when closed
+  // (data isn't changing, so avoid needless load). Backend caches absorb the rate:
+  // candles refresh every ~5s, OI/liquidity serve from their 15s caches between hits.
+  MC._tick = 0;
+  MC.timer = setInterval(() => {
+    const pn = document.getElementById("panel-marketcommand");
+    if (!pn || !pn.classList.contains("active") || MC.loading) return;
+    if (MC.replayDate) return; // frozen on a past session — don't overwrite with live
+    const open = (typeof isMarketOpen === "function" && isMarketOpen()) ||
+                 (typeof isFeedWindow === "function" && isFeedWindow());
+    MC._tick++;
+    // Every 5s tick fires when open; only every 6th tick (30s) when closed.
+    if (open || MC._tick % 6 === 0) loadMarketCommand();
+  }, 5000);
+}
+
+async function loadMarketCommand(chartOnly = false) {
+  // chartOnly (view=chart) skips the heavy OI pipeline so the chart paints fast;
+  // a full load follows to fill the OI-based command panel. Replay never uses it.
+  if (MC.loading) return;
+  MC.loading = true;
+  try {
+    let url = `/api/market-command?symbol=${encodeURIComponent(MC.sym)}&interval=${MC.tf}`;
+    if (MC.replayDate) url += `&date=${MC.replayDate}`;
+    else if (chartOnly) url += `&view=chart`;
+    const d = await fetchJSON(url, 25000);
+    if (!d || d.error) {
+      const cmd = el("mc-cmd-action");
+      if (cmd) { cmd.className = "mc-cmd-action stale"; }
+      const lbl = el("mc-action-label"); if (lbl) lbl.textContent = "NO DATA";
+      const arr = el("mc-action-arrow"); if (arr) arr.textContent = "—";
+      const bdg = el("mc-action-badge"); if (bdg) bdg.textContent = "";
+      const fr = el("mc-fa-reason"); if (fr) fr.textContent = d?.error || "Failed to load";
+      MC.loading = false;
+      return;
+    }
+    MC.lastData = d;
+    renderMCChart(d);
+    renderMCCommand(d);
+    renderMCStatus(d);
+    renderMCLiveBar(d);
+  } catch (e) {
+    console.error("[MarketCommand]", e);
+  }
+  MC.loading = false;
+  // After a fast chart-only paint, immediately fetch the full payload (OI/command).
+  if (chartOnly && !MC.replayDate) loadMarketCommand(false);
+}
+
+function mcFmtVol(v) {
+  if (v == null) return "—";
+  if (v >= 1e7) return (v / 1e7).toFixed(2) + "Cr";
+  if (v >= 1e5) return (v / 1e5).toFixed(2) + "L";
+  if (v >= 1e3) return (v / 1e3).toFixed(1) + "K";
+  return String(v);
+}
+
+function renderMCChart(d) {
+  if (!MC.chart || !MC.candleSeries) return;
+  const candles = (d.candles || []).map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close }));
+  MC.candleSeries.setData(candles);
+
+  // Volume histogram (colored by candle direction)
+  const volumes = (d.candles || []).map((c) => ({
+    time: c.time, value: c.volume || 0,
+    color: c.close >= c.open ? "rgba(22,199,132,.5)" : "rgba(234,57,67,.5)",
+  }));
+  MC._volumes = volumes;
+  if (MC.volSeries) MC.volSeries.setData(MC.show.vol === false ? [] : volumes);
+
+  // Store overlays for toggle
+  MC._overlayData = d.overlays || {};
+  MC._candles = candles;
+  MC._orderBlocks = d.orderBlocks || [];
+  MC._bosEvents = d.structure?.bosEvents || [];
+  MC._swingPoints = d.structure?.swingPoints || [];
+
+  // Visible window: show the recent ~120 bars (like TradingView / the Selected
+  // Stock chart) so candles are large. Compute the price range of those bars so
+  // we can drop any level line that sits far outside it — otherwise a distant
+  // Order Block or target drags the whole price scale down and squishes the candles.
+  const N = candles.length;
+  const showBars = Math.min(120, N);
+  const recent = candles.slice(-showBars);
+  let vlo = Infinity, vhi = -Infinity;
+  recent.forEach((c) => { if (c.low < vlo) vlo = c.low; if (c.high > vhi) vhi = c.high; });
+  const pad = (vhi - vlo) * 0.6 || vhi * 0.005;
+  MC._inView = (p) => p != null && p >= vlo - pad && p <= vhi + pad;
+  applyMCOverlays();
+
+  // Current price line
+  if (MC.priceLine) { try { MC.candleSeries.removePriceLine(MC.priceLine); } catch {} }
+  if (d.spot) {
+    MC.priceLine = MC.candleSeries.createPriceLine({
+      price: d.spot, color: "#2962ff", lineWidth: 1, lineStyle: 2,
+      axisLabelVisible: true, title: "",
+    });
+  }
+
+  // Order Block zones — only those near the visible price range.
+  MC.obMarkers.forEach((pl) => { try { MC.candleSeries.removePriceLine(pl); } catch {} });
+  MC.obMarkers = [];
+  if (MC.show.ob && d.orderBlocks) {
+    d.orderBlocks.forEach((ob) => {
+      if (!MC._inView(ob.high) && !MC._inView(ob.low)) return;
+      drawMCOrderBlock(ob);
+    });
+  }
+
+  // Spot-level SL + Target price lines on chart (only when near visible range)
+  const cmd = d.command;
+  if (cmd) {
+    if (cmd.spotSL && MC._inView(cmd.spotSL)) {
+      const sl = MC.candleSeries.createPriceLine({ price: cmd.spotSL, color: "#ea3943", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `SL ${cmd.spotSL}` });
+      MC.obMarkers.push(sl);
+    }
+    if (cmd.spotT1 && MC._inView(cmd.spotT1)) {
+      const t1 = MC.candleSeries.createPriceLine({ price: cmd.spotT1, color: "#16c784", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `T1 ${cmd.spotT1}` });
+      MC.obMarkers.push(t1);
+    }
+    if (cmd.spotT2 && MC._inView(cmd.spotT2)) {
+      const t2 = MC.candleSeries.createPriceLine({ price: cmd.spotT2, color: "#16c784", lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: `T2 ${cmd.spotT2}` });
+      MC.obMarkers.push(t2);
+    }
+    // Entry zone
+    if (cmd.entryZone && cmd.entryZone !== "—") {
+      const parts = cmd.entryZone.split("–").map((s) => parseFloat(s.trim()));
+      if (parts.length === 2 && parts[0] && parts[1] && MC._inView(parts[0])) {
+        const ezLo = MC.candleSeries.createPriceLine({ price: parts[0], color: "#2962ff", lineWidth: 1, lineStyle: 1, axisLabelVisible: false, title: "" });
+        const ezHi = MC.candleSeries.createPriceLine({ price: parts[1], color: "#2962ff", lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title: "Entry Zone" });
+        MC.obMarkers.push(ezLo, ezHi);
+      }
+    }
+  }
+
+  // BOS markers: Confirmed = solid arrow "BOS"; Pre = faded circle "BOS?"
+  if (d.structure?.bosEvents?.length) {
+    const markers = d.structure.bosEvents.map((b) => {
+      const pre = b.stage === "Pre";
+      const bull = b.direction === "Bullish";
+      return {
+        time: b.time, position: bull ? "belowBar" : "aboveBar",
+        color: pre ? (bull ? "rgba(22,199,132,.55)" : "rgba(234,57,67,.55)") : (bull ? "#16c784" : "#ea3943"),
+        shape: pre ? "circle" : (bull ? "arrowUp" : "arrowDown"),
+        text: pre ? "BOS?" : "BOS",
+      };
+    });
+    MC.candleSeries.setMarkers(markers);
+  }
+
+  // Show only the recent ~120 bars (big candles, tight price range like the
+  // Selected Stock chart) on first render or a symbol/timeframe switch. Live 5s
+  // refreshes leave the user's current zoom/scroll alone.
+  const viewKey = MC.sym + ":" + MC.tf;
+  if (MC._fitKey !== viewKey) {
+    MC.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, N - showBars), to: N + 2 });
+    MC._fitKey = viewKey;
+  }
+}
+
+function applyMCOverlays() {
+  if (!MC.chart) return;
+  const ov = MC._overlayData || {};
+  const candles = MC._candles || [];
+  const align = (arr) => candles.map((c, i) => arr && arr[i] != null ? { time: c.time, value: arr[i] } : null).filter(Boolean);
+
+  MC.ema9Series.setData(MC.show.ema9 ? align(ov.ema9) : []);
+  MC.ema21Series.setData(MC.show.ema21 ? align(ov.ema21) : []);
+  MC.ema50Series.setData(MC.show.ema50 ? align(ov.ema50) : []);
+  MC.vwapSeries.setData(MC.show.vwap ? align(ov.vwap) : []);
+  if (MC.volSeries) MC.volSeries.setData(MC.show.vol ? (MC._volumes || []) : []);
+
+  // Re-render OB zones
+  MC.obMarkers.forEach((pl) => { try { MC.candleSeries.removePriceLine(pl); } catch {} });
+  MC.obMarkers = [];
+  if (MC.show.ob && MC._orderBlocks) {
+    const inView = MC._inView || (() => true);
+    MC._orderBlocks.forEach((ob) => {
+      if (!inView(ob.high) && !inView(ob.low)) return;
+      drawMCOrderBlock(ob);
+    });
+  }
+}
+
+// Draw one Order Block zone. Confirmed = solid bright lines with a label;
+// Pre (forming) = dashed, faded lines labelled "pre" so an early setup is
+// visually distinct from a confirmed one.
+function drawMCOrderBlock(ob) {
+  const isBull = ob.side === "Bullish";
+  const confirmed = ob.stage === "Confirmed";
+  const solid = isBull ? "#16c784" : "#ea3943";
+  const faded = isBull ? "rgba(22,199,132,.55)" : "rgba(234,57,67,.55)";
+  const color = confirmed ? solid : faded;
+  const style = confirmed ? 0 : 2; // solid vs dashed
+  const label = `${isBull ? "Bull" : "Bear"} OB${confirmed ? "" : " (pre)"}`;
+  const hiLine = MC.candleSeries.createPriceLine({ price: ob.high, color, lineWidth: confirmed ? 2 : 1, lineStyle: style, axisLabelVisible: false, title: label });
+  const loLine = MC.candleSeries.createPriceLine({ price: ob.low, color, lineWidth: 1, lineStyle: style, axisLabelVisible: false, title: "" });
+  MC.obMarkers.push(hiLine, loLine);
+}
+
+function renderMCCommand(d) {
+  const cmd = d.command;
+  if (!cmd) return;
+  const setText = (id, v) => { const e = el(id); if (e) e.textContent = v ?? "—"; };
+
+  // Trade Signal action
+  const isReplay = cmd.finalAction === "REPLAY" || d.historical;
+  const isPartial = !!d.partial; // chart-only fast payload; OI still loading
+  const actionEl = el("mc-cmd-action");
+  if (actionEl) {
+    const isTake = cmd.finalAction === "TAKE";
+    const isBull = cmd.direction === "BULLISH";
+    const isBear = cmd.direction === "BEARISH";
+    const cls = isPartial ? "wait" : isReplay ? (isBull ? "take" : isBear ? "sell" : "wait")
+      : isTake ? (isBull ? "take" : "sell") : cmd.finalAction === "NO TRADE" ? "no-trade" : cmd.finalAction === "DATA STALE" ? "stale" : "wait";
+    actionEl.className = "mc-cmd-action " + cls;
+    const arrowEl = el("mc-action-arrow");
+    const labelEl = el("mc-action-label");
+    const badgeEl = el("mc-action-badge");
+    if (arrowEl) arrowEl.textContent = isPartial ? "⋯" : isReplay ? (isBull ? "▲" : isBear ? "▼" : "◆") : isTake ? (isBull ? "▲" : "▼") : cmd.finalAction === "NO TRADE" ? "✕" : "◆";
+    if (labelEl) labelEl.textContent = isPartial ? "LOADING…" : isReplay ? cmd.direction : isTake ? (isBull ? "BUY (CALL)" : "SELL (PUT)") : cmd.finalAction;
+    if (badgeEl) badgeEl.textContent = isPartial ? "OI" : isReplay ? "REPLAY" : isTake ? cmd.direction : cmd.finalAction === "WAIT" ? "PENDING" : "";
+  }
+
+  // Pre / Confirmed signal detail (VWAP + candle movement)
+  const dirEl = el("mc-sd-dir");
+  if (dirEl) {
+    const conf = cmd.structureConfirmed || "Ranging";
+    const pre = cmd.structurePre || "Ranging";
+    // Confirmed structure wins the label; if only a pre lean exists, show it as forming.
+    if (conf !== "Ranging") {
+      dirEl.textContent = conf.toUpperCase() + " · confirmed";
+      dirEl.className = conf === "Bearish" ? "bear" : "confirmed";
+    } else if (pre !== "Ranging") {
+      dirEl.textContent = pre.toUpperCase() + " · forming";
+      dirEl.className = "pre";
+    } else {
+      dirEl.textContent = "RANGING"; dirEl.className = "muted";
+    }
+  }
+  const vwEl = el("mc-sd-vwap");
+  if (vwEl) {
+    const v = cmd.vwapStatus || "At";
+    vwEl.textContent = v === "Above" ? "Price ABOVE" : v === "Below" ? "Price BELOW" : "At VWAP";
+    vwEl.className = v === "Above" ? "confirmed" : v === "Below" ? "bear" : "muted";
+  }
+  const obEl = el("mc-sd-ob");
+  if (obEl) {
+    if (cmd.obStage) {
+      obEl.textContent = cmd.obStage === "Confirmed" ? "Confirmed" : "Pre (forming)";
+      obEl.className = cmd.obStage === "Confirmed" ? "confirmed" : "pre";
+    } else { obEl.textContent = "None in range"; obEl.className = "muted"; }
+  }
+  // Direction-change alert banner
+  const alertEl = el("mc-sd-alert");
+  if (alertEl) {
+    const dc = cmd.directionChange;
+    if (dc && dc.stage && dc.stage !== "None") {
+      alertEl.hidden = false;
+      alertEl.className = "mc-sd-alert " + (dc.stage === "Confirmed" ? "confirmed" : "pre");
+      const arrow = dc.to === "Bullish" ? "▲" : dc.to === "Bearish" ? "▼" : "◆";
+      alertEl.textContent = `${arrow} DIRECTION CHANGE ${dc.stage.toUpperCase()} → ${String(dc.to).toUpperCase()}`;
+    } else {
+      alertEl.hidden = true;
+    }
+  }
+
+  // Entry / SL / Targets
+  setText("mc-cmd-entry-zone", cmd.entryZone);
+  setText("mc-cmd-sl", cmd.spotSL != null ? cmd.spotSL.toLocaleString("en-IN") : "—");
+  setText("mc-cmd-t1", cmd.spotT1 != null ? cmd.spotT1.toLocaleString("en-IN") : "—");
+  setText("mc-cmd-t2", cmd.spotT2 != null ? cmd.spotT2.toLocaleString("en-IN") : "—");
+
+  // Option Selection
+  const callBtn = el("mc-opt-call");
+  const putBtn = el("mc-opt-put");
+  if (callBtn && putBtn) {
+    callBtn.className = "mc-opt-btn" + (cmd.optionType === "CE" ? " active-call" : "");
+    putBtn.className = "mc-opt-btn" + (cmd.optionType === "PE" ? " active-put" : "");
+  }
+  setText("mc-cmd-strike", cmd.strike);
+  setText("mc-cmd-ltp", cmd.optionLtp != null ? "₹" + cmd.optionLtp : "—");
+
+  // Final action bar
+  const faEl = el("mc-final-action");
+  const faLabel = el("mc-fa-label");
+  const faReason = el("mc-fa-reason");
+  if (faEl && faLabel) {
+    const isTake = cmd.finalAction === "TAKE";
+    const isBull = cmd.direction === "BULLISH";
+    faEl.className = "mc-final-action " + (isReplay ? "wait" : isTake ? (isBull ? "take" : "sell") : cmd.finalAction === "NO TRADE" ? "sell" : "wait");
+    faLabel.textContent = isReplay ? "HISTORICAL REPLAY" : isTake ? (isBull ? "EXECUTE BUY" : "EXECUTE SELL") : cmd.finalAction === "WAIT" ? "WAIT FOR SETUP" : cmd.finalAction;
+  }
+  if (faReason) faReason.textContent = cmd.finalReason || "";
+
+  // Confirmations checklist
+  const checksEl = el("mc-cmd-checks");
+  if (checksEl && cmd.confirmations) {
+    const confPassed = cmd.confirmations.filter((c) => c.passed).length;
+    checksEl.innerHTML =
+      `<div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#787b86;margin-bottom:6px">Confirmations ${confPassed}/${cmd.confirmations.length}</div>` +
+      cmd.confirmations.map((c) =>
+        `<div class="mc-check-item ${c.passed ? "pass" : "fail"}"><span class="mc-check-ico">${c.passed ? "✓" : "✗"}</span><span class="mc-check-name">${c.label}</span></div>`
+      ).join("");
+  }
+}
+
+function renderMCStatus(d) {
+  // Direction card
+  const dirCard = el("mc-stat-direction");
+  if (dirCard) {
+    const v = dirCard.querySelector(".mc-stat-value");
+    const ico = el("mc-stat-dir-ico");
+    const dir = d.oi?.direction === "UP" ? "BULLISH" : d.oi?.direction === "DOWN" ? "BEARISH" : "NEUTRAL";
+    if (v) { v.textContent = dir; v.className = "mc-stat-value " + (dir === "BULLISH" ? "bullish" : dir === "BEARISH" ? "bearish" : "neutral"); }
+    if (ico) ico.textContent = dir === "BULLISH" ? "▲" : dir === "BEARISH" ? "▼" : "◆";
+  }
+  // Structure / Trend card
+  const stCard = el("mc-stat-structure");
+  if (stCard) {
+    const v = stCard.querySelector(".mc-stat-value");
+    const ico = el("mc-stat-str-ico");
+    const st = d.structure?.current || "—";
+    const isUp = st === "Bullish";
+    if (v) { v.textContent = isUp ? "UPTREND" : st === "Bearish" ? "DOWNTREND" : "RANGING"; v.className = "mc-stat-value " + (isUp ? "bullish" : st === "Bearish" ? "bearish" : "neutral"); }
+    if (ico) ico.textContent = isUp ? "↗" : st === "Bearish" ? "↘" : "→";
+  }
+  // Order Block card
+  const obCard = el("mc-stat-ob");
+  if (obCard) {
+    const v = obCard.querySelector(".mc-stat-value");
+    const ico = el("mc-stat-ob-ico");
+    if (d.activeOB) {
+      const confirmed = d.activeOB.stage === "Confirmed";
+      v.textContent = confirmed ? "CONFIRMED ✓" : "PRE (forming)";
+      v.className = "mc-stat-value " + (confirmed ? (d.activeOB.side === "Bullish" ? "bullish" : "bearish") : "neutral");
+    } else {
+      v.textContent = "NONE"; v.className = "mc-stat-value neutral";
+    }
+    if (ico) ico.textContent = d.activeOB ? (d.activeOB.side === "Bullish" ? "◧" : "◨") : "○";
+  }
+  // Volatility / Regime card
+  const regCard = el("mc-stat-regime");
+  if (regCard) {
+    const v = regCard.querySelector(".mc-stat-value");
+    const ico = el("mc-stat-reg-ico");
+    const regime = d.command?.regime || "—";
+    if (v) { v.textContent = regime.toUpperCase(); v.className = "mc-stat-value neutral"; }
+    if (ico) ico.textContent = regime === "HIGH" ? "⚡" : regime === "LOW" ? "~" : "≈";
+  }
+
+  // Header: symbol name, spot price, OHLC last candle, EMA legend
+  const spotEl = el("mc-spot");
+  if (spotEl && d.spot) spotEl.textContent = d.spot.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+  const nameEl = el("mc-sym-name");
+  if (nameEl) nameEl.textContent = d.name || d.symbol;
+  const tfEl = el("mc-sym-tf");
+  if (tfEl) tfEl.textContent = "· " + (MC.tf || "15m").replace("m", "") + " · NSE";
+
+  // OHLC + Volume from last candle
+  if (d.candles?.length) {
+    const last = d.candles[d.candles.length - 1];
+    const oE = el("mc-ohlc-o"), hE = el("mc-ohlc-h"), lE = el("mc-ohlc-l"), cE = el("mc-ohlc-c");
+    if (oE) oE.textContent = last.open?.toFixed(2);
+    if (hE) hE.textContent = last.high?.toFixed(2);
+    if (lE) lE.textContent = last.low?.toFixed(2);
+    if (cE) cE.textContent = last.close?.toFixed(2);
+    const vE = el("mc-leg-vol-v");
+    if (vE) vE.textContent = mcFmtVol(last.volume || 0);
+  }
+  // EMA21 legend value
+  if (d.overlays?.ema21?.length) {
+    const lastEma = d.overlays.ema21[d.overlays.ema21.length - 1];
+    const legEl = el("mc-leg-ema21-v");
+    if (legEl && lastEma) legEl.textContent = lastEma.toFixed(2);
+  }
+}
+
+function renderMCLiveBar(d) {
+  const dot = el("mc-live-dot");
+  const label = el("mc-live-label");
+  const ts = el("mc-timestamp");
+  const tag = el("mc-live-tag");
+
+  // Replay / historical mode: never present past data as LIVE.
+  if (d.historical) {
+    if (dot) dot.className = "mc-live-dot stale";
+    if (label) label.textContent = "Replay · " + (d.asOfDate || "past session");
+    if (tag) { tag.textContent = "HISTORICAL"; tag.style.color = "#f7931a"; tag.style.borderColor = "#f7931a"; }
+    if (ts && d.lastCandleTime) {
+      const dt = new Date((d.lastCandleTime + 19800) * 1000);
+      ts.textContent = "last bar " + dt.toISOString().slice(11, 16);
+    }
+    return;
+  }
+
+  if (dot) dot.className = "mc-live-dot" + (d.dataStale ? " stale" : !d.dhanLive ? " off" : "");
+  if (label) label.textContent = d.dhanLive ? "Dhan Connected" : "Offline";
+  if (tag) {
+    tag.textContent = d.dataStale ? "STALE" : d.dhanLive ? "LIVE" : "OFF";
+    tag.style.color = d.dataStale ? "#f7931a" : d.dhanLive ? "#26a69a" : "#ef5350";
+    tag.style.borderColor = tag.style.color;
+  }
+  if (ts && d.lastCandleTime) {
+    const dt = new Date((d.lastCandleTime + 19800) * 1000);
+    ts.textContent = dt.toISOString().slice(11, 19) + (d.dataAgeSec != null ? ` (${d.dataAgeSec}s)` : "");
+  }
+}
 
 function dfHead(num, title, q) {
   return `<div class="df-scr-head"><span class="df-scr-num">${String(num).padStart(2, "0")}</span><h2>${title}</h2></div><p class="df-scr-q"><em>${q}</em></p>`;
