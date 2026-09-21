@@ -210,7 +210,6 @@
 
         <div class="home-footer">
           <span class="home-footer-brand">MarketPil</span>
-          <span id="home-footer-disclaimer" class="wl-sub"></span>
         </div>
       </div>
     </div>
@@ -281,22 +280,22 @@
       </div>
     </div>
 
-    <!-- Groww Connection settings card (desktop + mobile) — admin-only, opened
+    <!-- Dhan Connection settings card (desktop + mobile) — admin-only, opened
          from the Admin Control Center's Connections card ("Manage" button). -->
     <div id="connect-panel" class="connect-panel gc-panel hidden">
       <div class="cp-head">
-        <h4>Groww Connection</h4>
+        <h4>Dhan Connection</h4>
         <button id="connect-close" class="cp-close" aria-label="Close">&times;</button>
       </div>
 
-      <div class="gc-source">MARKET DATA SOURCE&nbsp; <b>🟢 GROWW</b> <span class="wl-sub">single source</span></div>
+      <div class="gc-source">MARKET DATA SOURCE&nbsp; <b>🟢 DHAN</b> <span class="wl-sub">single source</span></div>
 
-      <!-- Shared connection-status component (also used by the Dhan panel). -->
+      <!-- Shared connection-status component. -->
       <div id="gc-conn-status" class="conn-badge-block"></div>
 
-      <label class="cp-label" for="conn-token">Groww Access Token</label>
+      <label class="cp-label" for="conn-token">Dhan Access Token</label>
       <div class="gc-field">
-        <input id="conn-token" type="password" placeholder="Paste your Groww access token" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        <input id="conn-token" type="password" placeholder="Paste your Dhan access token" autocomplete="off" autocapitalize="off" spellcheck="false" />
         <button type="button" class="gc-eye" data-target="conn-token" aria-label="Show/hide">👁</button>
       </div>
 
@@ -308,15 +307,15 @@
       <div id="gc-status" class="gc-status"></div>
       <div id="gc-signals" class="gc-signals"></div>
 
-      <button id="conn-test" class="gc-test">TEST GROWW CONNECTION</button>
+      <button id="conn-test" class="gc-test">TEST DHAN CONNECTION</button>
       <div id="gc-test-result" class="gc-test-result"></div>
 
       <p class="wl-sub cp-note">
-        The <b>access token is the only Groww credential</b> this app needs. Generate it on
-        Groww &rarr; Settings &rarr; Trading APIs (needs an active Trading API subscription), paste it above and press
-        <b>SAVE ACCESS TOKEN</b> — it is only accepted after a real Groww request succeeds, and is then stored
-        <b>securely server-side (owner-only .groww_token), so it persists across restarts</b>. The full token is never
-        shown, logged, or sent back to this screen. Tokens expire daily ~6 AM IST — paste a fresh one when the test fails.
+        The <b>access token is the only Dhan credential</b> this app needs. Generate it on
+        web.dhan.co &rarr; Access DhanHQ APIs, paste it above and press
+        <b>SAVE ACCESS TOKEN</b> — it is only accepted after a real Dhan request succeeds, and is then stored
+        <b>securely server-side (data/dhan-config.json), so it persists across restarts</b>. The full token is never
+        shown, logged, or sent back to this screen. Tokens expire daily — paste a fresh one when the test fails.
       </p>
 
       <div class="cp-divider"></div>
@@ -377,49 +376,26 @@
       </p>
     </div>
 
-    <!-- Dhan historical-data panel (separate from Groww Connection) -->
-    <div id="dhan-panel" class="connect-panel gc-panel hidden">
-      <div class="cp-head">
-        <h4>Connect Dhan (Historical data — backtesting only)</h4>
-        <button id="dhan-close" class="cp-close" aria-label="Close">&times;</button>
-      </div>
-      <!-- Shared connection-status component (same one the Groww panel uses). -->
-      <div id="dhan-conn-status" class="conn-badge-block"></div>
-      <label class="cp-label" for="dhan-token">Access Token <span class="wl-sub">(web.dhan.co → My Profile → Access DhanHQ APIs, 24h validity)</span></label>
-      <div class="gc-field">
-        <input id="dhan-token" type="password" placeholder="Paste Dhan access token" autocomplete="off" autocapitalize="off" spellcheck="false" />
-        <button type="button" class="gc-eye" data-target="dhan-token" aria-label="Show/hide">👁</button>
-      </div>
-      <div class="gc-field">
-        <button id="dhan-save" type="button" class="auth-email-save" aria-label="Save">💾 SAVE</button>
-        <button id="dhan-test" type="button" class="gc-test">TEST CONNECTION</button>
-      </div>
-      <div id="dhan-status" class="conn-status"></div>
-      <p class="wl-sub cp-note">
-        Used ONLY for pulling historical candles for offline backtesting/research — Groww remains the sole source for OI, EMA, live signals and every
-        trading decision. Dhan tokens expire every 24h; press SAVE again with a fresh one when TEST CONNECTION fails.
-      </p>
-    </div>
+    <!-- Dhan panel is now the main connection panel above; this secondary panel is no longer needed. -->
 
     <header class="topbar">
       <div class="topbar-right">
         <!-- Consolidated status row: one pill per distinct fact (no repeated market/provider). -->
-        <span id="market-status" data-market-status class="pill market-status" title="Market session + last data refresh (IST). Groww historical only when closed.">market: -</span>
-        <button type="button" id="feed-groww" class="pill-btn feed-tog on" title="Groww is the ONLY market-data source (quotes, candles, historical, option chain, OI). Click to turn the feed on/off.">Groww · single source · ON</button>
+        <span id="market-status" data-market-status class="pill market-status" title="Market session + last data refresh (IST). Dhan historical only when closed.">market: -</span>
+        <button type="button" id="feed-dhan" class="pill-btn feed-tog on" title="Dhan is the ONLY market-data source (quotes, candles, historical, option chain, OI). Click to turn the feed on/off.">Dhan · single source · ON</button>
         <span id="best-trade" class="pill best-trade" title="Best option trade right now on the 15-min model (safety-gated). Shown across all sections.">best 15m: —</span>
         <span id="regime-ind" class="pill" title="Market regime from NIFTY 15m ADX. Range-bound = avoid buying options (theta bleed).">regime: -</span>
         <span id="success-ind" class="pill" title="Measured track record from the autonomous paper-trading run">success: -</span>
         <span id="early-ind" class="pill early-ind" title="Early-Move alert: a move in its INITIAL stage (fresh momentum + volume, not extended, potential still to run). Click to open it.">⚡ early: -</span>
         <button id="mode-switch" class="pill-btn" title="Switch between Index Option Trading, Stock Option Trading and Stock Swing Trading desks">⇄ Desk</button>
-        <!-- Groww/Dhan/Telegram connection management now lives in the Admin
+        <!-- Dhan/Telegram connection management now lives in the Admin
              Control Center's "Connections" card only - these three legacy
              trigger buttons stay in the DOM (existing JS still targets them
              to open/close the same panels) but are permanently hidden from
              the topbar; the Admin Control Center's "Manage" buttons click
              them programmatically instead of duplicating the open/close logic. -->
-        <button id="connect-btn" class="pill-btn hidden">Groww</button>
+        <button id="connect-btn" class="pill-btn hidden">Dhan</button>
         <button id="telegram-btn" class="pill-btn hidden">Telegram</button>
-        <button id="dhan-btn" class="pill-btn hidden">Dhan</button>
         <button id="rotate-login-btn" class="pill-btn" title="Turant naya login password generate karke email/Telegram par bhej do (agar configured hai) — 08:00 IST ka wait nahi karna padega">🔄 Rotate Login</button>
         <button id="logout-btn" class="pill-btn" title="Session band karke wapas login screen par jayein">🚪 Logout</button>
         <span id="clock" data-clock class="clock"></span>
@@ -427,7 +403,6 @@
 
     </header>
 
-    <div class="disclaimer" id="disclaimer" hidden></div>
 
     <main class="layout">
       <!-- Watchlist -->
@@ -444,18 +419,9 @@
 
       <!-- Main content -->
       <section class="content">
-        <!-- Consolidated cockpit strip: [status] | [Trader Mind] | [risk disclaimer ▾] -->
+        <!-- Cockpit strip: signal status -->
         <div id="cockpit-strip" class="cockpit-strip">
           <div id="signal-block-banner" class="cs-seg cs-status"><span class="cs-dot"></span>—</div>
-          <div id="mind-bar" class="cs-seg mind-bar mind-neutral">
-            <span id="mind-state" class="mind-state">🧠 Trader Mind</span>
-            <div id="mind-best" class="mind-best"><span class="wl-sub">Best directional win-case loading…</span></div>
-            <span id="mind-hindi" class="mind-hindi" hidden></span>
-          </div>
-          <details id="cs-risk" class="cs-seg cs-risk">
-            <summary><span class="cs-risk-icon">⚠</span> <span class="cs-risk-short">Not a guarantee of profit</span><span class="cs-risk-caret">⌄</span></summary>
-            <div class="cs-risk-full">Signals are generated from market data and predefined rules. They are <b>NOT</b> a guarantee of profit or future performance. Market conditions can change rapidly. You are responsible for the final trading decision.</div>
-          </details>
         </div>
         <!-- App-level: best 2 OPTION opportunities (always visible, live) -->
         <div id="opp-bar" class="opp-bar">
@@ -664,10 +630,6 @@
             <div class="mtg-card">
               <h5>Master Strategy QA summary</h5>
               <div id="msl-qasummary"><span class="wl-sub">Loading…</span></div>
-              <div class="cs-risk-full msl-disclaimer">
-                Passing scenario tests proves the engine follows its own documented rules. It does <b>NOT</b> prove profitability.
-                No win-rate or profitability claim is made here — that requires real historical / backtest / paper-trading results.
-              </div>
             </div>
 
           </div>
@@ -978,7 +940,7 @@
               <div>
                 <h3>AI Paper Desk &mdash; win-win only, any moment in the NSE session</h3>
                 <span class="rel-badge rel-high" title="Self-verifying: live data, real costs/slippage, honest P&amp;L. Not a zero-loss promise.">Reliability: HIGH &mdash; measured P&amp;L</span>
-                <span class="wl-sub">No 9:20 / lunch / 3pm clocks. Directional = OI TAKE + 1h bulletin. Scalp = 5m+15m agree (or aligned burst). Opens only when calibrated win-prob clears the floor. Losses still possible; losers are not relabelled as wins. Groww ON in hours for OI. Simulated only.</span>
+                <span class="wl-sub">No 9:20 / lunch / 3pm clocks. Directional = OI TAKE + 1h bulletin. Scalp = 5m+15m agree (or aligned burst). Opens only when calibrated win-prob clears the floor. Losses still possible; losers are not relabelled as wins. Dhan ON in hours for OI. Simulated only.</span>
               </div>
               <div class="swing-filters">
                 <label>Index opt ₹ <input id="pp-index" type="number" step="10000" value="40000" style="width:90px" /></label>
@@ -1395,7 +1357,7 @@
                   <code>runBacktest</code> engine used elsewhere in this app), plus Momentum Burst / Market Regime / EMA confluence
                   shown as informational reads. <b>OI walls, PCR, and the Master Trade Selector are NOT included</b> — Dhan's
                   historical API has no live option-chain snapshot history, so that part of the strategy cannot be backtested here.
-                  Groww remains the only source for anything live/tradeable.
+                  Dhan is the sole source for all live/tradeable data.
                 </div>
               </div>
             </div>
@@ -1435,7 +1397,7 @@
               <div>
                 <h3>🤖 AI Data Collection</h3>
                 <div class="wl-sub">
-                  A passive recorder attached to the LIVE Groww OI Command feed (not Dhan) — writes a timestamped
+                  A passive recorder attached to the LIVE Dhan OI Command feed — writes a timestamped
                   market/option-chain/strategy snapshot every time OI Command refreshes, for future ML training data only.
                   Advisory data collection only: <b>AI_MODE=ADVISORY_ONLY</b>, no automated trading, no live orders.
                 </div>
@@ -1449,13 +1411,7 @@
       </section>
     </main>
 
-    <!-- ============ Compliance: mandatory risk-warning footer (always visible) ============ -->
-    <footer id="risk-footer" class="risk-footer">
-      <span class="rf-warn">⚠️ Investment in securities market are subject to market risks. Read all the related documents carefully before investing.</span>
-      <span class="rf-links">
-        <button type="button" id="open-risk-disclosure" class="rf-link">Risk Disclosure</button>
-      </span>
-    </footer>
+    <!-- Risk footer removed — SEBI disclosure shown on login screen only -->
 
     <!-- Mobile bottom navigation (visible only on small screens). Maps to existing tabs
          + a watchlist overlay + a "More" sheet listing every tab. No data is removed. -->
@@ -1488,32 +1444,7 @@
       </div>
     </div>
 
-    <!-- ============ Compliance: full Risk / Regulatory disclosure modal ============ -->
-    <div id="disclosure-modal" class="cmp-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="disclosure-title">
-      <div class="cmp-box cmp-box-scroll">
-        <div class="cmp-head">
-          <h2 id="disclosure-title">Risk &amp; Regulatory Disclosure</h2>
-          <button type="button" id="disclosure-close" class="cp-close" aria-label="Close">&times;</button>
-        </div>
-
-        <h3>Mandatory Risk Warning</h3>
-        <p class="cmp-sebi">Investment in securities market are subject to market risks. Read all the related documents carefully before investing.</p>
-
-        <h3>Trading Application Disclaimer</h3>
-        <p>This application is a trading and market-analysis software tool. It does not guarantee profits or returns. Trading in securities, derivatives and options involves substantial risk of loss. Past performance, backtests, simulations or historical results do not guarantee future performance. Users are solely responsible for their trading decisions and should independently assess the risks before placing any order.</p>
-
-        <h3>Algorithmic / Automated Trading</h3>
-        <p>Algorithmic or automated trading can result in rapid losses. Signals generated by this application are not a guarantee of execution price, profitability or successful trading. This application does not place live orders — the automated desk is a simulation only.</p>
-
-        <h3>Backtest / Simulation</h3>
-        <p>Past performance is not indicative of future results. Backtest results may differ materially from actual trading because of slippage, liquidity, brokerage, taxes, latency, execution quality, market impact and other factors. Simulated results are not actual investor returns.</p>
-
-        <h3>Market Data</h3>
-        <p>The sole market-data source is Groww. Live trading signals are blocked when Groww data is disconnected, stale, invalid or unavailable.</p>
-
-        <p class="cmp-note" id="disclosure-versions">Loading version…</p>
-      </div>
-    </div>
+    <!-- Disclosure modal removed — SEBI disclosure shown on login consent screen only -->
 
     <!-- ============ Compliance: automated-trading acknowledgement modal (simulated engine) ============ -->
     <div id="autotrade-modal" class="cmp-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="autotrade-title">

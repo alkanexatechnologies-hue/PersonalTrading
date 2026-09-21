@@ -177,7 +177,7 @@ export function recommendOiTrades(p: OiTradeInput): OiRecommendations {
     algo: {
       paperAuto: true,
       liveOrders: false,
-      note: "Algo uses Paper Trading auto (no live Groww orders). Directional + OI-scalp ideas are injected each paper tick; OI-scalp also retries every ~90s. Paper still requires confidence ≥ 68, cost-aware R:R, and heat caps.",
+      note: "Algo uses Paper Trading auto (no live orders). Directional + OI-scalp ideas are injected each paper tick; OI-scalp also retries every ~90s. Paper still requires confidence ≥ 68, cost-aware R:R, and heat caps.",
     },
   };
 }

@@ -87,7 +87,7 @@ function formatTakeMessage(grid: any, ctx: { weekday: string; hhmm: string; date
   const L = grid.levels || {};
   const lines: string[] = [];
   lines.push(`NSA PAPER TRADE · ${ctx.isMonday ? "MONDAY OPEN SESSION" : ctx.weekday.toUpperCase()}`);
-  lines.push(`${ctx.date} ${ctx.hhmm} IST · Groww live`);
+  lines.push(`${ctx.date} ${ctx.hhmm} IST · Dhan live`);
   lines.push(`GOOD TIME to take a PAPER trade (not live broker).`);
   lines.push("");
   lines.push(`${grid.name}  spot ${grid.spot}`);
@@ -177,7 +177,7 @@ export interface PingDeps {
 export async function tickPaperAlerts(deps: PingDeps): Promise<{ sent: string[]; skipped: string }> {
   const ready = notificationsReady();
   if (!ready.ok) return { sent: [], skipped: ready.reason };
-  if (deps.provider !== "groww") return { sent: [], skipped: "Groww feed required" };
+  if (deps.provider !== "dhan") return { sent: [], skipped: "Dhan feed required" };
   if (!deps.marketOpen) return { sent: [], skipped: "market closed" };
 
   const t = istNow();

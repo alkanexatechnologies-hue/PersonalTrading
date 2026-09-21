@@ -215,18 +215,16 @@ export const CONFIG = {
     "60m": 60,
     "1d": 365,
   } as Record<Interval, number>,
-  // Market-data provider. GROWW IS THE ONLY SUPPORTED SOURCE (real-time NSE via
-  // the Groww Trade API; needs GROWW_ACCESS_TOKEN). Yahoo and TrueData have been
-  // removed. BrokerProvider is reserved for future order execution only and is
-  // never a market-data source.
-  dataProvider: "groww" as const,
+  // Market-data provider. DHAN IS THE ONLY SUPPORTED SOURCE (real-time NSE via
+  // the DhanHQ API; needs access token in data/dhan-config.json).
+  dataProvider: "dhan" as const,
 };
 
 /**
  * Best-estimate option strike interval for a given underlying price.
  * Indices use their known steps; equities use NSE-style price bands.
  * NOTE: NSE sets intervals per-scrip and revises them - the live option chain
- * (Groww/NSE) is the only exact source. This keeps strikes in the correct range.
+ * (Dhan/NSE) is the only exact source. This keeps strikes in the correct range.
  */
 export function getStrikeStep(price: number, def?: Partial<SymbolDef>): number {
   if (def?.isIndex) return def.strikeStep && def.strikeStep > 0 ? def.strikeStep : 50;

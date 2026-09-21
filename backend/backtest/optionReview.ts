@@ -1,6 +1,6 @@
 import { Candle } from "../types";
 import { findSymbolDef } from "../config";
-import { GrowwProvider, growwOptionCandles, growwSpotCandles } from "../data/growwProvider";
+import { dhanOptionCandles, dhanSpotCandles, DhanProvider } from "../data/dhanProvider";
 import { findOption, optionStrikes } from "../data/growwInstruments";
 
 // ---- Option Trade Back-Test / Review (commentary in Hindi) ----
@@ -71,7 +71,7 @@ function legPnl(cs: Candle[], startE: number, endE: number, entryOverride?: numb
   return { entry: r2(entry), exit: r2(exit), pnlPct: r1(((exit - entry) / entry) * 100) };
 }
 
-export async function reviewOptionTrade(provider: GrowwProvider, p: ReviewParams): Promise<any> {
+export async function reviewOptionTrade(provider: DhanProvider, p: ReviewParams): Promise<any> {
   const def = findSymbolDef(p.symbol);
   const underlying = (def?.nseSymbol || p.symbol.replace(/\.NS$/i, "")).toUpperCase();
   const name = def?.name || underlying;
@@ -92,14 +92,14 @@ export async function reviewOptionTrade(provider: GrowwProvider, p: ReviewParams
   let optCs: Candle[] = [];
   let spotCs: Candle[] = [];
   try {
-    optCs = await growwOptionCandles(provider, inst.tradingSymbol, dayStart, dayEnd, 5);
+    optCs = await dhanOptionCandles(inst.tradingSymbol, dayStart, dayEnd, 5);
   } catch (e: any) {
     return { available: false, message: `Option का historical data नहीं मिला: ${e?.message || e}. (उस दिन market बंद/छुट्टी हो सकती है, या data 3 महीने से पुराना है।)` };
   }
   if (!optCs.length) {
     return { available: false, message: `${p.date} को इस option का कोई candle नहीं मिला — शायद छुट्टी/weekend था या strike उस दिन list नहीं था।` };
   }
-  try { spotCs = await growwSpotCandles(provider, underlying, dayStart, dayEnd, 5); } catch { spotCs = []; }
+  try { spotCs = await dhanSpotCandles(underlying, dayStart, dayEnd, 5); } catch { spotCs = []; }
 
   // User trade P&L within the hold window.
   const leg = legPnl(optCs, startE, endE, p.entryPrice, p.exitPrice);
@@ -140,7 +140,7 @@ export async function reviewOptionTrade(provider: GrowwProvider, p: ReviewParams
       const ai = await findOption(underlying, p.type, s, p.expiry);
       if (!ai) continue;
       try {
-        const acs = await growwOptionCandles(provider, ai.tradingSymbol, dayStart, dayEnd, 5);
+        const acs = await dhanOptionCandles(ai.tradingSymbol, dayStart, dayEnd, 5);
         const al = legPnl(acs, startE, endE);
         if (al) alternatives.push({ strike: s, type: p.type, moneyness: moneyness(p.type, s, spotEntry, step).tag, entry: al.entry, exit: al.exit, pnlPct: al.pnlPct });
       } catch { /* skip candidate */ }
@@ -218,6 +218,6 @@ export async function reviewOptionTrade(provider: GrowwProvider, p: ReviewParams
     moneyness: mny.tag, moneynessPct: mny.pct, capturePct: r1(capture * 100),
     alternatives, bestAlternative: bestAlt,
     rating, ratingHindi, summary, reasons, improvements,
-    disclaimer: "केवल शैक्षणिक विश्लेषण — निवेश सलाह नहीं। Historical data Groww से; expiry/holiday पर data न भी मिले।",
+    disclaimer: "केवल शैक्षणिक विश्लेषण — निवेश सलाह नहीं। Historical data Dhan से; expiry/holiday पर data न भी मिले।",
   };
 }

@@ -3,22 +3,17 @@ import path from "path";
 import { dataFile } from "../config/dataDir";
 import { dhanFetch } from "./dhanClient";
 
-// ---- Dhan historical-data connection (BACKTESTING ONLY) ----
-// Deliberately isolated from the live trading path: GROWW IS STILL THE ONLY
-// SOURCE for OI / EMA / live signals / Master Trade Selector (see
-// config/index.ts, data/sessionFeed.ts). Dhan exists here purely so the user
-// can pull long-range historical candles for offline backtesting/research -
-// nothing in oiGridToIdea, recommendOiTrades, tryOpenOption, or any signal/
-// regime/risk engine ever reads this file or Dhan data.
+// ---- Dhan connection config (SINGLE market-data source) ----
+// Dhan is the sole source for all market data: live quotes, candles, OI,
+// option chains, and historical data.
 //
-// Auth: Dhan's simplest method is a manually-generated access token (24h
-// validity) from web.dhan.co -> My Profile -> Access DhanHQ APIs (see
-// dhanhq.co/docs/v2/authentication/) - pasted here, same pattern as this
-// app's existing Groww "paste an existing token" fallback.
+// Auth: Dhan uses a manually-generated access token (24h validity) from
+// web.dhan.co -> Access DhanHQ APIs (see dhanhq.co/docs/v2/authentication/).
+// The client ID is auto-extracted from the JWT payload on save.
 
 export interface DhanConfig {
   accessToken: string;
-  clientId: string; // optional, for display/labeling only - not required by the historical/fund-limit endpoints
+  clientId: string; // required by market-feed endpoints (sent as client-id header)
 }
 
 // Persisted on DATA_DIR (the mounted disk in production) so the Dhan
@@ -34,11 +29,22 @@ export function loadDhanConfig(): DhanConfig {
   };
 }
 
+function extractClientIdFromJwt(token: string): string {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return "";
+    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf-8"));
+    return String(payload.dhanClientId || "");
+  } catch { return ""; }
+}
+
 export function saveDhanConfig(patch: Partial<DhanConfig>): DhanConfig {
   const cur = loadDhanConfig();
+  const newToken = patch.accessToken != null && String(patch.accessToken).trim() ? String(patch.accessToken).trim() : cur.accessToken;
+  const autoClientId = newToken && newToken !== cur.accessToken ? extractClientIdFromJwt(newToken) : "";
   const next: DhanConfig = {
-    accessToken: patch.accessToken != null && String(patch.accessToken).trim() ? String(patch.accessToken).trim() : cur.accessToken,
-    clientId: patch.clientId != null && String(patch.clientId).trim() ? String(patch.clientId).trim() : cur.clientId,
+    accessToken: newToken,
+    clientId: patch.clientId != null && String(patch.clientId).trim() ? String(patch.clientId).trim() : autoClientId || cur.clientId,
   };
   try {
     fs.mkdirSync(path.dirname(FILE), { recursive: true });
@@ -72,7 +78,7 @@ export async function testDhanConnection(): Promise<{ ok: boolean; error?: strin
   const cfg = loadDhanConfig();
   if (!cfg.accessToken) return { ok: false, error: "No Dhan access token saved yet." };
   try {
-    const res = await dhanFetch("/fundlimit", { method: "GET", accessToken: cfg.accessToken });
+    const res = await dhanFetch("/fundlimit", { method: "GET", accessToken: cfg.accessToken, clientId: cfg.clientId });
     if (!res.ok) {
       const t = await res.text().catch(() => "");
       return { ok: false, error: `Dhan ${res.status}: ${t.slice(0, 200)}` };

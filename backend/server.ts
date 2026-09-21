@@ -1,5 +1,5 @@
 // Trust the OS (Windows) certificate store so Node's fetch accepts corporate-proxy /
-// antivirus self-signed root CAs (fixes "fetch failed" to api.groww.in). Node 22.15+/24.
+// antivirus self-signed root CAs. Node 22.15+/24.
 import tls from "node:tls";
 try {
   const anyTls = tls as any;
@@ -21,7 +21,8 @@ import fs from "fs";
 import apiRouter, { startHourlyScheduler } from "./routes/api";
 import { CONFIG } from "./config";
 import { getProvider, setActiveProvider } from "./data";
-import { rememberGrowwToken, setFeedFlags, readPersistedGrowwToken } from "./data/sessionFeed";
+import { setFeedFlags, syncSessionProvider } from "./data/sessionFeed";
+import { dhanConfigured } from "./data/dhanConfig";
 import { getExitCheckHealth } from "./paper/engine";
 
 const app = express();
@@ -59,30 +60,20 @@ app.get("/health", (_req, res) =>
   })
 );
 
-// Process-wide unhandled-rejection safety net. Previously log-only, so a
-// rejection escaping a poller vanished into the console with no operational
-// signal. Now also counted and surfaced on /health so a persistent failure is
-// visible from the outside instead of indistinguishable from silence.
+// Process-wide unhandled-rejection safety net.
 let unhandledRejectionCount = 0;
 process.on("unhandledRejection", (err) => {
   unhandledRejectionCount++;
   console.error(`[unhandledRejection] (#${unhandledRejectionCount})`, err instanceof Error ? err.message : err);
 });
 
-// Auto-reconnect Groww on boot using the saved access token (POST /connect
-// persists it to .groww_token, but only loaded it into the live session when the
-// admin clicked Connect - meaning a simple restart previously dropped the live
-// feed every time even though the token file was sitting right there).
-// Best-effort: a stale/expired token just leaves the feed off rather than
-// blocking startup. The token itself is never logged.
-function autoConnectGroww(): void {
-  const token = readPersistedGrowwToken();
-  if (!token) return; // no saved token - feed stays off until Connect is used
+// Auto-connect Dhan on boot using the saved access token.
+function autoConnectDhan(): void {
+  if (!dhanConfigured()) return;
   try {
-    setActiveProvider("groww", token);
-    rememberGrowwToken(token);
-    setFeedFlags({ groww: true });
-    console.log(`  Groww         : reconnecting with saved token...`);
+    setActiveProvider("dhan");
+    setFeedFlags({ dhan: true });
+    console.log(`  Dhan          : reconnecting with saved token...`);
   } catch {
     /* provider construction failed - feed stays off */
   }
@@ -94,7 +85,7 @@ app.listen(CONFIG.port, () => {
   console.log(`  Data provider : ${getProvider().name}`);
   console.log(`  Dashboard     : http://localhost:${CONFIG.port}`);
   console.log(`  API base      : http://localhost:${CONFIG.port}/api\n`);
-  autoConnectGroww();
+  autoConnectDhan();
   // Auto-record the hourly 15-min-model shortlist (9:30-15:30 IST) for evening backtest.
   startHourlyScheduler();
 });

@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { GrowwProvider } from "../backend/data/growwProvider";
+import { DhanProvider } from "../backend/data/dhanProvider";
 import { backtestOiCommandLog, LogReplayResult, OiTradeSim } from "../backend/backtest/oiCommand";
 
 // ---- OI Command Back-Test — CLI runner -------------------------------------
@@ -16,10 +16,10 @@ import { backtestOiCommandLog, LogReplayResult, OiTradeSim } from "../backend/ba
 //   npm run backtest:oi -- log ^NSEI        -> replay TODAY's logged signals (standalone)
 //   npm run backtest:oi -- log ^NSEI 2026-09-04
 //
-//  - "live" hits the RUNNING server (start.ps1 / run-groww.ps1) at
+//  - "live" hits the RUNNING server (start.ps1) at
 //    http://localhost:PORT/api/oi-command/backtest — it uses the exact live OI
-//    grid, then simulates the recommended option trade on real Groww candles.
-//  - "log" runs standalone (only needs .groww_token) and replays the signals the
+//    grid, then simulates the recommended option trade on real Dhan candles.
+//  - "log" runs standalone (only needs Dhan config) and replays the signals the
 //    server logged into data/oi-command-log.json.
 
 const args = process.argv.slice(2);
@@ -44,9 +44,11 @@ function lastTradingDateIST(): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
-function readToken(): string | undefined {
-  if (process.env.GROWW_ACCESS_TOKEN) return process.env.GROWW_ACCESS_TOKEN;
-  try { return fs.readFileSync(path.resolve(process.cwd(), ".groww_token"), "utf-8").trim() || undefined; } catch { return undefined; }
+function dhanConfigured(): boolean {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), "data/dhan-config.json"), "utf-8"));
+    return !!cfg?.accessToken;
+  } catch { return false; }
 }
 
 const money = (v: number | null | undefined) => (v == null ? "—" : "₹" + v);
@@ -89,7 +91,7 @@ async function runLive() {
     const res = await fetch(url);
     d = await res.json();
   } catch (e: any) {
-    console.error(`\nCould not reach the server on port ${PORT}. Start it first (./start.ps1 or ./run-groww.ps1), then re-run.`);
+    console.error(`\nCould not reach the server on port ${PORT}. Start it first (./start.ps1), then re-run.`);
     console.error(`Or run standalone log replay:  npm run backtest:oi -- log ${symbol} ${date}`);
     console.error(`(${e?.message || e})`);
     process.exit(1);
@@ -100,13 +102,12 @@ async function runLive() {
   if (d.live && d.live.available) printSim(d.live.simulation);
   else console.log("  " + ((d.live && d.live.message) || "grid setup unavailable"));
   printLog(d.log);
-  console.log("\nNote: historical intraday OI can't be reconstructed — DIRECTION is the live grid read applied from the entry time; the option premium path & target/stop are measured on real Groww candles. Education/simulation only.");
+  console.log("\nNote: historical intraday OI can't be reconstructed — DIRECTION is the live grid read applied from the entry time; the option premium path & target/stop are measured on real Dhan candles. Education/simulation only.");
 }
 
 async function runLog() {
-  const token = readToken();
-  if (!token) { console.error("No Groww token. Set GROWW_ACCESS_TOKEN or save an access token to .groww_token."); process.exit(1); }
-  const provider = new GrowwProvider(token);
+  if (!dhanConfigured()) { console.error("Dhan not configured. Save an access token in data/dhan-config.json."); process.exit(1); }
+  const provider = new DhanProvider();
   console.log(`\nOI Command Back-test (LOG replay, standalone) · ${symbol} · ${date}`);
   const g = await backtestOiCommandLog(provider, { date, symbol });
   printLog(g);

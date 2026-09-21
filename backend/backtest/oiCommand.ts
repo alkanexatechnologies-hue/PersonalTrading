@@ -1,6 +1,6 @@
 import { Candle } from "../types";
 import { findSymbolDef } from "../config";
-import { GrowwProvider, growwOptionCandles, growwSpotCandles } from "../data/growwProvider";
+import { dhanOptionCandles, dhanSpotCandles, DhanProvider } from "../data/dhanProvider";
 import { findOption, optionStrikes, optionExpiries } from "../data/growwInstruments";
 import { OiSignal, Horizon, HORIZONS, loadOiSignalLog } from "../oi/oiCommandLog";
 
@@ -110,7 +110,7 @@ async function resolveStrike(underlying: string, expiry: string, type: "CE" | "P
   return strikes.reduce((b, s) => (Math.abs(s - wanted) < Math.abs(b - wanted) ? s : b), strikes[0]);
 }
 
-export async function simulateOiOptionTrade(provider: GrowwProvider, p: SimParams): Promise<OiTradeSim> {
+export async function simulateOiOptionTrade(provider: DhanProvider, p: SimParams): Promise<OiTradeSim> {
   const def = findSymbolDef(p.symbol);
   const underlying = (def?.nseSymbol || p.symbol.replace(/\.NS$/i, "")).toUpperCase();
   const base: OiTradeSim = {
@@ -134,13 +134,13 @@ export async function simulateOiOptionTrade(provider: GrowwProvider, p: SimParam
 
   let optCs: Candle[] = [];
   try {
-    optCs = await growwOptionCandles(provider, inst.tradingSymbol, dayStart, dayEnd, 5);
+    optCs = await dhanOptionCandles(inst.tradingSymbol, dayStart, dayEnd, 5);
   } catch (e: any) {
     return { ...base, expiry, strike, tradingSymbol: inst.tradingSymbol, message: `Option historical data नहीं मिला: ${e?.message || e}` };
   }
   if (!optCs.length) return { ...base, expiry, strike, tradingSymbol: inst.tradingSymbol, message: `${p.date} को इस option की कोई candle नहीं (छुट्टी/weekend या strike उस दिन list नहीं था)।` };
   let spotCs: Candle[] = [];
-  try { spotCs = await growwSpotCandles(provider, underlying, dayStart, dayEnd, 5); } catch { spotCs = []; }
+  try { spotCs = await dhanSpotCandles(underlying, dayStart, dayEnd, 5); } catch { spotCs = []; }
 
   // Entry premium = grid LTP if given, else the first option candle open at/after entry.
   const entryC = candleAtOrAfter(optCs, entryE);
@@ -224,7 +224,7 @@ export interface LogReplayResult {
 const readLog = loadOiSignalLog;
 
 export async function backtestOiCommandLog(
-  provider: GrowwProvider,
+  provider: DhanProvider,
   opts: { date?: string; symbol?: string } = {}
 ): Promise<LogReplayResult> {
   const date = opts.date || istDateOf(Math.floor(Date.now() / 1000));

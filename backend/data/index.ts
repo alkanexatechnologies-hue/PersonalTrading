@@ -1,26 +1,22 @@
 import { MarketDataProvider } from "./provider";
-import { GrowwProvider } from "./growwProvider";
+import { DhanProvider } from "./dhanProvider";
 
-// GROWW IS THE ONLY MARKET-DATA PROVIDER.
+// DHAN IS THE ONLY MARKET-DATA PROVIDER.
 // The MarketDataProvider abstraction is preserved (so the trading engine never
-// hard-codes a vendor), but it resolves EXCLUSIVELY to Groww. There is no Yahoo
-// or TrueData provider. BrokerProvider exists only for future ORDER EXECUTION and
-// must never be used as a market-data source, so it is not wired here.
+// hard-codes a vendor), but it resolves EXCLUSIVELY to Dhan. There is no Groww,
+// Yahoo or TrueData provider. BrokerProvider exists only for future ORDER
+// EXECUTION and must never be used as a market-data source.
 
 let provider: MarketDataProvider | null = null;
 
 export function getProvider(): MarketDataProvider {
   if (provider) return provider;
-  provider = new GrowwProvider(process.env.GROWW_ACCESS_TOKEN);
+  provider = new DhanProvider();
   return provider;
 }
 
-// Kept for API compatibility with the connect flow. Only Groww is accepted as a
-// market-data provider; any other name is ignored (Groww stays active).
-export function setActiveProvider(_name: "groww", token?: string): MarketDataProvider {
-  // `token !== undefined` (including "") must win: forget-token passes an empty
-  // string so the singleton cannot keep a previous Bearer or fall back to env.
-  provider = new GrowwProvider(token !== undefined ? token : process.env.GROWW_ACCESS_TOKEN);
+export function setActiveProvider(_name: "dhan"): MarketDataProvider {
+  provider = new DhanProvider();
   return provider;
 }
 

@@ -13,7 +13,7 @@ import { RULE_VERSION } from "./disclosures";
 export interface SignalAuditInput {
   symbol: string;
   name: string;
-  dataSource: string;        // always "GROWW"
+  dataSource: string;        // always "DHAN"
   dataTs: number | null;     // epoch seconds of the market-data snapshot (oiAsOf)
   dataAgeSec: number | null; // freshness at emit
   direction: "UP" | "DOWN";

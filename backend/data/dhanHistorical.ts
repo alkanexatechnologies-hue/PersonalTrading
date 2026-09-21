@@ -37,7 +37,7 @@ function toCandles(payload: any): Candle[] {
 async function dhanFetchJson(path: string, body: Record<string, unknown>): Promise<any> {
   const cfg = loadDhanConfig();
   if (!cfg.accessToken) throw new Error("Dhan not connected — paste an access token first (Dhan button in the top bar).");
-  const res = await guardedDhanFetch(path, { method: "POST", body, accessToken: cfg.accessToken });
+  const res = await guardedDhanFetch(path, { method: "POST", body, accessToken: cfg.accessToken, clientId: cfg.clientId });
   if (!res.ok) {
     const t = await res.text().catch(() => "");
     throw new Error(`Dhan ${res.status}: ${t.slice(0, 200)}`);

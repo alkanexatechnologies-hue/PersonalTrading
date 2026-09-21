@@ -38,6 +38,6 @@ export function complianceMeta() {
     sebiStandardWarning: SEBI_STANDARD_WARNING,
     // Honest capability flags for the UI.
     liveOrderExecution: false, // no broker order path; simulated paper only
-    marketDataSource: "GROWW",
+    marketDataSource: "DHAN",
   };
 }

@@ -78,7 +78,7 @@ export function logDecision(e: Omit<DecisionLogEntry, "at"> & { at?: number }): 
       ts: at * 1000, channel: "decision", symbol: e.symbol ?? null,
       mode: e.mode === "Directional" || e.mode === "Scalp" ? e.mode : null,
       eventType: m.eventType, severity: m.severity, summary: e.text,
-      payload: { dataSource: "GROWW", from: e.from, to: e.to, finalScore: e.finalScore, setupQuality: e.setupQuality },
+      payload: { dataSource: "DHAN", from: e.from, to: e.to, finalScore: e.finalScore, setupQuality: e.setupQuality },
     });
   } catch { /* best-effort */ }
 }

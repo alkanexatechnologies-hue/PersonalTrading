@@ -39,7 +39,6 @@ async function loadSymbolsAndWatchlist() {
   state.symbols = res.symbols;
   if (el("provider-badge")) el("provider-badge").textContent = "provider: " + res.provider;
   if (el("disclaimer")) el("disclaimer").textContent = res.disclaimer;
-  if (el("home-footer-disclaimer")) el("home-footer-disclaimer").textContent = res.disclaimer || "";
   if (el("home-tk-provider")) el("home-tk-provider").textContent = res.provider || "—";
   renderWatchlist();
   if (!state.active && state.symbols.length) selectSymbol(state.symbols[0].symbol);
@@ -55,7 +54,7 @@ async function init() {
 
   // Trader Dashboard is the default tab for Monday live testing of the OI model
   // - fire its fetch FIRST, before anything else, so it gets first claim on the
-  // Groww 2-concurrent throttle while someone is watching the loading spinner.
+  // Dhan 2-concurrent throttle while someone is watching the loading spinner.
   // initOiCommand fetches its own underlyings (/api/backtest/option/underlyings)
   // and does NOT depend on state.symbols, so loadSymbolsAndWatchlist (below) must
   // not block it - awaiting /api/symbols first used to add seconds to first paint.
@@ -70,11 +69,11 @@ async function init() {
 
   setTimeout(() => loadIndexDesk(), 1500);
   setTimeout(() => startIndexStrip(), 2500);
-  setTimeout(() => { loadTraderMind(); setInterval(loadTraderMind, 20 * 1000); }, 3500);
+  // Trader Mind removed from upper cockpit strip; tab version still loads on demand.
   setTimeout(() => loadWatchlistBadges(), 4500);
   setTimeout(() => loadWatchlistScan(), 6500); // heavy per-symbol scan — last, after the cheaper loaders
 
-  // Heavy scans are staggered so Groww is not hammered on login (no hang).
+  // Heavy scans are staggered so Dhan is not hammered on login (no hang).
   setTimeout(() => loadTopPicks(true), 2500);
   setTimeout(() => loadOptionTopPick(), 5000); // scans ~60 stocks - stays clear of the earlier, cheaper staggered loaders
   if (el("otp-refresh")) el("otp-refresh").addEventListener("click", loadOptionTopPick);
@@ -214,11 +213,11 @@ function cadencePanelHtml(c, d) {
   }).join("");
   return `<div class="cadence-head">Refresh cadence${d.marketOpen ? "" : " · market closed"}</div>${body || '<div class="wl-sub">cadence unavailable</div>'}`;
 }
-// §5–7/§18 Groww connection & data-health detail panel (opens from the status pill).
-function growwHealthPanelHtml(S, gh, d, c) {
+// §5–7/§18 Dhan connection & data-health detail panel (opens from the status pill).
+function dhanHealthPanelHtml(S, gh, d, c) {
   const rows = [
     ["Status", S.txt],
-    ["Data Source", "GROWW"],
+    ["Data Source", "DHAN"],
     ["Market", d.marketOpen ? "OPEN" : "CLOSED"],
     ["Last Update", gh.lastDataTs ? new Date(gh.lastDataTs).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false }) : "—"],
     ["Data Age", gh.dataAgeSec != null ? gh.dataAgeSec + " sec" : "—"],
@@ -227,7 +226,7 @@ function growwHealthPanelHtml(S, gh, d, c) {
     ["Failures", gh.failures != null ? gh.failures : "—"],
     ["Reconnects", gh.reconnects != null ? gh.reconnects : "—"],
   ];
-  return `<div class="cadence-head">${S.dot} Groww Connection · Data Health</div>` +
+  return `<div class="cadence-head">${S.dot} Dhan Connection · Data Health</div>` +
     rows.map(([k, v]) => `<div class="cadence-row"><span>${k}</span><b>${v}</b></div>`).join("") +
     `<div class="cadence-row"><span>OI refresh</span><b>every ${(c && c.oiSec) || 90}s</b></div>`;
 }
@@ -235,10 +234,10 @@ async function updateDataStatus() {
   const node = el("market-status");
   if (!node) return;
   // Wire the cadence panel toggle once (idempotent).
-  const gsBtn = el("groww-status");
+  const gsBtn = el("dhan-status");
   if (gsBtn && !gsBtn.dataset.wired) {
     gsBtn.dataset.wired = "1";
-    gsBtn.addEventListener("click", () => { const gp = el("groww-health-panel"); if (gp) gp.classList.toggle("hidden"); });
+    gsBtn.addEventListener("click", () => { const gp = el("dhan-health-panel"); if (gp) gp.classList.toggle("hidden"); });
   }
   if (!node) return;
   try {
@@ -275,38 +274,38 @@ async function updateDataStatus() {
       }
     }
     const c = d.cadence || {};
-    // §C.2 single data-health readout: which provider serves OPTIONS (Groww only,
+    // §C.2 single data-health readout: which provider serves OPTIONS (Dhan only,
     // per the strict live-option policy) + whether the feed is degraded/after-hours.
-    // §5–7 Groww connection / data-health readout — Groww is the ONLY source.
-    const gs = el("groww-status");
-    const gh = d.growwHealth || {};
-    const status = gh.status || d.growwStatus || (d.hasGrowwToken ? (d.marketOpen ? "YELLOW" : "CLOSED") : "GREY");
+    // §5–7 Dhan connection / data-health readout — Dhan is the ONLY source.
+    const gs = el("dhan-status");
+    const gh = d.dhanHealth || d.growwHealth || {};
+    const status = gh.status || d.dhanStatus || d.growwStatus || (d.hasDhanToken || d.hasGrowwToken ? (d.marketOpen ? "YELLOW" : "CLOSED") : "GREY");
     const STATUS = {
-      GREEN:  { dot: "🟢", txt: "GROWW CONNECTED — LIVE", cls: "open" },
-      YELLOW: { dot: "🟡", txt: "GROWW CONNECTED — DELAYED", cls: "pre" },
-      RED:    { dot: "🔴", txt: "GROWW DISCONNECTED", cls: "closed" },
-      GREY:   { dot: "⚪", txt: "GROWW NOT CONFIGURED", cls: "" },
+      GREEN:  { dot: "🟢", txt: "DHAN CONNECTED — LIVE", cls: "open" },
+      YELLOW: { dot: "🟡", txt: "DHAN CONNECTED — DELAYED", cls: "pre" },
+      RED:    { dot: "🔴", txt: "DHAN DISCONNECTED", cls: "closed" },
+      GREY:   { dot: "⚪", txt: "DHAN NOT CONFIGURED", cls: "" },
       CLOSED: { dot: "🌙", txt: "MARKET CLOSED", cls: "pre" },
     };
     const S = STATUS[status] || STATUS.GREY;
     if (gs) {
       gs.textContent = `${S.dot} ${S.txt}`;
       gs.className = "pill market-status " + S.cls;
-      gs.title = `Data source: GROWW (only). ${d.feedMode || ""}`.trim();
-      const gp = el("groww-health-panel");
-      if (gp) gp.innerHTML = growwHealthPanelHtml(S, gh, d, c);
+      gs.title = `Data source: DHAN (only). ${d.feedMode || ""}`.trim();
+      const gp = el("dhan-health-panel");
+      if (gp) gp.innerHTML = dhanHealthPanelHtml(S, gh, d, c);
     }
-    // §8 Trading-safety banner: block live signals when Groww is unhealthy/closed.
+    // §8 Trading-safety banner: block live signals when Dhan is unhealthy/closed.
     const sb = el("signal-block-banner");
     if (sb) {
       if (d.signalsBlocked) {
-        sb.innerHTML = `<span class="cs-dot red"></span><b>SIGNAL BLOCKED</b> — ${d.signalsBlockedReason || "Groww data unavailable/stale"}`;
+        sb.innerHTML = `<span class="cs-dot red"></span><b>SIGNAL BLOCKED</b> — ${d.signalsBlockedReason || "Dhan data unavailable/stale"}`;
         sb.className = "cs-seg cs-status blocked";
         sb.title = d.signalsBlockedReason || "Live signals blocked";
       } else {
         sb.innerHTML = `<span class="cs-dot green"></span><b>LIVE SIGNALS ENABLED</b>`;
         sb.className = "cs-seg cs-status ok";
-        sb.title = "Groww connected, data fresh — live signals allowed";
+        sb.title = "Dhan connected, data fresh — live signals allowed";
       }
     }
     // Single consolidated MARKET pill: session + freshness + timestamp. Neutral/muted when
@@ -319,15 +318,15 @@ async function updateDataStatus() {
       node.textContent = `● Market OPEN · tick ${ageStr}${d.refreshIst ? " · " + d.refreshIst : ""}`;
       node.className = "pill market-status " + (fresh ? "open" : "pre");
       node.title =
-        `Groww live feed. ${d.refSymbol} ₹${d.refPrice ?? "-"}, last tick ${ageStr}.\n` +
+        `Dhan live feed. ${d.refSymbol} ₹${d.refPrice ?? "-"}, last tick ${ageStr}.\n` +
         `Refresh cadence — quotes ~${c.quotesSec}s · option OI ~${c.oiSec}s · daily ~${Math.round((c.dailySec || 0) / 60)}m · ` +
         `paper tick ~${Math.round((c.paperTickSec || 0) / 60)}m.`;
     } else {
       const t = d.refreshIst ? ` · ${d.refreshIst}` : "";
       node.textContent = `● Market CLOSED${t}`;
       node.className = "pill market-status muted";
-      node.title = (d.feedMode || "Market closed — Groww historical only, no live signals") +
-        "\nData source: GROWW (only).\nLast status refresh " + (d.refreshIst || "");
+      node.title = (d.feedMode || "Market closed — Dhan historical only, no live signals") +
+        "\nData source: DHAN (only).\nLast status refresh " + (d.refreshIst || "");
     }
   } catch {
     /* leave the last-known market pill in place on a transient fetch error */
@@ -583,35 +582,6 @@ function chartOpts(width, height) {
   };
 }
 
-// ---------- app-level Trader Mind (Hindi discipline cue) ----------
-// ---------- app-level Trader Mind (discipline + separate best-case CE/PE) ----------
-async function loadTraderMind() {
-  const bar = el("mind-bar");
-  const stEl = el("mind-state");
-  const hiEl = el("mind-hindi");
-  const bestEl = el("mind-best");
-  if (!bar || !stEl) return;
-  if (hiEl) hiEl.innerHTML = "";
-  bar.className = "cs-seg mind-bar mind-neutral";
-  stEl.textContent = "🧠 Trader Mind";
-  const chip = (kind, p) => {
-    if (!p) return `<button type="button" class="mind-chip wait" disabled>${kind}: WAIT</button>`;
-    const cls = p.optionType === "CE" ? "ce" : "pe";
-    const left = p.remainingPct != null ? ` · left ${Number(p.remainingPct).toFixed(1)}%` : "";
-    const when = p.runStartClock ? ` · ${p.runStartClock}` : "";
-    const play = p.strike ? `${p.strike} ${p.optionType}` : p.optionType;
-    return `<button type="button" class="mind-chip ${cls}" data-sym="${p.symbol}">${kind} ${p.name} BUY ${play}${when}${left}</button>`;
-  };
-  try {
-    const best = await fetchJSON("/api/best-case", 12000).catch(() => null);
-    if (!bestEl) return;
-    if (!best || best.error) bestEl.innerHTML = '<span class="wl-sub">Best case warming…</span>';
-    else if (best.wait && !best.index && !best.stock) bestEl.innerHTML = `<span class="mind-wait">${best.wait}</span>`;
-    else bestEl.innerHTML = chip("INDEX", best.index) + chip("STOCK", best.stock);
-    bestEl.querySelectorAll(".mind-chip[data-sym]").forEach((b) => b.addEventListener("click", () => openStock(b.getAttribute("data-sym"))));
-  } catch (_) { /* keep last */ }
-}
-
 // ---------- app-level best-2 option opportunities + 1s live ticker ----------
 async function loadTopOpportunities() {
   try {
@@ -720,7 +690,7 @@ let liveTickBusy = false;
 function startLiveTicker() {
   if (state.liveTimer) return;
   state.prevPrices = state.prevPrices || {};
-  // 3s cadence + no overlap: keeps prices live without bursting the Groww feed.
+  // 3s cadence + no overlap: keeps prices live without bursting the Dhan feed.
   state.liveTimer = setInterval(async () => {
     if (!isMarketOpen() || liveTickBusy) return; // static when closed; skip if a fetch is still running
     const wl = (state.symbols || []).map((s) => s.symbol);
@@ -928,7 +898,7 @@ async function loadWatchlistBadges() {
     // parallel (was a sequential for-loop awaiting one symbol at a time, which
     // serialized ~26 round-trips and was most of "dashboard is slow after
     // login") — the browser's own per-origin connection cap plus the server's
-    // Groww request throttle (growwProvider.ts) already bound real concurrency,
+    // Dhan request throttle (dhanProvider.ts) already bound real concurrency,
     // so this adds no extra load, just removes an unnecessary added wait.
     await Promise.all(state.symbols.map(async (s) => {
       try {
@@ -981,23 +951,23 @@ function styleBadge(node, score) {
 }
 
 // ---------- connect / data source ----------
-// Groww, Telegram, and Dhan each get their own top-bar button + panel (no
-// longer bundled into one "Connect data" panel). All three share the same
+// Dhan and Telegram each get their own top-bar button + panel (no
+// longer bundled into one "Connect data" panel). All share the same
 // fixed-position panel styling, so only one is ever shown at a time.
-let _growwPollTimer = null;
+let _dhanPollTimer = null;
 function closeAllConnectPanels() {
   ["connect-panel", "telegram-panel", "dhan-panel"].forEach((id) => {
     const p = el(id);
     if (p) p.classList.add("hidden");
   });
-  stopGrowwPoll();
+  stopDhanPoll();
 }
 function setupConnect() {
   const panel = el("connect-panel");
   el("connect-btn").addEventListener("click", () => {
     const wasHidden = panel.classList.contains("hidden");
     closeAllConnectPanels();
-    if (wasHidden) { panel.classList.remove("hidden"); loadGrowwConfig(); startGrowwPoll(); loadAuthEmail(); }
+    if (wasHidden) { panel.classList.remove("hidden"); loadDhanConfig(); startDhanPoll(); loadAuthEmail(); }
   });
   el("connect-close").addEventListener("click", closeAllConnectPanels);
 
@@ -1260,10 +1230,10 @@ async function doRotateLoginNow() {
   }
 }
 
-// Delete the saved Groww token, then prompt the user to generate a fresh one.
+// Delete the saved Dhan token, then prompt the user to generate a fresh one.
 async function doForgetToken() {
   const status = el("conn-status");
-  if (!confirm("Remove the saved Groww access token? You'll need to paste a fresh token to reconnect.")) return;
+  if (!confirm("Remove the saved Dhan access token? You'll need to paste a fresh token to reconnect.")) return;
   try {
     const r = await fetch("/api/groww/forget-token", { method: "POST" }).then((res) => res.json());
     if (status) {
@@ -1271,19 +1241,19 @@ async function doForgetToken() {
       status.className = "conn-status warn";
     }
     const inp = el("conn-token"); if (inp) { inp.value = ""; inp.focus(); }
-    renderConnStatus("gc-conn-status", "GROWW", "DISCONNECTED", { Connection: "Disconnected", Authentication: "None", "Data Status": "Not receiving" });
-    loadGrowwConfig();
+    renderConnStatus("gc-conn-status", "DHAN", "DISCONNECTED", { Connection: "Disconnected", Authentication: "None", "Data Status": "Not receiving" });
+    loadDhanConfig();
   } catch (e) {
     if (status) { status.textContent = "Could not remove token: " + e.message; status.className = "conn-status err"; }
   }
 }
 
-function startGrowwPoll() {
-  stopGrowwPoll();
-  _growwPollTimer = setInterval(loadGrowwConfig, 5000);
+function startDhanPoll() {
+  stopDhanPoll();
+  _dhanPollTimer = setInterval(loadDhanConfig, 5000);
 }
-function stopGrowwPoll() {
-  if (_growwPollTimer) { clearInterval(_growwPollTimer); _growwPollTimer = null; }
+function stopDhanPoll() {
+  if (_dhanPollTimer) { clearInterval(_dhanPollTimer); _dhanPollTimer = null; }
 }
 
 // ---------- compliance: consent + disclosures + auto-trade acknowledgement ----------
@@ -1291,15 +1261,13 @@ const CMP_ACK_KEY = "nsa_disclosure_ack";
 let _cmpMeta = { appVersion: "0.0.0", disclosureVersion: "0", ruleVersion: "" };
 
 function setupCompliance() {
-  // Version metadata from the server is the source of truth for re-prompting.
+  // Version metadata from the server.
   fetch("/api/compliance/meta").then((r) => r.json()).then((m) => {
     _cmpMeta = m || _cmpMeta;
-    const v = el("disclosure-versions");
-    if (v) v.textContent = `App version ${_cmpMeta.appVersion} · disclosure ${_cmpMeta.disclosureVersion}. This software is not SEBI-approved/registered and does not guarantee profits.`;
     maybeShowConsent();
   }).catch(() => { maybeShowConsent(); });
 
-  // First-use consent modal.
+  // First-use consent modal (login screen SEBI disclosure).
   const chk = el("consent-check");
   const cont = el("consent-continue");
   if (chk && cont) chk.addEventListener("change", () => { cont.disabled = !chk.checked; });
@@ -1312,20 +1280,6 @@ function setupCompliance() {
       }));
     } catch (_) {}
     el("consent-modal").classList.add("hidden");
-  });
-
-  // Footer link → full disclosure modal (Risk Disclosure only; the separate
-  // SEBI/Regulatory Disclosure entry point was removed on request).
-  const openDisc = () => { el("disclosure-modal").classList.remove("hidden"); };
-  if (el("open-risk-disclosure")) el("open-risk-disclosure").addEventListener("click", () => openDisc());
-  if (el("disclosure-close")) el("disclosure-close").addEventListener("click", () => el("disclosure-modal").classList.add("hidden"));
-
-  // Per-signal risk note collapse toggle.
-  const srn = el("srn-toggle");
-  if (srn) srn.addEventListener("click", () => {
-    const box = el("signal-risk-note");
-    const collapsed = box.classList.toggle("collapsed");
-    srn.textContent = collapsed ? "+" : "–";
   });
 
   // Auto-trade acknowledgement modal.
@@ -1387,15 +1341,15 @@ async function emergencyStop() {
 }
 
 function paintFeedToggles(d) {
-  const g = el("feed-groww");
+  const g = el("feed-dhan");
   if (!d || !g) return;
-  const gon = d.growwOn !== false;
-  g.textContent = "Groww · single source · " + (gon ? "ON" : "OFF");
+  const gon = d.dhanOn !== false;
+  g.textContent = "Dhan · single source · " + (gon ? "ON" : "OFF");
   g.className = "pill-btn feed-tog " + (gon ? "on" : "off");
-  g.title = (d.reason || "") + (d.hasGrowwToken === false ? "\nGroww token missing — Connect data." : "\nGroww is the only market-data source.");
+  g.title = (d.reason || "") + (d.hasDhanToken === false ? "\nDhan token missing — Connect data." : "\nDhan is the only market-data source.");
 }
 function setupFeedToggles() {
-  const g = el("feed-groww");
+  const g = el("feed-dhan");
   const send = async (body) => {
     const r = await fetch("/api/feed", {
       method: "POST",
@@ -1414,7 +1368,7 @@ function setupFeedToggles() {
   };
   if (g) g.addEventListener("click", async () => {
     const cur = await fetch("/api/connection").then((r) => r.json());
-    send({ groww: !cur.growwOn });
+    send({ dhan: !cur.dhanOn });
   });
 }
 
@@ -1433,7 +1387,7 @@ async function refreshConnection() {
 }
 
 // ---------- reusable connection-status component ----------
-// One renderer for every provider (Groww today, Dhan/future providers next).
+// One renderer for every provider (Dhan is the single source).
 // States: CONNECTED / CHECKING / DISCONNECTED / ERROR.
 const CONN_STATE_UI = {
   CONNECTED:    { dot: "🟢", label: "CONNECTED", cls: "ok" },
@@ -1455,8 +1409,8 @@ function renderConnStatus(targetId, provider, state, info) {
 }
 const fmtCheckTime = (ts) => (ts ? new Date(ts).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—");
 
-// SAVE ACCESS TOKEN — the access token is the only Groww credential. The server
-// accepts it only after a real authenticated Groww request returns data, so a
+// SAVE ACCESS TOKEN — the access token is the only Dhan credential. The server
+// accepts it only after a real authenticated Dhan request returns data, so a
 // non-empty field alone never shows CONNECTED.
 async function doSaveConnect() {
   const status = el("conn-status");
@@ -1465,14 +1419,14 @@ async function doSaveConnect() {
   const token = (tokenInput?.value || "").trim();
 
   if (!token) {
-    status.textContent = "Paste your Groww access token first.";
+    status.textContent = "Paste your Dhan access token first.";
     status.className = "conn-status err";
     return;
   }
 
-  status.textContent = "Validating token with Groww (a few seconds)…";
+  status.textContent = "Validating token with Dhan (a few seconds)…";
   status.className = "conn-status";
-  renderConnStatus("gc-conn-status", "GROWW", "CHECKING", { Connection: "Checking…" });
+  renderConnStatus("gc-conn-status", "DHAN", "CHECKING", { Connection: "Checking…" });
   btn.disabled = true;
   try {
     const r = await fetch("/api/connect", {
@@ -1483,47 +1437,47 @@ async function doSaveConnect() {
     if (r.ok) {
       status.textContent = r.message || "Connected — market data received.";
       status.className = "conn-status ok";
-      renderConnStatus("gc-conn-status", "GROWW", "CONNECTED", {
+      renderConnStatus("gc-conn-status", "DHAN", "CONNECTED", {
         Connection: "Connected", Authentication: "Valid", "Data Status": "Receiving",
         "Last Successful Check": fmtCheckTime(Date.now()),
       });
-      setProviderBadge(r.provider || "groww");
+      setProviderBadge(r.provider || "dhan");
       // SECURITY: never leave the credential sitting in the DOM after saving.
       if (tokenInput) tokenInput.value = "";
-      loadGrowwConfig();
+      loadDhanConfig();
       loadAlerts();
       if (state.active) loadSymbol(state.active);
     } else {
-      status.textContent = r.error || "Groww connection failed.";
+      status.textContent = r.error || "Dhan connection failed.";
       status.className = "conn-status err";
-      renderConnStatus("gc-conn-status", "GROWW", r.code === "NETWORK_ERROR" || r.code === "API_UNAVAILABLE" || r.code === "RATE_LIMIT" ? "ERROR" : "DISCONNECTED", {
+      renderConnStatus("gc-conn-status", "DHAN", r.code === "NETWORK_ERROR" || r.code === "API_UNAVAILABLE" || r.code === "RATE_LIMIT" ? "ERROR" : "DISCONNECTED", {
         Connection: "Failed", Authentication: r.code === "INVALID_TOKEN" || r.code === "AUTH_FAILED" ? "Invalid" : "Unknown",
         Reason: r.error || "—",
       });
-      setProviderBadge(r.provider || "groww");
-      loadGrowwConfig();
-      // Groww rate-limits requests — cool the button down so repeated clicks
+      setProviderBadge(r.provider || "dhan");
+      loadDhanConfig();
+      // Dhan rate-limits requests — cool the button down so repeated clicks
       // don't make it worse.
-      if (r.rateLimited) { growwCooldown(btn, 90); return; }
+      if (r.rateLimited) { dhanCooldown(btn, 90); return; }
     }
   } catch (e) {
     status.textContent = "Error: " + e.message;
     status.className = "conn-status err";
-    renderConnStatus("gc-conn-status", "GROWW", "ERROR", { Connection: "Failed", Reason: e.message });
+    renderConnStatus("gc-conn-status", "DHAN", "ERROR", { Connection: "Failed", Reason: e.message });
   } finally {
     if (!btn.dataset.cooldown) btn.disabled = false;
   }
 }
 
-// Disable a button for N seconds with a live countdown (used after a Groww rate-limit).
-function growwCooldown(btn, secs) {
+// Disable a button for N seconds with a live countdown (used after a Dhan rate-limit).
+function dhanCooldown(btn, secs) {
   if (!btn) return;
   const label = btn.textContent;
   btn.dataset.cooldown = "1";
   btn.disabled = true;
   let left = secs;
   const tick = () => {
-    btn.textContent = `Wait ${left}s (Groww rate-limit)`;
+    btn.textContent = `Wait ${left}s (Dhan rate-limit)`;
     if (left <= 0) {
       clearInterval(t); delete btn.dataset.cooldown; btn.disabled = false; btn.textContent = label;
     }
@@ -1539,13 +1493,13 @@ async function doConnect(token) {
   return doSaveConnect();
 }
 
-// TEST GROWW CONNECTION — the server makes a real authenticated Groww request;
-// we only show 🟢 Groww Connected when actual market data came back.
+// TEST DHAN CONNECTION — the server makes a real authenticated Dhan request;
+// we only show 🟢 Dhan Connected when actual market data came back.
 async function doTestConnection() {
   const box = el("gc-test-result");
   const btn = el("conn-test");
   box.innerHTML = "<div class='gc-tr-line'>Testing…</div>";
-  renderConnStatus("gc-conn-status", "GROWW", "CHECKING", { Connection: "Checking…" });
+  renderConnStatus("gc-conn-status", "DHAN", "CHECKING", { Connection: "Checking…" });
   btn.disabled = true;
   try {
     const r = await fetch("/api/groww/test").then((res) => res.json());
@@ -1554,17 +1508,17 @@ async function doTestConnection() {
     const line = (ok, label, msg) =>
       `<div class="gc-tr-line ${ok ? "ok" : "err"}">${ok ? "✓" : "✗"} ${label}${msg ? " — " + msg : ""}</div>`;
     const head = r.ok
-      ? `<div class="gc-tr-head ok">🟢 Groww Connected</div>`
-      : `<div class="gc-tr-head err">🔴 Groww Connection Failed</div>`;
+      ? `<div class="gc-tr-head ok">🟢 Dhan Connected</div>`
+      : `<div class="gc-tr-head err">🔴 Dhan Connection Failed</div>`;
     box.innerHTML = head +
       line(c.auth, "Authentication", m.auth) +
-      line(c.api, "Groww API reachable", m.api) +
+      line(c.api, "Dhan API reachable", m.api) +
       line(c.data, "Market data received", m.data) +
       line(c.optionChain, "Option chain / OI reachable", m.optionChain) +
       line(c.freshness, "Data freshness", m.freshness);
 
     if (r.ok) {
-      renderConnStatus("gc-conn-status", "GROWW", "CONNECTED", {
+      renderConnStatus("gc-conn-status", "DHAN", "CONNECTED", {
         Connection: "Connected",
         Authentication: "Valid",
         "Data Status": "Receiving",
@@ -1572,7 +1526,7 @@ async function doTestConnection() {
       });
     } else {
       const errorish = r.code === "NETWORK_ERROR" || r.code === "API_UNAVAILABLE" || r.code === "RATE_LIMIT";
-      renderConnStatus("gc-conn-status", "GROWW", errorish ? "ERROR" : "DISCONNECTED", {
+      renderConnStatus("gc-conn-status", "DHAN", errorish ? "ERROR" : "DISCONNECTED", {
         Connection: "Failed",
         Authentication: r.authentication === "VALID" ? "Valid" : r.authentication === "INVALID" ? "Invalid" : "Unknown",
         "Data Status": "Not receiving",
@@ -1580,17 +1534,17 @@ async function doTestConnection() {
         "Last Successful Check": fmtCheckTime(r.lastSuccessfulCheck),
       });
     }
-    loadGrowwConfig();
+    loadDhanConfig();
   } catch (e) {
-    box.innerHTML = `<div class="gc-tr-head err">🔴 Groww Connection Failed</div><div class="gc-tr-line err">✗ ${e.message}</div>`;
-    renderConnStatus("gc-conn-status", "GROWW", "ERROR", { Connection: "Failed", Reason: e.message });
+    box.innerHTML = `<div class="gc-tr-head err">🔴 Dhan Connection Failed</div><div class="gc-tr-line err">✗ ${e.message}</div>`;
+    renderConnStatus("gc-conn-status", "DHAN", "ERROR", { Connection: "Failed", Reason: e.message });
   } finally {
     btn.disabled = false;
   }
 }
 
 // Render the connection status + health block from the secure config endpoint.
-async function loadGrowwConfig() {
+async function loadDhanConfig() {
   try {
     const d = await fetch("/api/groww/config").then((res) => res.json());
     // Masked saved token + UPDATE TOKEN control.
@@ -1602,7 +1556,7 @@ async function loadGrowwConfig() {
       wrap.classList.add("hidden");
     }
     // Shared connection-status component, driven by the last real probe.
-    renderConnStatus("gc-conn-status", "GROWW",
+    renderConnStatus("gc-conn-status", "DHAN",
       d.connection === "CONNECTED" ? "CONNECTED" : d.connection === "ERROR" ? "ERROR" : "DISCONNECTED", {
         Connection: d.connection === "CONNECTED" ? "Connected" : d.connection === "ERROR" ? "Error" : "Disconnected",
         Authentication: d.authentication === "VALID" ? "Valid" : d.authentication === "INVALID" ? "Invalid" : d.authentication === "NONE" ? "No token saved" : "Not tested yet",
@@ -1611,11 +1565,11 @@ async function loadGrowwConfig() {
       });
     // Status header + health.
     const map = {
-      GREEN:  { dot: "🟢", head: "GROWW CONNECTED", data: "LIVE" },
-      YELLOW: { dot: "🟡", head: "GROWW CONNECTED", data: "DELAYED" },
-      CLOSED: { dot: "🟡", head: "GROWW CONNECTED", data: "MARKET CLOSED" },
-      RED:    { dot: "🔴", head: "GROWW DISCONNECTED", data: "—" },
-      GREY:   { dot: "⚪", head: "GROWW NOT CONFIGURED", data: "—" },
+      GREEN:  { dot: "🟢", head: "DHAN CONNECTED", data: "LIVE" },
+      YELLOW: { dot: "🟡", head: "DHAN CONNECTED", data: "DELAYED" },
+      CLOSED: { dot: "🟡", head: "DHAN CONNECTED", data: "MARKET CLOSED" },
+      RED:    { dot: "🔴", head: "DHAN DISCONNECTED", data: "—" },
+      GREY:   { dot: "⚪", head: "DHAN NOT CONFIGURED", data: "—" },
     };
     const s = map[d.status] || map.GREY;
     const h = d.health || {};
@@ -1623,7 +1577,7 @@ async function loadGrowwConfig() {
     rows.push(`<div class="gc-st-head ${d.status}">${s.dot} ${s.head}</div>`);
     if (d.status !== "GREY") {
       rows.push(`<div class="gc-st-row"><span>Market Data</span><b>${s.data}</b></div>`);
-      rows.push(`<div class="gc-st-row"><span>Provider</span><b>GROWW</b></div>`);
+      rows.push(`<div class="gc-st-row"><span>Provider</span><b>DHAN</b></div>`);
       if (h.lastUpdate) rows.push(`<div class="gc-st-row"><span>Last Update</span><b>${h.lastUpdate}</b></div>`);
       if (h.dataAgeSec != null) rows.push(`<div class="gc-st-row"><span>Data Age</span><b>${h.dataAgeSec.toFixed(1)} sec</b></div>`);
       if (h.latencyMs != null) rows.push(`<div class="gc-st-row"><span>API Latency</span><b>${h.latencyMs} ms</b></div>`);
@@ -1703,7 +1657,7 @@ function setupTabs() {
 // Step types: in=input/data, proc=processing, gate=filter/gate, out=output, note.
 const TAB_FLOW = {
   oicommand: { title: "Trader Dashboard — Monday test: OI vs VWAP / GainzAlgo v2 / 4-Layer", steps: [
-    { t: "in", text: "Groww option chain (~90s) + VWAP/ADX from 15m + 4-Layer (no RSI/MACD) + GainzAlgo v2 (high-prob buy filter) + last 5m bar + futures buildup" },
+    { t: "in", text: "Dhan option chain (~90s) + VWAP/ADX from 15m + 4-Layer (no RSI/MACD) + GainzAlgo v2 (high-prob buy filter) + last 5m bar + futures buildup" },
     { t: "proc", text: "Correlate each model vs OI direction: AGREE / AGAINST / FLAT. Consensus AGREE needs ≥2 agrees and 0 against." },
     { t: "proc", text: "Sentiment/Liquidity/Risk pipeline: regime → liquidity → sentiment → premium → wall-reaction → trade-score → dedup → display threshold." },
     { t: "gate", text: "premium DECAY = hard veto (overrides all); setupQuality<30 = traded+logged but hidden; dedup blocks a repeat until exit or an ATR move-and-return." },
@@ -5189,13 +5143,8 @@ async function renderMobileTraderHero(d, sym) {
     <div class="mth-spot">${spot != null ? fmt(spot) : "—"}</div>
     ${chgText ? `<div class="mth-chg ${chgCls}">${chgText}</div>` : ""}
     ${MTH_CARDS.map((cfg) => renderMthCard(cfg, legs[cfg.key], symName)).join("")}
-    <div class="mth-risk-banner">
-      <span>⚠ Trading involves risk. Signals are decision-support only.</span>
-      <button type="button" id="mth-view-disclosure" class="mth-risk-link">View Disclosure ›</button>
-    </div>`;
+  `;
 
-  const dbtn = el("mth-view-disclosure");
-  if (dbtn) dbtn.addEventListener("click", () => { const b = el("open-risk-disclosure"); if (b) b.click(); });
   // "View Details" reveals the existing full desktop analysis already rendered
   // in #oicommand below - no second detail view, nothing new computed.
   box.querySelectorAll("[data-mth-details]").forEach((btn) => {
@@ -6231,7 +6180,7 @@ function renderBulletinHtml(d) {
 function renderOiDetailsHtml(d) {
   const S = d.oiSummary || {};
   const rows = d.oiChain || [];
-  if (!rows.length) return `<div class="wl-sub" style="padding:12px">OI chain not available yet — needs the live Groww chain during market hours.</div>`;
+  if (!rows.length) return `<div class="wl-sub" style="padding:12px">OI chain not available yet — needs the live Dhan chain during market hours.</div>`;
   const oiL = (n) => (n == null ? "—" : n >= 100000 ? (n / 100000).toFixed(2) + "L" : n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(Math.round(n)));
   const rupee = (n) => (n == null ? "—" : "₹" + (Math.round(n * 100) / 100));
   const pc = (v) => (v == null ? "" : `<span class="${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : ""}${Number(v).toFixed(1)}%</span>`);
@@ -6841,7 +6790,7 @@ function renderStrategiesSection(sel, ctx) {
     </div>`;
 }
 
-// ---- Strategy candlestick chart (TradingView Lightweight Charts, like Groww/Dhan) ----
+// ---- Strategy candlestick chart (TradingView Lightweight Charts, like Dhan) ----
 // A persistent chart node is created once and MOVED into the panel's slot on each
 // cockpit re-render, so the 15s innerHTML rebuild never destroys/recreates the chart
 // (no flicker). Candles + EMA9/EMA21/VWAP + volume + the opening-range band, with a
@@ -7262,7 +7211,7 @@ async function loadOiBacktest() {
   const box = el("oic-backtest");
   if (!box) return;
   const sym = (el("oic-symbol") && el("oic-symbol").value) || "^NSEI";
-  box.innerHTML = `<div class="oic-bt-wrap"><div class="wl-sub">📊 Back-test चल रहा… (Groww से आज के option/spot candles)</div></div>`;
+  box.innerHTML = `<div class="oic-bt-wrap"><div class="wl-sub">📊 Back-test चल रहा… (Dhan से आज के option/spot candles)</div></div>`;
   try {
     const d = await fetchJSON("/api/oi-command/backtest?symbol=" + encodeURIComponent(sym), 45000);
     renderOiBacktest(d);
@@ -7273,7 +7222,7 @@ async function loadOiBacktest() {
 function renderOiBacktest(d) {
   const box = el("oic-backtest");
   if (!box) return;
-  if (!d || !d.available) { box.innerHTML = `<div class="oic-bt-wrap"><div class="wl-sub">${(d && d.message) || "Back-test उपलब्ध नहीं (Groww feed चाहिए)।"}</div></div>`; return; }
+  if (!d || !d.available) { box.innerHTML = `<div class="oic-bt-wrap"><div class="wl-sub">${(d && d.message) || "Back-test उपलब्ध नहीं (Dhan feed चाहिए)।"}</div></div>`; return; }
   const money = (v) => (v == null ? "—" : "₹" + fmt(v));
   const pct = (v) => (v == null ? "—" : (v >= 0 ? "+" : "") + fmt(v, 1) + "%");
   const outcomeCls = (o) => (o === "TARGET" ? "up" : o === "STOP" ? "down" : "neu");
@@ -7332,7 +7281,7 @@ function renderOiBacktest(d) {
       <button class="oic-cbtn" onclick="el('oic-backtest').innerHTML=''">✕ बंद करें</button>
     </div>
     ${liveHtml}${logHtml}
-    <div class="wl-sub" style="margin-top:6px">Historical intraday OI उपलब्ध नहीं — इसलिए DIRECTION आज के live grid read का है (entry समय से आगे); option का premium path व target/stop असली Groww candles पर मापा गया. Education/simulation — guarantee नहीं.</div>
+    <div class="wl-sub" style="margin-top:6px">Historical intraday OI उपलब्ध नहीं — इसलिए DIRECTION आज के live grid read का है (entry समय से आगे); option का premium path व target/stop असली Dhan candles पर मापा गया. Education/simulation — guarantee नहीं.</div>
   </div>`;
 }
 
@@ -8078,7 +8027,7 @@ function fmtOptIST(t, withDate) {
     : { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false };
   return d.toLocaleString("en-IN", opts);
 }
-// Fetch JSON with a hard timeout so a slow/queued Groww call (market hours) never
+// Fetch JSON with a hard timeout so a slow/queued Dhan call (market hours) never
 // freezes the UI — it aborts and surfaces a message instead of hanging forever.
 async function fetchJSON(url, ms = 20000) {
   const ctrl = new AbortController();
@@ -9797,7 +9746,7 @@ function startEarlyMovesTab() {
     if (pn && pn.classList.contains("active") && isMarketOpen()) {
       fetch("/api/early-moves").then((r) => r.json()).then((d) => { state.earlyMovesData = d; renderEarlyMoves(); }).catch(() => {});
     }
-  }, 5 * 1000); // refresh every 5s (server cache + 30s candle cache gate the actual Groww load)
+  }, 5 * 1000); // refresh every 5s (server cache + 30s candle cache gate the actual Dhan load)
 }
 
 function renderEarlyMoves() {
@@ -10507,7 +10456,7 @@ const DESK_PERMISSION_MAP = { option: "oiAnalysis", stockOption: "tradingDashboa
 // server-side (requireAdmin on every /api/admin/* and provider route,
 // routes/api.ts) - a USER cannot retrieve any of this by typing the URL,
 // calling the API directly, or editing frontend JS, regardless of what this
-// function hides. (Groww/Dhan/Telegram buttons are handled separately - they
+// function hides. (Dhan/Telegram buttons are handled separately - they
 // stay permanently hidden in index.html and are only ever reachable via the
 // Admin Control Center's Connections card - see enterAdminMode().)
 const ADMIN_ONLY_BUTTON_IDS = ["rotate-login-btn"];
@@ -10587,11 +10536,11 @@ function enterAdminMode() {
   loadAdminConnectionsSummary();
 }
 
-// Renders the read-only Groww/Dhan/Telegram status summary in the Admin
+// Renders the read-only Dhan/Telegram status summary in the Admin
 // Control Center's Connections card. Each "Manage" button just clicks the
 // corresponding (permanently topbar-hidden) legacy button to reuse the
 // existing open/save/test logic in setupConnect() rather than duplicating it.
-const CONNECTION_MANAGE_BTN = { groww: "connect-btn", dhan: "dhan-btn", telegram: "telegram-btn" };
+const CONNECTION_MANAGE_BTN = { dhan: "connect-btn", telegram: "telegram-btn" };
 function manageConnection(provider) {
   const btnId = CONNECTION_MANAGE_BTN[provider];
   if (btnId) el(btnId)?.click();
@@ -10603,8 +10552,7 @@ async function loadAdminConnectionsSummary() {
     const d = await fetch("/api/admin/connections").then((r) => r.json());
     const fmt = (ts) => (ts ? new Date(ts).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—");
     const rows = [
-      { key: "groww", label: "Groww", info: d.groww },
-      { key: "dhan", label: "Dhan", info: d.dhan },
+      { key: "dhan", label: "Dhan", info: d.dhan || d.groww },
       { key: "telegram", label: "Telegram", info: d.telegram },
     ];
     body.innerHTML = rows.map(({ key, label, info }) => {
@@ -11310,7 +11258,7 @@ async function loadAdvisoryAccuracy(windowMinutes) {
           <div class="cb-row"><span>Right direction, premium lost</span><b class="err">${d.premium.correctDirectionButPremiumLoss}</b></div>
         </div>
       </div>
-      <div class="cs-risk-full adv-disclaimer">Directional accuracy is <b>not</b> profitability. An option can lose value on a correct spot call through IV, theta and spread — that is why premium outcome is reported separately above.</div>`;
+    `;
   } catch (e) {
     box.innerHTML = `<span class="wl-sub">Could not load accuracy: ${e.message}</span>`;
   }

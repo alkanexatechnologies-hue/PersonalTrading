@@ -1,48 +1,47 @@
 import { Router, Request, Response, NextFunction } from "express";
 import rateLimit from "express-rate-limit";
 import { getProvider, setActiveProvider } from "../data";
-import { syncSessionProvider, rememberGrowwToken, forgetGrowwToken, isMarketOpenIST, setFeedFlags, getFeedFlags, hasGrowwToken, growwProviderForOi, getGrowwTokenMasked, persistGrowwToken, getGrowwToken, deletePersistedGrowwToken } from "../data/sessionFeed";
+import { syncSessionProvider, isMarketOpenIST, setFeedFlags, getFeedFlags, hasGrowwToken, growwProviderForOi, dhanProviderForOi, getGrowwTokenMasked, scrubGrowwToken } from "../data/sessionFeed";
 
-// ---- Groww data-health tracker (single source, so we can surface connection
-// health + block live signals when Groww is unhealthy). Updated on each live
+// ---- Data-health tracker (Dhan is the single source). Updated on each live
 // data touch; counters are process-lifetime.
-const growwHealth = { updates: 0, failures: 0, reconnects: 0, lastDataTs: 0, lastLatencyMs: 0 };
-export function recordGrowwOk(latencyMs: number) { growwHealth.updates++; growwHealth.lastDataTs = Date.now(); growwHealth.lastLatencyMs = Math.round(latencyMs); }
-export function recordGrowwFail() { growwHealth.failures++; }
-export function recordGrowwReconnect() { growwHealth.reconnects++; }
+const dataHealth = { updates: 0, failures: 0, reconnects: 0, lastDataTs: 0, lastLatencyMs: 0 };
+export function recordGrowwOk(latencyMs: number) { dataHealth.updates++; dataHealth.lastDataTs = Date.now(); dataHealth.lastLatencyMs = Math.round(latencyMs); recordDhanOk(); }
+export function recordGrowwFail() { dataHealth.failures++; recordDhanFail(); }
+export function recordGrowwReconnect() { dataHealth.reconnects++; }
 export function getGrowwHealth() {
-  const ageSec = growwHealth.lastDataTs ? (Date.now() - growwHealth.lastDataTs) / 1000 : null;
-  return { ...growwHealth, dataAgeSec: ageSec == null ? null : Math.round(ageSec * 10) / 10 };
+  const ageSec = dataHealth.lastDataTs ? (Date.now() - dataHealth.lastDataTs) / 1000 : null;
+  return { ...dataHealth, dataAgeSec: ageSec == null ? null : Math.round(ageSec * 10) / 10 };
 }
-// Single source of truth for the Groww connection state (GREEN/YELLOW/RED/GREY/
-// CLOSED) + whether live signals are blocked. Reused by /data-status + /groww/*.
+// Single source of truth for the Dhan connection state (GREEN/YELLOW/RED/GREY/
+// CLOSED) + whether live signals are blocked.
 export function computeGrowwStatus() {
   const feed = syncSessionProvider();
   const health = getGrowwHealth();
   let status: "GREEN" | "YELLOW" | "RED" | "GREY" | "CLOSED";
-  if (!hasGrowwToken()) status = "GREY";              // not configured
-  else if (!feed.growwOn) status = "RED";             // token present but feed OFF / unhealthy
-  else if (!feed.marketOpen) status = "CLOSED";       // configured + on, market closed
-  else if (health.dataAgeSec == null || health.dataAgeSec > 30) status = "YELLOW"; // connected, data delayed
-  else status = "GREEN";                              // connected + fresh
+  if (!dhanConfigured()) status = "GREY";
+  else if (!feed.dhanOn) status = "RED";
+  else if (!feed.marketOpen) status = "CLOSED";
+  else if (health.dataAgeSec == null || health.dataAgeSec > 30) status = "YELLOW";
+  else status = "GREEN";
   const signalsBlocked = status !== "GREEN";
   const reason =
-    status === "GREY" ? "Groww not configured — connect a token" :
-    status === "RED" ? "Groww disconnected — no valid market data" :
+    status === "GREY" ? "Dhan not configured — connect a token" :
+    status === "RED" ? "Dhan disconnected — no valid market data" :
     status === "CLOSED" ? "Market closed — no live signals" :
-    status === "YELLOW" ? "Groww data stale / delayed" : "";
-  return { status, signalsBlocked, reason, marketOpen: feed.marketOpen, growwOn: feed.growwOn, configured: feed.configured, health };
+    status === "YELLOW" ? "Dhan data stale / delayed" : "";
+  return { status, signalsBlocked, reason, marketOpen: feed.marketOpen, growwOn: feed.dhanOn, configured: feed.configured, health };
 }
 
-// TRADING SAFETY GATE: live signals require healthy, fresh Groww data during
+// TRADING SAFETY GATE: live signals require healthy, fresh Dhan data during
 // market hours. When false, callers must NOT emit a live signal.
 export function growwSignalsAllowed(): { allowed: boolean; reason: string } {
-  if (!hasGrowwToken()) return { allowed: false, reason: "Groww not configured" };
+  if (!dhanConfigured()) return { allowed: false, reason: "Dhan not configured" };
   const feed = syncSessionProvider();
-  if (!feed.growwOn) return { allowed: false, reason: "Groww disconnected" };
+  if (!feed.dhanOn) return { allowed: false, reason: "Dhan disconnected" };
   if (!feed.marketOpen) return { allowed: false, reason: "Market closed — no live signals" };
   const age = getGrowwHealth().dataAgeSec;
-  if (age == null || age > 30) return { allowed: false, reason: "Groww data stale / not yet received" };
+  if (age == null || age > 30) return { allowed: false, reason: "Dhan data stale / not yet received" };
   return { allowed: true, reason: "" };
 }
 import { withTimeout } from "../util/timeout";
@@ -54,7 +53,8 @@ import { suggestOptionTrade } from "../options/suggest";
 import { computeRiskRadar } from "../options/riskRadar";
 import { analyzeVolume } from "../volume/analyze";
 import { getOiAnalysis } from "../oi/oi";
-import { growwOiAnalysis, GrowwProvider, growwHasOptions, growwZeroHero, growwRateLimitStats, runAsBackgroundGroww } from "../data/growwProvider";
+import { dhanOiAnalysis, dhanHasOptions, dhanZeroHero, dhanRateLimitStats, DhanProvider, dhanChainForExpiry, dhanOptionCandles, dhanSpotCandles, recordDhanOk, recordDhanFail, getDhanHealth } from "../data/dhanProvider";
+import { loadDhanConfig, saveDhanConfig, dhanConfigured, disconnectDhan, testDhanConnection } from "../data/dhanConfig";
 import { buildNextDayPick } from "../nextday/outlook";
 import { computeMomentumBurst } from "../scalp/momentum";
 import { computeEarlyMove } from "../movement/earlyMove";
@@ -81,7 +81,6 @@ import { recordOiBaseline, computeOiChange, oiBaselineStrike } from "../oi/oiCha
 import { recommendOiTrades, correlateOiModels, buildOiWalls, buildOiLesson } from "../oi/oiTrade";
 import { buildMoveBulletin } from "../oi/bulletin";
 import { tickPaperAlerts, sendAlertsTest, alertsStatus } from "../alerts/paperPing";
-import { loadDhanConfig, saveDhanConfig, dhanConfigured, testDhanConnection, disconnectDhan } from "../data/dhanConfig";
 import { saveTelegramConfig, disconnectTelegram, createInviteLink } from "../integrations/telegramProvider";
 import { notificationStatusLive } from "../integrations/notificationService";
 import { recordConnectionTest, recordConnectionSuccess, getConnectionStatus } from "../data/connectionStatusTracker";
@@ -107,10 +106,8 @@ import { readAuditLog, logAuditEvent } from "../auth/loginAudit";
 import { getNotifyEmail, setNotifyEmail, rotateCredentials, maybeRotateForNewDay, getCredentials } from "../auth/credentials";
 import { emailConfigured } from "../auth/mailer";
 import { computeOiVolume } from "../oi/oiVolume";
-import { growwChainForExpiry } from "../data/growwProvider";
 import { reviewOptionTrade } from "../backtest/optionReview";
 import { optionExpiries, optionStrikes, hasOptionData, findOption } from "../data/growwInstruments";
-import { growwOptionCandles } from "../data/growwProvider";
 import { directionNoMomentum, levelContext, srRoomOk, capTargetAndStop } from "../paper/entryRules";
 import {
   computeNiftyMacroSetup, classifyGlobalMarketBias, fetchGlobalMarketReads,
@@ -303,7 +300,7 @@ const getCandlesCached = (symbol: string, interval: Interval) =>
 const getDailyCached = (symbol: string, days = 40) =>
   cached(`d:${symbol}:${days}`, TTL_DAILY, () => {
     const feed = syncSessionProvider();
-    if (feed.skipLive) throw new Error("Groww feed off / not configured");
+    if (feed.skipLive) throw new Error("Dhan feed off / not configured");
     return getProvider().getCandles(symbol, "1d", days);
   });
 // Clean-move rating per symbol (cached 10 min) - how cleanly it trends, used to
@@ -313,16 +310,16 @@ const getCleanRatingCached = (symbol: string, name: string) =>
     const daily = await getDailyCached(symbol, 160);
     return computeCleanMover(symbol, name, daily);
   });
-// LIVE OPTION POLICY: option decisions (OI, greeks, strikes) use ONLY the Groww
-// feed. When Groww is not the active provider we return an explicit "unavailable"
+// LIVE OPTION POLICY: option decisions (OI, greeks, strikes) use ONLY the Dhan
+// feed. When Dhan is not the active provider we return an explicit "unavailable"
 // analysis instead of falling back to NSE-public / Yahoo data - so no option
-// trade is ever taken on non-Groww data in a live scenario.
-function oiRequiresGroww(def: SymbolDef): OiAnalysis {
+// trade is ever taken on non-Dhan data in a live scenario.
+function oiRequiresDhan(def: SymbolDef): OiAnalysis {
   return {
     symbol: def.symbol,
     nseSymbol: def.nseSymbol || def.symbol,
     available: false,
-    message: "Options use live Groww data only. Connect the Groww feed for OI, greeks and option trades.",
+    message: "Options use live Dhan data only. Connect the Dhan feed for OI, greeks and option trades.",
     underlying: null,
     expiry: null,
     pcr: null,
@@ -334,31 +331,31 @@ function oiRequiresGroww(def: SymbolDef): OiAnalysis {
     maxPain: null,
     ceBuildup: "mixed",
     peBuildup: "mixed",
-    verdict: { bias: "Neutral", reasons: ["Groww feed required for live option data."] },
+    verdict: { bias: "Neutral", reasons: ["Dhan feed required for live option data."] },
     topStrikes: [],
     asOf: Math.floor(Date.now() / 1000),
-    disclaimer: "Live option data (OI / greeks / strikes) is sourced exclusively from Groww.",
+    disclaimer: "Live option data (OI / greeks / strikes) is sourced exclusively from Dhan.",
   };
 }
 async function liveOptionOi(def: SymbolDef): Promise<OiAnalysis> {
   const feed = syncSessionProvider();
-  const gp = growwProviderForOi();
+  const gp = dhanProviderForOi();
   if (gp && isMarketOpenIST()) {
-    const oi = await withTimeout(growwOiAnalysis(gp, def), 15_000, `groww OI ${def.symbol}`);
+    const oi = await withTimeout(dhanOiAnalysis(def), 15_000, `dhan OI ${def.symbol}`);
     try { recordOiBaseline(def.symbol, oi); } catch { /* best-effort */ }
     try { saveOiSnapshot(def.symbol, oi); } catch { /* best-effort */ }
     try { if (oi && oi.available) saveLastOiJson(def.symbol, oi); } catch { /* best-effort */ }
     return oi;
   }
   const disk = loadLastOiJson(def.symbol);
-  if (disk && disk.available) return { ...disk, message: disk.message || "After hours: last saved Groww OI" };
+  if (disk && disk.available) return { ...disk, message: disk.message || "After hours: last saved OI" };
   return {
-    ...oiRequiresGroww(def),
-    message: feed.growwOn
+    ...oiRequiresDhan(def),
+    message: feed.dhanOn
       ? (isMarketOpenIST()
-        ? "Groww OI not ready (token/timeout) — retrying."
-        : "Market closed. No saved Groww OI yet — Excel fills 09:15–15:30 IST.")
-      : "Groww OFF / not configured — no live option chain. Connect Groww for OI.",
+        ? "Dhan OI not ready (token/timeout) — retrying."
+        : "Market closed. No saved Dhan OI yet — Excel fills 09:15–15:30 IST.")
+      : "Dhan OFF / not configured — no live option chain. Connect Dhan for OI.",
   };
 }
 // An OI chain is only USEFUL if at least one near-money strike carries a live
@@ -406,7 +403,7 @@ function oiQuality(p: {
   let score = 15;
   const notes: string[] = [];
   if (p.bars >= 30) score += 18; else notes.push("few candles");
-  if (p.oiSource === "groww") { score += 32; notes.push("live Groww OI"); }
+  if (p.oiSource === "dhan") { score += 32; notes.push("live Dhan OI"); }
     else if (p.oiSource === "last-good") { score += 18; notes.push("last-good chain"); }
     else if (p.oiSource === "file") { score += 18; notes.push("saved chain"); }
     else if (p.oiSource === "snapshot") { score += 10; notes.push("last session PCR/walls"); }
@@ -479,18 +476,18 @@ function oiServedFromLastGood(oi: OiAnalysis | null | undefined): boolean {
   return !!(oi && (oi as any)._servedFromLastGood);
 }
 
-function growwAuthFailed(e: unknown): boolean {
+function dhanAuthFailed(e: unknown): boolean {
   const { code } = classifyGrowwError(e);
   return code === "INVALID_TOKEN" || code === "AUTH_FAILED";
 }
-function disconnectGrowwFeedOnAuthFailure(e: unknown): void {
-  if (!growwAuthFailed(e)) return;
-  try { setFeedFlags({ groww: false }); } catch { /* ignore */ }
+function disconnectDhanFeedOnAuthFailure(e: unknown): void {
+  if (!dhanAuthFailed(e)) return;
+  try { setFeedFlags({ dhan: false }); } catch { /* ignore */ }
 }
 
 async function fetchCandles(symbol: string, interval: Interval) {
   const feed = syncSessionProvider();
-  if (feed.skipLive) throw new Error("Groww feed off / not configured — using last cache");
+  if (feed.skipLive) throw new Error("Dhan feed off / not configured — using last cache");
   const provider = getProvider(); // always Groww
   const t0 = Date.now();
   try {
@@ -499,7 +496,7 @@ async function fetchCandles(symbol: string, interval: Interval) {
     return c;
   } catch (e) {
     recordGrowwFail();
-    disconnectGrowwFeedOnAuthFailure(e);
+    disconnectDhanFeedOnAuthFailure(e);
     throw e;
   }
 }
@@ -519,7 +516,7 @@ router.get("/data-status", async (_req: Request, res: Response) => {
     if (lastTick) recordGrowwOk(0);
   } catch (e) {
     recordGrowwFail();
-    disconnectGrowwFeedOnAuthFailure(e);
+    disconnectDhanFeedOnAuthFailure(e);
   }
   // Market regime: the ONE MarketRegimeEngine (fractal + ATR, Phase 1.1) — was
   // previously an independent NIFTY-only ADX calculation here. `state` is
@@ -587,11 +584,11 @@ router.get("/data-status", async (_req: Request, res: Response) => {
   const signalsBlocked = gStatus.signalsBlocked;
   const signalsBlockedReason = gStatus.reason;
   res.json({
-    provider: provider.name, // always "groww"
-    dataSource: "GROWW",
+    provider: provider.name,
+    dataSource: "DHAN",
     signalsBlocked,
     signalsBlockedReason,
-    live: provider.name === "groww" && feed.marketOpen && feed.growwOn && health.dataAgeSec != null && health.dataAgeSec <= 30,
+    live: provider.name === "dhan" && feed.marketOpen && feed.dhanOn && health.dataAgeSec != null && health.dataAgeSec <= 30,
     marketOpen: isTradingTimeIST(),
     regime,
     tradeZone,
@@ -611,12 +608,12 @@ router.get("/data-status", async (_req: Request, res: Response) => {
       bulletinSec: 15,
     },
     feedMode: feed.reason,
-    growwOn: feed.growwOn,
+    growwOn: feed.dhanOn,
     growwStatus,
     configured: feed.configured,
     skipLive: feed.skipLive,
     hasGrowwToken: hasGrowwToken(),
-    // Groww connection / data-health telemetry (§5–7).
+    // Dhan connection / data-health telemetry (§5–7).
     growwHealth: {
       status: growwStatus,
       dataAgeSec: health.dataAgeSec,
@@ -636,8 +633,8 @@ router.get("/connection", requireAdmin, (_req: Request, res: Response) => {
   const feed = syncSessionProvider();
   res.json({
     provider: getProvider().name, // always "groww"
-    dataSource: "GROWW",
-    growwOn: feed.growwOn,
+    dataSource: "DHAN",
+    growwOn: feed.dhanOn,
     configured: feed.configured,
     skipLive: feed.skipLive,
     hasGrowwToken: hasGrowwToken(),
@@ -646,27 +643,26 @@ router.get("/connection", requireAdmin, (_req: Request, res: Response) => {
   });
 });
 
-// Groww connection config for the settings screen (desktop + mobile). Returns
+// Dhan connection config for the settings screen (desktop + mobile). Returns
 // NON-SECRET status only: a masked token (never the full token), the connection
 // state, and live data-health telemetry. Safe to poll.
 router.get("/groww/config", requireAdmin, (_req: Request, res: Response) => {
   const g = computeGrowwStatus();
   const health = getGrowwHealth();
-  const tracked = getConnectionStatus("groww");
+  const tracked = getConnectionStatus("dhan");
   res.json({
-    dataSource: "GROWW",
-    configured: hasGrowwToken(),
+    dataSource: "DHAN",
+    configured: dhanConfigured(),
     tokenMasked: getGrowwTokenMasked(),
-    status: g.status,                 // GREEN / YELLOW / RED / GREY / CLOSED
+    status: g.status,
     growwOn: g.growwOn,
+    dhanOn: g.growwOn,
     marketOpen: g.marketOpen,
     reason: g.reason,
     signalsBlocked: g.signalsBlocked,
-    // Headline fields for the shared connection-status component. Derived from
-    // the last real probe - never from "a token string exists".
     connection: g.status === "GREEN" || g.status === "YELLOW" || g.status === "CLOSED" ? "CONNECTED"
       : g.status === "GREY" ? "DISCONNECTED" : "ERROR",
-    authentication: !hasGrowwToken() ? "NONE" : tracked.lastTestOk === false ? "INVALID" : tracked.lastTestOk ? "VALID" : "UNKNOWN",
+    authentication: !dhanConfigured() ? "NONE" : tracked.lastTestOk === false ? "INVALID" : tracked.lastTestOk ? "VALID" : "UNKNOWN",
     dataStatus: g.status === "GREEN" ? "RECEIVING" : g.status === "YELLOW" ? "DELAYED" : g.status === "CLOSED" ? "MARKET CLOSED" : "NOT RECEIVING",
     lastSuccessfulCheck: tracked.lastConnectedAt || null,
     health: {
@@ -691,14 +687,14 @@ router.get("/groww/test", requireAdmin, async (req: Request, res: Response) => {
   const admin = getSession(bearerToken(req));
 
   // No token at all — nothing to authenticate with.
-  if (!hasGrowwToken()) {
-    messages.auth = "No access token saved. Paste a Groww access token and save it.";
-    recordConnectionTest("groww", false);
-    logAuditEvent({ type: "GROWW_CONNECTION_TEST", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "groww", result: "failure", detail: "no token configured" });
+  if (!dhanConfigured()) {
+    messages.auth = "No access token saved. Paste a Dhan access token and save it.";
+    recordConnectionTest("dhan", false);
+    logAuditEvent({ type: "DHAN_CONNECTION_TEST", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "dhan", result: "failure", detail: "no token configured" });
     return res.json({
-      ok: false, dataSource: "GROWW", code: "NO_TOKEN", checks, messages,
+      ok: false, dataSource: "DHAN", code: "NO_TOKEN", checks, messages,
       connection: "DISCONNECTED", authentication: "NONE", dataStatus: "NOT RECEIVING",
-      tokenMasked: "", lastSuccessfulCheck: getConnectionStatus("groww").lastConnectedAt || null,
+      tokenMasked: "", lastSuccessfulCheck: getConnectionStatus("dhan").lastConnectedAt || null,
       error: messages.auth,
     });
   }
@@ -708,11 +704,11 @@ router.get("/groww/test", requireAdmin, async (req: Request, res: Response) => {
   checks.auth = v.ok || (v.code !== "INVALID_TOKEN" && v.code !== "AUTH_FAILED");
   checks.api = v.ok || v.code === "UNEXPECTED_RESPONSE" || v.code === "INVALID_TOKEN" || v.code === "AUTH_FAILED";
   checks.data = v.ok;
-  messages.auth = checks.auth ? "Token accepted by Groww." : v.message;
-  messages.api = checks.api ? `Groww API reachable (${v.latencyMs} ms).` : v.message;
+  messages.auth = checks.auth ? "Token accepted by Dhan." : v.message;
+  messages.api = checks.api ? `Dhan API reachable (${v.latencyMs} ms).` : v.message;
   messages.data = v.ok ? v.message : v.message;
 
-  if (v.ok) { recordGrowwOk(v.latencyMs); recordConnectionSuccess("groww"); }
+  if (v.ok) { recordGrowwOk(v.latencyMs); recordConnectionSuccess("dhan"); }
   else recordGrowwFail();
 
   // OPTION-CHAIN PROBE (pre-market validation). The quote check above proves the
@@ -723,11 +719,11 @@ router.get("/groww/test", requireAdmin, async (req: Request, res: Response) => {
   if (v.ok) {
     try {
       const chainDef = findSymbolDef("^NSEI") || DEFAULT_SYMBOLS.find((d) => d.type === "index");
-      const prov = growwProviderForOi();
+      const prov = dhanProviderForOi();
       if (!chainDef || !prov) {
-        messages.optionChain = "Skipped — no index symbol or Groww provider available.";
+        messages.optionChain = "Skipped — no index symbol or Dhan provider available.";
       } else {
-        const chain: any = await withTimeout(growwChainForExpiry(prov, chainDef, 0), 12_000, "groww option-chain probe");
+        const chain: any = await withTimeout(dhanChainForExpiry(chainDef, 0), 12_000, "dhan option-chain probe");
         const rows = Array.isArray(chain?.rows) ? chain.rows.length
           : Array.isArray(chain?.strikes) ? chain.strikes.length
           : Array.isArray(chain) ? chain.length : 0;
@@ -751,16 +747,16 @@ router.get("/groww/test", requireAdmin, async (req: Request, res: Response) => {
     : g.status === "YELLOW" ? "Connected but data delayed/stale."
     : g.reason;
 
-  recordConnectionTest("groww", v.ok);
+  recordConnectionTest("dhan", v.ok);
   logAuditEvent({
-    type: "GROWW_CONNECTION_TEST", userId: admin?.userId ?? null, username: admin?.username ?? null,
-    mode: "admin", provider: "groww", result: v.ok ? "success" : "failure",
+    type: "DHAN_CONNECTION_TEST", userId: admin?.userId ?? null, username: admin?.username ?? null,
+    mode: "admin", provider: "dhan", result: v.ok ? "success" : "failure",
     detail: v.ok ? "authenticated, data received" : `failed (${v.code})`,
   });
 
   res.json({
     ok: v.ok,
-    dataSource: "GROWW",
+    dataSource: "DHAN",
     code: v.ok ? undefined : v.code,
     checks,
     messages,
@@ -769,7 +765,7 @@ router.get("/groww/test", requireAdmin, async (req: Request, res: Response) => {
     authentication: v.ok ? "VALID" : (v.code === "INVALID_TOKEN" || v.code === "AUTH_FAILED" ? "INVALID" : "UNKNOWN"),
     dataStatus: v.ok ? "RECEIVING" : "NOT RECEIVING",
     optionChainStatus: checks.optionChain ? "REACHABLE" : (v.ok ? "UNAVAILABLE" : "NOT ATTEMPTED"),
-    lastSuccessfulCheck: getConnectionStatus("groww").lastConnectedAt || null,
+    lastSuccessfulCheck: getConnectionStatus("dhan").lastConnectedAt || null,
     latencyMs: v.latencyMs,
     tokenMasked: getGrowwTokenMasked(),
     status: g.status,
@@ -778,111 +774,83 @@ router.get("/groww/test", requireAdmin, async (req: Request, res: Response) => {
   });
 });
 
-// Toggle the single Groww market-data feed on/off (Groww is the only source).
 router.post("/feed", requireAdmin, (req: Request, res: Response) => {
   const b = req.body || {};
-  const next: { groww?: boolean } = {};
-  if (b.groww != null) next.groww = b.groww === true || b.groww === "true" || b.groww === 1;
-  if (next.groww === true && !hasGrowwToken()) {
+  const next: { dhan?: boolean } = {};
+  if (b.groww != null || b.dhan != null) next.dhan = (b.dhan ?? b.groww) === true || (b.dhan ?? b.groww) === "true" || (b.dhan ?? b.groww) === 1;
+  if (next.dhan === true && !dhanConfigured()) {
     return res.status(400).json({
       ok: false,
-      error: "Groww ON needs a token — Connect data first.",
+      error: "Dhan ON needs a token — Connect data first.",
       ...getFeedFlags(),
-      hasGrowwToken: false,
     });
   }
   const feed = setFeedFlags(next);
   res.json({
     ok: true,
     provider: getProvider().name,
-    dataSource: "GROWW",
-    growwOn: feed.growwOn,
+    dataSource: "DHAN",
+    growwOn: feed.dhanOn,
+    dhanOn: feed.dhanOn,
     configured: feed.configured,
     skipLive: feed.skipLive,
-    hasGrowwToken: hasGrowwToken(),
     marketOpen: feed.marketOpen,
     reason: feed.reason,
   });
 });
 
-// Remove the saved Groww token (clears .groww_token + in-memory) and turn the
+// Remove the saved Dhan token (clears .groww_token + in-memory) and turn the
 // feed off. After this the admin must paste a fresh access token.
 router.post("/groww/forget-token", requireAdmin, (req: Request, res: Response) => {
-  forgetGrowwToken();
-  deletePersistedGrowwToken();
-  try { setActiveProvider("groww", ""); } catch { /* singleton cleared to empty token */ }
-  setFeedFlags({ groww: false });
+  disconnectDhan();
+  setFeedFlags({ dhan: false });
   clearQuoteLastGood();
   const admin = getSession(bearerToken(req));
-  logAuditEvent({ type: "GROWW_DISCONNECTED", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "groww", result: "success" });
-  return res.json({ ok: true, tokenMasked: getGrowwTokenMasked(), configured: hasGrowwToken(), message: "Saved token removed. Paste a fresh Groww access token to reconnect." });
+  logAuditEvent({ type: "DHAN_DISCONNECTED", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "dhan", result: "success" });
+  return res.json({ ok: true, tokenMasked: "", configured: false, message: "Saved token removed. Paste a fresh Dhan access token to reconnect." });
 });
 
-// Connect Groww with an ACCESS TOKEN — the only Groww credential this app takes.
+// Connect Dhan with an ACCESS TOKEN — the only Groww credential this app takes.
 // The token is accepted only after a real authenticated Groww request succeeds
 // and returns usable data; a non-empty field is never treated as "connected".
 // Body: { token }
 router.post("/connect", requireAdmin, async (req: Request, res: Response) => {
   const token = String(req.body?.token || "").trim();
   if (!token) {
-    return res.status(400).json({ ok: false, code: "NO_TOKEN", error: "A Groww access token is required." });
+    return res.status(400).json({ ok: false, code: "NO_TOKEN", error: "A Dhan access token is required." });
   }
 
-  // Keep the currently-working token so a bad paste doesn't kill a live feed.
-  // With no previous token, a rejected one must be cleared rather than left in
-  // the slot - otherwise hasGrowwToken() would report "configured" off a
-  // credential Groww just refused.
-  const previous = getGrowwToken();
-  const restorePrevious = () => {
-    if (!previous) {
-      forgetGrowwToken();
-      setFeedFlags({ groww: false });
-      return;
-    }
-    try { setActiveProvider("groww", previous); rememberGrowwToken(previous); } catch { /* best-effort */ }
-  };
-
-  try {
-    setActiveProvider("groww", token);
-    rememberGrowwToken(token);
-  } catch (e) {
-    restorePrevious();
-    const { code, message } = classifyGrowwError(e);
-    return res.status(502).json({ ok: false, provider: "groww", code, error: message });
-  }
+  // Save the token to Dhan config and validate
+  saveDhanConfig({ accessToken: token });
+  setActiveProvider("dhan");
 
   const v = await validateGrowwToken();
   const admin = getSession(bearerToken(req));
 
   if (!v.ok) {
-    // Rejected: do NOT persist, and put the previously working token back.
-    restorePrevious();
     recordGrowwFail();
-    recordConnectionTest("groww", false);
+    recordConnectionTest("dhan", false);
     logAuditEvent({
-      type: "GROWW_CREDENTIAL_UPDATED", userId: admin?.userId ?? null, username: admin?.username ?? null,
-      mode: "admin", provider: "groww", result: "failure", detail: `token rejected (${v.code})`,
+      type: "DHAN_CREDENTIAL_UPDATED", userId: admin?.userId ?? null, username: admin?.username ?? null,
+      mode: "admin", provider: "dhan", result: "failure", detail: `token rejected (${v.code})`,
     });
     return res.status(v.code === "RATE_LIMIT" ? 429 : 502).json({
-      ok: false, provider: "groww", dataSource: "GROWW",
+      ok: false, provider: "dhan", dataSource: "DHAN",
       code: v.code, rateLimited: v.code === "RATE_LIMIT", error: v.message,
     });
   }
 
-  // Validated: now it is safe to turn the feed on and persist for restarts.
-  setFeedFlags({ groww: true });
-  persistGrowwToken(token);
+  setFeedFlags({ dhan: true });
   recordGrowwReconnect();
   recordGrowwOk(v.latencyMs);
-  recordConnectionSuccess("groww");
-  recordConnectionTest("groww", true);
+  recordConnectionSuccess("dhan");
+  recordConnectionTest("dhan", true);
   logAuditEvent({
-    type: "GROWW_CREDENTIAL_UPDATED", userId: admin?.userId ?? null, username: admin?.username ?? null,
-    mode: "admin", provider: "groww", result: "success", detail: "access token saved and validated",
+    type: "DHAN_CREDENTIAL_UPDATED", userId: admin?.userId ?? null, username: admin?.username ?? null,
+    mode: "admin", provider: "dhan", result: "success", detail: "access token saved and validated",
   });
-  // SECURITY: never return the token itself — masked form only.
   return res.json({
-    ok: true, provider: "groww", dataSource: "GROWW",
+    ok: true, provider: "dhan", dataSource: "DHAN",
     tokenSaved: true, tokenMasked: getGrowwTokenMasked(),
     dataReceived: true, latencyMs: v.latencyMs,
     message: `${v.message} Token stored securely server-side (persists across restarts).`,
@@ -898,20 +866,20 @@ router.get("/symbols", (_req: Request, res: Response) => {
 router.get("/quote/:symbol", async (req: Request, res: Response) => {
   try {
     const feed = syncSessionProvider();
-    if (feed.skipLive) return res.status(503).json({ error: "Groww feed off / not configured" });
+    if (feed.skipLive) return res.status(503).json({ error: "Dhan feed off / not configured" });
     const t0 = Date.now();
     const quote = await getProvider().getQuote(req.params.symbol);
     if (quote?.marketTime && quote.marketTime > 0) recordGrowwOk(Date.now() - t0);
     res.json(quote);
   } catch (e: any) {
     recordGrowwFail();
-    disconnectGrowwFeedOnAuthFailure(e);
+    disconnectDhanFeedOnAuthFailure(e);
     res.status(502).json({ error: e?.message || "Failed to fetch quote" });
   }
 });
 
 // Batch LIVE quotes for many symbols (for the 3-second app-wide price refresh).
-// Per-symbol cached ~3s so polling doesn't hammer the Groww feed.
+// Per-symbol cached ~3s so polling doesn't hammer the Dhan feed.
 const lastGoodQuote: Record<string, { v: any; ts: number }> = {};
 const LAST_GOOD_QUOTE_MAX_MS = 15_000;
 function clearQuoteLastGood() {
@@ -952,7 +920,7 @@ router.get("/quotes", async (req: Request, res: Response) => {
         }
       } catch (e) {
         recordGrowwFail();
-        disconnectGrowwFeedOnAuthFailure(e);
+        disconnectDhanFeedOnAuthFailure(e);
         const lg = quoteLastGoodFresh(sym);
         quotes[sym] = lg ? { ...lg, stale: true } : null;
       }
@@ -1429,10 +1397,10 @@ router.get("/oi/:symbol", async (req: Request, res: Response) => {
     if (!def) return res.status(404).json({ error: "Unknown symbol." });
     const provider = getProvider();
     const feed = syncSessionProvider();
-    if (feed.skipLive) return res.status(503).json({ error: "Groww feed off / not configured" });
+    if (feed.skipLive) return res.status(503).json({ error: "Dhan feed off / not configured" });
     // Prefer Groww's real option-chain OI when connected; else NSE public API.
-    if (provider.name === "groww") {
-      res.json(await growwOiAnalysis(provider as GrowwProvider, def));
+    if (provider.name === "dhan") {
+      res.json(await dhanOiAnalysis(def));
     } else {
       res.json(await getOiAnalysis(def));
     }
@@ -1455,7 +1423,7 @@ router.get("/final/:symbol", async (req: Request, res: Response) => {
     const provider = getProvider();
     let oi: any = null;
     if (def.fno) {
-      oi = provider.name === "groww" ? await growwOiAnalysis(provider as GrowwProvider, def) : await getOiAnalysis(def);
+      oi = await dhanOiAnalysis(def);
     }
 
     const oiOk = oi && oi.available;
@@ -1726,7 +1694,7 @@ router.get("/swing", async (_req: Request, res: Response) => {
       if (prov.name === "groww") {
         const nse = def.nseSymbol || def.symbol.replace(/\.NS$/i, "");
         try {
-          pick.hasOptions = await growwHasOptions(prov as GrowwProvider, nse);
+          pick.hasOptions = await dhanHasOptions(nse);
         } catch {
           pick.hasOptions = null;
         }
@@ -1795,7 +1763,7 @@ router.get("/longterm", async (_req: Request, res: Response) => {
       if (prov.name === "groww") {
         const nse = def.nseSymbol || def.symbol.replace(/\.NS$/i, "");
         try {
-          pick.hasOptions = await growwHasOptions(prov as GrowwProvider, nse);
+          pick.hasOptions = await dhanHasOptions(nse);
         } catch {
           pick.hasOptions = null;
         }
@@ -2005,7 +1973,7 @@ router.get("/movers", async (_req: Request, res: Response) => {
       if (prov.name === "groww") {
         const nse = def.nseSymbol || def.symbol.replace(/\.NS$/i, "");
         try {
-          hasOptions = await growwHasOptions(prov as GrowwProvider, nse);
+          hasOptions = await dhanHasOptions(nse);
         } catch {
           hasOptions = null;
         }
@@ -2097,7 +2065,7 @@ router.get("/big-move", async (_req: Request, res: Response) => {
       if (prov.name === "groww") {
         const nse = def.nseSymbol || def.symbol.replace(/\.NS$/i, "");
         try {
-          pick.hasOptions = await growwHasOptions(prov as GrowwProvider, nse);
+          pick.hasOptions = await dhanHasOptions(nse);
         } catch {
           pick.hasOptions = null;
         }
@@ -2158,7 +2126,7 @@ router.get("/today-movers", async (_req: Request, res: Response) => {
         const prov = getProvider();
         if (prov.name === "groww") {
           const nse = def.nseSymbol || def.symbol.replace(/\.NS$/i, "");
-          try { pick.hasOptions = await growwHasOptions(prov as GrowwProvider, nse); } catch { pick.hasOptions = null; }
+          try { pick.hasOptions = await dhanHasOptions(nse); } catch { pick.hasOptions = null; }
         } else pick.hasOptions = def.fno ?? null;
       }
       return pick;
@@ -2222,7 +2190,7 @@ router.get("/clean-movers", async (_req: Request, res: Response) => {
         const prov = getProvider();
         if (prov.name === "groww") {
           const nse = def.nseSymbol || def.symbol.replace(/\.NS$/i, "");
-          try { pick.hasOptions = await growwHasOptions(prov as GrowwProvider, nse); } catch { pick.hasOptions = null; }
+          try { pick.hasOptions = await dhanHasOptions(nse); } catch { pick.hasOptions = null; }
         } else pick.hasOptions = def.fno ?? null;
       }
       return pick;
@@ -3196,7 +3164,7 @@ async function buildOiCommand(def: SymbolDef): Promise<any> {
         const snap = latestSnapshot(def.symbol);
         const lastBar = (c15arr.length ? c15arr : c5arr.length ? c5arr : c60arr).slice(-1)[0];
         const lastBarDate = oiBarIstDate(lastBar);
-        // Groww-style volume indicator (works after hours on Groww historical bars too).
+        // Groww-style volume indicator (works after hours on Dhan historical bars too).
         // Opening-range from the first 15m bar of the latest session drives the
         // breakout read; PDH/PDL omitted here (no daily load on this path).
         const fbSpot = lastBar ? lastBar.close : (snap?.underlying ?? 0);
@@ -3252,10 +3220,10 @@ async function buildOiCommand(def: SymbolDef): Promise<any> {
           maxPain: snap?.maxPain ?? null,
           lastBarDate,
           message: feed0.marketOpen
-            ? (oi?.message || "Groww OI chain not ready (timeout / rate-limit). Candles still refresh.")
+            ? (oi?.message || "Dhan OI chain not ready (timeout / rate-limit). Candles still refresh.")
             : (snap
-              ? `After hours: Groww historical bars + last session OI snapshot ${snap.date} (PCR/walls). Full chain Excel starts 09:15 IST.`
-              : "After hours: Groww historical bars. No saved Groww chain — Excel + last chain fill Mon–Fri 09:15–15:30 IST."),
+              ? `After hours: Dhan historical bars + last session OI snapshot ${snap.date} (PCR/walls). Full chain Excel starts 09:15 IST.`
+              : "After hours: Dhan historical bars. No saved Dhan chain — Excel + last chain fill Mon–Fri 09:15–15:30 IST."),
           bulletin,
           moodReview,
           quality,
@@ -3274,8 +3242,8 @@ async function buildOiCommand(def: SymbolDef): Promise<any> {
           recommendation: {},
           correlate: {},
           lesson: { scenario: snap
-            ? `No live chain. PCR ${snap.pcr} · S ${snap.support} / R ${snap.resistance} from ${snap.date}. 15m/1h mood is Groww historical vs Excel.`
-            : "No Groww OI this print. 15m/1h mood is from Groww historical bars vs last Excel row." },
+            ? `No live chain. PCR ${snap.pcr} · S ${snap.support} / R ${snap.resistance} from ${snap.date}. 15m/1h mood is Dhan historical vs Excel.`
+            : "No Dhan OI this print. 15m/1h mood is from Dhan historical bars vs last Excel row." },
           stale: true,
           hasBaseline: false,
         }, { c5: c5arr, c15: c15arr, daily: dailyArr, oi: null });
@@ -3378,7 +3346,7 @@ async function buildOiCommand(def: SymbolDef): Promise<any> {
       const c15Age = cacheAgeMs(`c:${def.symbol}:15m`);
       const candleStale = (c5Age != null && c5Age > 90_000) || (c15Age != null && c15Age > 90_000);
       const payload: any = {
-        available: true, dataSource: "GROWW", symbol: def.symbol, name: def.name, expiry: oi.expiry, asOf: nowSec, oiAsOf, dataAgeSec,
+        available: true, dataSource: "DHAN", symbol: def.symbol, name: def.name, expiry: oi.expiry, asOf: nowSec, oiAsOf, dataAgeSec,
         stale: dataAgeSec > 90 || candleStale || oiServedFromLastGood(oi),
         spot: Math.round(spot * 100) / 100,
         oiDirection: bullish ? "UP" : bearish ? "DOWN" : "FLAT",
@@ -3637,7 +3605,7 @@ async function buildOiCommand(def: SymbolDef): Promise<any> {
               let autoTradeEnabled = false;
               try { autoTradeEnabled = !!getPaperSummary()?.active; } catch { /* best-effort */ }
               auditSignal({
-                symbol: def.symbol, name: def.name, dataSource: "GROWW",
+                symbol: def.symbol, name: def.name, dataSource: "DHAN",
                 dataTs: payload.oiAsOf ?? null, dataAgeSec: payload.dataAgeSec ?? null,
                 direction: payload.oiDirection as "UP" | "DOWN",
                 optionType: payload.setup.optionType as "CE" | "PE",
@@ -3792,7 +3760,7 @@ async function assembleExtInputs(
     // intraday candle caches) keyed by symbol+strike+type+expiry.
     let premiumSeries: number[] = [];
     try {
-      const gp = growwProviderForOi();
+      const gp = dhanProviderForOi();
       if (gp && oi?.expiry && def) {
         const underlying = (def.nseSymbol || idea.symbol.replace(/\.NS$/i, "")).toUpperCase();
         const expiry: string = oi.expiry;
@@ -3801,7 +3769,7 @@ async function assembleExtInputs(
           const inst = await findOption(underlying, idea.optionType, idea.strike, expiry);
           if (!inst) return [] as number[];
           const now = Math.floor(Date.now() / 1000);
-          const oc = await growwOptionCandles(gp!, inst.tradingSymbol, now - 2 * 24 * 3600, now, 5);
+          const oc = await dhanOptionCandles(inst.tradingSymbol, now - 2 * 24 * 3600, now, 5);
           return (oc || []).map((c: any) => Number(c.close)).filter((n: number) => Number.isFinite(n));
         });
       }
@@ -3967,12 +3935,12 @@ router.get("/oi-command", requirePermission("oiAnalysis"), async (req: Request, 
   const feed = syncSessionProvider();
   const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
   if (!def || !def.fno) return res.status(400).json({ available: false, error: "valid F&O symbol चाहिए" });
-  if (isMarketOpenIST() && !growwProviderForOi()) {
+  if (isMarketOpenIST() && !dhanProviderForOi()) {
     return res.json({
       available: false,
-      message: feed.growwOn
-        ? "Market hours में OI Command के लिए Groww token चाहिए।"
-        : "Groww OFF / not configured — OI chain के लिए Groww connect करें।",
+      message: feed.dhanOn
+        ? "Market hours में OI Command के लिए Dhan token चाहिए।"
+        : "Dhan OFF / not configured — OI chain के लिए Dhan connect करें।",
       refresh: oiRefreshMeta(def.symbol),
     });
   }
@@ -4169,7 +4137,7 @@ router.get("/compliance/meta", (_req: Request, res: Response) => {
 // Groww rate-limit telemetry: per-endpoint call counts, 429s seen, retries, whether the
 // client-side throttle is kicking in, and per-minute/per-day usage vs caps.
 router.get("/groww/ratelimit-stats", requireAdmin, (_req: Request, res: Response) => {
-  res.json(growwRateLimitStats());
+  res.json(dhanRateLimitStats());
 });
 
 // ============ Local access gate (paper desk single-user login) ============
@@ -4391,7 +4359,7 @@ router.get("/admin/connections", requireAdmin, (_req: Request, res: Response) =>
 router.get("/system-status", (_req: Request, res: Response) => {
   const feed = syncSessionProvider();
   res.json({
-    marketData: feed.growwOn && feed.configured ? "AVAILABLE" : "UNAVAILABLE",
+    marketData: feed.dhanOn && feed.configured ? "AVAILABLE" : "UNAVAILABLE",
     notifications: alertsStatus().ready ? "AVAILABLE" : "UNAVAILABLE",
   });
 });
@@ -4827,7 +4795,7 @@ router.get("/oi-command/review", (req: Request, res: Response) => {
   res.json(reviewOiSignals(symbol, minConf, 7));
 });
 // OI COMMAND BACK-TEST: for a given day (default today), back-test the grid's
-// concrete recommendation on REAL Groww option + spot candles. Two parts:
+// concrete recommendation on REAL Dhan option + spot candles. Two parts:
 //   live  - build the CURRENT grid setup and simulate that exact ATM CE/PE trade
 //           (grid targets/stop) across the session, plus its 5/15/60m direction.
 //   log   - replay every OI-Command signal logged for that day (track record).
@@ -4852,19 +4820,19 @@ function lastTradingDateIST(): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
 router.get("/oi-command/backtest", async (req: Request, res: Response) => {
-  if (getProvider().name !== "groww") return res.json({ available: false, message: "OI Command back-test के लिए Groww feed चाहिए।" });
+  if (getProvider().name !== "groww") return res.json({ available: false, message: "OI Command back-test के लिए Dhan feed चाहिए।" });
   const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
   if (!def || !def.fno) return res.status(400).json({ available: false, error: "valid F&O symbol चाहिए" });
   const date = req.query.date ? String(req.query.date) : lastTradingDateIST();
   const entryHM = req.query.entry ? String(req.query.entry) : "09:20";
   try {
-    const provider = getProvider() as GrowwProvider;
+    const provider = getProvider() as any;
     // 1) Live grid setup -> simulate that exact recommended option trade for the day.
     let live: any = { available: false, message: "grid setup अभी उपलब्ध नहीं।" };
     try {
       const grid = await buildOiCommand(def);
       if (grid && grid.available && grid.setup) {
-        const sim = await simulateOiOptionTrade(provider, {
+        const sim = await simulateOiOptionTrade(new DhanProvider(), {
           symbol: def.symbol, optionType: grid.setup.optionType, strike: grid.setup.strike,
           expiry: /^\d{4}-\d{2}-\d{2}$/.test(grid.expiry || "") ? grid.expiry : undefined,
           date, entryHM, direction: grid.oiDirection,
@@ -4888,7 +4856,7 @@ router.get("/oi-command/backtest", async (req: Request, res: Response) => {
       live = { available: false, message: e?.message || "live grid back-test विफल।" };
     }
     // 2) Replay the day's logged signals (real track record).
-    const log = await backtestOiCommandLog(provider, { date, symbol: def.symbol });
+    const log = await backtestOiCommandLog(new DhanProvider(), { date, symbol: def.symbol });
     res.json({ available: true, symbol: def.symbol, name: def.name, date, entry: entryHM, live, log });
   } catch (e: any) {
     res.status(502).json({ available: false, error: e?.message || "oi-command backtest failed" });
@@ -5257,7 +5225,7 @@ router.get("/best-case", async (_req: Request, res: Response) => {
   } catch {
     res.json({
       generatedAt: Math.floor(Date.now() / 1000), marketOpen: isTradingTimeIST(), feedWindow: isFeedWindowIST(),
-      index: null, stock: null, wait: "Groww still warming feeds — Trader Mind will fill as soon as candles arrive.",
+      index: null, stock: null, wait: "Dhan still warming feeds — Trader Mind will fill as soon as candles arrive.",
     });
   }
 });
@@ -5352,7 +5320,7 @@ const sellDeps = (): SellTickDeps => ({
 // Recommended selling structures (straddle/strangle/condor) for the indices.
 router.get("/option-sell", async (_req: Request, res: Response) => {
   if (getProvider().name !== "groww") {
-    return res.json({ available: false, message: "Option-selling needs the live Groww option chain (connect Groww).", strategies: [] });
+    return res.json({ available: false, message: "Option-selling needs the live Dhan option chain (connect Dhan).", strategies: [] });
   }
   const defs = DEFAULT_SYMBOLS.filter((d) => d.type === "index" && d.fno);
   const strategies: any[] = [];
@@ -5380,7 +5348,7 @@ router.get("/option-sell", async (_req: Request, res: Response) => {
 
 // Start a sell-paper run with a chosen structure. ?symbol=^NSEI&type=Iron%20Condor&capital=200000
 router.get("/option-sell/start", async (req: Request, res: Response) => {
-  if (getProvider().name !== "groww") return res.status(400).json({ error: "Connect Groww for the live option chain." });
+  if (getProvider().name !== "groww") return res.status(400).json({ error: "Connect Dhan for the live option chain." });
   const symbol = (req.query.symbol as string) || "^NSEI";
   const type = (req.query.type as string) || "Iron Condor";
   const capital = Math.max(0, Number(req.query.capital) || 200000);
@@ -5453,7 +5421,7 @@ router.get("/backtest/option/strikes", async (req: Request, res: Response) => {
 // /api/option-candles?symbol=^NSEI&type=PE&strike=23900&expiry=2026-09-08&interval=15
 router.get("/option-candles", async (req: Request, res: Response) => {
   const provider = getProvider();
-  if (provider.name !== "groww") return res.json({ available: false, message: "Option chart के लिए Groww चाहिए।" });
+  if (provider.name !== "dhan") return res.json({ available: false, message: "Option chart के लिए Dhan चाहिए।" });
   const def = findSymbolDef(String(req.query.symbol || ""));
   const underlying = (def?.nseSymbol || String(req.query.symbol || "").replace(/\.NS$/i, "")).toUpperCase();
   const type = req.query.type === "PE" ? "PE" : "CE";
@@ -5466,7 +5434,7 @@ router.get("/option-candles", async (req: Request, res: Response) => {
     if (!inst) return res.json({ available: false, message: `${underlying} ${strike} ${type} (${expiry}) instrument नहीं मिला।` });
     const now = Math.floor(Date.now() / 1000);
     const start = now - 5 * 24 * 3600; // last ~5 days
-    const candles = await growwOptionCandles(provider as GrowwProvider, inst.tradingSymbol, start, now, interval);
+    const candles = await dhanOptionCandles(inst.tradingSymbol, start, now, interval);
     res.json({
       available: candles.length > 0, tradingSymbol: inst.tradingSymbol,
       underlying, name: def?.name || underlying, type, strike, expiry, interval, lotSize: inst.lotSize,
@@ -5518,7 +5486,7 @@ function projectOptionPrice(type: "CE" | "PE", ltp: number | null, S0: number, S
 // /api/option-projector?symbol=^NSEI&targetSpot=23950&strike=23950&ceLtp=103&peLtp=99.5&spot=23906
 router.get("/option-projector", async (req: Request, res: Response) => {
   const provider = getProvider();
-  if (provider.name !== "groww") return res.json({ available: false, message: "Projector के लिए Groww feed चाहिए (live IV/greeks)।" });
+  if (provider.name !== "dhan") return res.json({ available: false, message: "Projector के लिए Dhan feed चाहिए (live IV/greeks)।" });
   const def = findSymbolDef(String(req.query.symbol || ""));
   if (!def || !def.fno) return res.status(400).json({ error: "valid F&O symbol required" });
   try {
@@ -5569,8 +5537,8 @@ router.get("/option-projector", async (req: Request, res: Response) => {
 router.get("/backtest/option/review", async (req: Request, res: Response) => {
   try {
     const provider = getProvider();
-    if (provider.name !== "groww") {
-      return res.json({ available: false, message: "Trade back-test के लिए Groww connect करें (historical option data चाहिए)।" });
+    if (provider.name !== "dhan") {
+      return res.json({ available: false, message: "Trade back-test के लिए Dhan connect करें (historical option data चाहिए)।" });
     }
     const q = req.query;
     const type = q.type === "PE" ? "PE" : "CE";
@@ -5586,7 +5554,7 @@ router.get("/backtest/option/review", async (req: Request, res: Response) => {
     const entryPrice = q.entry != null && q.entry !== "" ? Number(q.entry) : undefined;
     const exitPrice = q.exit != null && q.exit !== "" ? Number(q.exit) : undefined;
     const lots = q.lots != null && q.lots !== "" ? Number(q.lots) : undefined;
-    const result = await reviewOptionTrade(provider as GrowwProvider, {
+    const result = await reviewOptionTrade(new DhanProvider(), {
       symbol, type, strike, expiry, date, start, end, entryPrice, exitPrice, lots,
     });
     res.json(result);
@@ -5620,7 +5588,7 @@ router.get("/monthly-swing", async (_req: Request, res: Response) => {
       if (prov.name === "groww") {
         const nse = def.nseSymbol || def.symbol.replace(/\.NS$/i, "");
         try {
-          pick.hasOptions = await growwHasOptions(prov as GrowwProvider, nse);
+          pick.hasOptions = await dhanHasOptions(nse);
         } catch {
           pick.hasOptions = null;
         }
@@ -5678,7 +5646,7 @@ router.get("/frequent-movers", async (_req: Request, res: Response) => {
       if (prov.name === "groww") {
         const nse = def.nseSymbol || def.symbol.replace(/\.NS$/i, "");
         try {
-          mover.hasOptions = await growwHasOptions(prov as GrowwProvider, nse);
+          mover.hasOptions = await dhanHasOptions(nse);
         } catch {
           mover.hasOptions = null;
         }
@@ -5713,14 +5681,14 @@ router.get("/frequent-movers", async (_req: Request, res: Response) => {
 // Zero-Hero (deep-OTM expiry lottery) analysis for NIFTY & BANK NIFTY.
 router.get("/zero-hero", async (_req: Request, res: Response) => {
   const provider = getProvider();
-  if (provider.name !== "groww") {
-    return res.json({ available: false, message: "Zero-Hero needs the live Groww option chain (connect Groww).", indices: [] });
+  if (provider.name !== "dhan") {
+    return res.json({ available: false, message: "Zero-Hero needs the live Dhan option chain (connect Dhan).", indices: [] });
   }
   const defs = DEFAULT_SYMBOLS.filter((d) => d.type === "index" && d.fno);
   const indices: any[] = [];
   for (const def of defs) {
     try {
-      indices.push(await cached(`zh:${def.symbol}`, 60_000, () => growwZeroHero(provider as GrowwProvider, def)));
+      indices.push(await cached(`zh:${def.symbol}`, 60_000, () => dhanZeroHero(def)));
     } catch {
       /* skip */
     }
@@ -5795,7 +5763,7 @@ router.get("/day-outlook", async (req: Request, res: Response) => {
   const oppDefs = ALL_SYMBOLS.filter((d) => d.fno === true);
 
   const allDefs = [...new Set([...indexDefs, ...oppDefs])];
-  // Throttle: batches + small delay so the Groww feed doesn't rate-limit us.
+  // Throttle: batches + small delay so the Dhan feed doesn't rate-limit us.
   const bundles: any[] = [];
   const BATCH = 6;
   for (let i = 0; i < allDefs.length; i += BATCH) {
@@ -6135,7 +6103,7 @@ async function tradeContext(symbol: string, direction: "Bullish" | "Bearish"): P
   timeframe: string; horizon: string; candlePattern: string; candleBias: number; favoured: boolean; alignment: number; reason: string;
 }> {
   // Cached 2 min: the 4-timeframe read is heavy; without this every paper tick
-  // would re-fetch 5m/15m/1h/1d for every idea and rate-limit the Groww feed.
+  // would re-fetch 5m/15m/1h/1d for every idea and rate-limit the Dhan feed.
   return cached(`tctx:${symbol}:${direction}`, 120_000, () => tradeContextRaw(symbol, direction));
 }
 async function tradeContextRaw(symbol: string, direction: "Bullish" | "Bearish"): Promise<{
@@ -6392,7 +6360,7 @@ function paperDeps(force = false): TickDeps {
     // Live option premium for Manual Trading marking (cached 30s, any strike).
     getOptionPremium: async (symbol: string, type: "CE" | "PE", strike: number, expiry: string) => {
       try {
-        const gp = growwProviderForOi();
+        const gp = dhanProviderForOi();
         if (!gp) return null;
         return await cached(`optprem:${symbol}:${type}:${strike}:${expiry}`, 30_000, async () => {
           const def = findSymbolDef(symbol);
@@ -6400,7 +6368,7 @@ function paperDeps(force = false): TickDeps {
           const inst = await findOption(underlying, type, strike, expiry);
           if (!inst) return null;
           const now = Math.floor(Date.now() / 1000);
-          const candles = await growwOptionCandles(gp, inst.tradingSymbol, now - 2 * 24 * 3600, now, 5);
+          const candles = await dhanOptionCandles(inst.tradingSymbol, now - 2 * 24 * 3600, now, 5);
           return candles.length ? candles[candles.length - 1].close : null;
         });
       } catch { return null; }
@@ -6752,9 +6720,9 @@ export function startHourlyScheduler() {
     try {
       const v = await validateGrowwToken();
       if (v.ok) { recordGrowwOk(v.latencyMs); recordConnectionSuccess("groww"); }
-      else { setFeedFlags({ groww: false }); recordGrowwFail(); }
+      else { setFeedFlags({ dhan: false }); recordGrowwFail(); }
     } catch {
-      try { setFeedFlags({ groww: false }); } catch { /* ignore */ }
+      try { setFeedFlags({ dhan: false }); } catch { /* ignore */ }
       recordGrowwFail();
     }
   })();
@@ -6814,11 +6782,11 @@ export function startHourlyScheduler() {
     try {
       // Background-only ping scan - LOW priority (dev priority mechanism,
       // growwProvider.ts). Only the delivery channel changed.
-      const r = await runAsBackgroundGroww(() => tickPaperAlerts({
+      const r = await tickPaperAlerts({
         marketOpen: isTradingTimeIST(),
         provider: getProvider().name,
         scan: scanOiGridsForPing,
-      }));
+      });
       if (r.sent.length) console.log(`[telegram] sent ${r.sent.join(", ")}`);
     } catch { /* ignore */ }
     finally { waBusy = false; }
@@ -6832,7 +6800,7 @@ export function startHourlyScheduler() {
   // Scheduled (background) refresh - LOW priority. The two call sites inside
   // the /oi-change route handler itself (stale-kickoff, cold-start) are
   // serving an actual request and are deliberately left at the default HIGH.
-  setInterval(() => { if (isTradingTimeIST()) runAsBackgroundGroww(() => refreshOiChangeSnapshot()); }, 3 * 60 * 1000);
+  setInterval(() => { if (isTradingTimeIST()) refreshOiChangeSnapshot(); }, 3 * 60 * 1000);
 
   // Daily log retention sweep — archives files >90d (gzip into data/log/archive),
   // deletes archives >1yr ONLY if LOG_ARCHIVE_DELETE=1. Runs once/day after close.
@@ -6845,7 +6813,7 @@ export function startHourlyScheduler() {
       if (mins >= 15 * 60 + 35 && lastSweepDate !== today) { lastSweepDate = today; runRetentionSweep(); }
     } catch { /* ignore */ }
   }, 10 * 60 * 1000);
-  setTimeout(() => { runAsBackgroundGroww(() => refreshOiChangeSnapshot()); }, 10_000); // seed shortly after startup, LOW priority
+  setTimeout(() => { refreshOiChangeSnapshot(); }, 10_000);
 
   // Monday-morning / session warmup: pull index + liquid F&O candles and OI
   // from 09:00 IST so tabs do not all stampede Groww at 09:15 and hang.
@@ -6854,17 +6822,7 @@ export function startHourlyScheduler() {
     if (warmBusy) return;
     warmBusy = true;
     try {
-      // Background-only pre-warm - marked LOW priority (dev priority mechanism,
-      // growwProvider.ts) so it never makes a real user's dashboard request wait
-      // behind it. Nothing else about this function changed.
-      await runAsBackgroundGroww(async () => {
-        // Each symbol's cache is independent (keyed per symbol/interval, no
-        // shared/ordered state) - was sequential across symbols AND across each
-        // symbol's own 3 calls. This is background-only (no HTTP response to
-        // order), and the shared Groww throttle (growwProvider.ts) still caps
-        // real outbound concurrency regardless of how many calls are issued at
-        // once here, so this only removes an artificial extra wait, not a limit.
-        const idx = DEFAULT_SYMBOLS.filter((d) => d.type === "index" && d.fno);
+      const idx = DEFAULT_SYMBOLS.filter((d) => d.type === "index" && d.fno);
         await Promise.all(idx.map((def) => Promise.all([
           getCandlesCached(def.symbol, "15m").catch(() => {}),
           getCandlesCached(def.symbol, "5m").catch(() => {}),
@@ -6878,7 +6836,6 @@ export function startHourlyScheduler() {
           equitySymbols.push(def);
         }
         await Promise.all(equitySymbols.map((def) => getCandlesCached(def.symbol, "15m").catch(() => {})));
-      });
     } finally { warmBusy = false; }
   };
   setTimeout(() => { warmCoreFeeds().catch(() => {}); }, 4_000);
@@ -6891,7 +6848,7 @@ export function startHourlyScheduler() {
   setInterval(async () => {
     try {
       await evaluateOiSignals(async (sym) => { try { const q = await getProvider().getQuote(sym); return (q as any)?.price ?? null; } catch { return null; } });
-      if (!isTradingTimeIST() || !growwProviderForOi()) {
+      if (!isTradingTimeIST() || !dhanProviderForOi()) {
         if (!isTradingTimeIST()) {
           for (const def of DEFAULT_SYMBOLS.filter((d) => d.type === "index" && d.fno).slice(0, 2)) {
             try { await withTimeout(buildOiCommand(def), 20_000, "after-hours bulletin " + def.symbol); } catch { /* timeout ok */ }
@@ -7046,7 +7003,7 @@ async function scanOiChangeRows(universe: SymbolDef[]): Promise<any[]> {
 const oiChangeSnap: { at: number; rows: any[]; busy: boolean } = { at: 0, rows: [], busy: false };
 export async function refreshOiChangeSnapshot(): Promise<void> {
   if (oiChangeSnap.busy) return;
-  if (!growwProviderForOi()) { oiChangeSnap.at = Date.now(); oiChangeSnap.rows = []; return; }
+  if (!dhanProviderForOi()) { oiChangeSnap.at = Date.now(); oiChangeSnap.rows = []; return; }
   oiChangeSnap.busy = true;
   try {
     // INDICES ONLY (4 chains) in the background — this was scanning all ~26 F&O
@@ -7064,7 +7021,7 @@ const OI_CHANGE_DISCLAIMER =
 
 router.get("/oi-change", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
   const provider = getProvider();
-  if (provider.name !== "groww") return res.json({ marketOpen: isTradingTimeIST(), rows: [], message: "OI change needs the Groww option chain." });
+  if (provider.name !== "dhan") return res.json({ marketOpen: isTradingTimeIST(), rows: [], message: "OI change needs the Dhan option chain." });
   // Single symbol: compute on-demand (only 1 chain - fast).
   const one = req.query.symbol ? findSymbolDef(String(req.query.symbol)) : null;
   if (one) {
@@ -7092,12 +7049,12 @@ router.get("/oi-change", requirePermission("oiAnalysis"), async (req: Request, r
 // expandable chain in the OI Change tab.
 router.get("/oi-chain", async (req: Request, res: Response) => {
   const provider = getProvider();
-  if (provider.name !== "groww") return res.json({ available: false, message: "OI chain needs the Groww feed." });
+  if (provider.name !== "dhan") return res.json({ available: false, message: "OI chain needs the Dhan feed." });
   const def = findSymbolDef(String(req.query.symbol || ""));
   if (!def || !def.fno) return res.status(404).json({ error: "Unknown F&O symbol." });
   const exp = Math.max(0, Math.min(6, Number(req.query.exp) || 0));
   try {
-    const ch = await growwChainForExpiry(provider as GrowwProvider, def, exp);
+    const ch = await dhanChainForExpiry(def, exp);
     if (!ch.available) return res.json({ available: false, symbol: def.symbol, name: def.name, message: ch.message || "chain unavailable" });
     const spot = ch.spot;
     let atm = ch.strikes[0].strike;
@@ -7552,7 +7509,7 @@ router.get("/advisory/resolve", async (_req: Request, res: Response) => {
 
   // One option-candle fetch per distinct option contract, best-effort.
   const optByKey = new Map<string, any[] | null>();
-  const provider: any = growwProviderForOi();
+  const provider: any = dhanProviderForOi();
   for (const r of due) {
     if (!r.suggestion.startsWith("BUY") || r.strike == null || !r.optionType || !r.expiry) continue;
     const key = `${r.symbol}|${r.optionType}|${r.strike}|${r.expiry}`;
@@ -7561,7 +7518,7 @@ router.get("/advisory/resolve", async (_req: Request, res: Response) => {
     try {
       const inst = await findOption(r.symbol, r.optionType, r.strike, r.expiry);
       if (!inst) { optByKey.set(key, null); continue; }
-      const candles = await growwOptionCandles(provider, inst.tradingSymbol, r.at - 300, r.at + maxWindow + 600, 5);
+      const candles = await dhanOptionCandles(inst.tradingSymbol, r.at - 300, r.at + maxWindow + 600, 5);
       optByKey.set(key, candles);
     } catch { optByKey.set(key, null); }
   }
