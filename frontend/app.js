@@ -5641,7 +5641,7 @@ function initMarketCommand() {
   });
 
   // Create chart (TradingView dark theme — high-visibility candles)
-  const chartH = Math.max(container.clientHeight, 450);
+  const chartH = Math.max(container.clientHeight, 500);
   MC.chart = LightweightCharts.createChart(container, {
     width: container.clientWidth, height: chartH,
     layout: { background: { type: "solid", color: "#131722" }, textColor: "#b2b5be", fontSize: 12 },
@@ -5682,7 +5682,7 @@ function initMarketCommand() {
   MC.vwapSeries = MC.chart.addLineSeries({ color: "#d29922", lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
 
   window.addEventListener("resize", () => {
-    if (MC.chart) MC.chart.applyOptions({ width: container.clientWidth, height: Math.max(container.clientHeight, 450) });
+    if (MC.chart) MC.chart.applyOptions({ width: container.clientWidth, height: Math.max(container.clientHeight, 500) });
   });
 
   loadMarketCommand(true); // fast chart first, then full
@@ -6096,6 +6096,13 @@ function renderMCCommand(d) {
   const cmd = d.command;
   if (!cmd) return;
   const setText = (id, v) => { const e = el(id); if (e) e.textContent = v ?? "—"; };
+  // Intraday Assistance header: 5M / 15M direction + current spot.
+  const tf = d.timeframes || {};
+  const setDir = (id, v) => { const e = el(id); if (e) { e.textContent = v || "—"; e.className = v || ""; } };
+  setDir("mc-tf-5m", tf.m5);
+  setDir("mc-tf-15m", tf.m15);
+  const spotEl = el("mc-tf-spot");
+  if (spotEl) spotEl.textContent = d.spot != null ? Number(d.spot).toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—";
 
   // Trade Signal action
   const isReplay = cmd.finalAction === "REPLAY" || d.historical;

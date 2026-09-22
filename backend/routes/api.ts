@@ -4131,7 +4131,10 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       }
       candles = raw;
     } else {
-      candles = await cached(`mc-c:${symbol}:${interval}`, interval === "1d" ? TTL_DAILY : TTL_MC_CANDLES, () => fetchCandles(symbol, interval));
+      // ONE authoritative candle cache (shared key `c:`). Market Command drives a
+      // fast 5s refresh here; background jobs read the SAME key at their 30s TTL,
+      // so they reuse this fresh fetch instead of issuing a duplicate Dhan call.
+      candles = await cached(`c:${symbol}:${interval}`, interval === "1d" ? TTL_DAILY : TTL_MC_CANDLES, () => fetchCandles(symbol, interval));
     }
     if (!candles || candles.length < 5) return res.json({ error: "Not enough candle data", available: false });
 
@@ -4159,7 +4162,7 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
     let structOther: "Bullish" | "Bearish" | "Ranging" | null = null;
     try {
       const otherTf = (interval === "5m" ? "15m" : "5m") as Interval;
-      const co = isHistorical ? null : await cached(`mc-c:${symbol}:${otherTf}`, TTL_MC_CANDLES, () => fetchCandles(symbol, otherTf));
+      const co = isHistorical ? null : await cached(`c:${symbol}:${otherTf}`, TTL_MC_CANDLES, () => fetchCandles(symbol, otherTf));
       if (co && co.length >= 20) structOther = detectMarketStructure(co, 3, vwap(co)).currentStructure;
     } catch { structOther = null; }
     const recentCut = candles.length - 3;
@@ -4173,6 +4176,12 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       swingHigh: swHi, swingLow: swLo,
       tfLabel: interval.toUpperCase(), otherTfLabel: (interval === "5m" ? "15m" : "5m").toUpperCase(),
     });
+    // Explicit 5M + 15M directions for the Intraday Assistance panel.
+    const dirTag = (s: string | null) => s === "Bullish" ? "BULLISH" : s === "Bearish" ? "BEARISH" : s === "Ranging" ? "RANGING" : "—";
+    const timeframes = {
+      m5: dirTag(interval === "15m" ? structOther : ms.currentStructure),
+      m15: dirTag(interval === "5m" ? structOther : (interval === "15m" ? ms.currentStructure : structOther)),
+    };
 
     // 3-4. OI Command + Liquidity Status — LIVE ONLY, and skipped in the fast
     // chart-only view (?view=chart) so the chart paints without waiting on the
@@ -4488,6 +4497,7 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       lastDirectionChange,
       bos: latestBos,
       earlyMove,
+      timeframes,
       // India VIX (live; expected 30-day NIFTY volatility — NOT a direction signal)
       vix: vix ? {
         available: !!vix.available, value: vix.value, change: vix.change, changePct: vix.changePct,

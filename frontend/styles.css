@@ -4027,8 +4027,8 @@ body.mode-decisionflow #index-strip { display: none !important; }
 .mc-fullscreen-btn { background: none; border: 1px solid #2a2e39; color: #787b86; border-radius: 3px; padding: 2px 7px; cursor: pointer; font-size: 14px; transition: color .15s; }
 .mc-fullscreen-btn:hover { color: #d1d4dc; }
 
-/* Chart container */
-.mc-chart-container { width: 100%; height: 450px; position: relative; background: #131722; flex-shrink: 0; }
+/* Chart container — given generous height so the chart is the focus */
+.mc-chart-container { width: 100%; height: 520px; position: relative; background: #131722; flex-shrink: 0; }
 
 /* Status cards below chart */
 .mc-status-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 6px 8px; background: #1e222d; }
@@ -4041,11 +4041,15 @@ body.mode-decisionflow #index-strip { display: none !important; }
 .mc-stat-value.neutral { color: #f7931a; }
 
 /* ── Right panel: Trade Signal + Option ── */
-.mc-command-panel { width: 310px; flex-shrink: 0; border-left: 1px solid #2a2e39; display: flex; flex-direction: column; overflow-y: auto; background: #1e222d; }
+.mc-command-panel { width: 288px; flex-shrink: 0; border-left: 1px solid #2a2e39; display: flex; flex-direction: column; overflow-y: auto; background: #1e222d; }
 
 /* Trade Signal section */
 .mc-signal-section { border-bottom: 1px solid #2a2e39; }
 .mc-signal-head { font-size: 10px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; color: #787b86; padding: 10px 14px 6px; }
+.mc-tf-row { display: flex; gap: 14px; padding: 0 14px 8px; font-size: 12px; }
+.mc-tf-cell { color: #787b86; }
+.mc-tf-cell b { font-weight: 700; }
+.mc-tf-cell b.BULLISH { color: #16c784; } .mc-tf-cell b.BEARISH { color: #ea3943; } .mc-tf-cell b.RANGING, .mc-tf-cell b.NEUTRAL { color: #f7931a; }
 .mc-cmd-action { display: flex; align-items: center; gap: 10px; padding: 8px 14px 14px; }
 .mc-action-arrow { font-size: 24px; line-height: 1; }
 .mc-action-label { font-size: 22px; font-weight: 800; letter-spacing: .5px; }
