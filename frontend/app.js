@@ -82,6 +82,8 @@ async function init() {
   if (el("ls-scan-refresh")) el("ls-scan-refresh").addEventListener("click", loadLiquidityMovers);
   setTimeout(() => { if (isMarketOpen() || isFeedWindow()) loadTopOpportunities(); }, 4000);
   setInterval(() => { if (isMarketOpen() || isFeedWindow()) loadTopOpportunities(); }, 60 * 1000);
+  setTimeout(loadSmartNews, 2500);
+  setInterval(loadSmartNews, 5 * 60 * 1000);
   startLiveTicker();
 
   el("interval").addEventListener("change", (e) => {
@@ -583,6 +585,33 @@ function chartOpts(width, height) {
 }
 
 // ---------- app-level best-2 option opportunities + 1s live ticker ----------
+// Smart News — live RSS (existing /api/news path), NIFTY/BANKNIFTY-relevant items
+// newest first with source + freshness. Informational only; never overrides the
+// deterministic engines.
+async function loadSmartNews() {
+  const box = el("opp-news");
+  if (!box) return;
+  try {
+    const d = await fetch("/api/news").then((r) => r.json());
+    if (d.error || !Array.isArray(d.items)) { box.innerHTML = `<span class="wl-sub">News unavailable.</span>`; return; }
+    const rx = /nifty|bank\s?nifty|banknifty|sensex|rbi|fed|index|option|fii|dii|rupee|crude|market/i;
+    const items = d.items.filter((n) => rx.test(n.title || "") || (n.tags || []).some((t) => rx.test(t))).slice(0, 4);
+    const use = items.length ? items : d.items.slice(0, 3);
+    const asOf = d.asOf ? new Date(d.asOf * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "";
+    const bias = d.summary?.bias;
+    box.innerHTML =
+      `<span class="opp-news-hd">${bias ? `News bias: <b>${bias}</b> · ` : ""}updated ${asOf}</span>` +
+      use.map((n) => {
+        const dot = n.sentiment === "positive" ? "▲" : n.sentiment === "negative" ? "▼" : "•";
+        const cls = n.sentiment === "positive" ? "pos" : n.sentiment === "negative" ? "neg" : "neu";
+        const t = (n.title || "").replace(/</g, "&lt;").slice(0, 110);
+        const imp = n.impact === "high" ? " ⚡" : "";
+        const link = (n.link || "#").replace(/"/g, "%22");
+        return `<a class="opp-news-item ${cls}" href="${link}" target="_blank" rel="noopener" title="${n.source || ""} · ${n.ago || ""}"><span class="d">${dot}</span>${t}${imp} <span class="src">${n.source || ""} · ${n.ago || ""}</span></a>`;
+      }).join("");
+  } catch { box.innerHTML = `<span class="wl-sub">News unavailable.</span>`; }
+}
+
 async function loadTopOpportunities() {
   try {
     const d = await fetchJSON("/api/top-opportunities", 15000);
@@ -5512,7 +5541,7 @@ const MC = {
   sym: "^NSEI", tf: "15m", chart: null, candleSeries: null,
   ema9Series: null, ema21Series: null, ema50Series: null, vwapSeries: null,
   obMarkers: [], priceLine: null, timer: null, loading: false, lastData: null,
-  show: { vwap: true, ema21: true, ema50: true, ema9: false, ob: true, vol: true },
+  show: { vwap: true, ema21: true, ema50: true, ema9: false, ob: true, vol: true, levels: false },
   replayDate: null, // yyyy-mm-dd when replaying a past session; null = live
 };
 
@@ -5544,11 +5573,13 @@ function initMarketCommand() {
   });
 
   // Wire indicator toggles
-  ["vwap", "ema21", "ema50", "ema9", "ob", "vol"].forEach((k) => {
+  ["vwap", "ema21", "ema50", "ema9", "ob", "vol", "levels"].forEach((k) => {
     const cb = el("mc-tog-" + k);
     if (cb) cb.addEventListener("change", () => {
       MC.show[k] = cb.checked;
-      applyMCOverlays();
+      // "Show Levels" governs every horizontal price line → full chart redraw.
+      if (k === "levels" && MC.lastData) renderMCChart(MC.lastData);
+      else applyMCOverlays();
     });
   });
 
@@ -5854,9 +5885,17 @@ function renderMCStrikes(d) {
   // Picks
   const picks = el("mc-strike-picks");
   if (picks) {
+    // Option-premium setup (entry/SL/target/R:R) rendered from the real delta.
+    const setup = (s) => {
+      if (!s) return "";
+      if (s.entryPremium == null || s.rr == null) return `<div class="mc-setup na">${s.note || "INSUFFICIENT DATA"}</div>`;
+      const respTag = s.responding === false ? `<span class="mc-setup-warn">⚠ not responding to underlying</span>` : "";
+      const rrCls = s.meets1to2 ? "ok" : "bad";
+      return `<div class="mc-setup"><span>Entry ₹${s.entryPremium}</span><span class="sl">SL ₹${s.stopPremium}</span><span class="tgt">Tgt ₹${s.targetPremium}</span><span class="rr ${rrCls}">R:R 1:${s.rr}${s.meets1to2 ? "" : " (<1:2)"}</span>${respTag}</div>`;
+    };
     let html = "";
-    if (sa.primary) html += `<div class="mc-strike-pick primary"><span class="lbl">Primary Strike — ${sa.primary.strike} ${sa.primary.side}</span><div class="why">${sa.primary.why}</div></div>`;
-    if (sa.alternative) html += `<div class="mc-strike-pick alt"><span class="lbl">Alternative — ${sa.alternative.strike} ${sa.alternative.side}</span><div class="why">${sa.alternative.why}</div></div>`;
+    if (sa.primary) html += `<div class="mc-strike-pick primary"><span class="lbl">Best Strike — ${sa.primary.strike} ${sa.primary.side}</span><div class="why">${sa.primary.why}</div>${setup(sa.bestSetup)}</div>`;
+    if (sa.alternative) html += `<div class="mc-strike-pick alt"><span class="lbl">Second Strike — ${sa.alternative.strike} ${sa.alternative.side}</span><div class="why">${sa.alternative.why}</div>${setup(sa.secondSetup)}</div>`;
     if (sa.avoid) html += `<div class="mc-strike-pick avoid"><span class="lbl">Avoid — ${sa.avoid.strike} ${sa.avoid.side}</span><div class="why">${sa.avoid.why}</div></div>`;
     if (!html && sa.side == null) html = `<div class="mc-strike-note">Master direction is neutral — no option side selected.</div>`;
     picks.innerHTML = html;
@@ -5909,6 +5948,26 @@ function renderMCChart(d) {
 
   // Current price line
   if (MC.priceLine) { try { MC.candleSeries.removePriceLine(MC.priceLine); } catch {} }
+  MC.obMarkers.forEach((pl) => { try { MC.candleSeries.removePriceLine(pl); } catch {} });
+  MC.obMarkers = [];
+
+  // "Show Levels" OFF (default) → a clean chart with NO horizontal lines.
+  // The calculations still run; only the drawing is gated here.
+  if (!MC.show.levels) {
+    MC.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, N - showBars), to: N + 2 });
+    MC._fitKey = MC.sym + ":" + MC.tf;
+    if (d.structure?.bosEvents?.length) {
+      const markers = d.structure.bosEvents.map((b) => {
+        const pre = b.stage === "Pre", bull = b.direction === "Bullish";
+        return { time: b.time, position: bull ? "belowBar" : "aboveBar",
+          color: pre ? (bull ? "rgba(22,199,132,.55)" : "rgba(234,57,67,.55)") : (bull ? "#16c784" : "#ea3943"),
+          shape: pre ? "circle" : (bull ? "arrowUp" : "arrowDown"), text: pre ? "BOS?" : "BOS" };
+      });
+      MC.candleSeries.setMarkers(markers);
+    }
+    return;
+  }
+
   if (d.spot) {
     MC.priceLine = MC.candleSeries.createPriceLine({
       price: d.spot, color: "#2962ff", lineWidth: 1, lineStyle: 2,
@@ -5917,8 +5976,6 @@ function renderMCChart(d) {
   }
 
   // Order Block zones — only those near the visible price range.
-  MC.obMarkers.forEach((pl) => { try { MC.candleSeries.removePriceLine(pl); } catch {} });
-  MC.obMarkers = [];
   if (MC.show.ob && d.orderBlocks) {
     d.orderBlocks.forEach((ob) => {
       if (!MC._inView(ob.high) && !MC._inView(ob.low)) return;
@@ -5989,10 +6046,10 @@ function applyMCOverlays() {
   MC.vwapSeries.setData(MC.show.vwap ? align(ov.vwap) : []);
   if (MC.volSeries) MC.volSeries.setData(MC.show.vol ? (MC._volumes || []) : []);
 
-  // Re-render OB zones
+  // Re-render OB zones — gated on "Show Levels" (default OFF = clean chart).
   MC.obMarkers.forEach((pl) => { try { MC.candleSeries.removePriceLine(pl); } catch {} });
   MC.obMarkers = [];
-  if (MC.show.ob && MC._orderBlocks) {
+  if (MC.show.levels && MC.show.ob && MC._orderBlocks) {
     const inView = MC._inView || (() => true);
     MC._orderBlocks.forEach((ob) => {
       if (!inView(ob.high) && !inView(ob.low)) return;

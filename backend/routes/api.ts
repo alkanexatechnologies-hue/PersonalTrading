@@ -4268,7 +4268,21 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
     const cmdDirection: "BULLISH" | "BEARISH" | "NEUTRAL" = isHistorical
       ? techDirection as any
       : oiDirection === "UP" ? "BULLISH" : oiDirection === "DOWN" ? "BEARISH" : "NEUTRAL";
-    const strikeAnalysis = analyzeStrikes(skipOi ? null : oiChain, cmdDirection, { stale: dataStale, finalAction, masterVerdict: arbVerdict, name: def.name });
+    // Entry/SL/Target from existing OI recommendation (option premium + spot levels).
+    const entry = rec?.ltp ?? null;
+    const stopLoss = rec?.stop ?? oiData?.management?.stopLoss ?? null;
+    const target1 = rec?.target ?? oiData?.management?.targetLo ?? null;
+    const target2 = oiData?.management?.targetHi ?? null;
+    const optionType = rec?.optionType || oiData?.setup?.optionType || "—";
+    const strike = rec?.strike || oiData?.setup?.strike || null;
+    // Spot-level SL/target from the EXISTING engine (structure/invalidation). For a
+    // bearish trade the target is BELOW spot; support (not resistance) is the T2.
+    const spotSL = rec?.spotStop ?? oiData?.management?.invalidation ?? null;
+    const spotT1 = rec?.spotTarget ?? null;
+    const spotT2 = cmdDirection === "BEARISH" ? (oiData?.management?.support ?? null) : (oiData?.management?.resistance ?? null);
+    const spotEntry = rec?.spotTarget ? { low: Math.min(spot, rec.spotTarget), high: Math.max(spot, rec.spotTarget) } : oiData?.levels ? { low: oiData.levels.orbLow || spot - currentAtr, high: oiData.levels.orbHigh || spot } : null;
+
+    const strikeAnalysis = analyzeStrikes(skipOi ? null : oiChain, cmdDirection, { stale: dataStale, finalAction, masterVerdict: arbVerdict, name: def.name, spotSL, spotTarget: spotT1 ?? spotT2 });
 
     // Per-component sync health (real timestamps + ages). OI freshness uses a
     // flat 30/90s band (chain refreshes continuously); candle freshness is
@@ -4300,19 +4314,6 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
           oi: { dataTs: oiTs, ageSec: oiAgeSec, available: !!oiData?.available, status: oStat },
           dhanOn,
         };
-
-    // Entry/SL/Target from existing OI recommendation
-    const entry = rec?.ltp ?? null;
-    const stopLoss = rec?.stop ?? oiData?.management?.stopLoss ?? null;
-    const target1 = rec?.target ?? oiData?.management?.targetLo ?? null;
-    const target2 = oiData?.management?.targetHi ?? null;
-    const optionType = rec?.optionType || oiData?.setup?.optionType || "—";
-    const strike = rec?.strike || oiData?.setup?.strike || null;
-    // Spot-level SL/targets for chart price lines
-    const spotSL = rec?.spotStop ?? oiData?.management?.invalidation ?? null;
-    const spotT1 = rec?.spotTarget ?? null;
-    const spotT2 = oiData?.management?.resistance ?? null;
-    const spotEntry = rec?.spotTarget ? { low: Math.min(spot, rec.spotTarget), high: Math.max(spot, rec.spotTarget) } : oiData?.levels ? { low: oiData.levels.orbLow || spot - currentAtr, high: oiData.levels.orbHigh || spot } : null;
 
     // ---- Specific WAIT reason (never a bare "WAIT"). Deterministic from the
     // same evidence; it EXPLAINS the wait and does NOT loosen any gate.
@@ -4421,6 +4422,9 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       optionType,                                            // CE / PE / —
       preferredStrike: strikeAnalysis?.primary ? `${strikeAnalysis.primary.strike} ${strikeAnalysis.primary.side}` : (strike && optionType !== "—" ? `${strike} ${optionType}` : null),
       alternativeStrike: strikeAnalysis?.alternative ? `${strikeAnalysis.alternative.strike} ${strikeAnalysis.alternative.side}` : null,
+      // Option-premium plan for the best/second strike (entry LTP, SL, target, R:R).
+      bestSetup: strikeAnalysis?.bestSetup ?? null,
+      secondSetup: strikeAnalysis?.secondSetup ?? null,
       stopLoss: spotSL, stopLossReason: slReason,
       target1: spotT1, target2: spotT2, targetBasis,
       invalidation: marketView.invalidation,

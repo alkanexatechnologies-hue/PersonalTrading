@@ -38,6 +38,24 @@ export interface StrikeRow {
   evidence: string;
 }
 
+// Option-premium trade math for a chosen strike, derived from its REAL delta and
+// the EXISTING spot stop/target levels (option move ≈ delta × underlying move).
+// Deterministic; enforces a minimum 1:2 R:R (never moves SL/target to fake it).
+export interface OptionSetup {
+  strike: number;
+  side: Side;
+  entryPremium: number | null;    // current option LTP
+  stopPremium: number | null;
+  targetPremium: number | null;
+  riskPts: number | null;         // premium risk
+  rewardPts: number | null;       // premium reward
+  rr: number | null;              // reward:risk
+  meets1to2: boolean;
+  responsiveness: number | null;  // |delta|
+  responding: boolean | null;     // did premium actually move with the underlying?
+  note: string;
+}
+
 export interface StrikeAnalysis {
   available: boolean;
   reason?: string;               // set when not available
@@ -51,6 +69,8 @@ export interface StrikeAnalysis {
   primary: { strike: number; side: Side; why: string } | null;
   alternative: { strike: number; side: Side; why: string } | null;
   avoid: { strike: number; side: Side; why: string } | null;
+  bestSetup: OptionSetup | null;       // option-premium plan for the best strike
+  secondSetup: OptionSetup | null;     // option-premium plan for the alternative
   spreadNote: string;            // execution-quality caveat
   // Trader-friendly conclusion
   summary: {
@@ -97,7 +117,38 @@ function buildRow(sym: string, s: OiStrike, side: Side, spot: number): StrikeRow
 }
 
 /** Analyse the strikes around ATM for the selected index. Read-only. */
-export function analyzeStrikes(oi: OiAnalysis | null, direction: "BULLISH" | "BEARISH" | "NEUTRAL", opts: { stale?: boolean; finalAction?: string; masterVerdict?: string; name?: string } = {}): StrikeAnalysis {
+// Build the option-premium plan for one strike from its delta + the spot levels.
+// Premium move ≈ |delta| × underlying move. Enforces a minimum 1:2 without ever
+// nudging SL/target to fabricate the ratio.
+function computeOptionSetup(row: StrikeRow, spot: number, spotSL: number | null, spotTarget: number | null): OptionSetup {
+  const resp = row.responsiveness;
+  const base: OptionSetup = {
+    strike: row.strike, side: row.side, entryPremium: row.ltp,
+    stopPremium: null, targetPremium: null, riskPts: null, rewardPts: null, rr: null,
+    meets1to2: false, responsiveness: resp,
+    responding: row.ltpChgPct != null ? Math.abs(row.ltpChgPct) >= 0.5 : null,
+    note: "",
+  };
+  if (row.ltp == null || resp == null || spotSL == null || spotTarget == null) {
+    base.note = "INSUFFICIENT DATA — need option LTP, delta and spot stop/target.";
+    return base;
+  }
+  const spotRisk = Math.abs(spot - spotSL);
+  const spotReward = Math.abs(spotTarget - spot);
+  const stop = Math.max(0.05, Math.round((row.ltp - resp * spotRisk) * 100) / 100);
+  const target = Math.round((row.ltp + resp * spotReward) * 100) / 100;
+  const risk = Math.round((row.ltp - stop) * 100) / 100;
+  const reward = Math.round((target - row.ltp) * 100) / 100;
+  const rr = risk > 0 ? Math.round((reward / risk) * 100) / 100 : null;
+  base.stopPremium = stop; base.targetPremium = target; base.riskPts = risk; base.rewardPts = reward;
+  base.rr = rr; base.meets1to2 = rr != null && rr >= 2;
+  base.note = base.meets1to2
+    ? `≈₹${row.ltp} entry, SL ₹${stop}, target ₹${target} (R:R 1:${rr}) from delta ${resp.toFixed(2)}.`
+    : `R:R 1:${rr ?? "—"} < 1:2 on the existing stop/target — WAIT rather than widen artificially.`;
+  return base;
+}
+
+export function analyzeStrikes(oi: OiAnalysis | null, direction: "BULLISH" | "BEARISH" | "NEUTRAL", opts: { stale?: boolean; finalAction?: string; masterVerdict?: string; name?: string; spotSL?: number | null; spotTarget?: number | null } = {}): StrikeAnalysis {
   const index = oi?.symbol || "";
   const indexName = opts.name || index;
   const spot = oi?.underlying ?? null;
@@ -109,6 +160,7 @@ export function analyzeStrikes(oi: OiAnalysis | null, direction: "BULLISH" | "BE
   const empty = (reason: string): StrikeAnalysis => ({
     available: false, reason, index, spot, expiry: oi?.expiry ?? null, atmStrike: null, side: null,
     atm: { ce: null, pe: null }, rows: [], primary: null, alternative: null, avoid: null,
+    bestSetup: null, secondSetup: null,
     spreadNote: "Bid/ask depth is not in the option feed — execution quality can't be measured.",
     summary: { index: indexName, direction, atm: null, optionView: null, preferred: null, why: reason, alternative: null, status },
     dataQuality: { stale: !!opts.stale, strikesWithPremium: withPrem.length, hasDelta },
@@ -179,6 +231,10 @@ export function analyzeStrikes(oi: OiAnalysis | null, direction: "BULLISH" | "BE
     if (worst) avoid = { strike: worst.strike, side, why: `Thin liquidity (${worst.evidence}) — poor fills likely.` };
   }
 
+  // Option-premium setups (entry/SL/target/R:R) for the best & second strike.
+  const bestSetup = primary ? computeOptionSetup(rows.find((r) => r.strike === primary.strike)!, spot, opts.spotSL ?? null, opts.spotTarget ?? null) : null;
+  const secondSetup = alternative ? computeOptionSetup(rows.find((r) => r.strike === alternative.strike)!, spot, opts.spotSL ?? null, opts.spotTarget ?? null) : null;
+
   const preferred = primary ? `${primary.strike} ${primary.side}` : null;
   const summaryWhy = primary
     ? whyLine(rows.find((r) => r.strike === primary!.strike)!, "preferred")
@@ -186,7 +242,7 @@ export function analyzeStrikes(oi: OiAnalysis | null, direction: "BULLISH" | "BE
 
   return {
     available: true, index, spot, expiry: oi.expiry ?? null, atmStrike, side,
-    atm, rows, primary, alternative, avoid,
+    atm, rows, primary, alternative, avoid, bestSetup, secondSetup,
     spreadNote: "Bid/ask depth is not in the option feed — execution quality (spread) is INSUFFICIENT DATA; liquidity is judged from OI + volume only.",
     summary: {
       index: indexName, direction, atm: atmStrike, optionView: side,

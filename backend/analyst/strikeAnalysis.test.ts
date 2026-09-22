@@ -63,3 +63,29 @@ test("no premiums in chain → INSUFFICIENT DATA", () => {
   assert.equal(a.available, false);
   assert.match(a.reason!, /INSUFFICIENT DATA/);
 });
+
+test("option setup: entry/SL/target/R:R derived from real delta + spot levels", () => {
+  const oi = chain([
+    strike({ strike: 23300, peLtp: 40, peOi: 900000, peVol: 20000, peDelta: -0.30 }),
+    strike({ strike: 23400, peLtp: 90, peOi: 2100000, peVol: 60000, peDelta: -0.50 }),  // ATM
+    strike({ strike: 23500, peLtp: 150, peOi: 1200000, peVol: 40000, peDelta: -0.68 }),
+  ]);
+  // Bearish: spot 23400, SL 23440 (40 pts), target 23320 (80 pts).
+  const a = analyzeStrikes(oi, "BEARISH", { spotSL: 23440, spotTarget: 23320, name: "NIFTY 50" });
+  assert.ok(a.bestSetup, "best setup computed");
+  const s = a.bestSetup!;
+  assert.equal(s.entryPremium != null, true);
+  // premium move ≈ |delta| × underlying move; risk uses 40pts, reward 80pts → R:R ≈ 2.
+  assert.ok(s.rr != null && s.rr >= 1.8, `R:R ~2 expected, got ${s.rr}`);
+  assert.equal(s.meets1to2, true);
+  assert.ok(s.stopPremium! < s.entryPremium! && s.targetPremium! > s.entryPremium!);
+});
+
+test("option setup: R:R below 1:2 is flagged, never widened to fake it", () => {
+  const oi = chain([strike({ strike: 23400, peLtp: 90, peOi: 2e6, peVol: 6e4, peDelta: -0.50 })]);
+  // Reward (20pts) < 2× risk (40pts) → R:R ~0.5, must NOT meet 1:2.
+  const a = analyzeStrikes(oi, "BEARISH", { spotSL: 23440, spotTarget: 23380 });
+  const s = a.bestSetup!;
+  assert.equal(s.meets1to2, false);
+  assert.match(s.note, /< 1:2|WAIT/);
+});

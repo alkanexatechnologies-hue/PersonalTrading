@@ -883,6 +883,13 @@ button.ghost.active { background: var(--blue); border-color: var(--blue); color:
   overflow-y: auto;
 }
 .opp-bar-title { font-size: 12px; font-weight: 700; color: var(--muted); white-space: nowrap; text-transform: uppercase; letter-spacing: 1px; }
+.opp-news { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; padding: 4px 0; font-size: 12px; }
+.opp-news-hd { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.opp-news-item { display: inline-flex; align-items: baseline; gap: 5px; color: var(--text); text-decoration: none; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.opp-news-item:hover { text-decoration: underline; }
+.opp-news-item .d { font-weight: 700; }
+.opp-news-item.pos .d { color: var(--green); } .opp-news-item.neg .d { color: var(--red); } .opp-news-item.neu .d { color: var(--muted); }
+.opp-news-item .src { color: var(--muted); font-size: 10px; }
 .opp-bar-items { display: flex; gap: 10px; flex: 1; }
 .opp-chip {
   display: flex; flex-direction: column;
@@ -4130,6 +4137,11 @@ body.mode-decisionflow #index-strip { display: none !important; }
 .mc-strike-pick.avoid .lbl { color: #ea3943; }
 .mc-strike-pick .why { color: #b2b5be; margin-top: 2px; }
 .mc-strike-note { font-size: 10px; color: #787b86; line-height: 1.4; }
+.mc-setup { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; margin-top: 4px; font-variant-numeric: tabular-nums; color: #d1d4dc; }
+.mc-setup .sl { color: #ea3943; } .mc-setup .tgt { color: #16c784; }
+.mc-setup .rr { font-weight: 700; } .mc-setup .rr.ok { color: #16c784; } .mc-setup .rr.bad { color: #f7931a; }
+.mc-setup-warn { color: #f7931a; font-weight: 600; }
+.mc-setup.na { font-size: 10px; color: #787b86; margin-top: 4px; }
 .mc-opt-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #787b86; }
 .mc-opt-btns { display: flex; gap: 2px; }
 .mc-opt-btn { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 3px; background: #2a2e39; color: #787b86; cursor: default; }
