@@ -3931,6 +3931,37 @@ body.mode-decisionflow #index-strip { display: none !important; }
 .mc-timestamp { color: #787b86; font-size: 11px; font-variant-numeric: tabular-nums; }
 .mc-live-tag { font-size: 9px; font-weight: 700; letter-spacing: .5px; color: #26a69a; border: 1px solid #26a69a; border-radius: 3px; padding: 1px 5px; }
 
+/* TOP TRADE PLAN bar — always visible above the chart */
+.mc-plan { display: grid; grid-template-columns: 1.2fr 1.4fr 1.2fr 1fr 1.1fr 1fr; gap: 1px; background: #2a2e39; border-bottom: 2px solid #2a2e39; }
+.mc-plan-cell { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; background: #1a1d28; min-width: 0; }
+.mc-plan-lbl { font-size: 9px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: #787b86; }
+.mc-plan-val { font-size: 16px; font-weight: 700; color: #d1d4dc; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mc-plan-sub { font-size: 10px; color: #787b86; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mc-plan-sl { color: #ea3943; }
+.mc-plan-tgt { color: #16c784; }
+.mc-plan-dir .mc-plan-val.BULLISH { color: #16c784; }
+.mc-plan-dir .mc-plan-val.BEARISH { color: #ea3943; }
+.mc-plan-dir .mc-plan-val.NEUTRAL { color: #f7931a; }
+.mc-plan-dir .mc-plan-val.CONFLICT { color: #bc8cff; }
+.mc-plan-dir-cell.BULLISH { box-shadow: inset 3px 0 0 #16c784; }
+.mc-plan-dir-cell.BEARISH { box-shadow: inset 3px 0 0 #ea3943; }
+.mc-plan-dir-cell.NEUTRAL { box-shadow: inset 3px 0 0 #f7931a; }
+.mc-plan-dir-cell.CONFLICT { box-shadow: inset 3px 0 0 #bc8cff; }
+.mc-plan-action-cell { align-items: flex-start; justify-content: center; }
+.mc-plan-action { font-size: 18px; font-weight: 800; letter-spacing: .5px; padding: 3px 12px; border-radius: 4px; background: #2a2e39; color: #787b86; }
+.mc-plan-action.TAKE { background: rgba(22,199,132,.2); color: #16c784; }
+.mc-plan-action.READY { background: rgba(22,199,132,.15); color: #16c784; }
+.mc-plan-action.WAIT { background: rgba(247,147,26,.18); color: #f7931a; }
+.mc-plan-action.AVOID, .mc-plan-action.NO.TRADE { background: rgba(234,57,67,.2); color: #ea3943; }
+.mc-plan-action.STALE { background: #2a2e39; color: #787b86; }
+@media (max-width: 900px) {
+  .mc-plan { grid-template-columns: 1fr 1fr 1fr; }
+}
+@media (max-width: 640px) {
+  .mc-plan { grid-template-columns: 1fr 1fr; }
+  .mc-plan-val { font-size: 14px; }
+}
+
 /* Body: chart + command panel */
 .mc-body { display: flex; flex: 1; min-height: 0; overflow: hidden; }
 .mc-chart-area { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #131722; overflow-y: auto; }
@@ -4020,9 +4051,9 @@ body.mode-decisionflow #index-strip { display: none !important; }
 .mc-mv-line b.TAKE, .mc-mv-line b.READY { color: #16c784; } .mc-mv-line b.WAIT { color: #f7931a; } .mc-mv-line b.AVOID { color: #ea3943; }
 .mc-mv-block { font-size: 11px; margin-top: 6px; line-height: 1.5; }
 .mc-mv-block .lbl { color: #787b86; text-transform: uppercase; font-size: 9px; letter-spacing: .5px; }
-.mc-mv-block.support .item::before { content: "✓ "; color: #16c784; }
-.mc-mv-block.contradict .item::before { content: "✕ "; color: #ea3943; }
-.mc-mv-block.missing .item::before { content: "• "; color: #f7931a; }
+.mc-mv-block.support .item::before { content: "▲ "; color: #16c784; }
+.mc-mv-block.contradict .item::before { content: "▼ "; color: #ea3943; }
+.mc-mv-block.missing .item::before { content: "○ "; color: #f7931a; }
 .mc-mv-block .item { display: block; color: #b2b5be; }
 .mc-mv-inval { font-size: 11px; margin-top: 6px; color: #ea3943; }
 .mc-mv-based { font-size: 10px; margin-top: 6px; color: #787b86; line-height: 1.4; font-style: italic; }

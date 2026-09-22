@@ -5702,6 +5702,7 @@ async function loadMarketCommand(chartOnly = false) {
     renderMCLiveBar(d);
     renderMCStrikes(d);
     renderMCMarketView(d);
+    renderMCPlan(d);
   } catch (e) {
     console.error("[MarketCommand]", e);
   }
@@ -5717,6 +5718,38 @@ function mcFmtK(v) {
   if (a >= 1e5) return (v / 1e5).toFixed(2) + "L";
   if (a >= 1e3) return (v / 1e3).toFixed(1) + "K";
   return String(Math.round(v));
+}
+
+function renderMCPlan(d) {
+  const p = d.tradePlan;
+  const el2 = (id) => el(id);
+  if (!p) return;
+  const fmt = (v) => v != null ? Number(v).toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—";
+  // Direction
+  const dirEl = el2("mc-plan-dir"), dirCell = el2("mc-plan-dir-cell");
+  if (dirEl) { dirEl.textContent = p.direction; dirEl.className = "mc-plan-val " + p.direction; }
+  if (dirCell) dirCell.className = "mc-plan-cell mc-plan-dir " + p.direction;
+  // Entry
+  const entryEl = el2("mc-plan-entry"), entryState = el2("mc-plan-entry-state");
+  if (entryEl) entryEl.textContent = p.entryZone || "—";
+  if (entryState) entryState.textContent = p.entryState || "";
+  // Strike
+  const strikeEl = el2("mc-plan-strike"), strikeAlt = el2("mc-plan-strike-alt");
+  if (strikeEl) strikeEl.textContent = p.preferredStrike || "—";
+  if (strikeAlt) strikeAlt.textContent = p.alternativeStrike ? "alt " + p.alternativeStrike : "";
+  // SL
+  const slEl = el2("mc-plan-sl");
+  if (slEl) slEl.textContent = p.stopLoss != null ? fmt(p.stopLoss) : "—";
+  // Targets
+  const tgtEl = el2("mc-plan-tgt");
+  if (tgtEl) tgtEl.textContent = (p.target1 != null ? fmt(p.target1) : "—") + (p.target2 != null ? " / " + fmt(p.target2) : "");
+  // Action (Master authority)
+  const actEl = el2("mc-plan-action");
+  if (actEl) {
+    const a = p.dataStale ? "STALE" : (p.action || "—");
+    actEl.textContent = a === "NO TRADE" ? "AVOID" : a;
+    actEl.className = "mc-plan-action " + a.replace(/ /g, ".");
+  }
 }
 
 function renderMCMarketView(d) {
@@ -5738,9 +5771,11 @@ function renderMCMarketView(d) {
     e.className = "mc-mv-block " + cls;
     e.innerHTML = `<span class="lbl">${label}</span>` + items.map((s) => `<span class="item">${s}</span>`).join("");
   };
-  block("mc-mv-supporting", "Supporting", mv.supporting, "support");
-  block("mc-mv-contradicting", "Contradicting", mv.contradicting, "contradict");
-  block("mc-mv-missing", "Missing confirmation", mv.missing, "missing");
+  const v = mv.validation || {};
+  // Always show the raw bullish/bearish evidence tally (grounded, never a guess).
+  block("mc-mv-supporting", `Bullish evidence (${v.bullVotes ?? 0})`, v.bullishEvidence, "support");
+  block("mc-mv-contradicting", `Bearish evidence (${v.bearVotes ?? 0})`, v.bearishEvidence, "contradict");
+  block("mc-mv-missing", "Confirmation required", mv.missing, "missing");
   const inval = el("mc-mv-inval");
   if (inval) inval.textContent = mv.invalidation ? "⚠ " + mv.invalidation : "";
   const based = el("mc-mv-based");

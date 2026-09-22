@@ -143,6 +143,7 @@ import { buildAccuracyReport } from "../advisory/accuracy";
 import { runDailyReview, loadDailyReport as loadAnalystDailyReport, loadHistory as loadAnalystHistory } from "../analyst/marketActivityAnalyst";
 import { analyzeStrikes } from "../analyst/strikeAnalysis";
 import { buildMarketView } from "../analyst/marketView";
+import { recordDirectionChange, readDirectionChanges } from "../analyst/directionLog";
 import { getOrLockDaily } from "../strategies/selector";
 import { liveEvidence } from "../strategies/evidence";
 import { recordDaily, readSessions } from "../strategies/sessionStore";
@@ -4309,6 +4310,57 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       dataStale,
     });
 
+    // ---- TOP TRADE PLAN (the trader's at-a-glance decision) ----------------
+    // Direction is the VALIDATED cross-check (marketView.direction). Entry/SL/
+    // targets/strike come from the EXISTING engines (unchanged). ACTION is the
+    // Master/final action — the AI never overrides it. Entry state is derived
+    // honestly (never an arbitrary price just to fill the UI).
+    const planDir = marketView.direction; // BULLISH / BEARISH / NEUTRAL / CONFLICT
+    const entryZoneStr = spotEntry ? `${Math.round(spotEntry.low * 100) / 100} – ${Math.round(spotEntry.high * 100) / 100}` : null;
+    // Is spot beyond the entry zone by more than ~1 ATR? → don't chase.
+    let entryState: string;
+    if (isHistorical) entryState = "REPLAY";
+    else if (dataStale) entryState = "DATA STALE — NO NEW PLAN";
+    else if (planDir === "CONFLICT") entryState = "CONFLICT — WAIT";
+    else if (planDir === "NEUTRAL") entryState = "NO CLEAR DIRECTION — WAIT";
+    else if (finalAction === "TAKE") entryState = "READY — conditions met";
+    else if (finalAction === "NO TRADE") entryState = "AVOID";
+    else if (spotEntry && (spot > spotEntry.high + currentAtr || spot < spotEntry.low - currentAtr)) entryState = "ENTRY MISSED — WAIT FOR PULLBACK";
+    else if (marketView.missing.length) entryState = "WAIT FOR CONFIRMATION";
+    else entryState = "WAIT";
+
+    const slReason = spotSL != null
+      ? (planDir === "BULLISH" ? "Below bullish structure / Order-Block support (existing invalidation)." : planDir === "BEARISH" ? "Above bearish structure / Order-Block resistance (existing invalidation)." : "Existing system invalidation level.")
+      : "No invalidation level from the existing engines yet.";
+    const targetBasis = spotT1 != null
+      ? "From the OI-Command management levels (support/resistance + expected move)."
+      : "Insufficient room / no target from the existing engines.";
+
+    const tradePlan = {
+      direction: planDir,
+      action: finalAction,                                   // Master authority
+      entryZone: entryZoneStr,
+      entryState,
+      optionType,                                            // CE / PE / —
+      preferredStrike: strikeAnalysis?.primary ? `${strikeAnalysis.primary.strike} ${strikeAnalysis.primary.side}` : (strike && optionType !== "—" ? `${strike} ${optionType}` : null),
+      alternativeStrike: strikeAnalysis?.alternative ? `${strikeAnalysis.alternative.strike} ${strikeAnalysis.alternative.side}` : null,
+      stopLoss: spotSL, stopLossReason: slReason,
+      target1: spotT1, target2: spotT2, targetBasis,
+      invalidation: marketView.invalidation,
+      dataStale, dhanLive: !isHistorical && dhanOn,
+    };
+
+    // ---- Direction-change learning record (deduped per symbol) -------------
+    let lastDirectionChange = null as any;
+    if (!isHistorical && !dataStale) {
+      lastDirectionChange = recordDirectionChange({
+        symbol, at: nowSec, spot: Math.round(spot * 100) / 100,
+        direction: planDir,
+        bullishEvidence: marketView.validation.bullishEvidence,
+        bearishEvidence: marketView.validation.bearishEvidence,
+      });
+    }
+
     // Assemble indicator overlay data aligned to candle times
     const align = (arr: any[]) => candles.map((_: any, i: number) => arr[i] ?? null);
 
@@ -4325,6 +4377,8 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       dataAgeSec: (oiData?.dataAgeSec ?? oiAgeSec ?? candleAgeSec),
       syncHealth,
       marketView,
+      tradePlan,
+      lastDirectionChange,
 
       // Candles for the chart
       candles: candles.map((c: any) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume || 0 })),
@@ -7954,6 +8008,14 @@ router.get("/analyst/daily-review", requirePermission("oiAnalysis"), (req: Reque
 router.get("/analyst/history", requirePermission("oiAnalysis"), (_req: Request, res: Response) => {
   try { res.json({ rows: loadAnalystHistory() }); }
   catch (e: any) { res.status(500).json({ error: e?.message || "history failed" }); }
+});
+
+// Recorded market-direction changes (learning log) for the selected symbol.
+router.get("/analyst/direction-changes", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
+  try {
+    const symbol = req.query.symbol ? String(req.query.symbol) : undefined;
+    res.json({ changes: readDirectionChanges(symbol, 50) });
+  } catch (e: any) { res.status(500).json({ error: e?.message || "direction-changes failed" }); }
 });
 
 export default router;

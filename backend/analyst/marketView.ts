@@ -30,8 +30,18 @@ export interface MarketViewInput {
   dataStale: boolean;
 }
 
+export interface DirectionValidation {
+  dominant: "BULLISH" | "BEARISH" | "NEUTRAL" | "CONFLICT";
+  bullishEvidence: string[];
+  bearishEvidence: string[];
+  bullVotes: number;
+  bearVotes: number;
+  confirmationRequired: string | null;
+}
+
 export interface MarketView {
-  direction: Dir;
+  direction: Dir | "CONFLICT";
+  validation: DirectionValidation;
   state: SystemState;
   strength: "STRONG" | "MODERATE" | "WEAK";
   strengthEvidence: string;       // e.g. "5/7 confirmations aligned"
@@ -44,13 +54,62 @@ export interface MarketView {
   basedOn: string;                // provenance / caveat (e.g. OI unavailable → structure-only)
 }
 
-const matches = (dir: Dir, bull: boolean, bear: boolean) =>
-  (dir === "BULLISH" && bull) || (dir === "BEARISH" && bear);
+// ---- Direction validation: a transparent one-vote-per-engine cross-check.
+// No invented weights — each deterministic engine that has a reading casts a
+// single bullish/bearish vote, and the dominant side wins. A near-even split of
+// meaningful votes is CONFLICT (the agent is allowed to refuse a call), and no
+// votes at all is NEUTRAL. This is what keeps "market direction" grounded in the
+// app's real-time engines rather than a language-model opinion.
+export function validateDirection(i: MarketViewInput): DirectionValidation {
+  const bull: string[] = [], bear: string[] = [];
+
+  if (i.structure === "Bullish") bull.push("Market structure Bullish");
+  else if (i.structure === "Bearish") bear.push("Market structure Bearish");
+
+  if (i.vwapStatus === "Above") bull.push("Price above VWAP");
+  else if (i.vwapStatus === "Below") bear.push("Price below VWAP");
+
+  if (i.emaStructure) {
+    if (/Bullish/i.test(i.emaStructure)) bull.push(`EMA structure ${i.emaStructure}`);
+    else if (/Bearish/i.test(i.emaStructure)) bear.push(`EMA structure ${i.emaStructure}`);
+  }
+
+  if (i.preStructure === "Bullish") bull.push("Short-term momentum up");
+  else if (i.preStructure === "Bearish") bear.push("Short-term momentum down");
+
+  if (i.obSide && i.obStatus && i.obStatus !== "Invalid") {
+    if (i.obSide === "Bullish") bull.push(`${i.obStage || ""} Bullish Order Block (${i.obStatus})`.trim());
+    else if (i.obSide === "Bearish") bear.push(`${i.obStage || ""} Bearish Order Block (${i.obStatus})`.trim());
+  }
+
+  if (i.oiAvailable) {
+    if (i.oiDirection === "UP") bull.push("OI direction UP");
+    else if (i.oiDirection === "DOWN") bear.push("OI direction DOWN");
+  }
+
+  const bv = bull.length, brv = bear.length;
+  let dominant: DirectionValidation["dominant"];
+  if (bv === 0 && brv === 0) dominant = "NEUTRAL";
+  else if (bv >= 2 && brv >= 2 && Math.abs(bv - brv) <= 1) dominant = "CONFLICT"; // both sides strong & close
+  else if (bv > brv) dominant = "BULLISH";
+  else if (brv > bv) dominant = "BEARISH";
+  else dominant = "CONFLICT"; // exact tie with votes on both sides
+
+  const confReq = i.confirmations.filter((c) => !c.passed).map((c) => c.label);
+  return {
+    dominant, bullishEvidence: bull, bearishEvidence: bear, bullVotes: bv, bearVotes: brv,
+    confirmationRequired: confReq.length ? confReq.join(", ") : null,
+  };
+}
 
 export function buildMarketView(i: MarketViewInput): MarketView {
   const passed = i.confirmations.filter((c) => c.passed);
   const failed = i.confirmations.filter((c) => !c.passed);
   const n = i.confirmations.length || 1;
+
+  // Direction is the validated cross-check, not a passed-in opinion.
+  const validation = validateDirection(i);
+  const direction = validation.dominant;
 
   const state: SystemState =
     i.finalAction === "TAKE" ? "TAKE"
@@ -61,44 +120,11 @@ export function buildMarketView(i: MarketViewInput): MarketView {
 
   const strength = passed.length >= 5 ? "STRONG" : passed.length >= 3 ? "MODERATE" : "WEAK";
 
-  const supporting: string[] = [];
-  const contradicting: string[] = [];
-
-  // Structure
-  const structBull = i.structure === "Bullish", structBear = i.structure === "Bearish";
-  if (matches(i.direction, structBull, structBear)) supporting.push(`Market structure ${i.structure}`);
-  else if (structBull || structBear) contradicting.push(`Structure is ${i.structure}`);
-
-  // VWAP (candle-derived) + liquidity-status VWAP if present
-  const vwapBull = i.vwapStatus === "Above", vwapBear = i.vwapStatus === "Below";
-  if (matches(i.direction, vwapBull, vwapBear)) supporting.push(`Price ${i.vwapStatus} VWAP`);
-  else if (vwapBull || vwapBear) contradicting.push(`Price ${i.vwapStatus} VWAP`);
-
-  // EMA structure (only when liquidity status is live)
-  if (i.emaStructure) {
-    const emaBull = /Bullish/i.test(i.emaStructure), emaBear = /Bearish/i.test(i.emaStructure);
-    if (matches(i.direction, emaBull, emaBear)) supporting.push(`EMA structure ${i.emaStructure}`);
-    else if (emaBull || emaBear) contradicting.push(`EMA structure ${i.emaStructure}`);
-  }
-
-  // Order Block
-  if (i.obSide && i.obStatus && i.obStatus !== "Invalid") {
-    const obBull = i.obSide === "Bullish", obBear = i.obSide === "Bearish";
-    if (matches(i.direction, obBull, obBear)) supporting.push(`${i.obStage || ""} ${i.obSide} Order Block (${i.obStatus})`.trim());
-    else contradicting.push(`Nearest Order Block is ${i.obSide}`);
-  }
-
-  // OI
-  if (i.oiAvailable) {
-    const oiBull = i.oiDirection === "UP", oiBear = i.oiDirection === "DOWN";
-    if (matches(i.direction, oiBull, oiBear)) supporting.push(`OI direction ${i.oiDirection}`);
-    else if (i.oiDirection === "FLAT") contradicting.push("OI direction FLAT (no derivatives edge)");
-    else contradicting.push(`OI direction ${i.oiDirection}`);
-  }
-
-  // Short-term momentum via pre-structure (early read)
-  const preBull = i.preStructure === "Bullish", preBear = i.preStructure === "Bearish";
-  if ((preBull || preBear) && !matches(i.direction, preBull, preBear)) contradicting.push(`Short-term momentum ${i.preStructure}`);
+  // Supporting = the dominant side's evidence; contradicting = the other side's.
+  let supporting: string[] = [], contradicting: string[] = [];
+  if (direction === "BULLISH") { supporting = validation.bullishEvidence; contradicting = validation.bearishEvidence; }
+  else if (direction === "BEARISH") { supporting = validation.bearishEvidence; contradicting = validation.bullishEvidence; }
+  else { supporting = []; contradicting = [...validation.bullishEvidence, ...validation.bearishEvidence]; }
 
   const missing = failed.map((c) => c.label);
 
@@ -107,12 +133,12 @@ export function buildMarketView(i: MarketViewInput): MarketView {
     : "Existing system has no invalidation level yet";
 
   let basedOn: string;
-  if (i.dataStale) basedOn = "Live OI is stale — view is from fresh candle structure/VWAP only; final action gated to WAIT.";
-  else if (!i.oiAvailable) basedOn = "OI option chain unavailable — view is structure/VWAP-based; option side not confirmed.";
-  else basedOn = "Structure + VWAP/EMA + Order Block + OI + confirmation checklist.";
+  if (i.dataStale) basedOn = "Live OI is stale — direction from fresh candle structure/VWAP only; final action gated to WAIT.";
+  else if (!i.oiAvailable) basedOn = "OI option chain unavailable — direction is structure/VWAP-based; option side not confirmed.";
+  else basedOn = "Cross-check of structure + VWAP/EMA + momentum + Order Block + OI.";
 
   return {
-    direction: i.direction, state, strength,
+    direction, validation, state, strength,
     strengthEvidence: `${passed.length}/${n} confirmations aligned`,
     supporting, contradicting, missing,
     invalidation,
