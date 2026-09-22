@@ -6092,15 +6092,27 @@ function mcFmtVol(v) {
 function renderMCChart(d) {
   if (!MC.chart || !MC.candleSeries) return;
   const candles = (d.candles || []).map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close }));
-  MC.candleSeries.setData(candles);
-
-  // Volume histogram (colored by candle direction)
   const volumes = (d.candles || []).map((c) => ({
     time: c.time, value: c.volume || 0,
     color: c.close >= c.open ? "rgba(22,199,132,.5)" : "rgba(234,57,67,.5)",
   }));
+  // On a LIVE refresh of the same view, update only the last candle(s) so the
+  // chart doesn't redraw/jump — the forming bar grows in place. Full setData
+  // only on a symbol / timeframe / replay change.
+  const chartViewKey = MC.sym + ":" + MC.tf + ":" + (MC.replayDate || "live");
+  const sameView = MC._chartViewKey === chartViewKey;
+  const prevN = MC._candles ? MC._candles.length : 0;
+  if (sameView && prevN && candles.length && candles.length - prevN >= 0 && candles.length - prevN <= 2) {
+    for (let i = Math.max(0, prevN - 1); i < candles.length; i++) {
+      MC.candleSeries.update(candles[i]);
+      if (MC.volSeries && MC.show.vol !== false) MC.volSeries.update(volumes[i]);
+    }
+  } else {
+    MC.candleSeries.setData(candles);
+    if (MC.volSeries) MC.volSeries.setData(MC.show.vol === false ? [] : volumes);
+  }
+  MC._chartViewKey = chartViewKey;
   MC._volumes = volumes;
-  if (MC.volSeries) MC.volSeries.setData(MC.show.vol === false ? [] : volumes);
 
   // Store overlays for toggle
   MC._overlayData = d.overlays || {};
