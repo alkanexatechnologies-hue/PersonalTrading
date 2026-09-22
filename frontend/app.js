@@ -5743,13 +5743,41 @@ function renderMCPlan(d) {
   // Targets
   const tgtEl = el2("mc-plan-tgt");
   if (tgtEl) tgtEl.textContent = (p.target1 != null ? fmt(p.target1) : "—") + (p.target2 != null ? " / " + fmt(p.target2) : "");
-  // Action (Master authority)
+  // Action (Master authority) — with the SPECIFIC wait reason.
   const actEl = el2("mc-plan-action");
   if (actEl) {
     const a = p.dataStale ? "STALE" : (p.action || "—");
     actEl.textContent = a === "NO TRADE" ? "AVOID" : a;
     actEl.className = "mc-plan-action " + a.replace(/ /g, ".");
+    if ((a === "WAIT" || a === "STALE") && p.waitReason) actEl.title = p.waitReason;
   }
+  // Entry-state line already carries the wait reason for WAIT states.
+  if (entryState && p.action === "WAIT" && p.waitReason) entryState.textContent = p.waitReason.replace(/^WAIT — /, "");
+  // Snapshot provenance — proves which market data produced this plan.
+  const snapEl = el2("mc-plan-snap");
+  const s = p.snapshot || d.snapshot;
+  if (snapEl && s) {
+    const mkt = s.marketTs ? new Date((s.marketTs + 19800) * 1000).toISOString().slice(11, 19) : "—";
+    snapEl.textContent = `${s.analysisVersion} · mkt ${mkt} · age ${s.dataAgeSec != null ? Math.round(s.dataAgeSec) + "s" : "—"}`;
+  }
+  // BREAK OF STRUCTURE banner
+  renderMCBos(d);
+}
+
+function renderMCBos(d) {
+  const banner = el("mc-bos-banner");
+  if (!banner) return;
+  const b = d.bos || (d.tradePlan && d.tradePlan.bos);
+  if (!b || !b.recent) { banner.hidden = true; return; }
+  banner.hidden = false;
+  const bull = b.direction === "BULLISH";
+  banner.className = "mc-bos-banner " + (bull ? "bull" : "bear");
+  const t = b.time ? new Date((b.time + 19800) * 1000).toISOString().slice(11, 19) : "—";
+  const price = b.price != null ? Number(b.price).toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—";
+  banner.innerHTML =
+    `<span class="bos-arrow">${bull ? "▲" : "▼"}</span>` +
+    `<span>BREAK OF STRUCTURE (BOS) · ${b.direction}</span>` +
+    `<span class="bos-sub">${price} @ ${t} · ${b.stage} · ${b.previousStructure} → ${b.newStructure}</span>`;
 }
 
 function renderMCMarketView(d) {
@@ -5779,7 +5807,12 @@ function renderMCMarketView(d) {
   const inval = el("mc-mv-inval");
   if (inval) inval.textContent = mv.invalidation ? "⚠ " + mv.invalidation : "";
   const based = el("mc-mv-based");
-  if (based) based.textContent = mv.basedOn || "";
+  if (based) {
+    let txt = mv.basedOn || "";
+    const ve = d.vixEnvironment;
+    if (ve) txt += ` · VIX env: ${ve.environment}${ve.optionBuying && ve.optionBuying !== "INSUFFICIENT DATA" ? " · option-buying " + ve.optionBuying : ""}`;
+    based.textContent = txt;
+  }
 }
 
 function renderMCStrikes(d) {
@@ -6205,6 +6238,28 @@ function renderMCLiveBar(d) {
       };
       sync.innerHTML = chip("Candle", sh.candle) + chip("OI", sh.oi);
     }
+  }
+  // India VIX chip
+  const vixEl = el("mc-vix");
+  if (vixEl) {
+    const v = d.vix;
+    if (!v || !v.available) { vixEl.innerHTML = `<span class="lbl">VIX</span> —`; vixEl.className = "mc-vix stale"; }
+    else {
+      const dir = v.change > 0 ? "up" : v.change < 0 ? "down" : "";
+      const chg = v.change != null ? `<span class="${dir}">${v.change >= 0 ? "+" : ""}${v.change}${v.changePct != null ? ` (${v.changePct >= 0 ? "+" : ""}${v.changePct}%)` : ""}</span>` : "";
+      vixEl.innerHTML = `<span class="lbl">INDIA VIX</span> <b>${v.value}</b> ${chg}`;
+      vixEl.className = "mc-vix" + (v.status === "STALE" ? " stale" : "");
+      vixEl.title = `India VIX ${v.value} · ${v.status}${v.ageSec != null ? " · " + v.ageSec + "s" : ""} — expected 30-day NIFTY volatility (not a direction signal)`;
+    }
+  }
+  // Event→screen latency: server compute (snapshot.calcTs) → this render.
+  const latEl = el("mc-latency");
+  const snap = d.snapshot;
+  if (latEl && snap && snap.calcTs) {
+    const delay = Math.max(0, Math.round(Date.now() / 1000) - snap.calcTs);
+    latEl.textContent = `Δ ${delay}s`;
+    latEl.className = "mc-latency" + (delay > 5 ? " alert" : "");
+    latEl.title = delay > 5 ? `LIVE LATENCY ALERT — ${delay}s from compute to screen (target ≤5s)` : `${delay}s compute→screen`;
   }
 }
 

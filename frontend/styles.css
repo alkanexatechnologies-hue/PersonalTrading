@@ -3931,6 +3931,22 @@ body.mode-decisionflow #index-strip { display: none !important; }
 .mc-timestamp { color: #787b86; font-size: 11px; font-variant-numeric: tabular-nums; }
 .mc-live-tag { font-size: 9px; font-weight: 700; letter-spacing: .5px; color: #26a69a; border: 1px solid #26a69a; border-radius: 3px; padding: 1px 5px; }
 
+/* India VIX chip + latency in the live status */
+.mc-vix { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 3px; border: 1px solid #2a2e39; color: #d1d4dc; }
+.mc-vix .lbl { color: #787b86; font-size: 9px; font-weight: 700; letter-spacing: .3px; }
+.mc-vix .up { color: #ea3943; } /* VIX up = more expected volatility */
+.mc-vix .down { color: #16c784; }
+.mc-vix.stale { opacity: .55; }
+.mc-latency { font-size: 10px; color: #5c6370; font-variant-numeric: tabular-nums; }
+.mc-latency.alert { color: #ea3943; font-weight: 700; }
+
+/* BREAK OF STRUCTURE banner */
+.mc-bos-banner { display: flex; align-items: center; gap: 10px; padding: 7px 14px; font-size: 13px; font-weight: 700; letter-spacing: .3px; border-bottom: 1px solid #2a2e39; }
+.mc-bos-banner.bull { background: linear-gradient(90deg, rgba(22,199,132,.18), rgba(22,199,132,.04)); color: #16c784; border-left: 4px solid #16c784; }
+.mc-bos-banner.bear { background: linear-gradient(90deg, rgba(234,57,67,.18), rgba(234,57,67,.04)); color: #ea3943; border-left: 4px solid #ea3943; }
+.mc-bos-banner .bos-sub { color: #b2b5be; font-weight: 500; font-size: 11px; }
+.mc-bos-banner .bos-arrow { font-size: 15px; }
+
 /* TOP TRADE PLAN bar — always visible above the chart */
 .mc-plan { display: grid; grid-template-columns: 1.2fr 1.4fr 1.2fr 1fr 1.1fr 1fr; gap: 1px; background: #2a2e39; border-bottom: 2px solid #2a2e39; }
 .mc-plan-cell { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; background: #1a1d28; min-width: 0; }
@@ -3954,6 +3970,7 @@ body.mode-decisionflow #index-strip { display: none !important; }
 .mc-plan-action.WAIT { background: rgba(247,147,26,.18); color: #f7931a; }
 .mc-plan-action.AVOID, .mc-plan-action.NO.TRADE { background: rgba(234,57,67,.2); color: #ea3943; }
 .mc-plan-action.STALE { background: #2a2e39; color: #787b86; }
+.mc-plan-snap { font-size: 9px; color: #5c6370; margin-top: 3px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 @media (max-width: 900px) {
   .mc-plan { grid-template-columns: 1fr 1fr 1fr; }
 }

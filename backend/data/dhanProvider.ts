@@ -154,6 +154,47 @@ export class DhanProvider implements MarketDataProvider {
   }
 }
 
+// ---- India VIX (live) ----
+// India VIX is the IDX_I instrument with Dhan security id 21. It measures the
+// expected NIFTY volatility over the next ~30 days; it does NOT indicate market
+// direction. Returned value carries the provider's own last-traded time so
+// freshness can be judged (never Date.now-as-data).
+const INDIA_VIX_SECID = 21;
+export interface IndiaVix {
+  available: boolean;
+  value: number | null;
+  prevClose: number | null;
+  change: number | null;
+  changePct: number | null;
+  dayHigh: number | null;
+  dayLow: number | null;
+  ts: number | null;      // provider timestamp (epoch sec), when available
+  message?: string;
+}
+
+export async function getIndiaVix(): Promise<IndiaVix> {
+  const cfg = loadDhanConfig();
+  if (!cfg.accessToken) return { available: false, value: null, prevClose: null, change: null, changePct: null, dayHigh: null, dayLow: null, ts: null, message: "Dhan not connected" };
+  try {
+    const json = await dhanJson("/marketfeed/ohlc", { IDX_I: [INDIA_VIX_SECID] });
+    const data = json?.data?.IDX_I?.[INDIA_VIX_SECID] ?? json?.data?.IDX_I?.[String(INDIA_VIX_SECID)];
+    if (!data) return { available: false, value: null, prevClose: null, change: null, changePct: null, dayHigh: null, dayLow: null, ts: null, message: "No India VIX in feed" };
+    const ohlc = data.ohlc || {};
+    const value = round2(num(data.last_price ?? data.LTP ?? data.ltp));
+    const prevClose = round2(num(ohlc.close ?? data.prev_close ?? 0));
+    const change = prevClose > 0 ? round2(value - prevClose) : null;
+    const changePct = prevClose > 0 ? round2(((value - prevClose) / prevClose) * 100) : null;
+    let ts: number | null = null;
+    const t = Number(data.last_traded_time ?? data.exchange_time ?? 0);
+    if (Number.isFinite(t) && t > 0) ts = t > 1e12 ? Math.floor(t / 1000) : Math.floor(t);
+    recordDhanOk();
+    return { available: value > 0, value: value > 0 ? value : null, prevClose: prevClose > 0 ? prevClose : null, change, changePct, dayHigh: round2(num(ohlc.high)) || null, dayLow: round2(num(ohlc.low)) || null, ts };
+  } catch (e: any) {
+    recordDhanFail(e?.message);
+    return { available: false, value: null, prevClose: null, change: null, changePct: null, dayHigh: null, dayLow: null, ts: null, message: e?.message || "vix failed" };
+  }
+}
+
 // ---- Resample candles (group every N bars into one) ----
 function resample(candles: Candle[], factor: number): Candle[] {
   const out: Candle[] = [];

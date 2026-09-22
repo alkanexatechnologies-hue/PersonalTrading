@@ -1261,9 +1261,14 @@
                 <span id="mc-live-label">Dhan Connected</span>
                 <span class="mc-timestamp" id="mc-timestamp"></span>
                 <span class="mc-live-tag" id="mc-live-tag">LIVE</span>
+                <span class="mc-vix" id="mc-vix" title="India VIX — expected 30-day NIFTY volatility (not a direction signal)"></span>
                 <span class="mc-sync" id="mc-sync" title="Per-component data freshness"></span>
+                <span class="mc-latency" id="mc-latency" title="Market event → trader screen delay"></span>
               </div>
             </div>
+
+            <!-- BREAK OF STRUCTURE banner (shown on a recent BOS) -->
+            <div class="mc-bos-banner" id="mc-bos-banner" hidden></div>
 
             <!-- TOP TRADE PLAN — always visible, first thing the trader reads -->
             <div class="mc-plan" id="mc-plan">
@@ -1292,6 +1297,7 @@
               <div class="mc-plan-cell mc-plan-action-cell">
                 <span class="mc-plan-lbl">Action</span>
                 <span class="mc-plan-action" id="mc-plan-action">—</span>
+                <span class="mc-plan-snap" id="mc-plan-snap" title="Which market snapshot produced this plan"></span>
               </div>
             </div>
 

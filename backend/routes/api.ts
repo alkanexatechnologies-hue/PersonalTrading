@@ -144,6 +144,8 @@ import { runDailyReview, loadDailyReport as loadAnalystDailyReport, loadHistory 
 import { analyzeStrikes } from "../analyst/strikeAnalysis";
 import { buildMarketView } from "../analyst/marketView";
 import { recordDirectionChange, readDirectionChanges } from "../analyst/directionLog";
+import { getIndiaVix } from "../data/dhanProvider";
+import { recordVixSample, classifyVixEnvironment } from "../analyst/vixEnvironment";
 import { getOrLockDaily } from "../strategies/selector";
 import { liveEvidence } from "../strategies/evidence";
 import { recordDaily, readSessions } from "../strategies/sessionStore";
@@ -296,6 +298,9 @@ function relVolNow(candles: any[]): number | null {
   const recent = tail.reduce((a, b) => a + b, 0) / tail.length;
   return Math.round((recent / base) * 100) / 100;
 }
+// Market Command analysis version — stamped on every decision snapshot so the
+// UI/logs can prove which analysis logic produced a plan. Bump on a logic change.
+const MC_ANALYSIS_VERSION = "mc/v2";
 // Cache TTLs: intraday candles refresh fast; daily bars barely change intraday; OI ~1 min.
 const TTL_INTRADAY = 30_000;
 const TTL_DAILY = 10 * 60_000;
@@ -4158,15 +4163,18 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
     let ext: any = null;
     let ls: any = null;
     let oiChain: OiAnalysis | null = null;
+    let vix: any = null;
     if (!skipOi) {
-      const [oiRes, lsRes, chainRes] = await Promise.allSettled([
+      const [oiRes, lsRes, chainRes, vixRes] = await Promise.allSettled([
         cached(`oi-command:${def.symbol}`, 15_000, () => buildOiCommand(def)),
         cached(`ls:${def.symbol}`, 15_000, () => evaluateLiquidityStatus(symbol, liquidityStatusDeps)),
         getOiCached(def), // cached OiAnalysis chain (per-strike LTP/OI/vol/delta) for strike analysis
+        cached(`india-vix`, 15_000, () => getIndiaVix()), // India VIX (shared across symbols)
       ]);
       oiData = oiRes.status === "fulfilled" ? oiRes.value : null;
       ls = lsRes.status === "fulfilled" ? lsRes.value : null;
       oiChain = chainRes.status === "fulfilled" ? (chainRes.value as OiAnalysis) : null;
+      vix = vixRes.status === "fulfilled" ? vixRes.value : null;
       if (oiData) {
         try { ext = await cached(`oi-command-ext:${def.symbol}`, 15_000, () => extForOiPayload(oiData)); } catch { ext = null; }
       }
@@ -4237,6 +4245,23 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       finalReason = missing.length ? `Missing: ${missing.join(", ")}` : "Setup not ready.";
     }
 
+    // ---- Latest Break of Structure (BOS) — from the EXISTING structure engine.
+    const confirmedBos = ms.bosEvents.filter((b: any) => b.stage === "Confirmed");
+    const lastBosEv = confirmedBos.length ? confirmedBos[confirmedBos.length - 1] : (ms.bosEvents.length ? ms.bosEvents[ms.bosEvents.length - 1] : null);
+    const lastBarIdx = candles.length - 1;
+    const bosRecent = lastBosEv ? (lastBarIdx - (lastBosEv.breakIndex ?? 0)) <= 6 : false; // within ~6 bars
+    const latestBos = lastBosEv ? {
+      time: candles[lastBosEv.breakIndex]?.time ?? lastBosEv.breakTime ?? null,
+      price: Math.round((lastBosEv.level ?? 0) * 100) / 100,
+      direction: lastBosEv.direction === "Bullish" ? "BULLISH" : "BEARISH",
+      stage: lastBosEv.stage,                 // Pre / Confirmed
+      recent: bosRecent,
+      barsAgo: lastBarIdx - (lastBosEv.breakIndex ?? lastBarIdx),
+      previousStructure: lastBosEv.direction === "Bullish" ? "Bearish/Ranging" : "Bullish/Ranging",
+      newStructure: lastBosEv.direction === "Bullish" ? "Bullish" : "Bearish",
+    } : null;
+
+
     // Live option-strike analysis (read-only). Direction follows the command's
     // direction; STATUS follows the Master/final action. Historical & chart-only
     // modes have no live chain → analysis reports DATA UNAVAILABLE.
@@ -4289,6 +4314,32 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
     const spotT2 = oiData?.management?.resistance ?? null;
     const spotEntry = rec?.spotTarget ? { low: Math.min(spot, rec.spotTarget), high: Math.max(spot, rec.spotTarget) } : oiData?.levels ? { low: oiData.levels.orbLow || spot - currentAtr, high: oiData.levels.orbHigh || spot } : null;
 
+    // ---- Specific WAIT reason (never a bare "WAIT"). Deterministic from the
+    // same evidence; it EXPLAINS the wait and does NOT loosen any gate.
+    let waitReason: string | null = null;
+    if (finalAction === "WAIT" || finalAction === "DATA STALE") {
+      const missing = confirmations.filter((c) => !c.passed).map((c) => c.label);
+      const entryMissed = !!(spotEntry && (spot > spotEntry.high + currentAtr || spot < spotEntry.low - currentAtr));
+      const inZone = !!(spotEntry && spot >= spotEntry.low && spot <= spotEntry.high);
+      const entryNotReached = !!(spotEntry && !inZone && !entryMissed);
+      if (dataStale) waitReason = "WAIT — DATA STALE";
+      else if (arbVerdict === "CONFLICT") waitReason = "WAIT — MARKET CONFLICT";
+      else if (!latestBos || !latestBos.recent) waitReason = "WAIT — NO BREAK OF STRUCTURE";
+      else if (missing.some((m) => m !== "Master Selector")) waitReason = "WAIT — BREAK OF STRUCTURE BUT CONFIRMATION MISSING";
+      else if (entryMissed) waitReason = "WAIT — ENTRY ALREADY MISSED";
+      else if (entryNotReached) waitReason = "WAIT — ENTRY ZONE NOT REACHED";
+      else if (spotT1 == null && oiDirection !== "FLAT") waitReason = "WAIT — INSUFFICIENT ROOM";
+      else if (arbVerdict !== "GO") waitReason = "WAIT — MASTER TRADE SELECTOR BLOCKED";
+      else waitReason = "WAIT — SETUP NOT READY";
+    }
+
+    // India VIX: record a sample (builds percentile history) + classify environment.
+    let vixEnv: any = null;
+    if (!isHistorical && vix?.available) {
+      try { recordVixSample(vix.value, nowSec); } catch { /* best-effort */ }
+      vixEnv = classifyVixEnvironment(vix.value);
+    }
+
     // AI Market Analyst — market view (read-only explanation of the existing
     // system's read). Present even when OI is stale, from fresh candle structure.
     // The market view explains the read; when OI has no directional edge, explain
@@ -4310,6 +4361,32 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       dataStale,
     });
 
+    // ---- ONE CONSISTENT SNAPSHOT + provenance (proves which data produced the
+    // decision). Every field of this response was computed in a single request
+    // pass from the same cached market data — direction, entry, strike, SL and
+    // target all reference this snapshot. marketTs is the authoritative PROVIDER
+    // timestamp (OI as-of, else last candle) — never Date.now(); calcTs is when
+    // the decision was computed. A given data version yields the same id.
+    // Age is measured at REQUEST time from the authoritative provider timestamp
+    // (never Date.now-as-data). A cached OI payload can look fresh by its build-
+    // time flag while its data has actually aged past the threshold — so the
+    // snapshot marks itself stale strictly (engine gate OR request-time age > 90).
+    // This governs DISPLAY only; the engine's own dataStale/finalAction are
+    // unchanged (no trading-logic change).
+    const snapMarketTs = oiTs ?? lastTime ?? nowSec;
+    const snapAgeSec = isHistorical ? 0 : Math.max(0, nowSec - snapMarketTs);
+    const displayStale = isHistorical ? false : (dataStale || snapAgeSec > 90);
+    const snapshot = {
+      id: `${symbol}:${interval}:${lastTime ?? 0}:${oiTs ?? "noOi"}`,
+      marketTs: snapMarketTs,
+      candleTs: lastTime ?? null,
+      oiTs: oiTs ?? null,
+      calcTs: nowSec,
+      dataAgeSec: snapAgeSec,
+      analysisVersion: MC_ANALYSIS_VERSION,
+      stale: displayStale,
+    };
+
     // ---- TOP TRADE PLAN (the trader's at-a-glance decision) ----------------
     // Direction is the VALIDATED cross-check (marketView.direction). Entry/SL/
     // targets/strike come from the EXISTING engines (unchanged). ACTION is the
@@ -4320,7 +4397,7 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
     // Is spot beyond the entry zone by more than ~1 ATR? → don't chase.
     let entryState: string;
     if (isHistorical) entryState = "REPLAY";
-    else if (dataStale) entryState = "DATA STALE — NO NEW PLAN";
+    else if (displayStale) entryState = "DATA STALE — NO NEW PLAN";
     else if (planDir === "CONFLICT") entryState = "CONFLICT — WAIT";
     else if (planDir === "NEUTRAL") entryState = "NO CLEAR DIRECTION — WAIT";
     else if (finalAction === "TAKE") entryState = "READY — conditions met";
@@ -4347,12 +4424,15 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       stopLoss: spotSL, stopLossReason: slReason,
       target1: spotT1, target2: spotT2, targetBasis,
       invalidation: marketView.invalidation,
-      dataStale, dhanLive: !isHistorical && dhanOn,
+      bos: latestBos,                 // Break of Structure (full form surfaced in UI)
+      waitReason,                     // specific reason when action is WAIT
+      dataStale: displayStale, dhanLive: !isHistorical && dhanOn,
+      snapshot, // provenance: every field above is from this one snapshot
     };
 
     // ---- Direction-change learning record (deduped per symbol) -------------
     let lastDirectionChange = null as any;
-    if (!isHistorical && !dataStale) {
+    if (!isHistorical && !displayStale) {
       lastDirectionChange = recordDirectionChange({
         symbol, at: nowSec, spot: Math.round(spot * 100) / 100,
         direction: planDir,
@@ -4373,12 +4453,22 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       partial: viewChart, // chart-only fast payload: OI/command still loading
       dataStale,
       dhanLive: isHistorical ? false : !!(syncSessionProvider().dhanOn),
-      // Age of the freshest critical component; OI age when known, else candle age.
-      dataAgeSec: (oiData?.dataAgeSec ?? oiAgeSec ?? candleAgeSec),
+      // Request-time age of the authoritative snapshot (now − provider timestamp).
+      dataAgeSec: snapAgeSec,
       syncHealth,
       marketView,
       tradePlan,
+      snapshot,
       lastDirectionChange,
+      bos: latestBos,
+      // India VIX (live; expected 30-day NIFTY volatility — NOT a direction signal)
+      vix: vix ? {
+        available: !!vix.available, value: vix.value, change: vix.change, changePct: vix.changePct,
+        dayHigh: vix.dayHigh, dayLow: vix.dayLow, ts: vix.ts,
+        ageSec: vix.ts ? Math.max(0, nowSec - vix.ts) : null,
+        status: !dhanOn ? "DISCONNECTED" : !vix.available ? "UNAVAILABLE" : (vix.ts && nowSec - vix.ts > 90) ? "STALE" : "LIVE",
+      } : { available: false, status: isHistorical ? "HISTORICAL" : "UNAVAILABLE" },
+      vixEnvironment: vixEnv,
 
       // Candles for the chart
       candles: candles.map((c: any) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume || 0 })),
