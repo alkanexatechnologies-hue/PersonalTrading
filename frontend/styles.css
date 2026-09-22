@@ -4000,6 +4000,33 @@ body.mode-decisionflow #index-strip { display: none !important; }
 .mc-cmd-action.stale .mc-action-label { color: #787b86; }
 .mc-cmd-action.stale .mc-action-arrow { color: #787b86; }
 
+/* Per-component sync health chips */
+.mc-sync { display: inline-flex; gap: 4px; align-items: center; }
+.mc-sync .chip { font-size: 9px; font-weight: 700; letter-spacing: .3px; padding: 1px 5px; border-radius: 3px; border: 1px solid #2a2e39; color: #787b86; }
+.mc-sync .chip.LIVE { color: #16c784; border-color: rgba(22,199,132,.4); }
+.mc-sync .chip.DELAYED { color: #f7931a; border-color: rgba(247,147,26,.4); }
+.mc-sync .chip.STALE, .mc-sync .chip.UNAVAILABLE, .mc-sync .chip.DISCONNECTED { color: #ea3943; border-color: rgba(234,57,67,.4); }
+
+/* AI Market Analyst — Market View */
+.mc-marketview { margin: 0 14px 12px; padding: 10px; border: 1px solid #2a2e39; border-radius: 6px; background: #131722; }
+.mc-mv-head { display: flex; justify-content: space-between; align-items: center; font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #787b86; margin-bottom: 8px; }
+.mc-mv-strength { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 3px; }
+.mc-mv-strength.STRONG { background: rgba(22,199,132,.18); color: #16c784; }
+.mc-mv-strength.MODERATE { background: rgba(247,147,26,.15); color: #f7931a; }
+.mc-mv-strength.WEAK { background: rgba(234,57,67,.15); color: #ea3943; }
+.mc-mv-line { display: flex; justify-content: space-between; font-size: 12px; padding: 2px 0; }
+.mc-mv-line span { color: #787b86; }
+.mc-mv-line b.BULLISH { color: #16c784; } .mc-mv-line b.BEARISH { color: #ea3943; } .mc-mv-line b.NEUTRAL { color: #f7931a; }
+.mc-mv-line b.TAKE, .mc-mv-line b.READY { color: #16c784; } .mc-mv-line b.WAIT { color: #f7931a; } .mc-mv-line b.AVOID { color: #ea3943; }
+.mc-mv-block { font-size: 11px; margin-top: 6px; line-height: 1.5; }
+.mc-mv-block .lbl { color: #787b86; text-transform: uppercase; font-size: 9px; letter-spacing: .5px; }
+.mc-mv-block.support .item::before { content: "✓ "; color: #16c784; }
+.mc-mv-block.contradict .item::before { content: "✕ "; color: #ea3943; }
+.mc-mv-block.missing .item::before { content: "• "; color: #f7931a; }
+.mc-mv-block .item { display: block; color: #b2b5be; }
+.mc-mv-inval { font-size: 11px; margin-top: 6px; color: #ea3943; }
+.mc-mv-based { font-size: 10px; margin-top: 6px; color: #787b86; line-height: 1.4; font-style: italic; }
+
 /* Pre/Confirmed signal detail */
 .mc-signal-detail { padding: 0 14px 12px; }
 .mc-sd-alert { font-size: 11px; font-weight: 700; padding: 6px 8px; border-radius: 4px; margin-bottom: 8px; text-align: center; letter-spacing: .3px; }

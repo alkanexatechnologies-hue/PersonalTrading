@@ -23,8 +23,8 @@ const ALLOWED_PATHS = new Set<string>([
   "/marketfeed/ltp",    // live LTP for quotes
   "/marketfeed/ohlc",   // live OHLC for quotes
   "/marketfeed/quote",  // full market quote (OI, volume, OHLC)
-  "/option/chain",      // option chain (strikes, OI, greeks)
-  "/expiry/list",       // expiry dates for an underlying
+  "/optionchain",           // option chain (strikes, OI, greeks) — Dhan v2 POST
+  "/optionchain/expirylist", // expiry dates for an underlying — Dhan v2 POST
 ]);
 
 export interface DhanFetchOptions {

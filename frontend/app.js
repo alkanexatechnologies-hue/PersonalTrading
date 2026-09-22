@@ -5701,6 +5701,7 @@ async function loadMarketCommand(chartOnly = false) {
     renderMCStatus(d);
     renderMCLiveBar(d);
     renderMCStrikes(d);
+    renderMCMarketView(d);
   } catch (e) {
     console.error("[MarketCommand]", e);
   }
@@ -5716,6 +5717,34 @@ function mcFmtK(v) {
   if (a >= 1e5) return (v / 1e5).toFixed(2) + "L";
   if (a >= 1e3) return (v / 1e3).toFixed(1) + "K";
   return String(Math.round(v));
+}
+
+function renderMCMarketView(d) {
+  const mv = d.marketView;
+  const box = el("mc-marketview");
+  if (!box) return;
+  if (!mv || d.partial) { box.hidden = true; return; }
+  box.hidden = false;
+  const strengthEl = el("mc-mv-strength");
+  if (strengthEl) { strengthEl.textContent = `${mv.strength} · ${mv.strengthEvidence}`; strengthEl.className = "mc-mv-strength " + mv.strength; }
+  const dirEl = el("mc-mv-dir");
+  if (dirEl) { dirEl.textContent = mv.direction; dirEl.className = mv.direction; }
+  const stEl = el("mc-mv-state");
+  if (stEl) { stEl.textContent = mv.state; stEl.className = mv.state; }
+  const block = (id, label, items, cls) => {
+    const e = el(id); if (!e) return;
+    if (!items || !items.length) { e.hidden = true; return; }
+    e.hidden = false;
+    e.className = "mc-mv-block " + cls;
+    e.innerHTML = `<span class="lbl">${label}</span>` + items.map((s) => `<span class="item">${s}</span>`).join("");
+  };
+  block("mc-mv-supporting", "Supporting", mv.supporting, "support");
+  block("mc-mv-contradicting", "Contradicting", mv.contradicting, "contradict");
+  block("mc-mv-missing", "Missing confirmation", mv.missing, "missing");
+  const inval = el("mc-mv-inval");
+  if (inval) inval.textContent = mv.invalidation ? "⚠ " + mv.invalidation : "";
+  const based = el("mc-mv-based");
+  if (based) based.textContent = mv.basedOn || "";
 }
 
 function renderMCStrikes(d) {
@@ -6126,6 +6155,21 @@ function renderMCLiveBar(d) {
   if (ts && d.lastCandleTime) {
     const dt = new Date((d.lastCandleTime + 19800) * 1000);
     ts.textContent = dt.toISOString().slice(11, 19) + (d.dataAgeSec != null ? ` (${d.dataAgeSec}s)` : "");
+  }
+  // Per-component sync-health chips (candle / OI)
+  const sync = el("mc-sync");
+  if (sync) {
+    const sh = d.syncHealth;
+    if (!sh || sh.overall === "HISTORICAL") { sync.innerHTML = ""; }
+    else {
+      const chip = (name, comp) => {
+        if (!comp) return "";
+        const st = comp.status || "UNAVAILABLE";
+        const age = comp.ageSec != null ? ` ${comp.ageSec}s` : "";
+        return `<span class="chip ${st}" title="${name} ${st}${age}">${name} ${st}</span>`;
+      };
+      sync.innerHTML = chip("Candle", sh.candle) + chip("OI", sh.oi);
+    }
   }
 }
 

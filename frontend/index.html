@@ -1261,6 +1261,7 @@
                 <span id="mc-live-label">Dhan Connected</span>
                 <span class="mc-timestamp" id="mc-timestamp"></span>
                 <span class="mc-live-tag" id="mc-live-tag">LIVE</span>
+                <span class="mc-sync" id="mc-sync" title="Per-component data freshness"></span>
               </div>
             </div>
 
@@ -1341,6 +1342,21 @@
                     <span class="mc-action-label" id="mc-action-label">WAIT</span>
                     <span class="mc-action-badge" id="mc-action-badge"></span>
                   </div>
+                  <!-- AI Market Analyst — market view (explains the existing system's read) -->
+                  <div class="mc-marketview" id="mc-marketview" hidden>
+                    <div class="mc-mv-head">
+                      <span>Market View · AI Analyst</span>
+                      <span class="mc-mv-strength" id="mc-mv-strength"></span>
+                    </div>
+                    <div class="mc-mv-line"><span>Direction</span><b id="mc-mv-dir">—</b></div>
+                    <div class="mc-mv-line"><span>System State</span><b id="mc-mv-state">—</b></div>
+                    <div class="mc-mv-block" id="mc-mv-supporting"></div>
+                    <div class="mc-mv-block" id="mc-mv-contradicting"></div>
+                    <div class="mc-mv-block" id="mc-mv-missing"></div>
+                    <div class="mc-mv-inval" id="mc-mv-inval"></div>
+                    <div class="mc-mv-based" id="mc-mv-based"></div>
+                  </div>
+
                   <!-- Pre / Confirmed signal detail (VWAP + candle movement) -->
                   <div class="mc-signal-detail" id="mc-signal-detail">
                     <div class="mc-sd-alert" id="mc-sd-alert" hidden></div>

@@ -142,6 +142,7 @@ import { resolveRecord } from "../advisory/outcomeResolver";
 import { buildAccuracyReport } from "../advisory/accuracy";
 import { runDailyReview, loadDailyReport as loadAnalystDailyReport, loadHistory as loadAnalystHistory } from "../analyst/marketActivityAnalyst";
 import { analyzeStrikes } from "../analyst/strikeAnalysis";
+import { buildMarketView } from "../analyst/marketView";
 import { getOrLockDaily } from "../strategies/selector";
 import { liveEvidence } from "../strategies/evidence";
 import { recordDaily, readSessions } from "../strategies/sessionStore";
@@ -4243,6 +4244,37 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       : oiDirection === "UP" ? "BULLISH" : oiDirection === "DOWN" ? "BEARISH" : "NEUTRAL";
     const strikeAnalysis = analyzeStrikes(skipOi ? null : oiChain, cmdDirection, { stale: dataStale, finalAction, masterVerdict: arbVerdict, name: def.name });
 
+    // Per-component sync health (real timestamps + ages). OI freshness uses a
+    // flat 30/90s band (chain refreshes continuously); candle freshness is
+    // timeframe-aware (a forming bar is naturally up to one interval old, so
+    // LIVE ≤ 1.5×interval, DELAYED ≤ 3×interval, else STALE). Never uses
+    // Date.now() as a data timestamp — every age is (now − real data timestamp).
+    // FLAT OI is still LIVE data (a valid "no directional edge" reading), so OI
+    // liveness is availability + freshness, NOT whether it has a direction.
+    const intervalSec = interval === "5m" ? 300 : interval === "15m" ? 900 : interval === "30m" ? 1800 : interval === "60m" ? 3600 : 86400;
+    const oiLive = !isHistorical && !!oiData?.available && !oiData?.stale;
+    const candleAgeSec = lastTime ? Math.max(0, nowSec - lastTime) : null;
+    const oiTs = (oiData?.oiAsOf ?? null) as number | null;
+    const oiAgeSec = oiTs ? Math.max(0, nowSec - oiTs) : (oiData?.dataAgeSec ?? null);
+    const dhanOn = !!(syncSessionProvider().dhanOn);
+    const candleStatus = (): "LIVE" | "DELAYED" | "STALE" | "UNAVAILABLE" | "DISCONNECTED" =>
+      !dhanOn ? "DISCONNECTED" : candleAgeSec == null ? "UNAVAILABLE" : candleAgeSec <= intervalSec * 1.5 ? "LIVE" : candleAgeSec <= intervalSec * 3 ? "DELAYED" : "STALE";
+    const oiStatus = (): "LIVE" | "DELAYED" | "STALE" | "UNAVAILABLE" | "DISCONNECTED" =>
+      !dhanOn ? "DISCONNECTED" : !oiData?.available ? "UNAVAILABLE" : oiData?.stale ? "STALE" : oiAgeSec == null ? "LIVE" : oiAgeSec <= 30 ? "LIVE" : oiAgeSec <= 90 ? "DELAYED" : "STALE";
+    const cStat = candleStatus(), oStat = oiStatus();
+    const worst = (a: string, b: string) => {
+      const rank: Record<string, number> = { DISCONNECTED: 4, STALE: 3, UNAVAILABLE: 2, DELAYED: 1, LIVE: 0 };
+      return (rank[a] ?? 0) >= (rank[b] ?? 0) ? a : b;
+    };
+    const syncHealth = isHistorical
+      ? { overall: "HISTORICAL" as const, candle: null, oi: null, dhanOn: false }
+      : {
+          overall: (!dhanOn ? "DISCONNECTED" : worst(cStat, oStat)) as string,
+          candle: { dataTs: lastTime, ageSec: candleAgeSec, status: cStat },
+          oi: { dataTs: oiTs, ageSec: oiAgeSec, available: !!oiData?.available, status: oStat },
+          dhanOn,
+        };
+
     // Entry/SL/Target from existing OI recommendation
     const entry = rec?.ltp ?? null;
     const stopLoss = rec?.stop ?? oiData?.management?.stopLoss ?? null;
@@ -4256,6 +4288,27 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
     const spotT2 = oiData?.management?.resistance ?? null;
     const spotEntry = rec?.spotTarget ? { low: Math.min(spot, rec.spotTarget), high: Math.max(spot, rec.spotTarget) } : oiData?.levels ? { low: oiData.levels.orbLow || spot - currentAtr, high: oiData.levels.orbHigh || spot } : null;
 
+    // AI Market Analyst — market view (read-only explanation of the existing
+    // system's read). Present even when OI is stale, from fresh candle structure.
+    // The market view explains the read; when OI has no directional edge, explain
+    // the structural bias (so evidence reads as supporting) — the command's own
+    // direction and final action are unchanged by this.
+    const viewDirection: "BULLISH" | "BEARISH" | "NEUTRAL" =
+      cmdDirection !== "NEUTRAL" ? cmdDirection
+      : ms.currentStructure === "Bullish" ? "BULLISH" : ms.currentStructure === "Bearish" ? "BEARISH" : "NEUTRAL";
+    const marketView = buildMarketView({
+      direction: viewDirection, finalAction, masterVerdict: arbVerdict,
+      structure: ms.currentStructure, preStructure: ms.preStructure, vwapStatus: ms.vwapStatus,
+      oiDirection, oiAvailable: oiLive,
+      emaStructure: ls?.structure?.emaStructure ?? null, lsVwapStatus: ls?.structure?.vwapStatus ?? null,
+      obSide: nearOB?.side ?? null, obStatus: nearOB?.status ?? null, obStage: nearOB?.stage ?? null,
+      confirmations,
+      invalidationSpot: (oiData?.management?.invalidation ?? spotSL) ?? null,
+      optionView: strikeAnalysis?.side ?? null,
+      preferredStrike: strikeAnalysis?.primary ? `${strikeAnalysis.primary.strike} ${strikeAnalysis.primary.side}` : null,
+      dataStale,
+    });
+
     // Assemble indicator overlay data aligned to candle times
     const align = (arr: any[]) => candles.map((_: any, i: number) => arr[i] ?? null);
 
@@ -4268,7 +4321,10 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       partial: viewChart, // chart-only fast payload: OI/command still loading
       dataStale,
       dhanLive: isHistorical ? false : !!(syncSessionProvider().dhanOn),
-      dataAgeSec: oiData?.dataAgeSec ?? null,
+      // Age of the freshest critical component; OI age when known, else candle age.
+      dataAgeSec: (oiData?.dataAgeSec ?? oiAgeSec ?? candleAgeSec),
+      syncHealth,
+      marketView,
 
       // Candles for the chart
       candles: candles.map((c: any) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume || 0 })),

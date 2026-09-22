@@ -228,17 +228,18 @@ export async function dhanChainForExpiry(def: SymbolDef, expiryOffset = 0): Prom
     // First get the underlying's security ID for the option chain
     const sec = await lookupDhanSecurity(def.nseSymbol);
     if (!sec) return { available: false, message: `No Dhan security for ${def.nseSymbol}` };
+    // Dhan v2 option-chain underlying segment: indices use IDX_I, F&O stocks NSE_FNO.
+    const underlyingSeg = sec.exchangeSegment === "IDX_I" ? "IDX_I" : "NSE_FNO";
+    const scrip = Number(sec.securityId);
 
-    // Get option chain (includes expiry list)
-    const chainRes = await dhanFetch(
-      `/option/chain?UnderlyingScrip=${sec.securityId}&ExpiryDate=`,
-      { method: "GET", accessToken: cfg.accessToken }
-    );
-    if (!chainRes.ok) return { available: false, message: `chain ${chainRes.status}` };
-    const chainJson: any = await chainRes.json();
-
-    // Extract expiry list
-    const allExpiries: string[] = chainJson?.expiryList || [];
+    // Expiry list — Dhan v2: POST /optionchain/expirylist { UnderlyingScrip, UnderlyingSeg }
+    const elRes = await dhanFetch("/optionchain/expirylist", {
+      method: "POST", accessToken: cfg.accessToken, clientId: cfg.clientId,
+      body: { UnderlyingScrip: scrip, UnderlyingSeg: underlyingSeg },
+    });
+    if (!elRes.ok) return { available: false, message: `expirylist ${elRes.status}` };
+    const elJson: any = await elRes.json();
+    const allExpiries: string[] = Array.isArray(elJson?.data) ? elJson.data : [];
     const today = new Date(Date.now() + 19800000).toISOString().slice(0, 10);
     const future = allExpiries.filter((e: string) => e >= today);
     const list = future.length ? future : allExpiries;
@@ -247,29 +248,34 @@ export async function dhanChainForExpiry(def: SymbolDef, expiryOffset = 0): Prom
     const idx = Math.max(0, Math.min(expiryOffset, list.length - 1));
     const expiry = list[idx];
 
-    // If we need a different expiry than the default, re-fetch
-    let chainData = chainJson;
-    if (expiryOffset > 0 || (chainJson?.selectedExpiry && chainJson.selectedExpiry !== expiry)) {
-      const res2 = await dhanFetch(
-        `/option/chain?UnderlyingScrip=${sec.securityId}&ExpiryDate=${encodeURIComponent(expiry)}`,
-        { method: "GET", accessToken: cfg.accessToken }
-      );
-      if (!res2.ok) return { available: false, message: `chain ${res2.status}` };
-      chainData = await res2.json();
-    }
+    // Chain — Dhan v2: POST /optionchain { UnderlyingScrip, UnderlyingSeg, Expiry }
+    // (rate-limited to ~1 req / 3s by Dhan; callers cache it).
+    const chainRes = await dhanFetch("/optionchain", {
+      method: "POST", accessToken: cfg.accessToken, clientId: cfg.clientId,
+      body: { UnderlyingScrip: scrip, UnderlyingSeg: underlyingSeg, Expiry: expiry },
+    });
+    if (!chainRes.ok) return { available: false, message: `chain ${chainRes.status}` };
+    const chainData: any = await chainRes.json();
 
-    // Parse strikes from Dhan's response format
-    const spot = num(chainData?.data?.underlyingLTP ?? chainData?.data?.ltp ?? 0);
-    const rawStrikes: any[] = chainData?.data?.oc || chainData?.data?.optionChain || [];
-    const strikes = rawStrikes.map((s: any) => ({
-      strike: num(s.strikePrice ?? s.strike),
-      ceOi: num(s.ce_oi ?? s.CE?.oi ?? s.CE?.open_interest ?? 0),
-      peOi: num(s.pe_oi ?? s.PE?.oi ?? s.PE?.open_interest ?? 0),
-      ceLtp: s.ce_ltp != null ? num(s.ce_ltp) : s.CE?.ltp != null ? num(s.CE.ltp) : null,
-      peLtp: s.pe_ltp != null ? num(s.pe_ltp) : s.PE?.ltp != null ? num(s.PE.ltp) : null,
-      ceVol: num(s.ce_volume ?? s.CE?.volume ?? 0),
-      peVol: num(s.pe_volume ?? s.PE?.volume ?? 0),
-    })).filter((s: any) => s.strike > 0).sort((a: any, b: any) => a.strike - b.strike);
+    // Parse Dhan's oc map: { "<strike>": { ce:{...}, pe:{...} } }. Each leg carries
+    // last_price, oi, previous_oi, volume, implied_volatility and greeks{delta,theta}.
+    const spot = num(chainData?.data?.last_price ?? chainData?.data?.underlyingLTP ?? 0);
+    const oc = chainData?.data?.oc || {};
+    const nOrNull = (v: any): number | null => { const n = Number(v); return isFinite(n) ? n : null; };
+    const ltpOrNull = (v: any): number | null => { const n = Number(v); return isFinite(n) && n > 0 ? n : null; };
+    const strikes = Object.entries(oc).map(([k, v]: [string, any]) => {
+      const ce = v?.ce || {}, pe = v?.pe || {};
+      return {
+        strike: num(k),
+        ceOi: num(ce.oi), peOi: num(pe.oi),
+        ceChg: num(ce.oi) - num(ce.previous_oi), peChg: num(pe.oi) - num(pe.previous_oi),
+        ceVol: nOrNull(ce.volume), peVol: nOrNull(pe.volume),
+        ceLtp: ltpOrNull(ce.last_price), peLtp: ltpOrNull(pe.last_price),
+        ceDelta: nOrNull(ce.greeks?.delta), peDelta: nOrNull(pe.greeks?.delta),
+        ceIv: nOrNull(ce.implied_volatility), peIv: nOrNull(pe.implied_volatility),
+        ceTheta: nOrNull(ce.greeks?.theta), peTheta: nOrNull(pe.greeks?.theta),
+      };
+    }).filter((s: any) => s.strike > 0).sort((a: any, b: any) => a.strike - b.strike);
 
     if (!strikes.length || !spot) return { available: false, message: "Empty chain." };
     recordDhanOk();
@@ -366,18 +372,18 @@ export async function dhanOiAnalysis(def: SymbolDef): Promise<OiAnalysis> {
       strike: s.strike,
       ceOi: s.ceOi,
       peOi: s.peOi,
-      ceChg: 0,
-      peChg: 0,
+      ceChg: s.ceChg ?? 0,
+      peChg: s.peChg ?? 0,
       ceVol: s.ceVol ?? null,
       peVol: s.peVol ?? null,
       ceLtp: s.ceLtp ?? null,
       peLtp: s.peLtp ?? null,
-      ceDelta: null,
-      peDelta: null,
-      ceIv: null,
-      peIv: null,
-      ceTheta: null,
-      peTheta: null,
+      ceDelta: s.ceDelta ?? null,
+      peDelta: s.peDelta ?? null,
+      ceIv: s.ceIv ?? null,
+      peIv: s.peIv ?? null,
+      ceTheta: s.ceTheta ?? null,
+      peTheta: s.peTheta ?? null,
     }));
 
     if (!all.length) return fail("Empty option chain.");
