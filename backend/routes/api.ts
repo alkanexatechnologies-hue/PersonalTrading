@@ -140,6 +140,8 @@ import { recordAdvisorySuggestion } from "../advisory/recorder";
 import { readSuggestions, rewriteSuggestions, WINDOWS_MIN } from "../advisory/suggestionLog";
 import { resolveRecord } from "../advisory/outcomeResolver";
 import { buildAccuracyReport } from "../advisory/accuracy";
+import { runDailyReview, loadDailyReport as loadAnalystDailyReport, loadHistory as loadAnalystHistory } from "../analyst/marketActivityAnalyst";
+import { analyzeStrikes } from "../analyst/strikeAnalysis";
 import { getOrLockDaily } from "../strategies/selector";
 import { liveEvidence } from "../strategies/evidence";
 import { recordDaily, readSessions } from "../strategies/sessionStore";
@@ -4153,13 +4155,16 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
     let oiData: any = null;
     let ext: any = null;
     let ls: any = null;
+    let oiChain: OiAnalysis | null = null;
     if (!skipOi) {
-      const [oiRes, lsRes] = await Promise.allSettled([
+      const [oiRes, lsRes, chainRes] = await Promise.allSettled([
         cached(`oi-command:${def.symbol}`, 15_000, () => buildOiCommand(def)),
         cached(`ls:${def.symbol}`, 15_000, () => evaluateLiquidityStatus(symbol, liquidityStatusDeps)),
+        getOiCached(def), // cached OiAnalysis chain (per-strike LTP/OI/vol/delta) for strike analysis
       ]);
       oiData = oiRes.status === "fulfilled" ? oiRes.value : null;
       ls = lsRes.status === "fulfilled" ? lsRes.value : null;
+      oiChain = chainRes.status === "fulfilled" ? (chainRes.value as OiAnalysis) : null;
       if (oiData) {
         try { ext = await cached(`oi-command-ext:${def.symbol}`, 15_000, () => extForOiPayload(oiData)); } catch { ext = null; }
       }
@@ -4229,6 +4234,14 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       finalAction = "WAIT";
       finalReason = missing.length ? `Missing: ${missing.join(", ")}` : "Setup not ready.";
     }
+
+    // Live option-strike analysis (read-only). Direction follows the command's
+    // direction; STATUS follows the Master/final action. Historical & chart-only
+    // modes have no live chain → analysis reports DATA UNAVAILABLE.
+    const cmdDirection: "BULLISH" | "BEARISH" | "NEUTRAL" = isHistorical
+      ? techDirection as any
+      : oiDirection === "UP" ? "BULLISH" : oiDirection === "DOWN" ? "BEARISH" : "NEUTRAL";
+    const strikeAnalysis = analyzeStrikes(skipOi ? null : oiChain, cmdDirection, { stale: dataStale, finalAction, masterVerdict: arbVerdict, name: def.name });
 
     // Entry/SL/Target from existing OI recommendation
     const entry = rec?.ltp ?? null;
@@ -4307,6 +4320,9 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
 
       // Levels
       levels: oiData?.levels || {},
+
+      // Live option-strike analysis (read-only; never overrides Master/engine)
+      strikeAnalysis,
 
       // Command panel data
       command: {
@@ -7182,6 +7198,34 @@ export function startHourlyScheduler() {
     }
   }, 60 * 1000);
 
+  // MARKET ACTIVITY ANALYST — background daily review. After the session closes
+  // (>= 15:40 IST) build today's application-strength report ONCE from the app's
+  // own resolved logs and persist it (data/analyst/). Read-only: it changes no
+  // trading logic. Checked every 10 min; idempotent via lastReviewDate.
+  let lastReviewDate = "";
+  setInterval(() => {
+    try {
+      const nowIst = new Date(Date.now() + 19800000);
+      const minsOfDay = nowIst.getUTCHours() * 60 + nowIst.getUTCMinutes();
+      const day = nowIst.getUTCDay(); // 0 Sun .. 6 Sat
+      const date = istDateStr();
+      if (day === 0 || day === 6) return;          // no weekend sessions
+      if (minsOfDay < 15 * 60 + 40) return;         // wait until after 15:40 IST
+      if (lastReviewDate === date) return;          // once per day
+      const rep = runDailyReview(date);
+      lastReviewDate = date;
+      centralLog.write({
+        channel: "agent-narration",
+        symbol: "ALL",
+        mode: "Directional",
+        eventType: "DAILY_REVIEW",
+        severity: "info",
+        summary: `Market Activity Analyst — ${date}: strength ${rep.overallStrength}${rep.strengthScore != null ? " (" + rep.strengthScore + "/100)" : ""}, accuracy ${rep.signalAccuracyPct ?? "n/a"}%, false ${rep.falseSignalRatePct ?? "n/a"}%, missed ${rep.missedMoveRatePct ?? "n/a"}%, signals ${rep.totalSignals}.`,
+        payload: { date: rep.date, strengthScore: rep.strengthScore, overallStrength: rep.overallStrength, signalAccuracyPct: rep.signalAccuracyPct, falseSignalRatePct: rep.falseSignalRatePct, missedMoveRatePct: rep.missedMoveRatePct, totalSignals: rep.totalSignals },
+      });
+    } catch { /* review is best-effort; never breaks the server */ }
+  }, 10 * 60 * 1000);
+
 }
 
 // Scalp / momentum-burst for one symbol.
@@ -7832,6 +7876,28 @@ router.get("/advisory/accuracy", (req: Request, res: Response) => {
   const win = Number(req.query.window);
   const windowMinutes = WINDOWS_MIN.includes(win) ? win : 15;
   res.json(buildAccuracyReport(readSuggestions(1000), windowMinutes));
+});
+
+// ===================== Market Activity Analyst (read-only review) =====================
+// Rolls up the app's OWN resolved activity into a daily "application strength"
+// report. Review/measure/report only — it changes no trading logic. ?date= picks
+// a past session (defaults to today); on-demand build if not yet persisted.
+router.get("/analyst/daily-review", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
+  try {
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : istDateStr();
+    const rebuild = req.query.rebuild === "1";
+    let rep = rebuild ? null : loadAnalystDailyReport(date);
+    if (!rep) rep = runDailyReview(date); // builds from existing logs + persists
+    res.json(rep);
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || "daily-review failed" });
+  }
+});
+
+// Cross-session history (compact rows) for trend review.
+router.get("/analyst/history", requirePermission("oiAnalysis"), (_req: Request, res: Response) => {
+  try { res.json({ rows: loadAnalystHistory() }); }
+  catch (e: any) { res.status(500).json({ error: e?.message || "history failed" }); }
 });
 
 export default router;

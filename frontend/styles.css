@@ -4025,6 +4025,36 @@ body.mode-decisionflow #index-strip { display: none !important; }
 
 /* Option Selection box */
 .mc-option-box { padding: 10px 14px; }
+
+/* Option Strike Analysis */
+.mc-strike-box { padding: 8px 14px 12px; }
+.mc-strike-unavail { font-size: 11px; font-weight: 700; color: #f7931a; background: rgba(247,147,26,.1); border: 1px solid rgba(247,147,26,.25); border-radius: 4px; padding: 8px; text-align: center; }
+.mc-strike-atm { font-size: 12px; color: #d1d4dc; margin-bottom: 8px; display: flex; gap: 12px; flex-wrap: wrap; }
+.mc-strike-atm b { font-variant-numeric: tabular-nums; }
+.mc-strike-atm .ce { color: #16c784; }
+.mc-strike-atm .pe { color: #ea3943; }
+.mc-strike-table { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 8px; }
+.mc-strike-table th { color: #787b86; font-weight: 600; text-align: right; padding: 3px 4px; border-bottom: 1px solid #2a2e39; text-transform: uppercase; font-size: 9px; letter-spacing: .3px; }
+.mc-strike-table th:first-child, .mc-strike-table td:first-child { text-align: left; }
+.mc-strike-table td { padding: 4px; text-align: right; border-bottom: 1px solid #1e222d; font-variant-numeric: tabular-nums; color: #d1d4dc; }
+.mc-strike-table tr.primary td { background: rgba(22,199,132,.08); }
+.mc-strike-table tr.avoid td { opacity: .55; }
+.mc-strike-tag { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; background: #2a2e39; color: #787b86; }
+.mc-strike-tag.RESPONSIVE, .mc-strike-tag.BALANCED { background: rgba(22,199,132,.18); color: #16c784; }
+.mc-strike-tag.LIQUID { background: rgba(41,98,255,.18); color: #58a6ff; }
+.mc-strike-tag.WEAK { background: rgba(247,147,26,.15); color: #f7931a; }
+.mc-strike-tag.AVOID { background: rgba(234,57,67,.18); color: #ea3943; }
+.mc-strike-picks { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.mc-strike-pick { font-size: 11px; padding: 6px 8px; border-radius: 4px; border-left: 3px solid #2a2e39; background: #131722; }
+.mc-strike-pick .lbl { font-weight: 700; font-size: 10px; letter-spacing: .5px; text-transform: uppercase; }
+.mc-strike-pick.primary { border-left-color: #16c784; }
+.mc-strike-pick.primary .lbl { color: #16c784; }
+.mc-strike-pick.alt { border-left-color: #58a6ff; }
+.mc-strike-pick.alt .lbl { color: #58a6ff; }
+.mc-strike-pick.avoid { border-left-color: #ea3943; }
+.mc-strike-pick.avoid .lbl { color: #ea3943; }
+.mc-strike-pick .why { color: #b2b5be; margin-top: 2px; }
+.mc-strike-note { font-size: 10px; color: #787b86; line-height: 1.4; }
 .mc-opt-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #787b86; }
 .mc-opt-btns { display: flex; gap: 2px; }
 .mc-opt-btn { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 3px; background: #2a2e39; color: #787b86; cursor: default; }

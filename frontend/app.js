@@ -5700,12 +5700,73 @@ async function loadMarketCommand(chartOnly = false) {
     renderMCCommand(d);
     renderMCStatus(d);
     renderMCLiveBar(d);
+    renderMCStrikes(d);
   } catch (e) {
     console.error("[MarketCommand]", e);
   }
   MC.loading = false;
   // After a fast chart-only paint, immediately fetch the full payload (OI/command).
   if (chartOnly && !MC.replayDate) loadMarketCommand(false);
+}
+
+function mcFmtK(v) {
+  if (v == null) return "—";
+  const a = Math.abs(v);
+  if (a >= 1e7) return (v / 1e7).toFixed(2) + "Cr";
+  if (a >= 1e5) return (v / 1e5).toFixed(2) + "L";
+  if (a >= 1e3) return (v / 1e3).toFixed(1) + "K";
+  return String(Math.round(v));
+}
+
+function renderMCStrikes(d) {
+  const sa = d.strikeAnalysis;
+  const unavail = el("mc-strike-unavail");
+  const main = el("mc-strike-main");
+  if (!sa || !sa.available) {
+    if (unavail) { unavail.hidden = false; unavail.textContent = (sa && sa.reason) ? "STRIKE ANALYSIS: " + sa.reason : "STRIKE ANALYSIS: DATA UNAVAILABLE"; }
+    if (main) main.hidden = true;
+    return;
+  }
+  if (unavail) unavail.hidden = true;
+  if (main) main.hidden = false;
+
+  // ATM CE/PE line
+  const atmEl = el("mc-strike-atm");
+  if (atmEl) {
+    const ce = sa.atm?.ce, pe = sa.atm?.pe;
+    atmEl.innerHTML =
+      `<span>ATM <b>${sa.atmStrike ?? "—"}</b></span>` +
+      (ce ? `<span class="ce">${sa.atmStrike} CE <b>${ce.ltp != null ? "₹" + ce.ltp : "—"}</b>${ce.ltpChgPct != null ? ` (${ce.ltpChgPct >= 0 ? "+" : ""}${ce.ltpChgPct}%)` : ""}</span>` : "") +
+      (pe ? `<span class="pe">${sa.atmStrike} PE <b>${pe.ltp != null ? "₹" + pe.ltp : "—"}</b>${pe.ltpChgPct != null ? ` (${pe.ltpChgPct >= 0 ? "+" : ""}${pe.ltpChgPct}%)` : ""}</span>` : "");
+  }
+
+  // Strike table
+  const tbl = el("mc-strike-table");
+  if (tbl) {
+    const head = `<tr><th>Strike</th><th>Type</th><th>LTP</th><th>Move</th><th>Speed</th><th>Liq</th><th>Assess</th></tr>`;
+    const rows = (sa.rows || []).map((r) => {
+      const cls = sa.primary && r.strike === sa.primary.strike ? "primary" : r.assessment === "AVOID" ? "avoid" : "";
+      const speed = r.responsiveness != null ? r.responsiveness.toFixed(2) : "—";
+      const liq = r.liquidityRank != null ? Math.round(r.liquidityRank * 100) + "%" : "—";
+      const move = r.ltpChgPct != null ? (r.ltpChgPct >= 0 ? "+" : "") + r.ltpChgPct + "%" : "—";
+      return `<tr class="${cls}"><td>${r.strike} <span style="color:#787b86">${r.moneyness}</span></td><td>${r.side}</td><td>${r.ltp != null ? "₹" + r.ltp : "—"}</td><td>${move}</td><td>${speed}</td><td>${liq}</td><td><span class="mc-strike-tag ${r.assessment.replace(/ /g, "")}">${r.assessment}</span></td></tr>`;
+    }).join("");
+    tbl.innerHTML = head + rows;
+  }
+
+  // Picks
+  const picks = el("mc-strike-picks");
+  if (picks) {
+    let html = "";
+    if (sa.primary) html += `<div class="mc-strike-pick primary"><span class="lbl">Primary Strike — ${sa.primary.strike} ${sa.primary.side}</span><div class="why">${sa.primary.why}</div></div>`;
+    if (sa.alternative) html += `<div class="mc-strike-pick alt"><span class="lbl">Alternative — ${sa.alternative.strike} ${sa.alternative.side}</span><div class="why">${sa.alternative.why}</div></div>`;
+    if (sa.avoid) html += `<div class="mc-strike-pick avoid"><span class="lbl">Avoid — ${sa.avoid.strike} ${sa.avoid.side}</span><div class="why">${sa.avoid.why}</div></div>`;
+    if (!html && sa.side == null) html = `<div class="mc-strike-note">Master direction is neutral — no option side selected.</div>`;
+    picks.innerHTML = html;
+  }
+
+  const note = el("mc-strike-note");
+  if (note) note.textContent = sa.spreadNote || "";
 }
 
 function mcFmtVol(v) {
@@ -5949,10 +6010,10 @@ function renderMCCommand(d) {
   if (faEl && faLabel) {
     const isTake = cmd.finalAction === "TAKE";
     const isBull = cmd.direction === "BULLISH";
-    faEl.className = "mc-final-action " + (isReplay ? "wait" : isTake ? (isBull ? "take" : "sell") : cmd.finalAction === "NO TRADE" ? "sell" : "wait");
-    faLabel.textContent = isReplay ? "HISTORICAL REPLAY" : isTake ? (isBull ? "EXECUTE BUY" : "EXECUTE SELL") : cmd.finalAction === "WAIT" ? "WAIT FOR SETUP" : cmd.finalAction;
+    faEl.className = "mc-final-action " + (isPartial || isReplay ? "wait" : isTake ? (isBull ? "take" : "sell") : cmd.finalAction === "NO TRADE" ? "sell" : "wait");
+    faLabel.textContent = isPartial ? "LOADING LIVE DATA…" : isReplay ? "HISTORICAL REPLAY" : isTake ? (isBull ? "EXECUTE BUY" : "EXECUTE SELL") : cmd.finalAction === "WAIT" ? "WAIT FOR SETUP" : cmd.finalAction;
   }
-  if (faReason) faReason.textContent = cmd.finalReason || "";
+  if (faReason) faReason.textContent = isPartial ? "Chart ready — fetching OI & signals…" : (cmd.finalReason || "");
 
   // Confirmations checklist
   const checksEl = el("mc-cmd-checks");
