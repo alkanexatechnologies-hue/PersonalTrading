@@ -315,6 +315,9 @@ export async function dhanChainForExpiry(def: SymbolDef, expiryOffset = 0): Prom
         ceDelta: nOrNull(ce.greeks?.delta), peDelta: nOrNull(pe.greeks?.delta),
         ceIv: nOrNull(ce.implied_volatility), peIv: nOrNull(pe.implied_volatility),
         ceTheta: nOrNull(ce.greeks?.theta), peTheta: nOrNull(pe.greeks?.theta),
+        // gamma/vega if the feed carries them (Dhan greeks object) — else null.
+        ceGamma: nOrNull(ce.greeks?.gamma), peGamma: nOrNull(pe.greeks?.gamma),
+        ceVega: nOrNull(ce.greeks?.vega), peVega: nOrNull(pe.greeks?.vega),
       };
     }).filter((s: any) => s.strike > 0).sort((a: any, b: any) => a.strike - b.strike);
 
@@ -425,6 +428,10 @@ export async function dhanOiAnalysis(def: SymbolDef): Promise<OiAnalysis> {
       peIv: s.peIv ?? null,
       ceTheta: s.ceTheta ?? null,
       peTheta: s.peTheta ?? null,
+      ceGamma: s.ceGamma ?? null,
+      peGamma: s.peGamma ?? null,
+      ceVega: s.ceVega ?? null,
+      peVega: s.peVega ?? null,
     }));
 
     if (!all.length) return fail("Empty option chain.");

@@ -545,6 +545,12 @@ export interface OiStrike {
   peIv?: number | null;
   ceTheta?: number | null;
   peTheta?: number | null;
+  // Additional greeks — populated only when the feed provides them (Dhan sends
+  // gamma/vega inside the same greeks object). Null when absent (never guessed).
+  ceGamma?: number | null;
+  peGamma?: number | null;
+  ceVega?: number | null;
+  peVega?: number | null;
 }
 
 export interface OiAnalysis {

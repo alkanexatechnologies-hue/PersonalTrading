@@ -4513,6 +4513,54 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
         }));
         return { available: rows.length > 0, atmStrike: atm?.strike ?? null, rows };
       })(),
+      // Same-strike CE + PE matrix (ATM ±5) for the Option Terminal. Every value is
+      // REAL live chain data: delta/theta/IV from the chain; gamma/vega ONLY when the
+      // feed provides them (else null → "DATA UNAVAILABLE", never guessed). The AUTO
+      // strike is the read-only strike analyser's primary pick — chosen from delta +
+      // OI/volume, NOT assumed ATM. Spread/depth and "balanced price" are not in the
+      // option feed / not defined in the app → flagged unsupported, never invented.
+      optionMatrix: (() => {
+        if (skipOi || !oiChain?.available || !Array.isArray(oiChain.topStrikes) || oiChain.underlying == null) {
+          return {
+            available: false,
+            reason: isHistorical ? "HISTORICAL — no live option chain" : (dataStale ? "DATA STALE" : "DATA UNAVAILABLE"),
+            index: def.name, spot: null, expiry: (oiChain?.expiry ?? oiData?.expiry) || null, atmStrike: null,
+            autoStrike: null, autoSide: null, autoWhy: null, autoResponding: null, rows: [],
+            spreadSupported: false, balancedPriceSupported: false,
+          };
+        }
+        const spotU = oiChain.underlying as number;
+        const sorted = oiChain.topStrikes.slice().filter((s: any) => s.strike > 0).sort((a: any, b: any) => a.strike - b.strike);
+        const atm = sorted.reduce((b: any, s: any) => (b == null || Math.abs(s.strike - spotU) < Math.abs(b.strike - spotU) ? s : b), null);
+        const ai = atm ? sorted.findIndex((s: any) => s.strike === atm.strike) : -1;
+        const win = ai < 0 ? [] : sorted.slice(Math.max(0, ai - 5), ai + 6);
+        const leg = (s: any, side: "CE" | "PE") => side === "CE" ? {
+          ltp: s.ceLtp ?? null, oi: s.ceOi ?? null, oiChg: s.ceChg ?? null, vol: s.ceVol ?? null,
+          delta: s.ceDelta ?? null, iv: s.ceIv ?? null, theta: s.ceTheta ?? null, gamma: s.ceGamma ?? null, vega: s.ceVega ?? null,
+        } : {
+          ltp: s.peLtp ?? null, oi: s.peOi ?? null, oiChg: s.peChg ?? null, vol: s.peVol ?? null,
+          delta: s.peDelta ?? null, iv: s.peIv ?? null, theta: s.peTheta ?? null, gamma: s.peGamma ?? null, vega: s.peVega ?? null,
+        };
+        const atmBand = spotU * 0.0015;
+        const rows = win.map((s: any) => ({
+          strike: s.strike,
+          moneyness: Math.abs(s.strike - spotU) <= atmBand ? "ATM" : (s.strike < spotU ? "CE-ITM" : "CE-OTM"),
+          ce: leg(s, "CE"), pe: leg(s, "PE"),
+        }));
+        return {
+          available: rows.length > 0,
+          index: def.name, spot: Math.round(spotU * 100) / 100,
+          expiry: (oiChain.expiry ?? oiData?.expiry) || null,
+          atmStrike: atm?.strike ?? null,
+          autoStrike: strikeAnalysis?.primary?.strike ?? null,
+          autoSide: strikeAnalysis?.primary?.side ?? (cmdDirection === "BULLISH" ? "CE" : cmdDirection === "BEARISH" ? "PE" : null),
+          autoWhy: strikeAnalysis?.primary?.why ?? null,
+          autoResponding: strikeAnalysis?.bestSetup?.responding ?? null,
+          rows,
+          spreadSupported: false,        // bid/ask depth is not in the option feed
+          balancedPriceSupported: false, // no "balanced price" formula exists in the app
+        };
+      })(),
       // India VIX (live; expected 30-day NIFTY volatility — NOT a direction signal)
       vix: vix ? {
         available: !!vix.available, value: vix.value, change: vix.change, changePct: vix.changePct,

@@ -451,6 +451,7 @@
           <button class="tab grp-swing" data-tab="movetiming" data-group="swing">Move Timing</button>
           <button class="tab" data-tab="dhanbacktest" data-group="dhanbacktest">🧪 Backtest (Dhan)</button>
           <button class="tab tab-primary" data-tab="marketcommand" data-group="marketcommand">⚡ Market Command</button>
+          <button class="tab tab-primary" data-tab="optionterminal" data-group="marketcommand">📈 Option Terminal</button>
           <!-- AI Paper Desk screens (own desk; each tab is permission-gated server-side) -->
           <button class="tab tab-primary" data-tab="aipdash" data-group="aipaper">🤖 Dashboard</button>
           <button class="tab" data-tab="aipanalysis" data-group="aipaper">🧠 AI Market Analysis</button>
@@ -1260,6 +1261,7 @@
                   <div class="mc-replay-note">Real candles + Order Blocks for that session (technical only).</div>
                 </div>
               </div>
+              <button class="mc2-replay" id="mc-open-optionterminal" title="Open the CE/PE Option Terminal for this index" style="margin-left:4px">📈 Option Terminal</button>
               <div class="mc2-status">
                 <span class="mc-live-dot" id="mc-live-dot"></span>
                 <span id="mc-live-label">Dhan Connected</span>
@@ -1400,6 +1402,116 @@
             </div>
           </div>
         </div><!-- /panel-marketcommand -->
+
+        <!-- ============================ OPTION TERMINAL ============================ -->
+        <!-- Market Option Selection: driven by the same index + snapshot as Market
+             Command. CE + PE premium charts are the primary focus. All data is the
+             live Dhan snapshot; nothing is fabricated. -->
+        <div class="tab-panel" id="panel-optionterminal">
+          <div class="ot-wrap">
+            <div class="ot-topbar">
+              <div class="ot-brand"><span class="ot-logo">📈</span> Option Terminal <span class="ot-muted" style="font-weight:500">· CE / PE premium · Market Option Selection</span></div>
+              <button class="ot-navbtn" id="ot-open-command">⚡ Market Command</button>
+            </div>
+            <!-- context strip: index/BOS/VIX + AUTO/MANUAL + strike -->
+            <div class="ot-strip">
+              <div class="ot-cell ot-index">
+                <div class="ot-lbl">Market · Index <span class="ot-src" id="ot-src">follows Market Command</span></div>
+                <div class="ot-idx" id="ot-idx-btns">
+                  <button class="ot-idxbtn active" data-sym="^NSEI">NIFTY 50</button>
+                  <button class="ot-idxbtn" data-sym="^NSEBANK">BANKNIFTY</button>
+                  <button class="ot-idxbtn" data-sym="^CNXFIN">FINNIFTY</button>
+                  <button class="ot-idxbtn" data-sym="^NSEMDCP50">MIDCAP</button>
+                </div>
+                <div class="ot-spot"><span class="ot-spot-val" id="ot-spot">—</span><span class="ot-spot-chg" id="ot-spot-chg"></span></div>
+                <div class="ot-tf" id="ot-tf-btns">
+                  <button class="ot-tfbtn" data-tf="5m">5m</button>
+                  <button class="ot-tfbtn active" data-tf="15m">15m</button>
+                  <button class="ot-tfbtn" data-tf="30m">30m</button>
+                  <button class="ot-tfbtn" data-tf="60m">1h</button>
+                </div>
+              </div>
+              <div class="ot-cell ot-bos-cell">
+                <div class="ot-lbl">Structure</div>
+                <div class="ot-bos" id="ot-bos"><span class="ot-muted">Loading structure…</span></div>
+              </div>
+              <div class="ot-cell ot-sel-cell">
+                <div class="ot-lbl">Market Option Selection</div>
+                <div class="ot-mode" id="ot-mode-btns">
+                  <button class="ot-modebtn active" data-mode="AUTO">AUTO</button>
+                  <button class="ot-modebtn" data-mode="MANUAL">MANUAL</button>
+                </div>
+                <div class="ot-strikepick">
+                  <label class="ot-muted" for="ot-strike-sel">Strike</label>
+                  <select id="ot-strike-sel" disabled></select>
+                </div>
+                <div class="ot-selstate" id="ot-selstate">AUTO MODE ACTIVE</div>
+              </div>
+              <div class="ot-cell ot-vix-cell">
+                <div class="ot-lbl">Volatility</div>
+                <div class="ot-vixgrid" id="ot-vix"><span class="ot-muted">—</span></div>
+              </div>
+            </div>
+
+            <!-- MAIN: CE + PE charts -->
+            <div class="ot-charts">
+              <div class="ot-cpanel">
+                <div class="ot-chead">
+                  <span class="ot-name" id="ot-ce-name">— CE</span>
+                  <span class="ot-tag ot-tag-ce">CALL</span>
+                  <span class="ot-ltp" id="ot-ce-ltp">—</span>
+                  <span class="ot-chg" id="ot-ce-chg"></span>
+                  <span class="ot-resp" id="ot-ce-resp"></span>
+                </div>
+                <div class="ot-gstrip" id="ot-ce-greeks"></div>
+                <div class="ot-chart" id="ot-ce-chart"></div>
+                <div class="ot-clegend"><b style="color:#f0b429">EMA9</b><b style="color:#2f7dff">EMA21</b><span class="ot-muted" id="ot-ce-note"></span></div>
+              </div>
+              <div class="ot-cpanel">
+                <div class="ot-chead">
+                  <span class="ot-name" id="ot-pe-name">— PE</span>
+                  <span class="ot-tag ot-tag-pe">PUT</span>
+                  <span class="ot-ltp" id="ot-pe-ltp">—</span>
+                  <span class="ot-chg" id="ot-pe-chg"></span>
+                  <span class="ot-resp" id="ot-pe-resp"></span>
+                </div>
+                <div class="ot-gstrip" id="ot-pe-greeks"></div>
+                <div class="ot-chart" id="ot-pe-chart"></div>
+                <div class="ot-clegend"><b style="color:#f0b429">EMA9</b><b style="color:#2f7dff">EMA21</b><span class="ot-muted" id="ot-pe-note"></span></div>
+              </div>
+            </div>
+
+            <!-- LOWER PANELS -->
+            <div class="ot-lower">
+              <div class="ot-lp" id="ot-analytics">
+                <h3>Σ Option Analytics · same strike</h3>
+                <div id="ot-analytics-body"><span class="ot-muted">—</span></div>
+              </div>
+              <div class="ot-lp" id="ot-response">
+                <h3>⚡ Option Response vs Underlying</h3>
+                <div id="ot-response-body"><span class="ot-muted">—</span></div>
+              </div>
+              <div class="ot-lp" id="ot-liq">
+                <h3>◉ Liquidity / OI</h3>
+                <div id="ot-liq-body"><span class="ot-muted">—</span></div>
+              </div>
+              <div class="ot-lp" id="ot-intraday">
+                <h3>◈ Intraday Assistance</h3>
+                <div id="ot-intraday-body"><span class="ot-muted">—</span></div>
+              </div>
+            </div>
+
+            <!-- FOOTER -->
+            <div class="ot-foot">
+              <span id="ot-foot-conn"><span class="ot-dot"></span> Dhan</span>
+              <span>Market Time <b id="ot-foot-mkt">—</b></span>
+              <span>Last Update <b id="ot-foot-upd">—</b></span>
+              <span>Data Age <b id="ot-foot-age">—</b></span>
+              <span id="ot-foot-status"></span>
+              <span class="ot-foot-r">Single authoritative snapshot · no duplicate Dhan requests</span>
+            </div>
+          </div>
+        </div><!-- /panel-optionterminal -->
 
         <!-- ================= Strategy Replay (real engine output, no-look-ahead) ================= -->
         <div class="tab-panel" id="panel-stratreplay">

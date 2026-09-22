@@ -1876,6 +1876,12 @@ function switchTab(name) {
     initMarketCommand(); startMarketCommandLive();
     if (MC.chart) setTimeout(() => { const c = el("mc-chart-container"); if (c) MC.chart.applyOptions({ width: c.clientWidth }); }, 60);
   }
+  // Option Terminal — full-width (keeps the tab bar), follows Market Command's index.
+  document.body.classList.toggle("ot-fullwidth", name === "optionterminal");
+  if (name === "optionterminal") {
+    initOptionTerminal(); syncOTFromMC(); startOptionTerminalLive();
+    setTimeout(otResize, 60);
+  }
   if (name === "bullrank" && !state.bullRankLoaded) { state.bullRankLoaded = true; loadBullRank(); }
   if (name === "stockoptions" && !state.stockOptionsInit) { state.stockOptionsInit = true; initStockOptions(); }
 
@@ -5605,6 +5611,10 @@ function initMarketCommand() {
     });
   });
 
+  // Jump to the Option Terminal (CE/PE) for the same index — Market Command runs
+  // full-screen with its tab bar hidden, so this button is the way across.
+  el("mc-open-optionterminal")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("optionterminal"); });
+
   // Wire fullscreen
   const fsBtn = el("mc-fullscreen");
   if (fsBtn) fsBtn.addEventListener("click", () => {
@@ -5733,6 +5743,412 @@ function startMarketCommandLive() {
     // Every 5s tick fires when open; only every 6th tick (30s) when closed.
     if (open || MC._tick % 6 === 0) loadMarketCommand();
   }, 5000);
+}
+
+// ==================== OPTION TERMINAL (Market Option Selection) ====================
+// Driven by the SAME index + snapshot as Market Command. CE + PE premium charts are
+// the primary focus. Reuses /api/market-command (optionMatrix = same-strike CE/PE,
+// real greeks) + /api/option-candles (per-strike premium candles). AUTO uses the
+// existing read-only strike analyser's pick; MANUAL lets the trader choose a strike.
+// Only one mode updates the selected strike at a time. Nothing is fabricated: missing
+// data shows DATA UNAVAILABLE / STRIKE DATA UNAVAILABLE / NO VALID STRIKE.
+const OT = {
+  sym: "^NSEI", tf: "15m", mode: "AUTO", manualStrike: null,
+  ceChart: null, ceCandle: null, ceE9: null, ceE21: null,
+  peChart: null, peCandle: null, peE9: null, peE21: null,
+  timer: null, loading: false, lastData: null,
+  _init: false, _candleKey: null, _candleAt: 0, _chartFitKey: null,
+  _ceCandles: null, _peCandles: null, _ceMsg: null, _peMsg: null, _tick: 0,
+};
+
+function otEl(id) { return document.getElementById(id); }
+function otNum(v, d = 2) { return (v == null || !isFinite(v)) ? "—" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: d }); }
+function otK(v) { if (v == null || !isFinite(v)) return "—"; const a = Math.abs(v); if (a >= 1e7) return (v / 1e7).toFixed(2) + "Cr"; if (a >= 1e5) return (v / 1e5).toFixed(2) + "L"; if (a >= 1e3) return (v / 1e3).toFixed(1) + "K"; return String(Math.round(v)); }
+function otHM(ts) { return ts ? new Date((ts + 19800) * 1000).toISOString().slice(11, 19) : "—"; }
+function otEma(vals, p) { if (!vals.length) return []; const k = 2 / (p + 1); let e = vals[0]; const out = []; for (let i = 0; i < vals.length; i++) { e = i ? vals[i] * k + e * (1 - k) : vals[i]; out.push(e); } return out; }
+
+// Intraday change of a candle series (first bar of the last IST day → last close).
+function otIntradayChange(candles) {
+  if (!candles || candles.length < 2) return null;
+  const istDay = (t) => new Date((t + 19800) * 1000).toISOString().slice(0, 10);
+  const lastDay = istDay(candles[candles.length - 1].time);
+  const first = candles.find((c) => istDay(c.time) === lastDay) || candles[0];
+  const base = first.open != null ? first.open : first.close;
+  const last = candles[candles.length - 1].close;
+  if (!(base > 0)) return null;
+  return { pts: last - base, pct: ((last - base) / base) * 100 };
+}
+
+function otMakeChart(containerId) {
+  const c = otEl(containerId);
+  if (!c || typeof LightweightCharts === "undefined") return null;
+  const chart = LightweightCharts.createChart(c, {
+    width: c.clientWidth, height: c.clientHeight || 360,
+    layout: { background: { color: "transparent" }, textColor: "#8394ad", fontSize: 10 },
+    grid: { vertLines: { color: "rgba(30,42,64,0.5)" }, horzLines: { color: "rgba(30,42,64,0.5)" } },
+    timeScale: { borderColor: "#1c2740", timeVisible: true, secondsVisible: false },
+    rightPriceScale: { borderColor: "#1c2740" },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+  });
+  const candle = chart.addCandlestickSeries({ upColor: "#16c784", downColor: "#f6465d", wickUpColor: "#16c784", wickDownColor: "#f6465d", borderVisible: false });
+  const e9 = chart.addLineSeries({ color: "#f0b429", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+  const e21 = chart.addLineSeries({ color: "#2f7dff", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+  try { new ResizeObserver(() => chart.applyOptions({ width: c.clientWidth, height: c.clientHeight || 360 })).observe(c); } catch { /* noop */ }
+  return { chart, candle, e9, e21 };
+}
+
+function initOptionTerminal() {
+  if (OT._init) return;
+  OT._init = true;
+  const ce = otMakeChart("ot-ce-chart"); if (ce) { OT.ceChart = ce.chart; OT.ceCandle = ce.candle; OT.ceE9 = ce.e9; OT.ceE21 = ce.e21; }
+  const pe = otMakeChart("ot-pe-chart"); if (pe) { OT.peChart = pe.chart; OT.peCandle = pe.candle; OT.peE9 = pe.e9; OT.peE21 = pe.e21; }
+  otEl("ot-idx-btns")?.querySelectorAll(".ot-idxbtn").forEach((b) => b.addEventListener("click", () => {
+    otEl("ot-idx-btns").querySelectorAll(".ot-idxbtn").forEach((x) => x.classList.remove("active"));
+    b.classList.add("active"); OT.sym = b.getAttribute("data-sym"); OT.manualStrike = null; OT._candleKey = null; loadOptionTerminal();
+  }));
+  otEl("ot-tf-btns")?.querySelectorAll(".ot-tfbtn").forEach((b) => b.addEventListener("click", () => {
+    otEl("ot-tf-btns").querySelectorAll(".ot-tfbtn").forEach((x) => x.classList.remove("active"));
+    b.classList.add("active"); OT.tf = b.getAttribute("data-tf"); OT._candleKey = null; loadOptionTerminal();
+  }));
+  otEl("ot-mode-btns")?.querySelectorAll(".ot-modebtn").forEach((b) => b.addEventListener("click", () => {
+    OT.mode = b.getAttribute("data-mode");
+    otEl("ot-mode-btns").querySelectorAll(".ot-modebtn").forEach((x) => x.classList.toggle("active", x === b));
+    const sel = otEl("ot-strike-sel"); if (sel) sel.disabled = (OT.mode !== "MANUAL");
+    OT._candleKey = null;
+    if (OT.lastData) renderOptionTerminal(OT.lastData);
+  }));
+  otEl("ot-strike-sel")?.addEventListener("change", (e) => {
+    OT.manualStrike = Number(e.target.value) || null; OT._candleKey = null;
+    if (OT.lastData) renderOptionTerminal(OT.lastData);
+  });
+  otEl("ot-open-command")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("marketcommand"); });
+}
+
+// Follow Market Command's selected index + timeframe on entry.
+function syncOTFromMC() {
+  if (typeof MC !== "undefined" && MC.sym) { OT.sym = MC.sym; OT.tf = MC.tf || OT.tf; }
+  otEl("ot-idx-btns")?.querySelectorAll(".ot-idxbtn").forEach((b) => b.classList.toggle("active", b.getAttribute("data-sym") === OT.sym));
+  otEl("ot-tf-btns")?.querySelectorAll(".ot-tfbtn").forEach((b) => b.classList.toggle("active", b.getAttribute("data-tf") === OT.tf));
+}
+
+function otResize() {
+  const c1 = otEl("ot-ce-chart"), c2 = otEl("ot-pe-chart");
+  if (OT.ceChart && c1) OT.ceChart.applyOptions({ width: c1.clientWidth, height: c1.clientHeight || 360 });
+  if (OT.peChart && c2) OT.peChart.applyOptions({ width: c2.clientWidth, height: c2.clientHeight || 360 });
+}
+
+async function loadOptionTerminal() {
+  if (OT.loading) return;
+  OT.loading = true;
+  try {
+    const url = `/api/market-command?symbol=${encodeURIComponent(OT.sym)}&interval=${OT.tf}`;
+    const d = await fetchJSON(url, 25000);
+    if (d && !d.error) { OT.lastData = d; renderOptionTerminal(d); }
+  } catch (e) { console.error("[OptionTerminal]", e); }
+  OT.loading = false;
+}
+
+function startOptionTerminalLive() {
+  loadOptionTerminal();
+  if (OT.timer) return;
+  OT._tick = 0;
+  OT.timer = setInterval(() => {
+    const pn = document.getElementById("panel-optionterminal");
+    if (!pn || !pn.classList.contains("active") || OT.loading) return;
+    const open = (typeof isMarketOpen === "function" && isMarketOpen()) || (typeof isFeedWindow === "function" && isFeedWindow());
+    OT._tick++;
+    if (open || OT._tick % 6 === 0) loadOptionTerminal();
+  }, 5000);
+}
+
+// Greeks strip for one leg. delta/theta/IV/gamma/vega are REAL when the feed
+// carries them; a null value shows "—" (never guessed).
+function otGreeksStrip(leg) {
+  if (!leg) return `<div class="g"><div class="k">—</div><div class="v">NO DATA</div></div>`;
+  const g = (k, v, cls) => `<div class="g"><div class="k">${k}</div><div class="v ${cls || ""}">${v}</div></div>`;
+  return [
+    g("OI", otK(leg.oi)),
+    g("OI Δ", leg.oiChg != null ? (leg.oiChg >= 0 ? "+" : "") + otK(leg.oiChg) : "—", leg.oiChg > 0 ? "ot-up" : leg.oiChg < 0 ? "ot-down" : ""),
+    g("Vol", otK(leg.vol)),
+    g("IV", leg.iv != null ? Number(leg.iv).toFixed(1) : "—"),
+    g("Δ", leg.delta != null ? Number(leg.delta).toFixed(2) : "—"),
+    g("Γ", leg.gamma != null ? Number(leg.gamma).toFixed(4) : "—"),
+    g("Θ", leg.theta != null ? Number(leg.theta).toFixed(2) : "—", "ot-down"),
+    g("Vega", leg.vega != null ? Number(leg.vega).toFixed(2) : "—"),
+  ].join("");
+}
+
+// Option-response classifier (transparent, real data): compares the ACTUAL premium
+// move to the DELTA-EXPECTED move over the last N bars. A wrong-direction move counts
+// as zero tracking. STRONG ≥0.8, NORMAL ≥0.4, else WEAK. Returns DATA UNAVAILABLE when
+// delta/candles are missing or the underlying barely moved (nothing to judge).
+function otResponse(side, leg, uCandles, oCandles) {
+  const delta = leg && leg.delta != null ? Math.abs(leg.delta) : null;
+  if (!delta || !oCandles || oCandles.length < 4 || !uCandles || uCandles.length < 4) return { cls: "DATA UNAVAILABLE" };
+  const K = Math.min(5, oCandles.length - 1, uCandles.length - 1);
+  const u0 = uCandles[uCandles.length - 1 - K].close, u1 = uCandles[uCandles.length - 1].close;
+  const o0 = oCandles[oCandles.length - 1 - K].close, o1 = oCandles[oCandles.length - 1].close;
+  const uMove = u1 - u0;
+  if (!(Math.abs(uMove) > u0 * 0.0004)) return { cls: "DATA UNAVAILABLE", note: "underlying barely moved" };
+  const expected = delta * Math.abs(uMove);
+  const actual = o1 - o0;
+  const expectSign = side === "CE" ? Math.sign(uMove) : -Math.sign(uMove);
+  const tracked = Math.sign(actual) === expectSign ? Math.abs(actual) : 0;
+  const ratio = expected > 0 ? tracked / expected : null;
+  const cls = ratio == null ? "DATA UNAVAILABLE" : ratio >= 0.8 ? "STRONG" : ratio >= 0.4 ? "NORMAL" : "WEAK";
+  return { cls, ratio, uMove, actual, expected };
+}
+
+async function otFetchOptionCandles(sym, strike, expiry, interval) {
+  try {
+    const q = (t) => `/api/option-candles?symbol=${encodeURIComponent(sym)}&type=${t}&strike=${strike}&expiry=${encodeURIComponent(expiry)}&interval=${interval}`;
+    const [ceR, peR] = await Promise.all([fetchJSON(q("CE"), 25000), fetchJSON(q("PE"), 25000)]);
+    OT._ceCandles = ceR && ceR.available ? ceR.candles : null;
+    OT._peCandles = peR && peR.available ? peR.candles : null;
+    OT._ceMsg = ceR && !ceR.available ? (ceR.message || "no candles") : null;
+    OT._peMsg = peR && !peR.available ? (peR.message || "no candles") : null;
+    otDrawChart("CE", OT._ceCandles);
+    otDrawChart("PE", OT._peCandles);
+    OT._chartFitKey = OT._candleKey;
+    // Now that candles are in, refresh the LTP-change + response + notes.
+    if (OT.lastData) { otRenderResponse(OT.lastData); otRenderLtpChange(); }
+    const cn = otEl("ot-ce-note"); if (cn) cn.textContent = OT._ceMsg || "premium candles · Dhan";
+    const pn = otEl("ot-pe-note"); if (pn) pn.textContent = OT._peMsg || "premium candles · Dhan";
+  } catch (e) { console.error("[OT candles]", e); }
+}
+
+function otDrawChart(side, candles) {
+  const chart = side === "CE" ? OT.ceChart : OT.peChart;
+  const cs = side === "CE" ? OT.ceCandle : OT.peCandle;
+  const e9 = side === "CE" ? OT.ceE9 : OT.peE9, e21 = side === "CE" ? OT.ceE21 : OT.peE21;
+  if (!chart || !cs) return;
+  if (!candles || !candles.length) { cs.setData([]); if (e9) e9.setData([]); if (e21) e21.setData([]); return; }
+  const data = candles.map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close }));
+  cs.setData(data);
+  const closes = data.map((c) => c.close);
+  const a9 = otEma(closes, 9), a21 = otEma(closes, 21);
+  if (e9) e9.setData(data.map((c, i) => ({ time: c.time, value: +a9[i].toFixed(2) })));
+  if (e21) e21.setData(data.map((c, i) => ({ time: c.time, value: +a21[i].toFixed(2) })));
+  // Re-frame only on a view change (new strike/expiry/tf) — a periodic refresh
+  // keeps the trader's current zoom/scroll (no jump on data refresh).
+  if (OT._chartFitKey !== OT._candleKey) chart.timeScale().fitContent();
+}
+
+// LTP change % (from the premium candles' intraday move) for both legs.
+function otRenderLtpChange() {
+  const set = (id, candles) => {
+    const e = otEl(id); if (!e) return;
+    const ch = otIntradayChange(candles);
+    if (!ch) { e.textContent = ""; return; }
+    e.textContent = `${ch.pts >= 0 ? "+" : ""}${otNum(ch.pts, 2)} (${ch.pct >= 0 ? "+" : ""}${ch.pct.toFixed(2)}%)`;
+    e.className = "ot-chg " + (ch.pts >= 0 ? "ot-up" : "ot-down");
+  };
+  set("ot-ce-chg", OT._ceCandles);
+  set("ot-pe-chg", OT._peCandles);
+}
+
+function otRenderResponse(d) {
+  const box = otEl("ot-response-body"); if (!box) return;
+  const m = d.optionMatrix;
+  const row = otSelectedRow(d);
+  if (!m || !m.available || !row) { box.innerHTML = `<span class="ot-muted">DATA UNAVAILABLE — no live option chain.</span>`; return; }
+  const ce = otResponse("CE", row.ce, d.candles, OT._ceCandles);
+  const pe = otResponse("PE", row.pe, d.candles, OT._peCandles);
+  const cls = (r) => r.cls === "STRONG" ? "ot-resp-strong" : r.cls === "WEAK" ? "ot-resp-weak" : "ot-resp-normal";
+  const rr = (r) => r.ratio != null ? ` · ${(r.ratio * 100).toFixed(0)}% of delta-expected` : (r.note ? ` · ${r.note}` : "");
+  box.innerHTML =
+    `<div class="ot-resprow ${cls(ce)}"><span>CALL RESPONSE</span><b>${ce.cls}</b></div>` +
+    `<div class="ot-resprow ${cls(pe)}"><span>PUT RESPONSE</span><b>${pe.cls}</b></div>` +
+    `<div class="ot-miniline"><span class="ot-muted">Underlying move (last bars)</span><span>${ce.uMove != null ? (ce.uMove >= 0 ? "+" : "") + otNum(ce.uMove, 1) : "—"}</span></div>` +
+    `<div class="ot-miniline"><span class="ot-muted">CALL premium move</span><span>${ce.actual != null ? (ce.actual >= 0 ? "+" : "") + otNum(ce.actual, 2) : "—"}${rr(ce)}</span></div>` +
+    `<div class="ot-miniline"><span class="ot-muted">PUT premium move</span><span>${pe.actual != null ? (pe.actual >= 0 ? "+" : "") + otNum(pe.actual, 2) : "—"}${rr(pe)}</span></div>` +
+    `<div class="ot-muted" style="font-size:10px;margin-top:7px">Response = actual premium move ÷ (|delta| × underlying move), last ${Math.min(5, (OT._ceCandles || []).length)} bars. Detects "index moved but option didn't".</div>`;
+}
+
+// Which strike row is selected (AUTO = analyser pick / ATM fallback; MANUAL = chosen).
+function otSelectedRow(d) {
+  const m = d.optionMatrix;
+  if (!m || !m.available || !Array.isArray(m.rows)) return null;
+  let strike;
+  if (OT.mode === "AUTO") strike = m.autoStrike != null ? m.autoStrike : m.atmStrike;
+  else strike = OT.manualStrike != null ? OT.manualStrike : m.atmStrike;
+  return m.rows.find((r) => r.strike === Number(strike)) || null;
+}
+
+function renderOptionTerminal(d) {
+  const m = d.optionMatrix;
+  // ---- spot + intraday change ----
+  const spotEl = otEl("ot-spot"); if (spotEl) spotEl.textContent = d.spot != null ? otNum(d.spot, 2) : "—";
+  const spotChg = otIntradayChange(d.candles);
+  const scEl = otEl("ot-spot-chg");
+  if (scEl) {
+    if (spotChg) { scEl.textContent = `${spotChg.pts >= 0 ? "+" : ""}${otNum(spotChg.pts, 1)} (${spotChg.pct >= 0 ? "+" : ""}${spotChg.pct.toFixed(2)}%)`; scEl.className = "ot-spot-chg " + (spotChg.pts >= 0 ? "ot-up" : "ot-down"); }
+    else scEl.textContent = "";
+  }
+
+  // ---- BOS (full form) ----
+  otRenderOTBos(d);
+
+  // ---- VIX ----
+  const vixEl = otEl("ot-vix");
+  if (vixEl) {
+    const v = d.vix;
+    if (v && v.available) {
+      const cePE = m && m.available && m.rows.length ? (m.rows.find((r) => r.strike === (m.atmStrike)) || m.rows[Math.floor(m.rows.length / 2)]) : null;
+      const ceIv = cePE && cePE.ce.iv != null ? cePE.ce.iv.toFixed(1) : "—";
+      const peIv = cePE && cePE.pe.iv != null ? cePE.pe.iv.toFixed(1) : "—";
+      const chgCls = v.change > 0 ? "ot-up" : v.change < 0 ? "ot-down" : "";
+      vixEl.innerHTML =
+        `<div><span class="k">India VIX</span><span class="v">${otNum(v.value, 2)} <span class="${chgCls}" style="font-size:11px">${v.changePct != null ? (v.changePct >= 0 ? "+" : "") + v.changePct.toFixed(2) + "%" : ""}</span></span></div>` +
+        `<div><span class="k">Status</span><span class="v">${v.status}</span></div>` +
+        `<div><span class="k">ATM Call IV</span><span class="v">${ceIv}</span></div>` +
+        `<div><span class="k">ATM Put IV</span><span class="v">${peIv}</span></div>`;
+    } else vixEl.innerHTML = `<span class="ot-muted">India VIX ${d.vix?.status || "UNAVAILABLE"}</span>`;
+  }
+
+  // ---- selection mode + strike dropdown ----
+  const selstate = otEl("ot-selstate");
+  const sel = otEl("ot-strike-sel");
+  const rows = m && m.available ? m.rows : [];
+  if (sel) {
+    const key = rows.map((r) => r.strike).join(",");
+    if (sel._key !== key) {
+      sel._key = key;
+      sel.innerHTML = rows.map((r) => `<option value="${r.strike}">${r.strike}${r.moneyness === "ATM" ? " (ATM)" : ""}</option>`).join("");
+    }
+    sel.disabled = OT.mode !== "MANUAL";
+  }
+  const row = otSelectedRow(d);
+  let selStrike = row ? row.strike : null;
+  if (sel && selStrike != null) sel.value = String(selStrike);
+
+  // Selection state message — honest about failures.
+  if (selstate) {
+    if (!m || !m.available) selstate.textContent = m && m.reason ? m.reason : "DATA UNAVAILABLE";
+    else if (OT.mode === "AUTO" && m.autoStrike == null && m.atmStrike == null) selstate.textContent = "NO VALID STRIKE";
+    else if (OT.mode === "MANUAL" && OT.manualStrike != null && !row) selstate.textContent = "STRIKE DATA UNAVAILABLE";
+    else selstate.textContent = (OT.mode === "AUTO" ? "AUTO MODE ACTIVE" : "MANUAL MODE ACTIVE") + (OT.mode === "AUTO" && m.autoSide ? ` · prefers ${m.autoStrike} ${m.autoSide}` : "");
+  }
+
+  // ---- names, LTP, greeks strips ----
+  const idxName = (m && m.index) || d.name || "";
+  otEl("ot-ce-name").textContent = selStrike != null ? `${idxName} ${selStrike} CE` : "— CE";
+  otEl("ot-pe-name").textContent = selStrike != null ? `${idxName} ${selStrike} PE` : "— PE";
+  otEl("ot-ce-ltp").textContent = row && row.ce.ltp != null ? otNum(row.ce.ltp, 2) : "—";
+  otEl("ot-pe-ltp").textContent = row && row.pe.ltp != null ? otNum(row.pe.ltp, 2) : "—";
+  otEl("ot-ce-greeks").innerHTML = otGreeksStrip(row ? row.ce : null);
+  otEl("ot-pe-greeks").innerHTML = otGreeksStrip(row ? row.pe : null);
+  // AUTO-preferred side highlight on the response chip area.
+  const ceResp = otEl("ot-ce-resp"), peResp = otEl("ot-pe-resp");
+  if (ceResp) { const on = m && m.autoSide === "CE" && OT.mode === "AUTO"; ceResp.textContent = on ? "★ AUTO PICK" : ""; ceResp.className = "ot-resp" + (on ? " ot-pill-green" : ""); }
+  if (peResp) { const on = m && m.autoSide === "PE" && OT.mode === "AUTO"; peResp.textContent = on ? "★ AUTO PICK" : ""; peResp.className = "ot-resp" + (on ? " ot-pill-red" : ""); }
+
+  // ---- analytics / liquidity / intraday ----
+  otRenderAnalytics(d, row);
+  otRenderLiquidity(d, row);
+  otRenderOTIntraday(d);
+
+  // ---- footer freshness ----
+  const s = d.snapshot || {};
+  const conn = otEl("ot-foot-conn");
+  if (conn) conn.innerHTML = `<span class="ot-dot ${d.dhanLive ? "" : "off"}"></span> Dhan ${d.dhanLive ? "Live" : "Off"}`;
+  otEl("ot-foot-mkt").textContent = otHM(s.marketTs);
+  otEl("ot-foot-upd").textContent = otHM(s.calcTs);
+  otEl("ot-foot-age").textContent = s.dataAgeSec != null ? Math.round(s.dataAgeSec) + "s" : "—";
+  const st = otEl("ot-foot-status");
+  if (st) { const stale = s.stale || d.dataStale; st.textContent = stale ? "DATA STALE" : "LIVE"; st.className = stale ? "ot-pill ot-pill-red" : "ot-pill ot-pill-green"; }
+
+  // ---- CE/PE candles (throttled: on view change, else every 15s) ----
+  const intervalMin = parseInt(OT.tf, 10) || 15;
+  const expiry = m && m.expiry;
+  if (m && m.available && selStrike != null && expiry) {
+    const ckey = `${OT.sym}:${selStrike}:${expiry}:${intervalMin}`;
+    if (OT._candleKey !== ckey || (Date.now() - OT._candleAt > 15000)) {
+      OT._candleKey = ckey; OT._candleAt = Date.now();
+      otFetchOptionCandles(OT.sym, selStrike, expiry, intervalMin);
+    } else {
+      // same view, refreshed <15s ago — just recompute response/change from cache.
+      otRenderResponse(d); otRenderLtpChange();
+    }
+  } else {
+    otDrawChart("CE", null); otDrawChart("PE", null);
+    otRenderResponse(d);
+    const cn = otEl("ot-ce-note"); if (cn) cn.textContent = (m && m.reason) || "No strike selected";
+    const pn = otEl("ot-pe-note"); if (pn) pn.textContent = (m && m.reason) || "No strike selected";
+  }
+}
+
+function otRenderOTBos(d) {
+  const box = otEl("ot-bos"); if (!box) return;
+  const b = d.bos;
+  if (!b) { box.innerHTML = `<span class="ot-muted">No Break of Structure detected yet.</span>`; return; }
+  const bull = b.direction === "BULLISH";
+  const confirmed = b.stage === "Confirmed";
+  const head = confirmed
+    ? `<span class="ot-pill ${bull ? "ot-pill-green" : "ot-pill-red"}">BREAK OF STRUCTURE (BOS) — CONFIRMED</span>`
+    : `<span class="ot-pill ot-pill-amber">${b.recent ? "PRE-BOS WATCH" : "BREAK OF STRUCTURE (BOS)"}</span>`;
+  box.innerHTML =
+    `<div class="ot-bos-head">${head}<span class="ot-pill ot-pill-blue">${(d.interval || OT.tf).toUpperCase()}</span></div>` +
+    `<div><span class="k">Direction</span><span class="v ${bull ? "ot-up" : "ot-down"}">${b.direction} ${bull ? "▲" : "▼"}</span></div>` +
+    `<div><span class="k">BOS Price</span><span class="v">${b.price != null ? otNum(b.price, 2) : "—"}</span></div>` +
+    `<div><span class="k">Current</span><span class="v">${d.spot != null ? otNum(d.spot, 2) : "—"}</span></div>` +
+    `<div><span class="k">Time</span><span class="v">${otHM(b.time)}</span></div>` +
+    `<div><span class="k">Structure</span><span class="v">${b.previousStructure || "—"} → ${b.newStructure || "—"}</span></div>` +
+    `<div><span class="k">Confirmation</span><span class="v">${confirmed ? "CLOSE-THROUGH ✓" : "PRE / not confirmed"}</span></div>`;
+}
+
+function otRenderAnalytics(d, row) {
+  const box = otEl("ot-analytics-body"); if (!box) return;
+  if (!row) { box.innerHTML = `<span class="ot-muted">DATA UNAVAILABLE.</span>`; return; }
+  const f = (v, dp) => v != null ? Number(v).toFixed(dp) : "—";
+  const rowT = (label, ce, pe, cls) => `<tr><td class="ot-muted">${label}</td><td class="${cls || ""}">${ce}</td><td class="${cls || ""}">${pe}</td></tr>`;
+  box.innerHTML =
+    `<table><thead><tr><th>Metric</th><th>CALL</th><th>PUT</th></tr></thead><tbody>` +
+    rowT("IV", f(row.ce.iv, 1), f(row.pe.iv, 1)) +
+    rowT("Delta", f(row.ce.delta, 2), f(row.pe.delta, 2)) +
+    rowT("Gamma", f(row.ce.gamma, 4), f(row.pe.gamma, 4)) +
+    rowT("Theta/day", f(row.ce.theta, 2), f(row.pe.theta, 2), "ot-down") +
+    rowT("Vega", f(row.ce.vega, 2), f(row.pe.vega, 2)) +
+    rowT("OI", otK(row.ce.oi), otK(row.pe.oi)) +
+    rowT("OI Δ", row.ce.oiChg != null ? (row.ce.oiChg >= 0 ? "+" : "") + otK(row.ce.oiChg) : "—", row.pe.oiChg != null ? (row.pe.oiChg >= 0 ? "+" : "") + otK(row.pe.oiChg) : "—") +
+    rowT("Volume", otK(row.ce.vol), otK(row.pe.vol)) +
+    rowT("Spread", "N/A", "N/A") +
+    rowT("Balanced Price", "N/A", "N/A") +
+    `</tbody></table>` +
+    `<div class="ot-muted" style="font-size:10px;margin-top:6px">Spread/depth is not in the Dhan option feed; "Balanced Price" is not defined in this application — both shown N/A rather than invented.</div>`;
+}
+
+function otRenderLiquidity(d, row) {
+  const box = otEl("ot-liq-body"); if (!box) return;
+  if (!row) { box.innerHTML = `<span class="ot-muted">DATA UNAVAILABLE.</span>`; return; }
+  const oiMax = Math.max(row.ce.oi || 0, row.pe.oi || 0, 1);
+  const bar = (v, color) => `<div class="ot-barwrap"><div class="ot-bar" style="width:${Math.min(100, ((v || 0) / oiMax) * 100)}%;background:${color}"></div></div>`;
+  box.innerHTML =
+    `<div class="ot-miniline"><span class="ot-muted">CALL OI / Δ</span><span>${otK(row.ce.oi)} · ${row.ce.oiChg != null ? (row.ce.oiChg >= 0 ? "+" : "") + otK(row.ce.oiChg) : "—"}</span></div>${bar(row.ce.oi, "#16c784")}` +
+    `<div class="ot-miniline" style="margin-top:6px"><span class="ot-muted">PUT OI / Δ</span><span>${otK(row.pe.oi)} · ${row.pe.oiChg != null ? (row.pe.oiChg >= 0 ? "+" : "") + otK(row.pe.oiChg) : "—"}</span></div>${bar(row.pe.oi, "#f6465d")}` +
+    `<div class="ot-miniline" style="margin-top:6px"><span class="ot-muted">CALL Vol</span><span>${otK(row.ce.vol)}</span></div>` +
+    `<div class="ot-miniline"><span class="ot-muted">PUT Vol</span><span>${otK(row.pe.vol)}</span></div>` +
+    `<div class="ot-miniline"><span class="ot-muted">Spread</span><span>INSUFFICIENT DATA</span></div>` +
+    `<div class="ot-muted" style="font-size:10px;margin-top:6px">Tradeability judged from OI + volume (bid/ask depth not in the feed).</div>`;
+}
+
+function otRenderOTIntraday(d) {
+  const box = otEl("ot-intraday-body"); if (!box) return;
+  const tp = d.tradePlan || {};
+  const tf = d.timeframes || {};
+  const b = d.bos;
+  const dirCls = (v) => v === "BULLISH" ? "ot-up" : v === "BEARISH" ? "ot-down" : "";
+  const bosTxt = b ? (b.stage === "Confirmed" ? "BOS CONFIRMED" : (b.recent ? "PRE-BOS WATCH" : "—")) : "—";
+  const row = (k, v, cls) => `<div class="ot-miniline"><span class="ot-muted">${k}</span><span class="${cls || ""}">${v}</span></div>`;
+  const action = tp.dataStale ? "STALE" : (tp.action || "—");
+  box.innerHTML =
+    row("Direction", `<b class="${dirCls(tp.direction)}">${tp.direction || "—"}</b>`) +
+    row("5M", tf.m5 || "—", dirCls(tf.m5)) +
+    row("15M", tf.m15 || "—", dirCls(tf.m15)) +
+    row("Break of Structure", bosTxt) +
+    row("Entry", tp.entryState || "—") +
+    row("Master Action", `<b>${action === "NO TRADE" ? "AVOID" : action}</b>`) +
+    `<div class="ot-muted" style="font-size:10.5px;margin-top:7px">${tp.waitReason || tp.stopLossReason || ""}</div>`;
 }
 
 async function loadMarketCommand(chartOnly = false) {
