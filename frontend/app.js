@@ -5793,6 +5793,24 @@ function renderMCPlan(d) {
   }
   // BREAK OF STRUCTURE banner
   renderMCBos(d);
+  renderMCEarly(d);
+}
+
+function renderMCEarly(d) {
+  const box = el("mc-early");
+  if (!box) return;
+  const em = d.earlyMove;
+  // Show it when there's an active watch, a timeframe conflict, or a clear
+  // continuation/reversal read — hide the low-signal "no clear edge" case.
+  if (!em || (!em.watch && em.label === "NO CLEAR EDGE")) { box.hidden = true; return; }
+  box.hidden = false;
+  box.className = "mc-early" + (em.watch ? " watch" : em.label === "TIMEFRAME CONFLICT" ? " conflict" : "");
+  const seq = [em.emaReaction, em.liquidity, em.candleBehaviour, em.nextCandle, `BOS: ${em.bosStatus}`].filter(Boolean).join(" · ");
+  box.innerHTML =
+    `<span class="em-label">${em.emoji} ${em.watch ? "EARLY MOVE WATCH — " : ""}${em.label}</span>` +
+    `<span class="em-seq">${em.timeframe} · ${em.context} context · ${seq}</span>` +
+    `<span class="em-action">${em.action}</span>` +
+    `<span class="em-conf">evidence ${em.confidence}%</span>`;
 }
 
 function renderMCBos(d) {

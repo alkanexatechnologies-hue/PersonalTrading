@@ -3947,6 +3947,15 @@ body.mode-decisionflow #index-strip { display: none !important; }
 .mc-latency { font-size: 10px; color: #5c6370; font-variant-numeric: tabular-nums; }
 .mc-latency.alert { color: #ea3943; font-weight: 700; }
 
+/* EARLY MOVE WATCH strip */
+.mc-early { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 6px 14px; font-size: 12px; border-bottom: 1px solid #2a2e39; background: #16192200; }
+.mc-early.watch { background: rgba(41,98,255,.08); border-left: 4px solid #2962ff; }
+.mc-early.conflict { background: rgba(247,147,26,.1); border-left: 4px solid #f7931a; }
+.mc-early .em-label { font-weight: 800; letter-spacing: .3px; }
+.mc-early .em-seq { color: #b2b5be; font-size: 11px; }
+.mc-early .em-action { font-weight: 700; color: #f7931a; font-size: 11px; }
+.mc-early .em-conf { font-size: 10px; color: #787b86; }
+
 /* BREAK OF STRUCTURE banner */
 .mc-bos-banner { display: flex; align-items: center; gap: 10px; padding: 7px 14px; font-size: 13px; font-weight: 700; letter-spacing: .3px; border-bottom: 1px solid #2a2e39; }
 .mc-bos-banner.bull { background: linear-gradient(90deg, rgba(22,199,132,.18), rgba(22,199,132,.04)); color: #16c784; border-left: 4px solid #16c784; }

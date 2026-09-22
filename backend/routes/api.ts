@@ -146,6 +146,7 @@ import { buildMarketView } from "../analyst/marketView";
 import { recordDirectionChange, readDirectionChanges } from "../analyst/directionLog";
 import { getIndiaVix } from "../data/dhanProvider";
 import { recordVixSample, classifyVixEnvironment } from "../analyst/vixEnvironment";
+import { classifyEarlyMove } from "../analyst/earlyMove";
 import { getOrLockDaily } from "../strategies/selector";
 import { liveEvidence } from "../strategies/evidence";
 import { recordDaily, readSessions } from "../strategies/sessionStore";
@@ -4152,6 +4153,27 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
     const nearOB = nearestValidOB(ms.orderBlocks, spot, direction);
     const obRelation = nearOB ? priceRelativeToOB(spot, nearOB, currentAtr) : "Away";
 
+    // Early-move sequence classifier (context → EMA21 → liquidity → candle →
+    // next candle → BOS). Cross-checks the OTHER timeframe's structure for a
+    // conflict. Read-only; never manufactures a trade.
+    let structOther: "Bullish" | "Bearish" | "Ranging" | null = null;
+    try {
+      const otherTf = (interval === "5m" ? "15m" : "5m") as Interval;
+      const co = isHistorical ? null : await cached(`mc-c:${symbol}:${otherTf}`, TTL_MC_CANDLES, () => fetchCandles(symbol, otherTf));
+      if (co && co.length >= 20) structOther = detectMarketStructure(co, 3, vwap(co)).currentStructure;
+    } catch { structOther = null; }
+    const recentCut = candles.length - 3;
+    const swHi = ms.swingPoints.filter((p: any) => (p.type === "HH" || p.type === "LH") && p.index < recentCut).slice(-1)[0]?.price ?? null;
+    const swLo = ms.swingPoints.filter((p: any) => (p.type === "HL" || p.type === "LL") && p.index < recentCut).slice(-1)[0]?.price ?? null;
+    const lastBosEvForEm = ms.bosEvents.length ? ms.bosEvents[ms.bosEvents.length - 1] : null;
+    const earlyMove = classifyEarlyMove({
+      candles: candles.map((c: any) => ({ open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume, time: c.time })),
+      ema21: ema21Arr, ema9: ema9Arr, context5m: ms.currentStructure, structure15m: structOther,
+      lastBos: lastBosEvForEm ? { direction: lastBosEvForEm.direction, breakIndex: lastBosEvForEm.breakIndex, stage: lastBosEvForEm.stage, time: lastBosEvForEm.breakTime } : null,
+      swingHigh: swHi, swingLow: swLo,
+      tfLabel: interval.toUpperCase(), otherTfLabel: (interval === "5m" ? "15m" : "5m").toUpperCase(),
+    });
+
     // 3-4. OI Command + Liquidity Status — LIVE ONLY, and skipped in the fast
     // chart-only view (?view=chart) so the chart paints without waiting on the
     // heavy option-chain pipeline. Historical replay also skips these (no past
@@ -4465,6 +4487,7 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       snapshot,
       lastDirectionChange,
       bos: latestBos,
+      earlyMove,
       // India VIX (live; expected 30-day NIFTY volatility — NOT a direction signal)
       vix: vix ? {
         available: !!vix.available, value: vix.value, change: vix.change, changePct: vix.changePct,
