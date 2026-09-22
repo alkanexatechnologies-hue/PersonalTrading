@@ -1229,263 +1229,173 @@
         <!-- ================= TAB: Market Command (live Order Block trading screen) ================= -->
         <div class="tab-panel" id="panel-marketcommand">
           <div class="mc-wrap">
-            <!-- Top bar: index filter + timeframe + live status -->
-            <div class="mc-topbar">
-              <div class="mc-filters">
-                <div class="mc-idx-btns" id="mc-idx-btns">
-                  <button class="mc-idx active" data-sym="^NSEI">NIFTY 50</button>
-                  <button class="mc-idx" data-sym="^NSEBANK">BANKNIFTY</button>
-                  <button class="mc-idx" data-sym="^CNXFIN">FINNIFTY</button>
-                  <button class="mc-idx" data-sym="^NSEMDCP50">MIDCAP</button>
-                </div>
-                <div class="mc-tf-btns" id="mc-tf-btns">
-                  <button class="mc-tf" data-tf="5m">5m</button>
-                  <button class="mc-tf active" data-tf="15m">15m</button>
-                  <button class="mc-tf" data-tf="30m">30m</button>
-                </div>
-                <!-- Replay / Backtest a past session -->
-                <div class="mc-replay" id="mc-replay">
-                  <button class="mc-replay-btn" id="mc-replay-toggle" title="Replay a previous day's chart & Order Blocks">↺ Replay</button>
-                  <div class="mc-replay-pop" id="mc-replay-pop" hidden>
-                    <label>Replay date</label>
-                    <input type="date" id="mc-replay-date">
-                    <div class="mc-replay-actions">
-                      <button class="mc-replay-load" id="mc-replay-load">Load</button>
-                      <button class="mc-replay-live" id="mc-replay-live">Back to Live</button>
-                    </div>
-                    <div class="mc-replay-note">Shows that session's real candles + Order Blocks. Technical only — no live OI/signals for past dates.</div>
+            <!-- ===== TOP BAR ===== -->
+            <div class="mc2-top">
+              <div class="mc2-brand">
+                <span class="mc2-logo">📈</span>
+                <div><div class="mc2-title">Market Command</div><div class="mc2-sub">Indian Markets | Trade Smarter</div></div>
+              </div>
+              <div class="mc2-idx" id="mc-idx-btns">
+                <button class="mc2-idxbtn active" data-sym="^NSEI">NIFTY 50</button>
+                <button class="mc2-idxbtn" data-sym="^NSEBANK">BANKNIFTY</button>
+                <button class="mc2-idxbtn" data-sym="^CNXFIN">FINNIFTY</button>
+                <button class="mc2-idxbtn" data-sym="^NSEMDCP50">MIDCAP</button>
+                <button class="mc2-idxbtn" data-sym="^NSEI" data-disabled="1" title="SENSEX not wired to Dhan F&O feed yet">SENSEX</button>
+              </div>
+              <div class="mc2-tf" id="mc-tf-btns">
+                <button class="mc2-tfbtn" data-tf="5m">5m</button>
+                <button class="mc2-tfbtn active" data-tf="15m">15m</button>
+                <button class="mc2-tfbtn" data-tf="30m">30m</button>
+                <button class="mc2-tfbtn" data-tf="60m">1h</button>
+              </div>
+              <div class="mc-replay" id="mc-replay">
+                <button class="mc2-replay" id="mc-replay-toggle">↺ Replay</button>
+                <div class="mc-replay-pop" id="mc-replay-pop" hidden>
+                  <label>Replay date</label>
+                  <input type="date" id="mc-replay-date">
+                  <div class="mc-replay-actions">
+                    <button class="mc-replay-load" id="mc-replay-load">Load</button>
+                    <button class="mc-replay-live" id="mc-replay-live">Back to Live</button>
                   </div>
+                  <div class="mc-replay-note">Real candles + Order Blocks for that session (technical only).</div>
                 </div>
               </div>
-              <div class="mc-live-status">
+              <div class="mc2-status">
                 <span class="mc-live-dot" id="mc-live-dot"></span>
                 <span id="mc-live-label">Dhan Connected</span>
                 <span class="mc-timestamp" id="mc-timestamp"></span>
                 <span class="mc-live-tag" id="mc-live-tag">LIVE</span>
-                <span class="mc-vix" id="mc-vix" title="India VIX — expected 30-day NIFTY volatility (not a direction signal)"></span>
                 <span class="mc-sync" id="mc-sync" title="Per-component data freshness"></span>
-                <span class="mc-latency" id="mc-latency" title="Market event → trader screen delay"></span>
+                <span class="mc-latency" id="mc-latency" title="Market event → screen delay"></span>
               </div>
             </div>
 
-            <!-- BREAK OF STRUCTURE banner (shown on a recent BOS) -->
-            <div class="mc-bos-banner" id="mc-bos-banner" hidden></div>
-
-            <!-- EARLY MOVE WATCH (sequence-based pre-BOS classification) -->
-            <div class="mc-early" id="mc-early" hidden></div>
-
-            <!-- TOP TRADE PLAN — always visible, first thing the trader reads -->
-            <div class="mc-plan" id="mc-plan">
-              <div class="mc-plan-cell mc-plan-dir" id="mc-plan-dir-cell">
-                <span class="mc-plan-lbl">Market Direction</span>
-                <span class="mc-plan-val" id="mc-plan-dir">—</span>
-              </div>
-              <div class="mc-plan-cell">
-                <span class="mc-plan-lbl">Entry Zone</span>
-                <span class="mc-plan-val" id="mc-plan-entry">—</span>
-                <span class="mc-plan-sub" id="mc-plan-entry-state"></span>
-              </div>
-              <div class="mc-plan-cell">
-                <span class="mc-plan-lbl">Strike</span>
-                <span class="mc-plan-val" id="mc-plan-strike">—</span>
-                <span class="mc-plan-sub" id="mc-plan-strike-alt"></span>
-              </div>
-              <div class="mc-plan-cell">
-                <span class="mc-plan-lbl">Stop Loss</span>
-                <span class="mc-plan-val mc-plan-sl" id="mc-plan-sl">—</span>
-              </div>
-              <div class="mc-plan-cell">
-                <span class="mc-plan-lbl">Targets</span>
-                <span class="mc-plan-val mc-plan-tgt" id="mc-plan-tgt">—</span>
-              </div>
-              <div class="mc-plan-cell mc-plan-action-cell">
-                <span class="mc-plan-lbl">Action</span>
-                <span class="mc-plan-action" id="mc-plan-action">—</span>
-                <span class="mc-plan-snap" id="mc-plan-snap" title="Which market snapshot produced this plan"></span>
-              </div>
+            <!-- ===== INDEX CARDS ===== -->
+            <div class="mc2-cards" id="mc2-cards">
+              <div class="mc2-card" data-card="^NSEI"><div class="mc2-card-hd">NIFTY 50</div><div class="mc2-card-row"><span class="mc2-card-val" data-f="val">—</span><span class="mc2-card-chg" data-f="chg"></span></div><svg class="mc2-spark" data-f="spark" viewBox="0 0 120 34" preserveAspectRatio="none"></svg></div>
+              <div class="mc2-card" data-card="^NSEBANK"><div class="mc2-card-hd">NIFTY BANK</div><div class="mc2-card-row"><span class="mc2-card-val" data-f="val">—</span><span class="mc2-card-chg" data-f="chg"></span></div><svg class="mc2-spark" data-f="spark" viewBox="0 0 120 34" preserveAspectRatio="none"></svg></div>
+              <div class="mc2-card" data-card="^CNXFIN"><div class="mc2-card-hd">FINNIFTY</div><div class="mc2-card-row"><span class="mc2-card-val" data-f="val">—</span><span class="mc2-card-chg" data-f="chg"></span></div><svg class="mc2-spark" data-f="spark" viewBox="0 0 120 34" preserveAspectRatio="none"></svg></div>
+              <div class="mc2-card" data-card="^NSEMDCP50"><div class="mc2-card-hd">MIDCAP NIFTY</div><div class="mc2-card-row"><span class="mc2-card-val" data-f="val">—</span><span class="mc2-card-chg" data-f="chg"></span></div><svg class="mc2-spark" data-f="spark" viewBox="0 0 120 34" preserveAspectRatio="none"></svg></div>
+              <div class="mc2-card" data-card="VIX"><div class="mc2-card-hd">INDIA VIX</div><div class="mc2-card-row"><span class="mc2-card-val" data-f="val">—</span><span class="mc2-card-chg" data-f="chg"></span></div><svg class="mc2-spark" data-f="spark" viewBox="0 0 120 34" preserveAspectRatio="none"></svg></div>
             </div>
 
-            <!-- Main content: chart (left) + command panel (right) -->
-            <div class="mc-body">
-              <div class="mc-chart-area">
-                <!-- TradingView-style OHLC header -->
-                <div class="mc-chart-header">
+            <!-- ===== MAIN: chart + right column ===== -->
+            <div class="mc2-main">
+              <div class="mc2-chart-area">
+                <div class="mc2-chart-hd">
                   <div class="mc-ohlc-bar">
                     <span class="mc-sym-name" id="mc-sym-name">NIFTY 50</span>
-                    <span class="mc-sym-tf" id="mc-sym-tf">· 15 · NSE</span>
+                    <span class="mc-sym-tf" id="mc-sym-tf">· 15m · NSE</span>
                     <span class="mc-spot" id="mc-spot">—</span>
                     <span class="mc-spot-chg" id="mc-spot-chg"></span>
+                    <span class="mc2-chart-icons"><button class="mc-fullscreen-btn" id="mc-fullscreen" title="Fullscreen">⛶</button></span>
                   </div>
                   <div class="mc-ohlc-detail" id="mc-ohlc-detail">
-                    <span>O <b id="mc-ohlc-o">—</b></span>
-                    <span>H <b id="mc-ohlc-h">—</b></span>
-                    <span>L <b id="mc-ohlc-l">—</b></span>
-                    <span>C <b id="mc-ohlc-c">—</b></span>
-                  </div>
-                  <div class="mc-ema-legend" id="mc-ema-legend">
-                    <span class="mc-leg-ema21">● EMA 21 <b id="mc-leg-ema21-v">—</b></span>
+                    <span>O <b id="mc-ohlc-o">—</b></span><span>H <b id="mc-ohlc-h">—</b></span>
+                    <span>L <b id="mc-ohlc-l">—</b></span><span>C <b id="mc-ohlc-c">—</b></span>
                     <span class="mc-leg-vol">Vol <b id="mc-leg-vol-v">—</b></span>
+                    <span class="mc-leg-ema21" style="display:none">EMA21 <b id="mc-leg-ema21-v">—</b></span>
+                  </div>
+                  <div class="mc-tog-row">
+                    <div class="mc-indicator-toggles" id="mc-indicator-toggles">
+                      <label class="mc-tog"><input type="checkbox" id="mc-tog-ema9"><span class="mc-tog-dot" style="background:#3b82f6"></span>EMA 9</label>
+                      <label class="mc-tog"><input type="checkbox" id="mc-tog-ema21" checked><span class="mc-tog-dot" style="background:#f0b90b"></span>EMA 21</label>
+                      <label class="mc-tog"><input type="checkbox" id="mc-tog-ema50" checked><span class="mc-tog-dot" style="background:#a855f7"></span>EMA 50</label>
+                      <label class="mc-tog"><input type="checkbox" id="mc-tog-ema200" checked><span class="mc-tog-dot" style="background:#e056a0"></span>EMA 200</label>
+                      <label class="mc-tog"><input type="checkbox" id="mc-tog-vwap" checked><span class="mc-tog-dot" style="background:#64748b"></span>VWAP</label>
+                      <label class="mc-tog"><input type="checkbox" id="mc-tog-vol" checked><span class="mc-tog-dot" style="background:#16c784"></span>Volume</label>
+                      <label class="mc-tog mc-tog-levels-wrap"><input type="checkbox" id="mc-tog-levels"><span class="mc-tog-dot" style="background:#2962ff"></span>Show Levels</label>
+                    </div>
                   </div>
                 </div>
-                <!-- Indicator toggles row -->
-                <div class="mc-tog-row">
-                  <div class="mc-indicator-toggles" id="mc-indicator-toggles">
-                    <label class="mc-tog"><input type="checkbox" id="mc-tog-vwap" checked><span class="mc-tog-dot" style="background:#d29922"></span>VWAP</label>
-                    <label class="mc-tog"><input type="checkbox" id="mc-tog-ema21" checked><span class="mc-tog-dot" style="background:#58a6ff"></span>EMA 21</label>
-                    <label class="mc-tog"><input type="checkbox" id="mc-tog-ema50" checked><span class="mc-tog-dot" style="background:#bc8cff"></span>EMA 50</label>
-                    <label class="mc-tog"><input type="checkbox" id="mc-tog-ema200" checked><span class="mc-tog-dot" style="background:#e056a0"></span>EMA 200</label>
-                    <label class="mc-tog"><input type="checkbox" id="mc-tog-ema9"><span class="mc-tog-dot" style="background:#ffa657"></span>EMA 9</label>
-                    <label class="mc-tog"><input type="checkbox" id="mc-tog-vol" checked><span class="mc-tog-dot" style="background:#16c784"></span>Volume</label>
-                    <label class="mc-tog"><input type="checkbox" id="mc-tog-levels"><span class="mc-tog-dot" style="background:#2962ff"></span>Show Levels</label>
-                  </div>
-                  <button class="mc-fullscreen-btn" id="mc-fullscreen" title="Fullscreen chart">⛶</button>
-                </div>
-                <!-- Chart -->
                 <div class="mc-chart-container" id="mc-chart-container"></div>
-                <!-- Bottom status cards (collapsible) -->
-                <div class="mc-section-head" data-mc-toggle="mc-status-content">
-                  <span style="font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#787b86">Market Status</span>
-                  <button class="mc-collapse-btn" data-mc-toggle="mc-status-content">▼</button>
+                <!-- BOS + Early Move banners under the chart -->
+                <div class="mc-bos-banner" id="mc-bos-banner" hidden></div>
+                <div class="mc-early" id="mc-early" hidden></div>
+                <!-- hidden legacy containers (kept so existing renderers no-op safely) -->
+                <div id="mc-status-content" hidden><div id="mc-status-row"><div id="mc-stat-direction"><span class="mc-stat-value"></span><span id="mc-stat-dir-ico"></span></div><div id="mc-stat-structure"><span class="mc-stat-value"></span><span id="mc-stat-str-ico"></span></div><div id="mc-stat-ob"><span class="mc-stat-value"></span><span id="mc-stat-ob-ico"></span></div><div id="mc-stat-regime"><span class="mc-stat-value"></span><span id="mc-stat-reg-ico"></span></div></div></div>
+                <div id="mc-plan" hidden><span id="mc-plan-dir-cell"><span id="mc-plan-dir"></span></span><span id="mc-plan-entry"></span><span id="mc-plan-entry-state"></span><span id="mc-plan-strike"></span><span id="mc-plan-strike-alt"></span><span id="mc-plan-sl"></span><span id="mc-plan-tgt"></span><span id="mc-plan-snap"></span></div>
+                <div id="mc-cmd-action" hidden><span id="mc-action-arrow"></span><span id="mc-action-label"></span><span id="mc-action-badge"></span></div>
+                <div id="mc-final-action" hidden><span id="mc-fa-label"></span></div><span id="mc-fa-reason" hidden></span>
+                <div id="mc-signal-detail" hidden><span id="mc-sd-alert"></span><b id="mc-sd-dir"></b><b id="mc-sd-vwap"></b><b id="mc-sd-ob"></b></div>
+                <span id="mc-vix" hidden></span>
+                <div id="mc-strike-content" hidden><div id="mc-strike-unavail"></div><div id="mc-strike-main"><div id="mc-strike-atm"></div><table id="mc-strike-table"></table><div id="mc-strike-picks"></div><div id="mc-strike-note"></div></div></div>
+                <span id="mc-cmd-entry-zone" hidden></span><span id="mc-cmd-sl" hidden></span><span id="mc-cmd-t1" hidden></span><span id="mc-cmd-t2" hidden></span><span id="mc-cmd-strike" hidden></span><span id="mc-cmd-ltp" hidden></span><span id="mc-opt-call" hidden></span><span id="mc-opt-put" hidden></span><div id="mc-cmd-checks" hidden></div>
+              </div>
+
+              <!-- RIGHT COLUMN -->
+              <div class="mc2-right">
+                <!-- Intraday Assistance -->
+                <div class="mc2-panel">
+                  <div class="mc2-panel-hd">
+                    <span class="mc2-panel-title">🎯 Intraday Assistance</span>
+                    <span class="mc2-ia-badge" id="mc-ia-badge">—</span>
+                    <span class="mc2-ia-upd">LAST UPDATE<br><b id="mc-ia-updated">—</b></span>
+                  </div>
+                  <div class="mc2-ia-dirs">
+                    <div class="mc2-ia-dir"><span class="mc2-ia-k">Dir</span><span class="mc2-ia-v" id="mc-ia-dir">—</span></div>
+                    <div class="mc2-ia-dir"><span class="mc2-ia-k">5M</span><span class="mc2-ia-v" id="mc-tf-5m">—</span></div>
+                    <div class="mc2-ia-dir"><span class="mc2-ia-k">15M</span><span class="mc2-ia-v" id="mc-tf-15m">—</span></div>
+                    <div class="mc2-ia-dir"><span class="mc2-ia-k">Early Move</span><span class="mc2-ia-v" id="mc-ia-early">—</span></div>
+                  </div>
+                  <div class="mc2-ia-grid">
+                    <div class="mc2-ia-cell wide"><span class="mc2-ia-k">Entry Zone</span><span class="mc2-ia-val" id="mc-ia-entry">—</span></div>
+                    <div class="mc2-ia-cell"><span class="mc2-ia-k">Best Strike</span><span class="mc2-ia-val" id="mc-ia-best">—</span></div>
+                    <div class="mc2-ia-cell"><span class="mc2-ia-k">Second Strike</span><span class="mc2-ia-val" id="mc-ia-second">—</span></div>
+                    <div class="mc2-ia-cell"><span class="mc2-ia-k">SL</span><span class="mc2-ia-val sl" id="mc-ia-sl">—</span></div>
+                    <div class="mc2-ia-cell"><span class="mc2-ia-k">Target</span><span class="mc2-ia-val tgt" id="mc-ia-target">—</span></div>
+                    <div class="mc2-ia-cell"><span class="mc2-ia-k">R:R</span><span class="mc2-ia-val" id="mc-ia-rr">—</span></div>
+                    <div class="mc2-ia-cell action"><span class="mc2-ia-k">Action</span><span class="mc2-ia-action" id="mc-plan-action">—</span></div>
+                  </div>
+                  <div class="mc2-ia-reason"><span class="mc2-ia-bulb">💡</span><span><b>Reason:</b> <span id="mc-ia-reason">—</span></span></div>
                 </div>
-                <div class="mc-collapsible" id="mc-status-content">
-                  <div class="mc-status-row" id="mc-status-row">
-                    <div class="mc-stat-card" id="mc-stat-direction">
-                      <div class="mc-stat-label">Market Direction</div>
-                      <div class="mc-stat-value">—</div>
-                      <div class="mc-stat-ico" id="mc-stat-dir-ico"></div>
-                    </div>
-                    <div class="mc-stat-card" id="mc-stat-structure">
-                      <div class="mc-stat-label">Trend</div>
-                      <div class="mc-stat-value">—</div>
-                      <div class="mc-stat-ico" id="mc-stat-str-ico"></div>
-                    </div>
-                    <div class="mc-stat-card" id="mc-stat-ob">
-                      <div class="mc-stat-label">Order Block</div>
-                      <div class="mc-stat-value">—</div>
-                      <div class="mc-stat-ico" id="mc-stat-ob-ico"></div>
-                    </div>
-                    <div class="mc-stat-card" id="mc-stat-regime">
-                      <div class="mc-stat-label">Volatility</div>
-                      <div class="mc-stat-value">—</div>
-                      <div class="mc-stat-ico" id="mc-stat-reg-ico"></div>
-                    </div>
+
+                <!-- Option Chain -->
+                <div class="mc2-panel">
+                  <div class="mc2-panel-hd">
+                    <span class="mc2-panel-title" id="mc-oc-title">Option Chain</span>
+                    <span class="mc2-oc-tabs" id="mc-oc-tabs">
+                      <button class="mc2-oc-tab active" data-oc="ATM">ATM</button>
+                      <button class="mc2-oc-tab" data-oc="ITM">ITM</button>
+                      <button class="mc2-oc-tab" data-oc="OTM">OTM</button>
+                    </span>
+                    <span id="mc-oc-atm" style="display:none"></span>
+                  </div>
+                  <div class="mc-oc" id="mc-oc">
+                    <div class="mc-oc-unavail" id="mc-oc-unavail" hidden>Option chain unavailable</div>
+                    <table class="mc-oc-table" id="mc-oc-table" hidden></table>
+                  </div>
+                </div>
+
+                <!-- Market View -->
+                <div class="mc2-panel">
+                  <div class="mc2-panel-hd">
+                    <span class="mc2-panel-title">📄 Market View</span>
+                    <span class="mc2-ai-badge">AI</span>
+                  </div>
+                  <div class="mc2-mv" id="mc-mv-text">—</div>
+                  <div class="mc-marketview" id="mc-marketview" hidden>
+                    <span class="mc-mv-strength" id="mc-mv-strength"></span>
+                    <b id="mc-mv-dir"></b><b id="mc-mv-state"></b>
+                    <div id="mc-mv-supporting"></div><div id="mc-mv-contradicting"></div><div id="mc-mv-missing"></div>
+                    <div id="mc-mv-inval"></div><div id="mc-mv-based"></div>
                   </div>
                 </div>
               </div>
+            </div>
 
-              <!-- Right side: Trade Signal + Option Selection -->
-              <div class="mc-command-panel" id="mc-command-panel">
-                <!-- Trade Signal section -->
-                <div class="mc-signal-section" id="mc-signal-section">
-                  <div class="mc-signal-head">INTRADAY ASSISTANCE</div>
-                  <div class="mc-tf-row" id="mc-tf-row">
-                    <span class="mc-tf-cell">5M <b id="mc-tf-5m">—</b></span>
-                    <span class="mc-tf-cell">15M <b id="mc-tf-15m">—</b></span>
-                    <span class="mc-tf-cell">Spot <b id="mc-tf-spot">—</b></span>
-                  </div>
-                  <div class="mc-cmd-action" id="mc-cmd-action">
-                    <span class="mc-action-arrow" id="mc-action-arrow"></span>
-                    <span class="mc-action-label" id="mc-action-label">WAIT</span>
-                    <span class="mc-action-badge" id="mc-action-badge"></span>
-                  </div>
-                  <!-- AI Market Analyst — market view (explains the existing system's read) -->
-                  <div class="mc-marketview" id="mc-marketview" hidden>
-                    <div class="mc-mv-head">
-                      <span>Market View · AI Analyst</span>
-                      <span class="mc-mv-strength" id="mc-mv-strength"></span>
-                    </div>
-                    <div class="mc-mv-line"><span>Direction</span><b id="mc-mv-dir">—</b></div>
-                    <div class="mc-mv-line"><span>System State</span><b id="mc-mv-state">—</b></div>
-                    <div class="mc-mv-block" id="mc-mv-supporting"></div>
-                    <div class="mc-mv-block" id="mc-mv-contradicting"></div>
-                    <div class="mc-mv-block" id="mc-mv-missing"></div>
-                    <div class="mc-mv-inval" id="mc-mv-inval"></div>
-                    <div class="mc-mv-based" id="mc-mv-based"></div>
-                  </div>
-
-                  <!-- Pre / Confirmed signal detail (VWAP + candle movement) -->
-                  <div class="mc-signal-detail" id="mc-signal-detail">
-                    <div class="mc-sd-alert" id="mc-sd-alert" hidden></div>
-                    <div class="mc-sd-row"><span>Direction</span><b id="mc-sd-dir">—</b></div>
-                    <div class="mc-sd-row"><span>VWAP</span><b id="mc-sd-vwap">—</b></div>
-                    <div class="mc-sd-row"><span>Order Block</span><b id="mc-sd-ob">—</b></div>
-                  </div>
-                </div>
-
-                <!-- Entry / SL / Targets (collapsible) -->
-                <div class="mc-section-head" data-mc-toggle="mc-trade-content">
-                  <span style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#787b86">Entry / SL / Targets</span>
-                  <button class="mc-collapse-btn" data-mc-toggle="mc-trade-content">▼</button>
-                </div>
-                <div class="mc-collapsible" id="mc-trade-content">
-                  <div class="mc-trade-detail">
-                    <div class="mc-td-row"><span class="mc-td-label">Entry Zone</span><span class="mc-td-val" id="mc-cmd-entry-zone">—</span></div>
-                    <div class="mc-td-row mc-sl-row"><span class="mc-td-label mc-sl-label">Stop Loss</span><span class="mc-td-val" id="mc-cmd-sl">—</span></div>
-                    <div class="mc-td-row mc-tgt-row"><span class="mc-td-label mc-tgt-label">Target 1</span><span class="mc-td-val" id="mc-cmd-t1">—</span></div>
-                    <div class="mc-td-row mc-tgt-row"><span class="mc-td-label mc-tgt-label">Target 2</span><span class="mc-td-val" id="mc-cmd-t2">—</span></div>
-                  </div>
-                </div>
-
-                <!-- Option Selection (collapsible) -->
-                <div class="mc-section-head" data-mc-toggle="mc-option-content">
-                  <span style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#787b86">Option Selection</span>
-                  <button class="mc-collapse-btn" data-mc-toggle="mc-option-content">▼</button>
-                </div>
-                <div class="mc-collapsible" id="mc-option-content">
-                  <div class="mc-option-box">
-                    <div class="mc-opt-head">
-                      <span>ATM Option</span>
-                      <div class="mc-opt-btns">
-                        <span class="mc-opt-btn" id="mc-opt-call">CALL</span>
-                        <span class="mc-opt-btn" id="mc-opt-put">PUT</span>
-                      </div>
-                    </div>
-                    <div class="mc-td-row"><span class="mc-td-label">Strike Price</span><span class="mc-td-val" id="mc-cmd-strike">—</span></div>
-                    <div class="mc-td-row"><span class="mc-td-label">LTP</span><span class="mc-td-val" id="mc-cmd-ltp">—</span></div>
-                  </div>
-                </div>
-
-                <!-- Live Option Chain (ATM±3, real CE/PE from the chain) -->
-                <div class="mc-section-head">
-                  <span style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#787b86">Option Chain</span>
-                  <span id="mc-oc-atm" style="margin-left:auto;font-size:10px;color:#787b86"></span>
-                </div>
-                <div class="mc-oc" id="mc-oc">
-                  <div class="mc-oc-unavail" id="mc-oc-unavail" hidden>Option chain unavailable</div>
-                  <table class="mc-oc-table" id="mc-oc-table" hidden></table>
-                </div>
-
-                <!-- Option Strike Analysis (collapsible, read-only) -->
-                <div class="mc-section-head" data-mc-toggle="mc-strike-content">
-                  <span style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#787b86">Option Strike Analysis</span>
-                  <button class="mc-collapse-btn" data-mc-toggle="mc-strike-content">▼</button>
-                </div>
-                <div class="mc-collapsible" id="mc-strike-content">
-                  <div class="mc-strike-box" id="mc-strike-box">
-                    <div class="mc-strike-unavail" id="mc-strike-unavail" hidden>STRIKE ANALYSIS: DATA UNAVAILABLE</div>
-                    <div id="mc-strike-main" hidden>
-                      <div class="mc-strike-atm" id="mc-strike-atm"></div>
-                      <table class="mc-strike-table" id="mc-strike-table"></table>
-                      <div class="mc-strike-picks" id="mc-strike-picks"></div>
-                      <div class="mc-strike-note" id="mc-strike-note"></div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Final Action -->
-                <div class="mc-final-action" id="mc-final-action">
-                  <span class="mc-fa-label" id="mc-fa-label">WAIT FOR SETUP</span>
-                </div>
-                <div class="mc-fa-reason" id="mc-fa-reason"></div>
-
-                <!-- Confirmations (collapsible) -->
-                <div class="mc-section-head" data-mc-toggle="mc-checks-content">
-                  <span style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#787b86">Confirmations</span>
-                  <button class="mc-collapse-btn" data-mc-toggle="mc-checks-content">▼</button>
-                </div>
-                <div class="mc-collapsible" id="mc-checks-content">
-                  <div class="mc-cmd-checks" id="mc-cmd-checks"></div>
-                </div>
+            <!-- ===== BOTTOM BAR ===== -->
+            <div class="mc2-bottom">
+              <div class="mc2-bottom-tabs">
+                <button class="mc2-bt active">Trade Log</button>
+                <button class="mc2-bt">Open Positions</button>
+                <button class="mc2-bt">Today's Signals</button>
+                <button class="mc2-bt">Performance</button>
+              </div>
+              <div class="mc2-bottom-status">
+                <span class="mc2-bs"><span class="dot" id="mc-bot-age-dot"></span> Data Age: <b id="mc-bot-age">—</b></span>
+                <span class="mc2-bs"><span class="dot" id="mc-bot-mkt-dot"></span> Market: <b id="mc-bot-mkt">—</b></span>
+                <span class="mc2-bs" id="mc-bot-time">—</span>
               </div>
             </div>
           </div>

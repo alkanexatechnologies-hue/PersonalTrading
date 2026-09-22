@@ -4224,3 +4224,139 @@ body.mode-decisionflow #index-strip { display: none !important; }
 .mc-fullscreen-active .mc-command-panel { display: none; }
 .mc-fullscreen-active .mc-status-row { display: none; }
 .mc-fullscreen-active .mc-chart-container { height: calc(100vh - 50px); }
+
+/* ============================ MARKET COMMAND v2 (mockup layout) ============================ */
+#panel-marketcommand .mc-wrap { display: flex; flex-direction: column; height: 100%; min-height: 0; background: #0a0e17; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+
+/* Top bar */
+.mc2-top { display: flex; align-items: center; gap: 14px; padding: 10px 16px; background: #0d1220; border-bottom: 1px solid #1c2537; flex-wrap: wrap; }
+.mc2-brand { display: flex; align-items: center; gap: 8px; }
+.mc2-logo { font-size: 20px; }
+.mc2-title { font-size: 16px; font-weight: 800; color: #f1f5f9; }
+.mc2-sub { font-size: 10px; color: #64748b; }
+.mc2-idx { display: flex; gap: 2px; margin-left: 8px; }
+.mc2-idxbtn { padding: 7px 14px; border: none; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer; background: transparent; color: #94a3b8; }
+.mc2-idxbtn.active { background: #2563eb; color: #fff; }
+.mc2-idxbtn:hover:not(.active) { background: #1e293b; color: #e2e8f0; }
+.mc2-idxbtn[data-disabled="1"] { opacity: .5; cursor: not-allowed; }
+.mc2-tf { display: flex; gap: 2px; margin-left: 4px; }
+.mc2-tfbtn { padding: 6px 11px; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; background: transparent; color: #94a3b8; }
+.mc2-tfbtn.active { background: #2563eb; color: #fff; }
+.mc2-tfbtn:hover:not(.active) { background: #1e293b; }
+.mc2-replay { padding: 6px 12px; border: 1px solid #1c2537; border-radius: 6px; background: #131a2b; color: #cbd5e1; font-size: 12px; font-weight: 600; cursor: pointer; }
+.mc2-replay:hover { border-color: #f7931a; color: #f7931a; }
+.mc2-status { display: flex; align-items: center; gap: 8px; margin-left: auto; font-size: 12px; color: #cbd5e1; }
+
+/* Index cards */
+.mc2-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; padding: 12px 16px; background: #0a0e17; }
+.mc2-card { position: relative; background: #0f1626; border: 1px solid #1c2537; border-radius: 10px; padding: 12px 14px; overflow: hidden; }
+.mc2-card-hd { font-size: 11px; font-weight: 700; color: #94a3b8; letter-spacing: .3px; }
+.mc2-card-row { display: flex; align-items: baseline; gap: 8px; margin-top: 4px; }
+.mc2-card-val { font-size: 22px; font-weight: 800; color: #f1f5f9; font-variant-numeric: tabular-nums; }
+.mc2-card-chg { font-size: 12px; font-weight: 600; }
+.mc2-card-chg.up { color: #22c55e; } .mc2-card-chg.down { color: #ef4444; }
+.mc2-spark { position: absolute; right: 10px; top: 14px; width: 110px; height: 34px; }
+
+/* Main area */
+.mc2-main { display: flex; flex: 1; min-height: 0; gap: 0; overflow: hidden; }
+.mc2-chart-area { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #0a0e17; overflow-y: auto; }
+.mc2-chart-hd { padding: 10px 16px 4px; }
+.mc-ohlc-bar { display: flex; align-items: baseline; gap: 8px; }
+.mc-sym-name { font-size: 17px; font-weight: 800; color: #f1f5f9; }
+.mc-sym-tf { font-size: 12px; color: #64748b; }
+.mc-spot { font-size: 22px; font-weight: 800; margin-left: 8px; color: #f1f5f9; font-variant-numeric: tabular-nums; }
+.mc-spot-chg { font-size: 13px; font-weight: 600; }
+.mc-spot-chg.up { color: #22c55e; } .mc-spot-chg.down { color: #ef4444; }
+.mc2-chart-icons { margin-left: auto; display: flex; gap: 6px; }
+.mc-ohlc-detail { display: flex; gap: 14px; font-size: 11px; color: #64748b; margin-top: 4px; }
+.mc-ohlc-detail b { color: #cbd5e1; font-weight: 600; }
+.mc-tog-row { display: flex; align-items: center; gap: 14px; padding: 6px 0 2px; }
+.mc-indicator-toggles { display: flex; flex-wrap: wrap; gap: 12px; }
+.mc-tog { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #94a3b8; cursor: pointer; }
+.mc-tog input { display: none; }
+.mc-tog-dot { width: 8px; height: 8px; border-radius: 50%; }
+.mc-tog-levels-wrap { margin-left: auto; color: #cbd5e1; }
+.mc-chart-container { width: 100%; height: 520px; flex-shrink: 0; background: #0a0e17; position: relative; }
+.mc-fullscreen-btn { background: #131a2b; border: 1px solid #1c2537; color: #94a3b8; border-radius: 6px; padding: 4px 9px; cursor: pointer; }
+
+/* Right column */
+.mc2-right { width: 468px; flex-shrink: 0; border-left: 1px solid #1c2537; background: #0a0e17; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+.mc2-panel { background: #0f1626; border: 1px solid #1c2537; border-radius: 12px; padding: 14px; }
+.mc2-panel-hd { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.mc2-panel-title { font-size: 15px; font-weight: 800; color: #f1f5f9; }
+.mc2-ia-badge { font-size: 12px; font-weight: 800; padding: 4px 12px; border-radius: 6px; letter-spacing: .5px; }
+.mc2-ia-badge.BULLISH { background: rgba(34,197,94,.18); color: #22c55e; }
+.mc2-ia-badge.BEARISH { background: rgba(239,68,68,.18); color: #ef4444; }
+.mc2-ia-badge.NEUTRAL, .mc2-ia-badge.RANGING, .mc2-ia-badge.CONFLICT { background: rgba(247,147,26,.18); color: #f59e0b; }
+.mc2-ia-upd { margin-left: auto; font-size: 9px; color: #64748b; text-align: right; line-height: 1.3; }
+.mc2-ia-upd b { color: #cbd5e1; font-size: 11px; }
+.mc2-ia-dirs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+.mc2-ia-dir { background: #0a0e17; border: 1px solid #1c2537; border-radius: 8px; padding: 8px 10px; }
+.mc2-ia-k { display: block; font-size: 10px; color: #64748b; margin-bottom: 3px; }
+.mc2-ia-v { font-size: 14px; font-weight: 700; }
+.mc2-ia-v.BULLISH { color: #22c55e; } .mc2-ia-v.BEARISH { color: #ef4444; } .mc2-ia-v.NEUTRAL,.mc2-ia-v.RANGING,.mc2-ia-v.WAIT,.mc2-ia-v.CONFLICT { color: #f59e0b; }
+.mc2-ia-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+.mc2-ia-cell { background: #0a0e17; border: 1px solid #1c2537; border-radius: 8px; padding: 8px 10px; }
+.mc2-ia-cell.wide { grid-column: span 1; }
+.mc2-ia-val { font-size: 14px; font-weight: 700; color: #f1f5f9; font-variant-numeric: tabular-nums; }
+.mc2-ia-val.sl { color: #ef4444; } .mc2-ia-val.tgt { color: #22c55e; }
+.mc2-ia-cell.action { background: rgba(247,147,26,.1); border-color: rgba(247,147,26,.3); }
+.mc2-ia-action { font-size: 16px; font-weight: 800; }
+.mc2-ia-action.WAIT,.mc2-ia-action.STALE { color: #f59e0b; }
+.mc2-ia-action.TAKE,.mc2-ia-action.READY { color: #22c55e; }
+.mc2-ia-action.AVOID { color: #ef4444; }
+.mc2-ia-reason { display: flex; gap: 8px; font-size: 12px; color: #cbd5e1; line-height: 1.4; }
+.mc2-ia-reason b { color: #f59e0b; }
+
+.mc2-oc-tabs { margin-left: auto; display: flex; gap: 2px; }
+.mc2-oc-tab { padding: 4px 12px; border: none; border-radius: 6px; font-size: 11px; font-weight: 700; cursor: pointer; background: #131a2b; color: #94a3b8; }
+.mc2-oc-tab.active { background: #2563eb; color: #fff; }
+.mc-oc-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.mc-oc-table th { color: #64748b; font-weight: 600; font-size: 10px; padding: 4px 6px; border-bottom: 1px solid #1c2537; text-align: right; }
+.mc-oc-table td { padding: 6px; text-align: right; color: #e2e8f0; border-bottom: 1px solid #131a2b; }
+.mc-oc-table .strike-col { text-align: center; font-weight: 700; background: #0a0e17; }
+.mc-oc-table tr.atm .strike-col { background: rgba(37,99,235,.2); color: #60a5fa; }
+.mc-oc-table .ce { color: #22c55e; } .mc-oc-table .pe { color: #ef4444; }
+.mc-oc-table .up { color: #22c55e; } .mc-oc-table .down { color: #ef4444; }
+.mc-oc-unavail { font-size: 12px; color: #f59e0b; padding: 12px; text-align: center; }
+
+.mc2-ai-badge { margin-left: auto; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 6px; background: #2563eb; color: #fff; }
+.mc2-mv { font-size: 13px; color: #cbd5e1; line-height: 1.6; }
+
+/* Bottom bar */
+.mc2-bottom { display: flex; align-items: center; gap: 16px; padding: 10px 16px; background: #0d1220; border-top: 1px solid #1c2537; }
+.mc2-bottom-tabs { display: flex; gap: 4px; }
+.mc2-bt { padding: 6px 14px; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; background: transparent; color: #94a3b8; }
+.mc2-bt.active { background: #1e293b; color: #f1f5f9; }
+.mc2-bottom-status { margin-left: auto; display: flex; gap: 18px; font-size: 12px; color: #94a3b8; }
+.mc2-bs b { color: #e2e8f0; }
+.mc2-bs .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #22c55e; margin-right: 4px; }
+.mc2-bs .dot.off { background: #ef4444; }
+
+@media (max-width: 1200px) {
+  .mc2-cards { grid-template-columns: repeat(3, 1fr); }
+  .mc2-right { width: 380px; }
+}
+@media (max-width: 900px) {
+  .mc2-main { flex-direction: column; }
+  .mc2-right { width: 100%; border-left: none; border-top: 1px solid #1c2537; }
+  .mc2-cards { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Market Command full-width: hide the watchlist sidebar so the trader screen
+   (chart + Intraday Assistance / Option Chain / Market View) uses the whole width. */
+body.mc-fullwidth .watchlist { display: none !important; }
+body.mc-fullwidth .content { padding-left: 0; padding-right: 0; }
+body.mc-fullwidth #panel-marketcommand .mc2-right { width: 500px; }
+@media (max-width: 1200px) { body.mc-fullwidth #panel-marketcommand .mc2-right { width: 420px; } }
+
+/* Market Command = true full-screen: hide the app strips/tabs above it and let
+   the panel fill the whole content area (its own mc2-top becomes the header). */
+body.mc-fullwidth #cockpit-strip,
+body.mc-fullwidth #opp-bar,
+body.mc-fullwidth #index-strip,
+body.mc-fullwidth #tabs,
+body.mc-fullwidth #tab-flow-wrap { display: none !important; }
+body.mc-fullwidth .content { padding: 0 !important; overflow: hidden; display: flex; flex-direction: column; }
+body.mc-fullwidth #panel-marketcommand.active { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+body.mc-fullwidth #panel-marketcommand.active .mc-wrap { flex: 1; height: 100%; min-height: 0; }

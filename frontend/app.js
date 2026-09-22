@@ -81,7 +81,7 @@ async function init() {
   if (el("ls-symbol")) el("ls-symbol").addEventListener("change", loadLiquidityStatusScreen);
   if (el("ls-scan-refresh")) el("ls-scan-refresh").addEventListener("click", loadLiquidityMovers);
   setTimeout(() => { if (isMarketOpen() || isFeedWindow()) loadTopOpportunities(); }, 4000);
-  setInterval(() => { if (isMarketOpen() || isFeedWindow()) loadTopOpportunities(); }, 60 * 1000);
+  setInterval(() => { if ((isMarketOpen() || isFeedWindow()) && !document.body.classList.contains("mc-fullwidth")) loadTopOpportunities(); }, 60 * 1000);
   setTimeout(loadSmartNews, 2500);
   setInterval(loadSmartNews, 5 * 60 * 1000);
   startLiveTicker();
@@ -721,6 +721,10 @@ function startLiveTicker() {
   state.prevPrices = state.prevPrices || {};
   // 3s cadence + no overlap: keeps prices live without bursting the Dhan feed.
   state.liveTimer = setInterval(async () => {
+    // Paused on the Market Command full-screen: the watchlist/index-strip it feeds
+    // are hidden there, so this would be a DUPLICATE Dhan quotes poll. Market
+    // Command runs its own minimal command + index-card polls instead.
+    if (document.body.classList.contains("mc-fullwidth")) return;
     if (!isMarketOpen() || liveTickBusy) return; // static when closed; skip if a fetch is still running
     const wl = (state.symbols || []).map((s) => s.symbol);
     const syms = [...new Set([...wl, ...(state.oppSymbols || [])])];
@@ -1812,7 +1816,8 @@ const INDEX_STRIP_SYMBOLS = [
 let indexStripTimer = null;
 async function refreshIndexStrip() {
   const box = el("index-strip");
-  if (!box || !document.body.classList.contains("mode-option")) return;
+  // Skip when hidden (index-strip is not shown on the Market Command full-screen).
+  if (!box || !document.body.classList.contains("mode-option") || document.body.classList.contains("mc-fullwidth")) return;
   try {
     const quotes = await Promise.all(
       INDEX_STRIP_SYMBOLS.map((s) => fetch(`/api/quote/${encodeURIComponent(s.symbol)}`).then((r) => r.json()).catch(() => null))
@@ -1864,7 +1869,13 @@ function switchTab(name) {
 
   if (name === "toppicks" && !state.topPicksLoaded) { state.topPicksLoaded = true; loadTopPicks(); }
   if (name === "liquiditystatus") { if (!state.liquidityStatusLoaded) { state.liquidityStatusLoaded = true; loadLiquidityStatusScreen(); } startLiquidityStatusLive(); }
-  if (name === "marketcommand") { initMarketCommand(); startMarketCommandLive(); }
+  // Market Command takes the full width: hide the watchlist sidebar so the
+  // right column (Intraday Assistance / Option Chain / Market View) gets more space.
+  document.body.classList.toggle("mc-fullwidth", name === "marketcommand");
+  if (name === "marketcommand") {
+    initMarketCommand(); startMarketCommandLive();
+    if (MC.chart) setTimeout(() => { const c = el("mc-chart-container"); if (c) MC.chart.applyOptions({ width: c.clientWidth }); }, 60);
+  }
   if (name === "bullrank" && !state.bullRankLoaded) { state.bullRankLoaded = true; loadBullRank(); }
   if (name === "stockoptions" && !state.stockOptionsInit) { state.stockOptionsInit = true; initStockOptions(); }
 
@@ -5551,9 +5562,10 @@ function initMarketCommand() {
   if (!container || typeof LightweightCharts === "undefined") return;
 
   // Wire index buttons
-  el("mc-idx-btns")?.querySelectorAll(".mc-idx").forEach((btn) => {
+  el("mc-idx-btns")?.querySelectorAll(".mc2-idxbtn").forEach((btn) => {
     btn.addEventListener("click", () => {
-      el("mc-idx-btns").querySelectorAll(".mc-idx").forEach((b) => b.classList.remove("active"));
+      if (btn.getAttribute("data-disabled") === "1") return;
+      el("mc-idx-btns").querySelectorAll(".mc2-idxbtn").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       MC.sym = btn.getAttribute("data-sym");
       MC._fitKey = null;
@@ -5562,13 +5574,23 @@ function initMarketCommand() {
   });
 
   // Wire timeframe buttons
-  el("mc-tf-btns")?.querySelectorAll(".mc-tf").forEach((btn) => {
+  el("mc-tf-btns")?.querySelectorAll(".mc2-tfbtn").forEach((btn) => {
     btn.addEventListener("click", () => {
-      el("mc-tf-btns").querySelectorAll(".mc-tf").forEach((b) => b.classList.remove("active"));
+      el("mc-tf-btns").querySelectorAll(".mc2-tfbtn").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       MC.tf = btn.getAttribute("data-tf");
       MC._fitKey = null;
       loadMarketCommand(!MC.replayDate);
+    });
+  });
+
+  // Option Chain ATM/ITM/OTM tabs
+  el("mc-oc-tabs")?.querySelectorAll(".mc2-oc-tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      el("mc-oc-tabs").querySelectorAll(".mc2-oc-tab").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      MC.ocView = btn.getAttribute("data-oc");
+      if (MC.lastData) renderMCOptionChain(MC.lastData);
     });
   });
 
@@ -5644,8 +5666,8 @@ function initMarketCommand() {
   const chartH = Math.max(container.clientHeight, 500);
   MC.chart = LightweightCharts.createChart(container, {
     width: container.clientWidth, height: chartH,
-    layout: { background: { type: "solid", color: "#131722" }, textColor: "#b2b5be", fontSize: 12 },
-    grid: { vertLines: { color: "#1e222d" }, horzLines: { color: "#1e222d" } },
+    layout: { background: { type: "solid", color: "#0a0e17" }, textColor: "#b2b5be", fontSize: 12 },
+    grid: { vertLines: { color: "#141c2e" }, horzLines: { color: "#141c2e" } },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal, vertLine: { color: "#758696", width: 1, style: 3, labelBackgroundColor: "#2a2e39" }, horzLine: { color: "#758696", width: 1, style: 3, labelBackgroundColor: "#2a2e39" } },
     rightPriceScale: { borderColor: "#2a2e39", scaleMargins: { top: 0.08, bottom: 0.28 } },
     localization: { timeFormatter: (t) => fmtIST(t, true) },
@@ -5676,11 +5698,11 @@ function initMarketCommand() {
     if (vE && v) vE.textContent = mcFmtVol(v.value);
   });
 
-  MC.ema9Series = MC.chart.addLineSeries({ color: "#ffa657", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-  MC.ema21Series = MC.chart.addLineSeries({ color: "#58a6ff", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-  MC.ema50Series = MC.chart.addLineSeries({ color: "#bc8cff", lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
+  MC.ema9Series = MC.chart.addLineSeries({ color: "#3b82f6", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+  MC.ema21Series = MC.chart.addLineSeries({ color: "#f0b90b", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+  MC.ema50Series = MC.chart.addLineSeries({ color: "#a855f7", lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
   MC.ema200Series = MC.chart.addLineSeries({ color: "#e056a0", lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
-  MC.vwapSeries = MC.chart.addLineSeries({ color: "#d29922", lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
+  MC.vwapSeries = MC.chart.addLineSeries({ color: "#64748b", lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
 
   window.addEventListener("resize", () => {
     if (MC.chart) MC.chart.applyOptions({ width: container.clientWidth, height: Math.max(container.clientHeight, 500) });
@@ -5691,6 +5713,12 @@ function initMarketCommand() {
 
 function startMarketCommandLive() {
   if (MC.timer) return;
+  // Index cards refresh (batched quotes, 15s) — separate from the 5s command poll.
+  renderMCIndexCards();
+  if (!MC.cardTimer) MC.cardTimer = setInterval(() => {
+    const pn = document.getElementById("panel-marketcommand");
+    if (pn && pn.classList.contains("active")) renderMCIndexCards();
+  }, 15000);
   // Live refresh: 5s while the market is open (fast, low-delay), 30s when closed
   // (data isn't changing, so avoid needless load). Backend caches absorb the rate:
   // candles refresh every ~5s, OI/liquidity serve from their 15s caches between hits.
@@ -5736,6 +5764,8 @@ async function loadMarketCommand(chartOnly = false) {
     renderMCMarketView(d);
     renderMCPlan(d);
     renderMCOptionChain(d);
+    renderMCIntraday(d);
+    renderMCBottom(d);
   } catch (e) {
     console.error("[MarketCommand]", e);
   }
@@ -5833,6 +5863,16 @@ function renderMCBos(d) {
 
 function renderMCMarketView(d) {
   const mv = d.marketView;
+  // Plain-text Market View card (the mockup's AI summary = early-move sequence).
+  const txtEl = el("mc-mv-text");
+  if (txtEl) {
+    const em = d.earlyMove;
+    if (em && em.label) {
+      const parts = [`${em.context} context`, em.emaReaction, em.liquidity, em.candleBehaviour, em.nextCandle, `BOS: ${em.bosStatus}`].filter(Boolean);
+      txtEl.textContent = parts.join(". ") + ".";
+    } else if (mv && mv.basedOn) txtEl.textContent = mv.basedOn;
+    else txtEl.textContent = "—";
+  }
   const box = el("mc-marketview");
   if (!box) return;
   if (!mv || d.partial) { box.hidden = true; return; }
@@ -5866,6 +5906,85 @@ function renderMCMarketView(d) {
   }
 }
 
+// Index summary cards — one batched quotes call (shared, 15s), VIX from the
+// last market-command payload. Sparkline slope reflects the real day change sign.
+async function renderMCIndexCards() {
+  const cards = document.querySelectorAll("#mc2-cards .mc2-card");
+  if (!cards.length) return;
+  let quotes = {};
+  try {
+    const q = await fetch("/api/quotes?symbols=" + encodeURIComponent("^NSEI,^NSEBANK,^CNXFIN,^NSEMDCP50")).then((r) => r.json());
+    quotes = q.quotes || {};
+  } catch { /* keep last */ }
+  const vix = MC.lastData?.vix;
+  const spark = (svg, chgPct) => {
+    if (!svg) return;
+    if (chgPct == null) { svg.innerHTML = `<polyline points="0,17 120,17" fill="none" stroke="#334155" stroke-width="1.5" opacity="0.6"/>`; return; }
+    const up = chgPct >= 0, col = up ? "#22c55e" : "#ef4444";
+    const pts = up ? "0,28 30,22 55,24 80,14 105,10 120,6" : "0,8 30,12 55,10 80,20 105,18 120,26";
+    svg.innerHTML = `<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.5" opacity="0.85"/>`;
+  };
+  cards.forEach((card) => {
+    const sym = card.getAttribute("data-card");
+    const valEl = card.querySelector('[data-f="val"]'), chgEl = card.querySelector('[data-f="chg"]'), sv = card.querySelector('[data-f="spark"]');
+    let price = null, chgPct = null;
+    if (sym === "VIX") { price = vix?.value ?? null; chgPct = vix?.changePct ?? null; }
+    else { const q = quotes[sym]; price = q?.price ?? null; chgPct = q?.changePercent ?? null; }
+    if (valEl) valEl.textContent = price != null ? Number(price).toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—";
+    if (chgEl) {
+      if (chgPct != null) { chgEl.textContent = `${chgPct >= 0 ? "+" : ""}${chgPct}%`; chgEl.className = "mc2-card-chg " + (chgPct >= 0 ? "up" : "down"); }
+      else chgEl.textContent = "";
+    }
+    spark(sv, chgPct);
+  });
+}
+
+function renderMCIntraday(d) {
+  const tp = d.tradePlan || {};
+  const mv = d.marketView || {};
+  const em = d.earlyMove || {};
+  const tf = d.timeframes || {};
+  const dir = (mv.direction || tp.direction || "—");
+  const setV = (id, v, cls) => { const e = el(id); if (e) { e.textContent = v ?? "—"; if (cls != null) e.className = e.className.replace(/\b(BULLISH|BEARISH|NEUTRAL|RANGING|WAIT|CONFLICT|TAKE|READY|STALE|AVOID)\b/g, "").trim() + " " + cls; } };
+  const badge = el("mc-ia-badge");
+  if (badge) { badge.textContent = dir; badge.className = "mc2-ia-badge " + dir; }
+  const upd = el("mc-ia-updated");
+  if (upd && d.snapshot?.marketTs) upd.textContent = new Date((d.snapshot.marketTs + 19800) * 1000).toISOString().slice(11, 19);
+  // Dir / 5M / 15M / Early Move
+  const arrow = (x) => x === "BULLISH" ? "↓".replace("↓", "▲") : x === "BEARISH" ? "▼" : "◆";
+  setV("mc-ia-dir", `${dir === "BULLISH" ? "▲" : dir === "BEARISH" ? "▼" : "◆"} ${dir}`, dir);
+  setV("mc-tf-5m", `${tf.m5 === "BULLISH" ? "▲" : tf.m5 === "BEARISH" ? "▼" : "◆"} ${tf.m5 || "—"}`, tf.m5);
+  setV("mc-tf-15m", `${tf.m15 === "BULLISH" ? "▲" : tf.m15 === "BEARISH" ? "▼" : "◆"} ${tf.m15 || "—"}`, tf.m15);
+  const emShort = em.watch ? "WATCH" : em.label === "TIMEFRAME CONFLICT" ? "CONFLICT" : em.bosStatus === "CONFIRMED" ? "BOS" : (tp.action === "TAKE" ? "READY" : "WAIT");
+  setV("mc-ia-early", `⏱ ${emShort}`, emShort);
+  // Grid
+  const fmt = (v) => v != null ? Number(v).toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—";
+  setV("mc-ia-entry", tp.entryZone || "—");
+  setV("mc-ia-best", tp.preferredStrike || "—");
+  setV("mc-ia-second", tp.alternativeStrike || "—");
+  const bs = tp.bestSetup;
+  setV("mc-ia-sl", bs && bs.stopPremium != null ? "₹" + bs.stopPremium : (tp.stopLoss != null ? fmt(tp.stopLoss) : "—"));
+  setV("mc-ia-target", bs && bs.targetPremium != null ? "₹" + bs.targetPremium : (tp.target1 != null ? fmt(tp.target1) : "—"));
+  setV("mc-ia-rr", bs && bs.rr != null ? "1:" + bs.rr : "—");
+  const act = el("mc-plan-action");
+  if (act) { const a = tp.dataStale ? "STALE" : (tp.action === "NO TRADE" ? "AVOID" : (tp.action || "—")); act.textContent = a; act.className = "mc2-ia-action " + a.replace(/ /g, "."); }
+  const reason = el("mc-ia-reason");
+  if (reason) reason.textContent = tp.waitReason ? tp.waitReason.replace(/^WAIT — /, "") + "." : (d.command?.finalReason || em.emaReaction || "—");
+}
+
+function renderMCBottom(d) {
+  const age = el("mc-bot-age");
+  if (age) age.textContent = d.dataAgeSec != null ? d.dataAgeSec + "s" : "—";
+  const ageDot = el("mc-bot-age-dot");
+  if (ageDot) ageDot.className = "dot" + (d.dataStale ? " off" : "");
+  const mkt = el("mc-bot-mkt"), mktDot = el("mc-bot-mkt-dot");
+  const open = !!(d.dhanLive && !d.dataStale);
+  if (mkt) mkt.textContent = d.historical ? "Replay" : d.dhanLive ? (d.dataStale ? "Stale" : "Open") : "Closed";
+  if (mktDot) mktDot.className = "dot" + (open ? "" : " off");
+  const t = el("mc-bot-time");
+  if (t) t.textContent = new Date().toLocaleString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
 function renderMCOptionChain(d) {
   const oc = d.optionChain;
   const tbl = el("mc-oc-table"), un = el("mc-oc-unavail"), atmEl = el("mc-oc-atm");
@@ -5876,11 +5995,24 @@ function renderMCOptionChain(d) {
     return;
   }
   if (un) un.hidden = true; tbl.hidden = false;
+  // Never present stale option data as live — dim + label when the snapshot is stale.
+  const stale = !!(d.snapshot?.stale || d.tradePlan?.dataStale);
+  tbl.style.opacity = stale ? "0.55" : "1";
   if (atmEl) atmEl.textContent = oc.atmStrike != null ? "ATM " + oc.atmStrike : "";
+  const octitle = el("mc-oc-title"); if (octitle) octitle.textContent = `Option Chain (${d.name || d.symbol || ""})` + (stale ? " · STALE" : "");
   const k = (v) => v == null ? "—" : Math.abs(v) >= 1e7 ? (v / 1e7).toFixed(1) + "Cr" : Math.abs(v) >= 1e5 ? (v / 1e5).toFixed(1) + "L" : Math.abs(v) >= 1e3 ? (v / 1e3).toFixed(0) + "K" : String(Math.round(v));
   const pct = (v) => v == null ? "" : `<span class="${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : ""}${v}%</span>`;
+  // ATM/ITM/OTM filter (ITM = strikes ≤ ATM for calls; OTM = strikes ≥ ATM)
+  const view = MC.ocView || "ATM";
+  const atmK = oc.atmStrike;
+  let rowsData = oc.rows;
+  if (atmK != null) {
+    if (view === "ITM") rowsData = oc.rows.filter((r) => r.strike <= atmK).slice(-3);
+    else if (view === "OTM") rowsData = oc.rows.filter((r) => r.strike >= atmK).slice(0, 3);
+    else { const ai = oc.rows.findIndex((r) => r.strike === atmK); rowsData = oc.rows.slice(Math.max(0, ai - 1), ai + 2); }
+  }
   const head = `<tr><th class="ce-side">Call LTP</th><th>Chg</th><th>OI</th><th class="strike-col">Strike</th><th class="pe-side">Put LTP</th><th>Chg</th><th>OI</th></tr>`;
-  const rows = oc.rows.map((r) => {
+  const rows = rowsData.map((r) => {
     const atm = r.strike === oc.atmStrike;
     return `<tr class="${atm ? "atm" : ""}">` +
       `<td class="ce ce-side">${r.ceLtp != null ? r.ceLtp : "—"}</td><td>${pct(r.ceChgPct)}</td><td>${k(r.ceOi)}</td>` +
