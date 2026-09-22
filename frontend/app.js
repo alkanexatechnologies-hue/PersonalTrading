@@ -5912,8 +5912,11 @@ async function otFetchOptionCandles(sym, strike, expiry, interval) {
     OT._chartFitKey = OT._candleKey;
     // Now that candles are in, refresh the LTP-change + response + notes.
     if (OT.lastData) { otRenderResponse(OT.lastData); otRenderLtpChange(); }
-    const cn = otEl("ot-ce-note"); if (cn) cn.textContent = OT._ceMsg || "premium candles · Dhan";
-    const pn = otEl("ot-pe-note"); if (pn) pn.textContent = OT._peMsg || "premium candles · Dhan";
+    // When the snapshot is stale (e.g. market closed → last-good expired-contract
+    // chain), say so instead of a bare "no candles" — live candles resume at open.
+    const staleNote = OT._stale ? "Market closed / stale — live premium candles resume at open" : null;
+    const cn = otEl("ot-ce-note"); if (cn) cn.textContent = (OT._ceCandles && OT._ceCandles.length) ? "premium candles · Dhan" : (staleNote || OT._ceMsg || "no candles");
+    const pn = otEl("ot-pe-note"); if (pn) pn.textContent = (OT._peCandles && OT._peCandles.length) ? "premium candles · Dhan" : (staleNote || OT._peMsg || "no candles");
   } catch (e) { console.error("[OT candles]", e); }
 }
 
@@ -5977,6 +5980,7 @@ function otSelectedRow(d) {
 
 function renderOptionTerminal(d) {
   const m = d.optionMatrix;
+  OT._stale = !!(d.snapshot && d.snapshot.stale) || !!d.dataStale;
   // ---- spot + intraday change ----
   const spotEl = otEl("ot-spot"); if (spotEl) spotEl.textContent = d.spot != null ? otNum(d.spot, 2) : "—";
   const spotChg = otIntradayChange(d.candles);
@@ -6666,21 +6670,25 @@ function buildMCLevels(d) {
   const spot = d.spot;
   if (spot == null) return [];
   const lv = d.levels || {}, oi = d.oi || {};
+  // The OI-wall levels come through as { strike, oi } objects; ORB/PDH-PDL as
+  // plain numbers. Normalise both to a price number (never pass the object).
+  const px = (x) => x == null ? null : (typeof x === "number" ? x : (typeof x.strike === "number" ? x.strike : null));
   const cand = [];
   const push = (kind, type, short, price, strength, side, time) => {
     if (price == null || !isFinite(price)) return;
     cand.push({ kind, type, short, price: Math.round(price * 100) / 100, strength, side, time: time || null });
   };
-  push("resistance", "Strong Resistance", "Strong R", lv.strongResistance, "STRONG", "resistance");
-  push("support", "Strong Support", "Strong S", lv.strongSupport, "STRONG", "support");
-  push("resistance", "Resistance", "R", lv.weakResistance, "MEDIUM", "resistance");
-  push("support", "Support", "S", lv.weakSupport, "MEDIUM", "support");
-  push("resistance", "OI Resistance", "OI R", oi.resistance, "STRONG", "resistance");
-  push("support", "OI Support", "OI S", oi.support, "STRONG", "support");
-  push("orb", "Opening Range High", "ORH", lv.orbHigh, "MEDIUM", spot >= (lv.orbHigh ?? Infinity) ? "support" : "resistance");
-  push("orb", "Opening Range Low", "ORL", lv.orbLow, "MEDIUM", spot <= (lv.orbLow ?? -Infinity) ? "resistance" : "support");
-  push("pdhl", "Prev Day High", "PDH", lv.pdh, "MEDIUM", spot >= (lv.pdh ?? Infinity) ? "support" : "resistance");
-  push("pdhl", "Prev Day Low", "PDL", lv.pdl, "MEDIUM", spot <= (lv.pdl ?? -Infinity) ? "resistance" : "support");
+  const orbHigh = px(lv.orbHigh), orbLow = px(lv.orbLow), pdh = px(lv.pdh), pdl = px(lv.pdl);
+  push("resistance", "Strong Resistance", "Strong R", px(lv.strongResistance), "STRONG", "resistance");
+  push("support", "Strong Support", "Strong S", px(lv.strongSupport), "STRONG", "support");
+  push("resistance", "Resistance", "R", px(lv.weakResistance), "MEDIUM", "resistance");
+  push("support", "Support", "S", px(lv.weakSupport), "MEDIUM", "support");
+  push("resistance", "OI Resistance", "OI R", px(oi.resistance), "STRONG", "resistance");
+  push("support", "OI Support", "OI S", px(oi.support), "STRONG", "support");
+  push("orb", "Opening Range High", "ORH", orbHigh, "MEDIUM", spot >= (orbHigh ?? Infinity) ? "support" : "resistance");
+  push("orb", "Opening Range Low", "ORL", orbLow, "MEDIUM", spot <= (orbLow ?? -Infinity) ? "resistance" : "support");
+  push("pdhl", "Prev Day High", "PDH", pdh, "MEDIUM", spot >= (pdh ?? Infinity) ? "support" : "resistance");
+  push("pdhl", "Prev Day Low", "PDL", pdl, "MEDIUM", spot <= (pdl ?? -Infinity) ? "resistance" : "support");
   const sw = (d.structure && d.structure.swingPoints) || [];
   const swHi = [...sw].reverse().find((p) => (p.type === "HH" || p.type === "LH") && p.price > spot);
   const swLo = [...sw].reverse().find((p) => (p.type === "HL" || p.type === "LL") && p.price < spot);
