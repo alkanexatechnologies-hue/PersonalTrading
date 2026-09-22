@@ -1296,7 +1296,15 @@
                     <span>O <b id="mc-ohlc-o">—</b></span><span>H <b id="mc-ohlc-h">—</b></span>
                     <span>L <b id="mc-ohlc-l">—</b></span><span>C <b id="mc-ohlc-c">—</b></span>
                     <span class="mc-leg-vol">Vol <b id="mc-leg-vol-v">—</b></span>
-                    <span class="mc-leg-ema21" style="display:none">EMA21 <b id="mc-leg-ema21-v">—</b></span>
+                    <span class="mc-leg-sep">·</span>
+                    <span style="color:#3b82f6">EMA9 <b id="mc-leg-ema9-v">—</b></span>
+                    <span style="color:#f0b90b">EMA21 <b id="mc-leg-ema21-v">—</b></span>
+                    <span style="color:#94a3b8">VWAP <b id="mc-leg-vwap-v">—</b></span>
+                    <span class="mc-leg-sep">·</span>
+                    <span>VIX <b id="mc-leg-vix-v">—</b></span>
+                    <span>5M <b id="mc-leg-5m">—</b></span>
+                    <span>15M <b id="mc-leg-15m">—</b></span>
+                    <span class="mc-leg-conn" id="mc-leg-conn"></span>
                   </div>
                   <div class="mc-tog-row">
                     <div class="mc-indicator-toggles" id="mc-indicator-toggles">
@@ -1306,11 +1314,16 @@
                       <label class="mc-tog"><input type="checkbox" id="mc-tog-ema200" checked><span class="mc-tog-dot" style="background:#e056a0"></span>EMA 200</label>
                       <label class="mc-tog"><input type="checkbox" id="mc-tog-vwap" checked><span class="mc-tog-dot" style="background:#64748b"></span>VWAP</label>
                       <label class="mc-tog"><input type="checkbox" id="mc-tog-vol" checked><span class="mc-tog-dot" style="background:#16c784"></span>Volume</label>
-                      <label class="mc-tog mc-tog-levels-wrap"><input type="checkbox" id="mc-tog-levels"><span class="mc-tog-dot" style="background:#2962ff"></span>Show Levels</label>
+                      <label class="mc-tog mc-tog-levels-wrap"><input type="checkbox" id="mc-tog-levels" checked><span class="mc-tog-dot" style="background:#2962ff"></span>Important Levels</label>
+                      <label class="mc-tog"><input type="checkbox" id="mc-tog-bos" checked><span class="mc-tog-dot" style="background:#a855f7"></span>BOS / CHoCH</label>
+                      <label class="mc-tog"><input type="checkbox" id="mc-tog-liq" checked><span class="mc-tog-dot" style="background:#f0b90b"></span>Liquidity</label>
+                      <label class="mc-tog"><input type="checkbox" id="mc-tog-orb"><span class="mc-tog-dot" style="background:#38bdf8"></span>Opening Range</label>
                     </div>
                   </div>
                 </div>
                 <div class="mc-chart-container" id="mc-chart-container"></div>
+                <!-- Important Levels legend — TYPE · PRICE · STRENGTH · TIME (nearest = TESTING) -->
+                <div class="mc-levels-legend" id="mc-levels-legend"></div>
                 <!-- BOS + Early Move banners under the chart -->
                 <div class="mc-bos-banner" id="mc-bos-banner" hidden></div>
                 <div class="mc-early" id="mc-early" hidden></div>
@@ -1339,6 +1352,14 @@
                     <div class="mc2-ia-dir"><span class="mc2-ia-k">5M</span><span class="mc2-ia-v" id="mc-tf-5m">—</span></div>
                     <div class="mc2-ia-dir"><span class="mc2-ia-k">15M</span><span class="mc2-ia-v" id="mc-tf-15m">—</span></div>
                     <div class="mc2-ia-dir"><span class="mc2-ia-k">Early Move</span><span class="mc2-ia-v" id="mc-ia-early">—</span></div>
+                  </div>
+                  <!-- Levels & structure state (from the same snapshot / existing engines) -->
+                  <div class="mc2-ia-levels">
+                    <div class="mc2-ia-lv"><span class="mc2-ia-k">BOS Status</span><span class="mc2-ia-lvv" id="mc-ia-bos">—</span></div>
+                    <div class="mc2-ia-lv"><span class="mc2-ia-k">Market State</span><span class="mc2-ia-lvv" id="mc-ia-state">—</span></div>
+                    <div class="mc2-ia-lv"><span class="mc2-ia-k">Current Level</span><span class="mc2-ia-lvv" id="mc-ia-curlevel">—</span></div>
+                    <div class="mc2-ia-lv"><span class="mc2-ia-k">Next Level</span><span class="mc2-ia-lvv" id="mc-ia-nextlevel">—</span></div>
+                    <div class="mc2-ia-lv"><span class="mc2-ia-k">Invalidation</span><span class="mc2-ia-lvv sl" id="mc-ia-inval">—</span></div>
                   </div>
                   <div class="mc2-ia-grid">
                     <div class="mc2-ia-cell wide"><span class="mc2-ia-k">Entry Zone</span><span class="mc2-ia-val" id="mc-ia-entry">—</span></div>

@@ -4471,3 +4471,33 @@ body.ot-fullwidth .content { padding: 0 !important; }
 .ot-navbtn { margin-left:auto; padding:7px 14px; border-radius:8px; border:1px solid var(--ot-border2);
   background:var(--ot-blue-d); color:#cfe0ff; font-size:12.5px; font-weight:700; cursor:pointer; }
 .ot-navbtn:hover { background:#12294d; }
+
+/* ===== Market Command — Important Levels legend + state rows ===== */
+.mc-levels-legend { display:flex; flex-wrap:wrap; gap:6px; padding:7px 8px; background:#0c1220;
+  border-top:1px solid #1c2740; max-height:78px; overflow-y:auto; }
+.mc-lvl-empty { color:#5f6f88; font-size:11px; padding:2px 4px; }
+.mc-lvl { display:inline-flex; align-items:center; gap:6px; padding:3px 8px; border-radius:6px;
+  font-size:11px; font-variant-numeric:tabular-nums; border:1px solid #26344f; background:#111a2b; white-space:nowrap; }
+.mc-lvl b { font-weight:800; }
+.mc-lvl.res { border-color:rgba(234,57,67,.45); }
+.mc-lvl.res b { color:#f6768a; }
+.mc-lvl.sup { border-color:rgba(22,199,132,.45); }
+.mc-lvl.sup b { color:#4ade9e; }
+.mc-lvl.neu b { color:#94a3b8; }
+.mc-lvl.k-bos b, .mc-lvl.k-choch b { color:#c084fc; }
+.mc-lvl.k-sweep b { color:#f0b90b; }
+.mc-lvl.k-orb b { color:#38bdf8; }
+.mc-lvl-str { font-size:8.5px; letter-spacing:.04em; color:#8394ad; text-transform:uppercase; font-weight:700; }
+.mc-lvl-time { font-size:9.5px; color:#5f6f88; }
+.mc-lvl.near { border-color:#2f7dff; box-shadow:0 0 0 1px rgba(47,125,255,.4); background:#0d1d3a; }
+.mc-lvl-tag { font-size:8.5px; font-weight:800; letter-spacing:.05em; color:#7fb0ff; background:#12294d; padding:1px 5px; border-radius:4px; }
+
+.mc2-ia-levels { display:grid; grid-template-columns:1fr 1fr; gap:5px 10px; padding:8px 0; margin:2px 0;
+  border-top:1px solid #1c2740; border-bottom:1px solid #1c2740; }
+.mc2-ia-lv { display:flex; flex-direction:column; gap:1px; }
+.mc2-ia-lv .mc2-ia-k { font-size:8.5px; letter-spacing:.05em; text-transform:uppercase; color:#5f6f88; font-weight:700; }
+.mc2-ia-lvv { font-size:12.5px; font-weight:700; font-variant-numeric:tabular-nums; }
+.mc2-ia-lvv.BULLISH { color:#16c784; } .mc2-ia-lvv.BEARISH { color:#ea3943; } .mc2-ia-lvv.NEUTRAL { color:#94a3b8; }
+.mc2-ia-lvv.sl { color:#f6768a; }
+.mc-leg-sep { color:#33415a; }
+.mc-leg-conn { font-weight:800; letter-spacing:.03em; }

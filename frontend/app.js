@@ -5558,7 +5558,7 @@ const MC = {
   sym: "^NSEI", tf: "15m", chart: null, candleSeries: null,
   ema9Series: null, ema21Series: null, ema50Series: null, vwapSeries: null,
   obMarkers: [], priceLine: null, timer: null, loading: false, lastData: null,
-  show: { vwap: true, ema21: true, ema50: true, ema9: false, ema200: true, ob: true, vol: true, levels: false },
+  show: { vwap: true, ema21: true, ema50: true, ema9: false, ema200: true, ob: true, vol: true, levels: true, bos: true, liq: true, orb: false },
   replayDate: null, // yyyy-mm-dd when replaying a past session; null = live
 };
 
@@ -5600,13 +5600,13 @@ function initMarketCommand() {
     });
   });
 
-  // Wire indicator toggles
-  ["vwap", "ema21", "ema50", "ema9", "ema200", "ob", "vol", "levels"].forEach((k) => {
+  // Wire indicator toggles. "levels"/"bos"/"liq"/"orb" govern the Important-Levels
+  // drawing → a full chart redraw; the EMA/VWAP/Volume overlays just re-apply.
+  ["vwap", "ema21", "ema50", "ema9", "ema200", "ob", "vol", "levels", "bos", "liq", "orb"].forEach((k) => {
     const cb = el("mc-tog-" + k);
     if (cb) cb.addEventListener("change", () => {
       MC.show[k] = cb.checked;
-      // "Show Levels" governs every horizontal price line → full chart redraw.
-      if (k === "levels" && MC.lastData) renderMCChart(MC.lastData);
+      if ((k === "levels" || k === "bos" || k === "liq" || k === "orb") && MC.lastData) renderMCChart(MC.lastData);
       else applyMCOverlays();
     });
   });
@@ -6173,6 +6173,7 @@ async function loadMarketCommand(chartOnly = false) {
     }
     MC.lastData = d;
     renderMCChart(d);
+    renderMCTopStats(d);
     renderMCCommand(d);
     renderMCStatus(d);
     renderMCLiveBar(d);
@@ -6386,6 +6387,35 @@ function renderMCIntraday(d) {
   if (act) { const a = tp.dataStale ? "STALE" : (tp.action === "NO TRADE" ? "AVOID" : (tp.action || "—")); act.textContent = a; act.className = "mc2-ia-action " + a.replace(/ /g, "."); }
   const reason = el("mc-ia-reason");
   if (reason) reason.textContent = tp.waitReason ? tp.waitReason.replace(/^WAIT — /, "") + "." : (d.command?.finalReason || em.emaReaction || "—");
+
+  // ---- Levels & structure state (nearest level = "current"; next in direction) ----
+  const spot = d.spot;
+  const bos = d.bos;
+  const bosEl = el("mc-ia-bos");
+  if (bosEl) {
+    if (bos) { bosEl.textContent = `${bos.stage === "Confirmed" ? "CONFIRMED" : "FORMING"} · ${bos.direction}`; bosEl.className = "mc2-ia-lvv " + (bos.direction === "BULLISH" ? "BULLISH" : "BEARISH"); }
+    else { bosEl.textContent = "NONE"; bosEl.className = "mc2-ia-lvv"; }
+  }
+  const state = d.structure?.current || d.command?.structureConfirmed || "—";
+  const stEl = el("mc-ia-state");
+  if (stEl) { stEl.textContent = state.toUpperCase(); stEl.className = "mc2-ia-lvv " + (state === "Bullish" ? "BULLISH" : state === "Bearish" ? "BEARISH" : "NEUTRAL"); }
+  const levels = MC._activeLevels || [];
+  const cur = levels[0] || null;
+  const curEl = el("mc-ia-curlevel");
+  if (curEl) { curEl.textContent = cur ? `${mcFmtP(cur.price)} · ${cur.type.replace(/ \(.*\)/, "")}` : "—"; curEl.className = "mc2-ia-lvv " + (cur ? (cur.side === "resistance" ? "BEARISH" : cur.side === "support" ? "BULLISH" : "") : ""); }
+  // Next level: in the direction of travel — resistance above (bullish) / support below (bearish).
+  const dirNow = (mv.direction || tp.direction || "");
+  let next = null;
+  if (spot != null && levels.length) {
+    if (dirNow === "BULLISH") next = levels.find((l) => l.price > spot && l.side !== "support") || levels.find((l) => l.price > spot);
+    else if (dirNow === "BEARISH") next = levels.find((l) => l.price < spot && l.side !== "resistance") || levels.find((l) => l.price < spot);
+    if (!next) next = levels.find((l) => l !== cur) || null;
+  }
+  const nextEl = el("mc-ia-nextlevel");
+  if (nextEl) nextEl.textContent = next ? `${mcFmtP(next.price)} · ${next.short}` : "—";
+  const invEl = el("mc-ia-inval");
+  const inval = tp.stopLoss ?? d.command?.spotSL ?? null;
+  if (invEl) invEl.textContent = inval != null ? mcFmtP(inval) : "—";
 }
 
 function renderMCBottom(d) {
@@ -6550,92 +6580,184 @@ function renderMCChart(d) {
   MC._inView = (p) => p != null && p >= vlo - pad && p <= vhi + pad;
   applyMCOverlays();
 
-  // Current price line
+  // Clear existing price-line + level overlays.
   if (MC.priceLine) { try { MC.candleSeries.removePriceLine(MC.priceLine); } catch {} }
   MC.obMarkers.forEach((pl) => { try { MC.candleSeries.removePriceLine(pl); } catch {} });
   MC.obMarkers = [];
 
-  // "Show Levels" OFF (default) → a clean chart with NO horizontal lines.
-  // The calculations still run; only the drawing is gated here.
-  if (!MC.show.levels) {
-    MC.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, N - showBars), to: N + 2 });
-    MC._fitKey = MC.sym + ":" + MC.tf;
-    if (d.structure?.bosEvents?.length) {
-      const markers = d.structure.bosEvents.map((b) => {
-        const pre = b.stage === "Pre", bull = b.direction === "Bullish";
-        return { time: b.time, position: bull ? "belowBar" : "aboveBar",
-          color: pre ? (bull ? "rgba(22,199,132,.55)" : "rgba(234,57,67,.55)") : (bull ? "#16c784" : "#ea3943"),
-          shape: pre ? "circle" : (bull ? "arrowUp" : "arrowDown"), text: pre ? "BOS?" : "BOS" };
+  // Candle-origin markers. BOS markers come from the EXISTING structure engine
+  // output (d.structure.bosEvents) UNCHANGED — this only *displays* them; the
+  // detection logic is untouched. Gated by the BOS/CHoCH toggle.
+  const markers = [];
+  if (MC.show.bos && d.structure?.bosEvents?.length) {
+    d.structure.bosEvents.forEach((b) => {
+      const pre = b.stage === "Pre", bull = b.direction === "Bullish";
+      markers.push({
+        time: b.time, position: bull ? "belowBar" : "aboveBar",
+        color: pre ? (bull ? "rgba(22,199,132,.55)" : "rgba(234,57,67,.55)") : (bull ? "#16c784" : "#ea3943"),
+        shape: pre ? "circle" : (bull ? "arrowUp" : "arrowDown"), text: pre ? "BOS?" : "BOS",
       });
-      MC.candleSeries.setMarkers(markers);
-    }
+    });
+  }
+
+  // Important Levels OFF → clean chart (BOS markers still show if that toggle is on).
+  if (!MC.show.levels) {
+    MC.candleSeries.setMarkers(markers);
+    MC._activeLevels = [];
+    renderMCLevelsLegend(d);
+    const vk0 = MC.sym + ":" + MC.tf;
+    if (MC._fitKey !== vk0) { MC.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, N - showBars), to: N + 2 }); MC._fitKey = vk0; }
     return;
   }
 
+  // Current price line
   if (d.spot) {
-    MC.priceLine = MC.candleSeries.createPriceLine({
-      price: d.spot, color: "#2962ff", lineWidth: 1, lineStyle: 2,
-      axisLabelVisible: true, title: "",
-    });
+    MC.priceLine = MC.candleSeries.createPriceLine({ price: d.spot, color: "#2962ff", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "" });
   }
 
-  // Order Block zones — only those near the visible price range.
-  if (MC.show.ob && d.orderBlocks) {
-    d.orderBlocks.forEach((ob) => {
-      if (!MC._inView(ob.high) && !MC._inView(ob.low)) return;
-      drawMCOrderBlock(ob);
-    });
+  // Order-Block liquidity zones — gated by the Liquidity toggle now.
+  if (MC.show.liq && MC.show.ob && d.orderBlocks) {
+    d.orderBlocks.forEach((ob) => { if (MC._inView(ob.high) || MC._inView(ob.low)) drawMCOrderBlock(ob); });
   }
 
-  // Spot-level SL + Target price lines on chart (only when near visible range)
-  const cmd = d.command;
-  if (cmd) {
-    if (cmd.spotSL && MC._inView(cmd.spotSL)) {
-      const sl = MC.candleSeries.createPriceLine({ price: cmd.spotSL, color: "#ea3943", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `SL ${cmd.spotSL}` });
-      MC.obMarkers.push(sl);
+  // ---- Curated IMPORTANT LEVELS (max 7, nearest to price) from existing engine
+  // outputs. Each line's axis label = TYPE PRICE; event levels (BOS/CHoCH/Sweep/
+  // Swing) also drop a marker on the candle that created them (originates there).
+  // The nearest level is drawn bold ("◀") — prominence as price approaches.
+  const all = buildMCLevels(d);
+  const kindOn = (k) => (k === "bos" || k === "choch") ? MC.show.bos !== false
+    : k === "sweep" ? MC.show.liq !== false
+    : k === "orb" ? MC.show.orb === true
+    : true;
+  const visible = all.filter((l) => kindOn(l.kind) && MC._inView(l.price)).slice(0, 7);
+  MC._activeLevels = visible;
+  const nearest = visible[0] || null;
+  visible.forEach((l) => {
+    const near = l === nearest;
+    const col = mcLevelColor(l);
+    // Structural walls = solid; ORB/PDH-PDL/swing = dashed; invalidation = dotted.
+    const style = l.kind === "invalidation" ? 1 : (l.kind === "orb" || l.kind === "pdhl" || l.kind === "swing" || l.strength === "MEDIUM") ? 2 : 0;
+    const line = MC.candleSeries.createPriceLine({ price: l.price, color: col, lineWidth: near ? 2 : 1, lineStyle: style, axisLabelVisible: true, title: `${l.short} ${mcFmtP(l.price)}${near ? " ◀" : ""}` });
+    MC.obMarkers.push(line);
+    if (l.time && (l.kind === "bos" || l.kind === "choch" || l.kind === "sweep" || l.kind === "swing")) {
+      markers.push({
+        time: l.time, position: l.side === "support" ? "belowBar" : "aboveBar", color: col,
+        shape: l.kind === "sweep" ? "circle" : l.kind === "swing" ? "square" : (l.side === "support" ? "arrowUp" : "arrowDown"),
+        text: l.short,
+      });
     }
-    if (cmd.spotT1 && MC._inView(cmd.spotT1)) {
-      const t1 = MC.candleSeries.createPriceLine({ price: cmd.spotT1, color: "#16c784", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `T1 ${cmd.spotT1}` });
-      MC.obMarkers.push(t1);
-    }
-    if (cmd.spotT2 && MC._inView(cmd.spotT2)) {
-      const t2 = MC.candleSeries.createPriceLine({ price: cmd.spotT2, color: "#16c784", lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: `T2 ${cmd.spotT2}` });
-      MC.obMarkers.push(t2);
-    }
-    // Entry zone
-    if (cmd.entryZone && cmd.entryZone !== "—") {
-      const parts = cmd.entryZone.split("–").map((s) => parseFloat(s.trim()));
-      if (parts.length === 2 && parts[0] && parts[1] && MC._inView(parts[0])) {
-        const ezLo = MC.candleSeries.createPriceLine({ price: parts[0], color: "#2962ff", lineWidth: 1, lineStyle: 1, axisLabelVisible: false, title: "" });
-        const ezHi = MC.candleSeries.createPriceLine({ price: parts[1], color: "#2962ff", lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title: "Entry Zone" });
-        MC.obMarkers.push(ezLo, ezHi);
-      }
-    }
-  }
+  });
+  MC.candleSeries.setMarkers(markers);
+  renderMCLevelsLegend(d);
 
-  // BOS markers: Confirmed = solid arrow "BOS"; Pre = faded circle "BOS?"
-  if (d.structure?.bosEvents?.length) {
-    const markers = d.structure.bosEvents.map((b) => {
-      const pre = b.stage === "Pre";
-      const bull = b.direction === "Bullish";
-      return {
-        time: b.time, position: bull ? "belowBar" : "aboveBar",
-        color: pre ? (bull ? "rgba(22,199,132,.55)" : "rgba(234,57,67,.55)") : (bull ? "#16c784" : "#ea3943"),
-        shape: pre ? "circle" : (bull ? "arrowUp" : "arrowDown"),
-        text: pre ? "BOS?" : "BOS",
-      };
-    });
-    MC.candleSeries.setMarkers(markers);
-  }
-
-  // Show only the recent ~120 bars (big candles, tight price range like the
-  // Selected Stock chart) on first render or a symbol/timeframe switch. Live 5s
-  // refreshes leave the user's current zoom/scroll alone.
+  // Frame the recent ~120 bars on first render / symbol / timeframe switch only.
   const viewKey = MC.sym + ":" + MC.tf;
   if (MC._fitKey !== viewKey) {
     MC.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, N - showBars), to: N + 2 });
     MC._fitKey = viewKey;
   }
+}
+
+// ---------- Important Levels: curate from EXISTING engine outputs (read-only) ----------
+// Pulls support/resistance walls, opening range, previous-day levels, swing points,
+// BOS, CHoCH and liquidity-sweep prices straight from the market-command payload —
+// no new calculation. Returns candidates de-duplicated and ranked nearest-to-price.
+function buildMCLevels(d) {
+  const spot = d.spot;
+  if (spot == null) return [];
+  const lv = d.levels || {}, oi = d.oi || {};
+  const cand = [];
+  const push = (kind, type, short, price, strength, side, time) => {
+    if (price == null || !isFinite(price)) return;
+    cand.push({ kind, type, short, price: Math.round(price * 100) / 100, strength, side, time: time || null });
+  };
+  push("resistance", "Strong Resistance", "Strong R", lv.strongResistance, "STRONG", "resistance");
+  push("support", "Strong Support", "Strong S", lv.strongSupport, "STRONG", "support");
+  push("resistance", "Resistance", "R", lv.weakResistance, "MEDIUM", "resistance");
+  push("support", "Support", "S", lv.weakSupport, "MEDIUM", "support");
+  push("resistance", "OI Resistance", "OI R", oi.resistance, "STRONG", "resistance");
+  push("support", "OI Support", "OI S", oi.support, "STRONG", "support");
+  push("orb", "Opening Range High", "ORH", lv.orbHigh, "MEDIUM", spot >= (lv.orbHigh ?? Infinity) ? "support" : "resistance");
+  push("orb", "Opening Range Low", "ORL", lv.orbLow, "MEDIUM", spot <= (lv.orbLow ?? -Infinity) ? "resistance" : "support");
+  push("pdhl", "Prev Day High", "PDH", lv.pdh, "MEDIUM", spot >= (lv.pdh ?? Infinity) ? "support" : "resistance");
+  push("pdhl", "Prev Day Low", "PDL", lv.pdl, "MEDIUM", spot <= (lv.pdl ?? -Infinity) ? "resistance" : "support");
+  const sw = (d.structure && d.structure.swingPoints) || [];
+  const swHi = [...sw].reverse().find((p) => (p.type === "HH" || p.type === "LH") && p.price > spot);
+  const swLo = [...sw].reverse().find((p) => (p.type === "HL" || p.type === "LL") && p.price < spot);
+  if (swHi) push("swing", "Swing High", "SwH", swHi.price, "MEDIUM", "resistance", swHi.time);
+  if (swLo) push("swing", "Swing Low", "SwL", swLo.price, "MEDIUM", "support", swLo.time);
+  const bos = d.bos;
+  if (bos && bos.price != null) push("bos", "BREAK OF STRUCTURE (BOS)", "BOS", bos.price, bos.stage === "Confirmed" ? "CONFIRMED" : "FORMING", bos.direction === "BULLISH" ? "support" : "resistance", bos.time);
+  const dc = d.structure && d.structure.directionChange;
+  if (dc && dc.stage && dc.stage !== "None" && bos && bos.price != null) push("choch", `CHANGE OF CHARACTER (CHoCH ${dc.from}→${dc.to})`, "CHoCH", bos.price, dc.stage === "Confirmed" ? "CONFIRMED" : "FORMING", dc.to === "Bullish" ? "support" : "resistance", bos.time);
+  const sweep = d.sweep && d.sweep.sweep;
+  if (sweep && sweep.sweepPrice != null) push("sweep", "Liquidity Sweep", "Sweep", sweep.sweepPrice, "EVENT", (d.sweep.direction === "UP" || d.sweep.direction === "Bullish") ? "resistance" : "support", sweep.breachTime);
+  if (d.command && d.command.spotSL != null) push("invalidation", "Invalidation", "SL", d.command.spotSL, "SL", "neutral");
+
+  // De-dup levels within ~0.05% of each other; keep the stronger.
+  const rank = { CONFIRMED: 5, STRONG: 4, EVENT: 3, MEDIUM: 2, FORMING: 2, SL: 1, WEAK: 1 };
+  const tol = spot * 0.0005;
+  const out = [];
+  cand.forEach((c) => {
+    const hit = out.find((x) => Math.abs(x.price - c.price) <= tol);
+    if (!hit) out.push(c);
+    else if ((rank[c.strength] || 0) > (rank[hit.strength] || 0)) Object.assign(hit, c);
+  });
+  out.forEach((c) => { c._dist = Math.abs(c.price - spot); });
+  out.sort((a, b) => a._dist - b._dist || (rank[b.strength] || 0) - (rank[a.strength] || 0));
+  return out;
+}
+function mcLevelColor(l) {
+  return l.kind === "choch" ? "#a855f7"
+    : l.kind === "bos" ? (l.side === "support" ? "#16c784" : "#ea3943")
+    : l.kind === "sweep" ? "#f0b90b"
+    : l.kind === "invalidation" ? "#ea3943"
+    : l.kind === "orb" ? "#38bdf8"
+    : l.kind === "pdhl" ? "#94a3b8"
+    : l.side === "resistance" ? "#ea3943" : "#16c784";
+}
+function mcFmtP(v) { return v != null ? Number(v).toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—"; }
+
+// Top-of-chart stat strip: EMA9 / EMA21 / VWAP / India VIX / 5M / 15M trend +
+// Dhan connection + data age. All from the same authoritative snapshot (d).
+function renderMCTopStats(d) {
+  const ov = d.overlays || {};
+  const lastVal = (arr) => { if (!Array.isArray(arr)) return null; for (let i = arr.length - 1; i >= 0; i--) if (arr[i] != null) return arr[i]; return null; };
+  const set = (id, v) => { const e = el(id); if (e) e.textContent = v == null ? "—" : mcFmtP(v); };
+  set("mc-leg-ema9-v", lastVal(ov.ema9));
+  set("mc-leg-ema21-v", lastVal(ov.ema21));
+  set("mc-leg-vwap-v", lastVal(ov.vwap));
+  const vixEl = el("mc-leg-vix-v");
+  if (vixEl) vixEl.textContent = d.vix && d.vix.available && d.vix.value != null ? Number(d.vix.value).toFixed(2) : "—";
+  const tf = d.timeframes || {};
+  const trend = (id, v) => { const e = el(id); if (e) { e.textContent = v === "BULLISH" ? "▲" : v === "BEARISH" ? "▼" : v || "—"; e.className = ""; e.style.color = v === "BULLISH" ? "#16c784" : v === "BEARISH" ? "#ea3943" : "#94a3b8"; } };
+  trend("mc-leg-5m", tf.m5);
+  trend("mc-leg-15m", tf.m15);
+  const conn = el("mc-leg-conn");
+  if (conn) {
+    const live = d.dhanLive && !d.dataStale;
+    conn.textContent = (d.historical ? "REPLAY" : d.dhanLive ? (d.dataStale ? "STALE" : "LIVE") : "OFF") + (d.dataAgeSec != null ? ` · ${d.dataAgeSec}s` : "");
+    conn.style.color = live ? "#16c784" : "#ea3943";
+  }
+}
+
+// Compact TYPE | PRICE | STRENGTH | TIME legend beside/under the chart.
+function renderMCLevelsLegend(d) {
+  const box = el("mc-levels-legend");
+  if (!box) return;
+  const levels = MC._activeLevels || [];
+  if (!MC.show.levels || !levels.length) { box.innerHTML = `<span class="mc-lvl-empty">${MC.show.levels ? "No active levels near price." : "Important Levels off."}</span>`; return; }
+  const hm = (t) => t ? new Date((t + 19800) * 1000).toISOString().slice(11, 16) : "—";
+  box.innerHTML = levels.map((l, i) => {
+    const near = i === 0;
+    const sideCls = l.side === "resistance" ? "res" : l.side === "support" ? "sup" : "neu";
+    return `<span class="mc-lvl ${sideCls} k-${l.kind}${near ? " near" : ""}" title="${l.type}">` +
+      `<b>${l.short}</b> ${mcFmtP(l.price)}` +
+      `<span class="mc-lvl-str">${l.strength}</span>` +
+      `<span class="mc-lvl-time">${hm(l.time)}</span>` +
+      (near ? `<span class="mc-lvl-tag">TESTING</span>` : "") +
+      `</span>`;
+  }).join("");
 }
 
 function applyMCOverlays() {
