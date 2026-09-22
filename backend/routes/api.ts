@@ -4141,6 +4141,7 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
     const closes = candles.map((c: any) => c.close);
     const ema21Arr = ema(closes, 21);
     const ema50Arr = ema(closes, 50);
+    const ema200Arr = ema(closes, 200);
     const vwapArr = vwap(candles);
     const ema9Arr = ema(closes, 9);
     const atr14Arr = atr(candles, 14);
@@ -4498,6 +4499,20 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       bos: latestBos,
       earlyMove,
       timeframes,
+      // Option chain rows (ATM ±3) for the trader table — real CE/PE from the live chain.
+      optionChain: (() => {
+        if (skipOi || !oiChain?.available || !Array.isArray(oiChain.topStrikes) || oiChain.underlying == null) return { available: false, atmStrike: null, rows: [] };
+        const spotU = oiChain.underlying as number;
+        const sorted = oiChain.topStrikes.slice().filter((s: any) => s.strike > 0).sort((a: any, b: any) => a.strike - b.strike);
+        const atm = sorted.reduce((b: any, s: any) => (b == null || Math.abs(s.strike - spotU) < Math.abs(b.strike - spotU) ? s : b), null);
+        const ai = atm ? sorted.findIndex((s: any) => s.strike === atm.strike) : -1;
+        const rows = ai < 0 ? [] : sorted.slice(Math.max(0, ai - 3), ai + 4).map((s: any) => ({
+          strike: s.strike, moneyness: s.strike < spotU ? "ITM-CE" : s.strike > spotU ? "OTM-CE" : "ATM",
+          ceLtp: s.ceLtp ?? null, ceChgPct: s.ceLtp != null && s.ceLtpChgPct != null ? s.ceLtpChgPct : null, ceOi: s.ceOi ?? null,
+          peLtp: s.peLtp ?? null, peChgPct: s.peLtp != null && s.peLtpChgPct != null ? s.peLtpChgPct : null, peOi: s.peOi ?? null,
+        }));
+        return { available: rows.length > 0, atmStrike: atm?.strike ?? null, rows };
+      })(),
       // India VIX (live; expected 30-day NIFTY volatility — NOT a direction signal)
       vix: vix ? {
         available: !!vix.available, value: vix.value, change: vix.change, changePct: vix.changePct,
@@ -4513,6 +4528,7 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       // Indicator overlays (arrays aligned to candles)
       overlays: {
         ema9: align(ema9Arr),
+        ema200: align(ema200Arr),
         ema21: align(ema21Arr),
         ema50: align(ema50Arr),
         vwap: align(vwapArr),

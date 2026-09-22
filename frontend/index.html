@@ -1333,6 +1333,7 @@
                     <label class="mc-tog"><input type="checkbox" id="mc-tog-vwap" checked><span class="mc-tog-dot" style="background:#d29922"></span>VWAP</label>
                     <label class="mc-tog"><input type="checkbox" id="mc-tog-ema21" checked><span class="mc-tog-dot" style="background:#58a6ff"></span>EMA 21</label>
                     <label class="mc-tog"><input type="checkbox" id="mc-tog-ema50" checked><span class="mc-tog-dot" style="background:#bc8cff"></span>EMA 50</label>
+                    <label class="mc-tog"><input type="checkbox" id="mc-tog-ema200" checked><span class="mc-tog-dot" style="background:#e056a0"></span>EMA 200</label>
                     <label class="mc-tog"><input type="checkbox" id="mc-tog-ema9"><span class="mc-tog-dot" style="background:#ffa657"></span>EMA 9</label>
                     <label class="mc-tog"><input type="checkbox" id="mc-tog-vol" checked><span class="mc-tog-dot" style="background:#16c784"></span>Volume</label>
                     <label class="mc-tog"><input type="checkbox" id="mc-tog-levels"><span class="mc-tog-dot" style="background:#2962ff"></span>Show Levels</label>
@@ -1442,6 +1443,16 @@
                     <div class="mc-td-row"><span class="mc-td-label">Strike Price</span><span class="mc-td-val" id="mc-cmd-strike">—</span></div>
                     <div class="mc-td-row"><span class="mc-td-label">LTP</span><span class="mc-td-val" id="mc-cmd-ltp">—</span></div>
                   </div>
+                </div>
+
+                <!-- Live Option Chain (ATM±3, real CE/PE from the chain) -->
+                <div class="mc-section-head">
+                  <span style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#787b86">Option Chain</span>
+                  <span id="mc-oc-atm" style="margin-left:auto;font-size:10px;color:#787b86"></span>
+                </div>
+                <div class="mc-oc" id="mc-oc">
+                  <div class="mc-oc-unavail" id="mc-oc-unavail" hidden>Option chain unavailable</div>
+                  <table class="mc-oc-table" id="mc-oc-table" hidden></table>
                 </div>
 
                 <!-- Option Strike Analysis (collapsible, read-only) -->

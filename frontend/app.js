@@ -5541,7 +5541,7 @@ const MC = {
   sym: "^NSEI", tf: "15m", chart: null, candleSeries: null,
   ema9Series: null, ema21Series: null, ema50Series: null, vwapSeries: null,
   obMarkers: [], priceLine: null, timer: null, loading: false, lastData: null,
-  show: { vwap: true, ema21: true, ema50: true, ema9: false, ob: true, vol: true, levels: false },
+  show: { vwap: true, ema21: true, ema50: true, ema9: false, ema200: true, ob: true, vol: true, levels: false },
   replayDate: null, // yyyy-mm-dd when replaying a past session; null = live
 };
 
@@ -5573,7 +5573,7 @@ function initMarketCommand() {
   });
 
   // Wire indicator toggles
-  ["vwap", "ema21", "ema50", "ema9", "ob", "vol", "levels"].forEach((k) => {
+  ["vwap", "ema21", "ema50", "ema9", "ema200", "ob", "vol", "levels"].forEach((k) => {
     const cb = el("mc-tog-" + k);
     if (cb) cb.addEventListener("change", () => {
       MC.show[k] = cb.checked;
@@ -5679,6 +5679,7 @@ function initMarketCommand() {
   MC.ema9Series = MC.chart.addLineSeries({ color: "#ffa657", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
   MC.ema21Series = MC.chart.addLineSeries({ color: "#58a6ff", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
   MC.ema50Series = MC.chart.addLineSeries({ color: "#bc8cff", lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
+  MC.ema200Series = MC.chart.addLineSeries({ color: "#e056a0", lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
   MC.vwapSeries = MC.chart.addLineSeries({ color: "#d29922", lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
 
   window.addEventListener("resize", () => {
@@ -5734,6 +5735,7 @@ async function loadMarketCommand(chartOnly = false) {
     renderMCStrikes(d);
     renderMCMarketView(d);
     renderMCPlan(d);
+    renderMCOptionChain(d);
   } catch (e) {
     console.error("[MarketCommand]", e);
   }
@@ -5862,6 +5864,30 @@ function renderMCMarketView(d) {
     if (ve) txt += ` · VIX env: ${ve.environment}${ve.optionBuying && ve.optionBuying !== "INSUFFICIENT DATA" ? " · option-buying " + ve.optionBuying : ""}`;
     based.textContent = txt;
   }
+}
+
+function renderMCOptionChain(d) {
+  const oc = d.optionChain;
+  const tbl = el("mc-oc-table"), un = el("mc-oc-unavail"), atmEl = el("mc-oc-atm");
+  if (!tbl) return;
+  if (!oc || !oc.available || !oc.rows || !oc.rows.length) {
+    tbl.hidden = true; if (un) un.hidden = false;
+    if (atmEl) atmEl.textContent = "";
+    return;
+  }
+  if (un) un.hidden = true; tbl.hidden = false;
+  if (atmEl) atmEl.textContent = oc.atmStrike != null ? "ATM " + oc.atmStrike : "";
+  const k = (v) => v == null ? "—" : Math.abs(v) >= 1e7 ? (v / 1e7).toFixed(1) + "Cr" : Math.abs(v) >= 1e5 ? (v / 1e5).toFixed(1) + "L" : Math.abs(v) >= 1e3 ? (v / 1e3).toFixed(0) + "K" : String(Math.round(v));
+  const pct = (v) => v == null ? "" : `<span class="${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : ""}${v}%</span>`;
+  const head = `<tr><th class="ce-side">Call LTP</th><th>Chg</th><th>OI</th><th class="strike-col">Strike</th><th class="pe-side">Put LTP</th><th>Chg</th><th>OI</th></tr>`;
+  const rows = oc.rows.map((r) => {
+    const atm = r.strike === oc.atmStrike;
+    return `<tr class="${atm ? "atm" : ""}">` +
+      `<td class="ce ce-side">${r.ceLtp != null ? r.ceLtp : "—"}</td><td>${pct(r.ceChgPct)}</td><td>${k(r.ceOi)}</td>` +
+      `<td class="strike-col">${r.strike}</td>` +
+      `<td class="pe pe-side">${r.peLtp != null ? r.peLtp : "—"}</td><td>${pct(r.peChgPct)}</td><td>${k(r.peOi)}</td></tr>`;
+  }).join("");
+  tbl.innerHTML = head + rows;
 }
 
 function renderMCStrikes(d) {
@@ -6061,6 +6087,7 @@ function applyMCOverlays() {
   MC.ema9Series.setData(MC.show.ema9 ? align(ov.ema9) : []);
   MC.ema21Series.setData(MC.show.ema21 ? align(ov.ema21) : []);
   MC.ema50Series.setData(MC.show.ema50 ? align(ov.ema50) : []);
+  if (MC.ema200Series) MC.ema200Series.setData(MC.show.ema200 ? align(ov.ema200) : []);
   MC.vwapSeries.setData(MC.show.vwap ? align(ov.vwap) : []);
   if (MC.volSeries) MC.volSeries.setData(MC.show.vol ? (MC._volumes || []) : []);
 

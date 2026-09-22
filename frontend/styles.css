@@ -4121,6 +4121,18 @@ body.mode-decisionflow #index-strip { display: none !important; }
 /* Option Selection box */
 .mc-option-box { padding: 10px 14px; }
 
+/* Live Option Chain table */
+.mc-oc { padding: 4px 10px 10px; }
+.mc-oc-unavail { font-size: 11px; color: #f7931a; padding: 8px; text-align: center; }
+.mc-oc-table { width: 100%; border-collapse: collapse; font-size: 11px; font-variant-numeric: tabular-nums; }
+.mc-oc-table th { color: #787b86; font-weight: 600; font-size: 9px; text-transform: uppercase; letter-spacing: .3px; padding: 3px 4px; border-bottom: 1px solid #2a2e39; text-align: right; }
+.mc-oc-table td { padding: 4px; text-align: right; border-bottom: 1px solid #1e222d; color: #d1d4dc; }
+.mc-oc-table .strike-col { text-align: center; font-weight: 700; color: #d1d4dc; background: #131722; }
+.mc-oc-table tr.atm .strike-col { background: rgba(41,98,255,.18); color: #58a6ff; }
+.mc-oc-table .ce { color: #16c784; } .mc-oc-table .pe { color: #ea3943; }
+.mc-oc-table .up { color: #16c784; } .mc-oc-table .down { color: #ea3943; }
+.mc-oc-table .ce-side { border-right: 1px solid #2a2e39; } .mc-oc-table .pe-side { border-left: 1px solid #2a2e39; }
+
 /* Option Strike Analysis */
 .mc-strike-box { padding: 8px 14px 12px; }
 .mc-strike-unavail { font-size: 11px; font-weight: 700; color: #f7931a; background: rgba(247,147,26,.1); border: 1px solid rgba(247,147,26,.25); border-radius: 4px; padding: 8px; text-align: center; }
