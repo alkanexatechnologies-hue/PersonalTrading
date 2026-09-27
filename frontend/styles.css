@@ -4347,8 +4347,8 @@ body.mode-decisionflow #index-strip { display: none !important; }
    (chart + Intraday Assistance / Option Chain / Market View) uses the whole width. */
 body.mc-fullwidth .watchlist { display: none !important; }
 body.mc-fullwidth .content { padding-left: 0; padding-right: 0; }
-body.mc-fullwidth #panel-marketcommand .mc2-right { width: 500px; }
-@media (max-width: 1200px) { body.mc-fullwidth #panel-marketcommand .mc2-right { width: 420px; } }
+body.mc-fullwidth #panel-marketcommand .mc2-right { width: 250px; }
+@media (max-width: 1200px) { body.mc-fullwidth #panel-marketcommand .mc2-right { width: 230px; } }
 
 /* Market Command = true full-screen: hide the app strips/tabs above it and let
    the panel fill the whole content area (its own mc2-top becomes the header). */
@@ -4878,3 +4878,14 @@ body.te-fullwidth .content { padding:0 !important; }
 .mc2-idxnews-dots span { width: 5px; height: 5px; border-radius: 50%; background: #33415a; }
 .mc2-idxnews-dots span.on { background: #2f7dff; }
 @media (max-width: 1100px) { .mc2-idxnews { flex: 1 1 100%; } }
+
+/* Compact the Market Command right-column panels (OI Movement + lower panels) so
+   the chart gets more width. Narrower column (250px) + tighter panels. */
+.mc2-right { padding: 8px !important; gap: 8px !important; }
+.mc2-right .mc2-panel { padding: 8px 10px; border-radius: 9px; }
+.mc2-right .mc2-panel-hd { margin-bottom: 6px; }
+.mc2-right .mc2-panel-title { font-size: 12px; }
+.mc2-right .mc2-fm-grid { gap: 4px 8px; margin: 6px 0; }
+.mc2-right .mc2-fm-v { font-size: 0.74rem; }
+.mc2-right table { font-size: 11px; }
+.mc2-right .mc2-fm-badge { font-size: 0.66rem; padding: 1px 6px; }
