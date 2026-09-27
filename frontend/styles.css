@@ -4829,3 +4829,31 @@ body.te-fullwidth .content { padding:0 !important; }
 .mc2-idxdir .mc2-ia-levels .mc2-ia-k { font-size: 8px; margin-bottom: 0; }
 .mc2-idxdir .mc2-ia-lvv { font-size: 10.5px; }
 @media (max-width: 1100px) { .mc2-idxdir { flex: 1; max-width: none; } }
+
+/* Index Direction: ~half again — direction items become inline text (no chip
+   boxes), single-line rows, minimal padding. Target ~half of ~114px. */
+.mc2-idxdir { padding: 4px 10px; }
+.mc2-idxdir .mc2-panel-hd { margin-bottom: 2px; }
+.mc2-idxdir .mc2-ia-dirs { gap: 14px; margin-bottom: 2px; align-items: baseline; flex-wrap: wrap; }
+.mc2-idxdir .mc2-ia-dir { background: transparent; border: none; padding: 0; display: flex; flex: 0 0 auto; align-items: baseline; gap: 4px; }
+.mc2-idxdir .mc2-ia-dir .mc2-ia-k { display: inline; margin: 0; }
+.mc2-idxdir .mc2-ia-levels { gap: 0 12px; padding-top: 0; }
+
+/* Index Direction: final tighten — smaller fonts + line-height, minimal padding. */
+.mc2-idxdir { padding: 3px 10px; }
+.mc2-idxdir .mc2-panel-hd { margin-bottom: 0; }
+.mc2-idxdir .mc2-panel-title { font-size: 11px; }
+.mc2-idxdir .mc2-ia-badge { font-size: 9px; padding: 1px 5px; }
+.mc2-idxdir .mc2-ia-dirs { margin-bottom: 1px; }
+.mc2-idxdir .mc2-ia-dir .mc2-ia-v { font-size: 11px; }
+.mc2-idxdir .mc2-ia-levels { line-height: 1.2; }
+.mc2-idxdir .mc2-ia-lvv { font-size: 10px; }
+.mc2-idxdir .mc2-ia-levels .mc2-ia-k { font-size: 7.5px; }
+
+/* Compact the India VIX card so the top strip (and the Index Direction panel it
+   stretches to match) is ~half height. */
+#mc2-cards .mc2-card { padding: 5px 12px; }
+#mc2-cards .mc2-card-hd { font-size: 10px; }
+#mc2-cards .mc2-card-row { margin-top: 2px; }
+#mc2-cards .mc2-card-val { font-size: 17px; }
+#mc2-cards .mc2-spark { height: 16px; margin-top: 1px; }

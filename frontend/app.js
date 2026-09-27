@@ -7434,7 +7434,7 @@ function renderMCIntraday(d) {
   const levels = MC._activeLevels || [];
   const cur = levels[0] || null;
   const curEl = el("mc-ia-curlevel");
-  if (curEl) { curEl.textContent = cur ? `${mcFmtP(cur.price)} · ${cur.type.replace(/ \(.*\)/, "")}` : "—"; curEl.className = "mc2-ia-lvv " + (cur ? (cur.side === "resistance" ? "BEARISH" : cur.side === "support" ? "BULLISH" : "") : ""); }
+  if (curEl) { curEl.textContent = cur ? `${mcFmtP(cur.price)} · ${cur.short || cur.type.replace(/ \(.*\)/, "")}` : "—"; curEl.className = "mc2-ia-lvv " + (cur ? (cur.side === "resistance" ? "BEARISH" : cur.side === "support" ? "BULLISH" : "") : ""); }
   // Next level: in the direction of travel — resistance above (bullish) / support below (bearish).
   const dirNow = (mv.direction || tp.direction || "");
   let next = null;
@@ -7447,7 +7447,13 @@ function renderMCIntraday(d) {
   if (nextEl) nextEl.textContent = next ? `${mcFmtP(next.price)} · ${next.short}` : "—";
   const invEl = el("mc-ia-inval");
   const inval = tp.stopLoss ?? d.command?.spotSL ?? null;
-  if (invEl) invEl.textContent = inval != null ? mcFmtP(inval) : "—";
+  if (invEl) {
+    invEl.textContent = inval != null ? mcFmtP(inval) : "—";
+    // Hide the whole Invalidation item when there's no level, so the compact
+    // Index Direction strip stays on one row of levels (shorter).
+    const invItem = invEl.closest(".mc2-ia-lv");
+    if (invItem) invItem.style.display = inval != null ? "" : "none";
+  }
 }
 
 function renderMCBottom(d) {
