@@ -4796,3 +4796,21 @@ body.te-fullwidth .content { padding:0 !important; }
 .mc2-idxdir .mc2-panel-hd { margin-bottom: 8px; }
 .mc2-idxdir .mc2-ia-upd { margin-left: auto; font-size: 10px; color: #5f6f88; }
 @media (max-width: 900px) { .mc2-cards { flex-wrap: wrap; } .mc2-cards .mc2-card { flex: 1 1 160px; } }
+
+/* Compact the Index Direction panel to ~half height (same width). */
+.mc2-idxdir { padding: 6px 12px; }
+.mc2-idxdir .mc2-panel-hd { margin-bottom: 6px; }
+.mc2-idxdir .mc2-ia-dirs { gap: 6px; margin-bottom: 6px; }
+.mc2-idxdir .mc2-ia-dir { padding: 3px 8px; }
+.mc2-idxdir .mc2-ia-k { margin-bottom: 0; font-size: 9px; }
+.mc2-idxdir .mc2-ia-v { font-size: 13px; }
+.mc2-idxdir .mc2-ia-levels { gap: 1px 18px; padding: 5px 0 0; margin: 0; }
+.mc2-idxdir .mc2-ia-levels .mc2-ia-k { font-size: 8px; }
+.mc2-idxdir .mc2-ia-lvv { font-size: 11px; }
+
+/* Tighten Index Direction further toward ~half the original height. */
+.mc2-idxdir { padding: 5px 12px 4px; }
+.mc2-idxdir .mc2-panel-hd { margin-bottom: 4px; }
+.mc2-idxdir .mc2-ia-dirs { margin-bottom: 4px; }
+.mc2-idxdir .mc2-ia-dir { padding: 2px 8px; }
+.mc2-idxdir .mc2-ia-levels { gap: 0 18px; padding-top: 3px; }
