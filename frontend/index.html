@@ -162,12 +162,6 @@
             <span class="mg-d">Live Order Block trading: Chart + Structure + OI + Master Trade Selector → TAKE / WAIT</span>
             <button type="button" class="mg-cta">Open Market Command →</button>
           </article>
-          <article class="mg-btn mg-option" data-mode="option" role="button" tabindex="0">
-            <span class="mg-ico">🎯</span>
-            <span class="mg-t">Index Option Trading</span>
-            <span class="mg-d">Trader Dashboard · Liquidity Status · Master Strategy Lab</span>
-            <button type="button" class="mg-cta">Open Index Option Trading →</button>
-          </article>
           <article class="mg-btn mg-stockoption" data-mode="stockOption" role="button" tabindex="0">
             <span class="mg-ico">📊</span>
             <span class="mg-t">Stock Option Trading</span>
@@ -204,7 +198,7 @@
         </div>
 
         <div id="home-tip" class="home-tip">
-          <span>💡 <b>Pro Tip:</b> Start with Index Option Trading for today's market view, or run a backtest to validate your strategy.</span>
+          <span>💡 <b>Pro Tip:</b> Start with Market Command for today's market view, or run a backtest to validate your strategy.</span>
           <button type="button" id="home-tip-close" aria-label="Dismiss">✕</button>
         </div>
 
@@ -424,7 +418,7 @@
         <span id="regime-ind" class="pill" title="Market regime from NIFTY 15m ADX. Range-bound = avoid buying options (theta bleed).">regime: -</span>
         <span id="success-ind" class="pill" title="Measured track record from the autonomous paper-trading run">success: -</span>
         <span id="early-ind" class="pill early-ind" title="Early-Move alert: a move in its INITIAL stage (fresh momentum + volume, not extended, potential still to run). Click to open it.">⚡ early: -</span>
-        <button id="mode-switch" class="pill-btn" title="Switch between Index Option Trading, Stock Option Trading and Stock Swing Trading desks">⇄ Desk</button>
+        <button id="mode-switch" class="pill-btn" title="Switch between Market Command, Stock Option Trading and Stock Swing Trading desks">⇄ Desk</button>
         <!-- Dhan/Telegram connection management now lives in the Admin
              Control Center's "Connections" card only - these three legacy
              trigger buttons stay in the DOM (existing JS still targets them

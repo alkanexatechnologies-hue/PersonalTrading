@@ -2100,13 +2100,16 @@ function showModeGate(allowClose) {
 }
 
 function chooseMode(mode) {
-  if (!VALID_MODES.includes(mode)) mode = "option";
+  if (!VALID_MODES.includes(mode)) mode = "marketcommand";
   try { localStorage.setItem(MODE_KEY, mode); } catch (_) {}
   el("mode-gate")?.classList.add("hidden");
   applyMode(mode);
 }
 
 function applyMode(mode) {
+  // The "Index Option Trading" desk was removed from the app — send any request
+  // for it (a saved mode, a stale link) to Market Command instead.
+  if (mode === "option") mode = "marketcommand";
   const body = document.body;
   VALID_MODES.forEach((m) => body.classList.toggle("mode-" + m, m === mode));
   renderMobileNav(mode);
