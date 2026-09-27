@@ -1904,7 +1904,7 @@ function switchTab(name) {
   // right column (Intraday Assistance / Option Chain / Market View) gets more space.
   document.body.classList.toggle("mc-fullwidth", name === "marketcommand");
   if (name === "marketcommand") {
-    initMarketCommand(); startMarketCommandLive();
+    initMarketCommand(); startMarketCommandLive(); startIndexNewsLive();
     if (MC.chart) setTimeout(() => { const c = el("mc-chart-container"); if (c) MC.chart.applyOptions({ width: c.clientWidth }); }, 60);
   }
   // Option Terminal — full-width (keeps the tab bar), follows Market Command's index.
@@ -5618,6 +5618,7 @@ function initMarketCommand() {
       MC.sym = btn.getAttribute("data-sym");
       MC._fitKey = null;
       loadMarketCommand(!MC.replayDate); // fast chart first (live only)
+      loadIndexNews(); // refresh the flashing news for the newly-selected index
     });
   });
 
@@ -7077,6 +7078,76 @@ function renderMCIndexCards() {
       sv.innerHTML = `<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.5" opacity="0.85"/>`;
     }
   }
+}
+
+// ===================== Index News (flashes best index-related headlines) =====================
+// Uses the existing /api/news RSS feed, filtered to the selected index, and
+// flashes the best headlines one at a time next to the Index Direction panel.
+// Informational only — never touches the deterministic engines.
+const IDXNEWS = { items: [], idx: 0, sym: null, timer: null, rotTimer: null };
+function idxNewsKeywords(sym) {
+  switch (sym) {
+    case "^NSEBANK": return ["bank nifty", "banknifty", "bank index", "hdfc bank", "icici bank", "sbi ", "axis bank", "kotak", "psu bank"];
+    case "^CNXFIN": return ["finnifty", "fin nifty", "financial", "nbfc", "bajaj fin", "insurance"];
+    case "^NSEMDCP50": return ["midcap", "mid cap", "mid-cap", "smallcap"];
+    case "^BSESN": return ["sensex", "bse "];
+    default: return ["nifty 50", "nifty50", "nifty"];
+  }
+}
+async function loadIndexNews() {
+  const flashEl = document.getElementById("mc-idxnews-flash");
+  if (!flashEl) return;
+  const sym = (typeof MC !== "undefined" && MC.sym) || "^NSEI";
+  try {
+    const d = await fetch("/api/news").then((r) => r.json());
+    if (!Array.isArray(d.items)) return;
+    const kw = idxNewsKeywords(sym);
+    const generic = /nifty|sensex|rbi|fed|fii|dii|rupee|crude|market|index|option|sebi|inflation|gdp|nse|bse/i;
+    const matchKw = (t) => kw.some((k) => (t || "").toLowerCase().includes(k));
+    let items = d.items.filter((n) => matchKw(n.title));
+    if (items.length < 3) items = items.concat(d.items.filter((n) => !matchKw(n.title) && generic.test(n.title || "")));
+    // "Best" = high-impact first (stable sort keeps the feed's newest-first order).
+    items = items.map((n, i) => ({ n, i })).sort((a, b) => ((b.n.impact === "high" ? 1 : 0) - (a.n.impact === "high" ? 1 : 0)) || (a.i - b.i)).map((x) => x.n).slice(0, 6);
+    IDXNEWS.items = items; IDXNEWS.sym = sym; IDXNEWS.idx = 0;
+    const biasEl = document.getElementById("mc-idxnews-bias");
+    if (biasEl) biasEl.textContent = d.summary && d.summary.bias ? `bias: ${d.summary.bias}` : "";
+    const updEl = document.getElementById("mc-idxnews-upd");
+    if (updEl && d.asOf) updEl.textContent = "upd " + new Date(d.asOf * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+    renderIndexNewsFlash();
+  } catch { /* keep last */ }
+}
+function renderIndexNewsFlash() {
+  const flashEl = document.getElementById("mc-idxnews-flash");
+  const titleEl = document.getElementById("mc-idxnews-title");
+  const dotEl = document.getElementById("mc-idxnews-dot");
+  const srcEl = document.getElementById("mc-idxnews-src");
+  const dotsEl = document.getElementById("mc-idxnews-dots");
+  if (!flashEl || !titleEl) return;
+  const items = IDXNEWS.items;
+  if (!items.length) { titleEl.textContent = "No index news right now."; if (srcEl) srcEl.textContent = ""; if (dotsEl) dotsEl.innerHTML = ""; flashEl.href = "#"; return; }
+  const pos = IDXNEWS.idx % items.length;
+  const n = items[pos];
+  const sent = n.sentiment === "positive" ? "pos" : n.sentiment === "negative" ? "neg" : "neu";
+  flashEl.className = "mc2-idxnews-flash " + sent;
+  flashEl.href = n.link || "#";
+  if (dotEl) dotEl.textContent = n.sentiment === "positive" ? "▲" : n.sentiment === "negative" ? "▼" : "•";
+  if (titleEl) titleEl.textContent = (n.title || "").slice(0, 150) + (n.impact === "high" ? "  ⚡" : "");
+  if (srcEl) srcEl.textContent = `${n.source || ""}${n.ago ? " · " + n.ago : ""}`;
+  if (dotsEl) dotsEl.innerHTML = items.map((_, i) => `<span class="${i === pos ? "on" : ""}"></span>`).join("");
+  flashEl.classList.remove("flash"); void flashEl.offsetWidth; flashEl.classList.add("flash");
+}
+function startIndexNewsLive() {
+  if (IDXNEWS.sym !== ((typeof MC !== "undefined" && MC.sym) || "^NSEI") || !IDXNEWS.items.length) loadIndexNews();
+  else renderIndexNewsFlash();
+  if (!IDXNEWS.rotTimer) IDXNEWS.rotTimer = setInterval(() => {
+    const pn = document.getElementById("panel-marketcommand");
+    if (!pn || !pn.classList.contains("active")) return;
+    if (IDXNEWS.items.length > 1) { IDXNEWS.idx = (IDXNEWS.idx + 1) % IDXNEWS.items.length; renderIndexNewsFlash(); }
+  }, 5000);
+  if (!IDXNEWS.timer) IDXNEWS.timer = setInterval(() => {
+    const pn = document.getElementById("panel-marketcommand");
+    if (pn && pn.classList.contains("active")) loadIndexNews();
+  }, 120000);
 }
 
 // ===================== ADDITIVE: Multi-Timeframe Fake Move panel =====================

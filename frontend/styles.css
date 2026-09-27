@@ -4857,3 +4857,24 @@ body.te-fullwidth .content { padding:0 !important; }
 #mc2-cards .mc2-card-row { margin-top: 2px; }
 #mc2-cards .mc2-card-val { font-size: 17px; }
 #mc2-cards .mc2-spark { height: 16px; margin-top: 1px; }
+
+/* Index News panel — flashes the best index-related headline, next to Index Direction. */
+.mc2-idxnews { flex: 1; min-width: 0; padding: 5px 12px; display: flex; flex-direction: column; }
+.mc2-idxnews .mc2-panel-hd { margin-bottom: 4px; }
+.mc2-idxnews .mc2-panel-title { font-size: 11px; }
+.mc2-idxnews-bias { font-size: 10px; color: #94a3b8; margin-left: 8px; }
+.mc2-idxnews-upd { margin-left: auto; font-size: 9px; color: #5f6f88; }
+.mc2-idxnews-flash { display: flex; align-items: baseline; gap: 7px; text-decoration: none; color: #e6ecf5;
+  font-size: 12.5px; line-height: 1.3; overflow: hidden; padding: 2px 4px; border-radius: 5px; }
+.mc2-idxnews-flash.flash { animation: idxnewsFlash 0.7s ease; }
+@keyframes idxnewsFlash { 0% { background: rgba(47,125,255,.28); } 100% { background: transparent; } }
+.mc2-idxnews-dot { font-weight: 800; }
+.mc2-idxnews-flash.pos .mc2-idxnews-dot { color: #22c55e; }
+.mc2-idxnews-flash.neg .mc2-idxnews-dot { color: #ef4444; }
+.mc2-idxnews-flash.neu .mc2-idxnews-dot { color: #94a3b8; }
+.mc2-idxnews-title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.mc2-idxnews-src { font-size: 9.5px; color: #5f6f88; white-space: nowrap; }
+.mc2-idxnews-dots { display: flex; gap: 4px; margin-top: 5px; }
+.mc2-idxnews-dots span { width: 5px; height: 5px; border-radius: 50%; background: #33415a; }
+.mc2-idxnews-dots span.on { background: #2f7dff; }
+@media (max-width: 1100px) { .mc2-idxnews { flex: 1 1 100%; } }
