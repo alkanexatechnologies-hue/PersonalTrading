@@ -6060,7 +6060,7 @@ function startOptionTerminalLive() {
 // persisted /api/trade-log. Important Market Levels come from the SAME curated
 // engine as Market Command (buildMCLevels). Nothing is fabricated.
 const TE = {
-  sym: "^NSEI", tf: "15m", filter: "All", chart: null, candle: null, e9: null, e20: null, e50: null, vwap: null,
+  sym: "^NSEI", tf: "15m", filter: "All", chart: null, candle: null, e9: null, e20: null, e50: null, vwap: null, vol: null,
   timer: null, loading: false, lastData: null, trades: [], _levels: [], _init: false, _fitKey: null, _tick: 0, _levelLines: [],
 };
 function teEl(id) { return document.getElementById(id); }
@@ -6106,6 +6106,9 @@ function initTradeExec() {
     TE.e20 = TE.chart.addLineSeries({ color: "#3b82f6", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });  // blue
     TE.e50 = TE.chart.addLineSeries({ color: "#a855f7", lineWidth: 2, priceLineVisible: false, lastValueVisible: false });  // purple
     TE.vwap = TE.chart.addLineSeries({ color: "#00e5ff", lineWidth: 3, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }); // bright cyan
+    // Volume histogram on its own scale, pinned to the bottom ~22% of the chart.
+    TE.vol = TE.chart.addHistogramSeries({ priceScaleId: "te-vol", priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false });
+    TE.chart.priceScale("te-vol").applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
     try { new ResizeObserver(() => TE.chart.applyOptions({ width: c.clientWidth, height: c.clientHeight || 520 })).observe(c); } catch { /* noop */ }
   }
   teEl("te-idx-btns")?.querySelectorAll(".te-idxbtn").forEach((b) => b.addEventListener("click", () => {
@@ -6296,8 +6299,15 @@ function renderTETrades() {
 function teDrawChart(d) {
   if (!TE.chart || !TE.candle) return;
   const cs = (d.candles || []).map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close }));
-  if (!cs.length) { TE.candle.setData([]); return; }
+  if (!cs.length) { TE.candle.setData([]); if (TE.vol) TE.vol.setData([]); return; }
   TE.candle.setData(cs);
+  // Volume bars (green on up-candles, red on down) at the bottom of the chart.
+  if (TE.vol) {
+    TE.vol.setData((d.candles || []).map((c) => ({
+      time: c.time, value: c.volume || 0,
+      color: c.close >= c.open ? "rgba(22,199,132,0.5)" : "rgba(246,70,93,0.5)",
+    })));
+  }
   const closes = cs.map((c) => c.close);
   const ema = (p) => { const k = 2 / (p + 1); let e = closes[0]; return closes.map((v, i) => (e = i ? v * k + e * (1 - k) : v)); };
   const e9 = ema(9), e20 = ema(20), e50 = ema(50);
