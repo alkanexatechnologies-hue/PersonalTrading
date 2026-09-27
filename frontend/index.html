@@ -489,6 +489,7 @@
           <button class="tab" data-tab="dhanbacktest" data-group="dhanbacktest">🧪 Backtest (Dhan)</button>
           <button class="tab tab-primary" data-tab="marketcommand" data-group="marketcommand">⚡ Market Command</button>
           <button class="tab tab-primary" data-tab="optionterminal" data-group="marketcommand">📈 Option Terminal</button>
+          <button class="tab tab-primary" data-tab="tradeexec" data-group="marketcommand">🧾 Trade Execution</button>
           <!-- AI Paper Desk screens (own desk; each tab is permission-gated server-side) -->
           <button class="tab tab-primary" data-tab="aipdash" data-group="aipaper">🤖 Dashboard</button>
           <button class="tab" data-tab="aipanalysis" data-group="aipaper">🧠 AI Market Analysis</button>
@@ -1698,6 +1699,88 @@
             </div>
           </div>
         </div><!-- /panel-optionterminal -->
+
+        <!-- ============================ TRADE EXECUTION ============================ -->
+        <!-- Trade & Levels: Daily Log + Important Market Levels + Levels chart. Uses
+             the same authoritative snapshot + the new confirmation flow / cooldown. -->
+        <div class="tab-panel" id="panel-tradeexec">
+          <div class="te-wrap">
+            <div class="te-top">
+              <div class="te-brand"><span class="te-logo">📈</span><div><div class="te-title">Market Command — Trade &amp; Levels</div><div class="te-sub">Analyze · Identify · Trade Smarter</div></div></div>
+              <div class="te-idx" id="te-idx-btns">
+                <button class="te-idxbtn active" data-sym="^NSEI">NIFTY 50</button>
+                <button class="te-idxbtn" data-sym="^NSEBANK">BANKNIFTY</button>
+                <button class="te-idxbtn" data-sym="^CNXFIN">FINNIFTY</button>
+                <button class="te-idxbtn" data-sym="^NSEMDCP50">MIDCAP</button>
+              </div>
+              <div class="te-tf" id="te-tf-btns">
+                <button class="te-tfbtn" data-tf="5m">5m</button>
+                <button class="te-tfbtn active" data-tf="15m">15m</button>
+                <button class="te-tfbtn" data-tf="30m">30m</button>
+                <button class="te-tfbtn" data-tf="60m">1h</button>
+              </div>
+              <span class="te-date" id="te-date">—</span>
+              <span class="te-live" id="te-live">LIVE</span>
+              <button class="te-refresh" id="te-refresh">↻ Refresh</button>
+              <button class="te-navbtn" id="te-open-command">⚡ Market Command</button>
+            </div>
+
+            <!-- stats strip -->
+            <div class="te-stats">
+              <div class="te-stat te-stat-spot"><div class="te-stat-k" id="te-name">NIFTY 50</div><div class="te-spot" id="te-spot">—</div><div class="te-spot-chg" id="te-spot-chg"></div></div>
+              <div class="te-stat te-ohlc"><span>O <b id="te-o">—</b></span><span>H <b id="te-h">—</b></span><span>L <b id="te-l">—</b></span><span>C <b id="te-c">—</b></span><span>Vol <b id="te-vol">—</b></span><span>VWAP <b id="te-vwap">—</b></span></div>
+              <div class="te-stat"><div class="te-stat-k">India VIX</div><div class="te-stat-v" id="te-vix">—</div></div>
+              <div class="te-stat"><div class="te-stat-k">Market Structure</div><div class="te-stat-v" id="te-structure">—</div></div>
+              <div class="te-stat"><div class="te-stat-k">Current Setup</div><div class="te-stat-v" id="te-setup">—</div></div>
+              <div class="te-stat te-tftrend"><div><span class="te-stat-k">5M</span><span id="te-5m">—</span></div><div><span class="te-stat-k">15M</span><span id="te-15m">—</span></div><div><span class="te-stat-k">1H</span><span id="te-1h">—</span></div></div>
+              <div class="te-stat te-action-cell"><div class="te-stat-k">Action</div><div class="te-action" id="te-action">—</div><div class="te-action-reason" id="te-action-reason"></div></div>
+            </div>
+
+            <div class="te-main">
+              <!-- LEFT: trade log + levels tables -->
+              <div class="te-left">
+                <div class="te-card">
+                  <div class="te-card-hd"><span class="te-card-title">🧾 Trade Details (Daily Log)</span>
+                    <span class="te-filters" id="te-filters">
+                      <button class="te-fbtn active" data-f="All">All</button>
+                      <button class="te-fbtn" data-f="Target Hit">Target Hit</button>
+                      <button class="te-fbtn" data-f="SL Hit">SL Hit</button>
+                      <button class="te-fbtn" data-f="Open">Open</button>
+                      <button class="te-fbtn" data-f="No Trade">No Trade</button>
+                    </span>
+                    <button class="te-export" id="te-export-trades">⬇ Export CSV</button>
+                  </div>
+                  <div class="te-table-wrap"><table class="te-table" id="te-trade-table"><thead><tr>
+                    <th>SeqNo</th><th>Date</th><th>Time</th><th>Index</th><th>Type</th><th>Strike</th><th>Entry</th><th>SL</th><th>Target</th><th>Total Pt</th><th>1:2</th><th>Status</th><th>Exit</th><th>Exit Time</th><th>Remarks</th>
+                  </tr></thead><tbody id="te-trade-body"></tbody></table></div>
+                </div>
+
+                <div class="te-card">
+                  <div class="te-card-hd"><span class="te-card-title" id="te-levels-title">📊 Important Market Levels</span>
+                    <button class="te-export" id="te-export-levels">⬇ Export CSV</button>
+                  </div>
+                  <div class="te-table-wrap"><table class="te-table" id="te-levels-table"><thead><tr>
+                    <th>#</th><th>Level Type</th><th>Price</th><th>Zone (±)</th><th>Strength</th><th>Date</th><th>Time</th><th>Status</th><th>Remarks</th>
+                  </tr></thead><tbody id="te-levels-body"></tbody></table></div>
+                </div>
+              </div>
+
+              <!-- RIGHT: levels chart -->
+              <div class="te-right">
+                <div class="te-card te-chart-card">
+                  <div class="te-card-hd"><span class="te-card-title">📈 Market Levels Chart</span><span class="te-muted" id="te-chart-note"></span></div>
+                  <div class="te-chart" id="te-chart"></div>
+                </div>
+              </div>
+            </div>
+            <div class="te-foot">
+              <span id="te-foot-conn"><span class="te-dot"></span> Dhan</span>
+              <span>Data Age <b id="te-foot-age">—</b></span>
+              <span id="te-foot-status"></span>
+              <span class="te-foot-r">Levels & trades from the authoritative snapshot · no fabricated values</span>
+            </div>
+          </div>
+        </div><!-- /panel-tradeexec -->
 
         <!-- ================= Strategy Replay (real engine output, no-look-ahead) ================= -->
         <div class="tab-panel" id="panel-stratreplay">

@@ -1917,6 +1917,13 @@ function switchTab(name) {
     requestAnimationFrame(otResize);
     setTimeout(otResize, 60); setTimeout(otResize, 250); setTimeout(otResize, 600);
   }
+  // Trade Execution — full-width (keeps tab bar), follows Market Command's index.
+  document.body.classList.toggle("te-fullwidth", name === "tradeexec");
+  if (name === "tradeexec") {
+    initTradeExec(); syncTEFromMC(); startTradeExecLive();
+    const teResize = () => { const c = teEl("te-chart"); if (TE.chart && c) TE.chart.applyOptions({ width: c.clientWidth, height: c.clientHeight || 520 }); };
+    requestAnimationFrame(teResize); setTimeout(teResize, 80); setTimeout(teResize, 300); setTimeout(teResize, 700);
+  }
   if (name === "bullrank" && !state.bullRankLoaded) { state.bullRankLoaded = true; loadBullRank(); }
   if (name === "stockoptions" && !state.stockOptionsInit) { state.stockOptionsInit = true; initStockOptions(); }
 
@@ -6045,6 +6052,258 @@ function startOptionTerminalLive() {
   }, 5000);
 }
 
+// ==================== TRADE EXECUTION (Trade & Levels) ====================
+// Reuses the authoritative /api/market-command snapshot (spot/OHLC/VWAP/VIX/
+// structure/levels + the new MTS-free confirmation flow & cooldown) and the
+// persisted /api/trade-log. Important Market Levels come from the SAME curated
+// engine as Market Command (buildMCLevels). Nothing is fabricated.
+const TE = {
+  sym: "^NSEI", tf: "15m", filter: "All", chart: null, candle: null, e9: null, e21: null,
+  timer: null, loading: false, lastData: null, trades: [], _levels: [], _init: false, _fitKey: null, _tick: 0, _levelLines: [],
+};
+function teEl(id) { return document.getElementById(id); }
+function teNum(v, d = 2) { return (v == null || !isFinite(v)) ? "—" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: d }); }
+function teK(v) { if (v == null || !isFinite(v)) return "—"; const a = Math.abs(v); if (a >= 1e7) return (v / 1e7).toFixed(1) + "Cr"; if (a >= 1e5) return (v / 1e5).toFixed(1) + "L"; if (a >= 1e3) return (v / 1e3).toFixed(0) + "K"; return String(Math.round(v)); }
+function teHM(ts) { return ts ? new Date((ts + 19800) * 1000).toISOString().slice(11, 16) : "—"; }
+function teDay(ts) { return ts ? new Date((ts + 19800) * 1000).toISOString().slice(0, 10) : "—"; }
+
+function initTradeExec() {
+  if (TE._init) return;
+  TE._init = true;
+  const c = teEl("te-chart");
+  if (c && typeof LightweightCharts !== "undefined") {
+    TE.chart = LightweightCharts.createChart(c, {
+      width: c.clientWidth, height: c.clientHeight || 520,
+      layout: { background: { color: "transparent" }, textColor: "#8394ad", fontSize: 10 },
+      grid: { vertLines: { color: "rgba(30,42,64,0.5)" }, horzLines: { color: "rgba(30,42,64,0.5)" } },
+      timeScale: { borderColor: "#1e2a40", timeVisible: true, secondsVisible: false },
+      rightPriceScale: { borderColor: "#1e2a40" }, crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    });
+    TE.candle = TE.chart.addCandlestickSeries({ upColor: "#16c784", downColor: "#f6465d", wickUpColor: "#16c784", wickDownColor: "#f6465d", borderVisible: false });
+    TE.e9 = TE.chart.addLineSeries({ color: "#f0b429", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    TE.e21 = TE.chart.addLineSeries({ color: "#2f7dff", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    try { new ResizeObserver(() => TE.chart.applyOptions({ width: c.clientWidth, height: c.clientHeight || 520 })).observe(c); } catch { /* noop */ }
+  }
+  teEl("te-idx-btns")?.querySelectorAll(".te-idxbtn").forEach((b) => b.addEventListener("click", () => {
+    teEl("te-idx-btns").querySelectorAll(".te-idxbtn").forEach((x) => x.classList.remove("active"));
+    b.classList.add("active"); TE.sym = b.getAttribute("data-sym"); TE._fitKey = null; loadTradeExec();
+  }));
+  teEl("te-tf-btns")?.querySelectorAll(".te-tfbtn").forEach((b) => b.addEventListener("click", () => {
+    teEl("te-tf-btns").querySelectorAll(".te-tfbtn").forEach((x) => x.classList.remove("active"));
+    b.classList.add("active"); TE.tf = b.getAttribute("data-tf"); TE._fitKey = null; loadTradeExec();
+  }));
+  teEl("te-filters")?.querySelectorAll(".te-fbtn").forEach((b) => b.addEventListener("click", () => {
+    teEl("te-filters").querySelectorAll(".te-fbtn").forEach((x) => x.classList.remove("active"));
+    b.classList.add("active"); TE.filter = b.getAttribute("data-f"); renderTETrades();
+  }));
+  teEl("te-refresh")?.addEventListener("click", () => loadTradeExec());
+  teEl("te-open-command")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("marketcommand"); });
+  teEl("te-export-trades")?.addEventListener("click", () => {
+    const url = `/api/trade-log/export${TE._day ? `?date=${TE._day}` : ""}`;
+    const a = document.createElement("a"); a.href = url; a.download = ""; document.body.appendChild(a); a.click(); a.remove();
+  });
+  teEl("te-export-levels")?.addEventListener("click", () => teExportLevels());
+}
+
+function syncTEFromMC() {
+  if (typeof MC !== "undefined" && MC.sym) { TE.sym = MC.sym; TE.tf = MC.tf || TE.tf; }
+  teEl("te-idx-btns")?.querySelectorAll(".te-idxbtn").forEach((b) => b.classList.toggle("active", b.getAttribute("data-sym") === TE.sym));
+  teEl("te-tf-btns")?.querySelectorAll(".te-tfbtn").forEach((b) => b.classList.toggle("active", b.getAttribute("data-tf") === TE.tf));
+}
+
+async function loadTradeExec() {
+  if (TE.loading) return;
+  TE.loading = true;
+  try {
+    const [d, tl] = await Promise.all([
+      fetchJSON(`/api/market-command?symbol=${encodeURIComponent(TE.sym)}&interval=${TE.tf}`, 25000),
+      fetchJSON(`/api/trade-log`, 15000).catch(() => ({ trades: [] })),
+    ]);
+    if (d && !d.error) { TE.lastData = d; renderTE(d); }
+    TE.trades = (tl && tl.trades) || [];
+    renderTETrades();
+  } catch (e) { console.error("[TradeExec]", e); }
+  TE.loading = false;
+}
+
+function startTradeExecLive() {
+  loadTradeExec();
+  if (TE.timer) return;
+  TE._tick = 0;
+  TE.timer = setInterval(() => {
+    const pn = document.getElementById("panel-tradeexec");
+    if (!pn || !pn.classList.contains("active") || TE.loading) return;
+    const open = (typeof isMarketOpen === "function" && isMarketOpen()) || (typeof isFeedWindow === "function" && isFeedWindow());
+    TE._tick++;
+    if (open || TE._tick % 6 === 0) loadTradeExec();
+  }, 5000);
+}
+
+// Map a curated level (from buildMCLevels) to a Trade-Execution table/chart row.
+function teLevelRows(d) {
+  const levels = (typeof buildMCLevels === "function") ? buildMCLevels(d) : [];
+  const spot = d.spot;
+  const band = spot != null ? Math.max(2, Math.round(spot * 0.0007)) : 0; // display zone (± ~0.07%)
+  const rows = levels.map((l) => {
+    const status = l.kind === "bos" || l.kind === "choch" ? (l.strength === "CONFIRMED" ? "Confirmed" : "Active")
+      : l.kind === "sweep" ? "Confirmed" : "Active";
+    return {
+      type: l.type, short: l.short, kind: l.kind, side: l.side,
+      price: l.price, zoneLo: l.price - band, zoneHi: l.price + band,
+      strength: l.strength, time: l.time, day: l.time ? teDay(l.time) : (d.asOf ? teDay(d.asOf) : "—"),
+      status, remarks: teLevelRemark(l),
+    };
+  });
+  // Insert the live "Current Price" marker in price order.
+  if (spot != null) rows.push({ type: "Current Price", short: "Current", kind: "current", side: "neu", price: spot, zoneLo: null, zoneHi: null, strength: null, time: d.asOf, day: teDay(d.asOf), status: "Live", remarks: "—", _cur: true });
+  rows.sort((a, b) => b.price - a.price);
+  return rows;
+}
+function teLevelRemark(l) {
+  switch (l.kind) {
+    case "bos": return "Break of Structure (BOS)";
+    case "choch": return "Change of Character";
+    case "sweep": return "Liquidity sweep";
+    case "orb": return l.short === "ORH" ? "Opening Range High" : "Opening Range Low";
+    case "pdhl": return l.short === "PDH" ? "Previous Day High" : "Previous Day Low";
+    case "swing": return l.side === "resistance" ? "Swing High (SWH)" : "Swing Low (SWL)";
+    case "invalidation": return "Invalidation / SL";
+    default: return l.side === "resistance" ? (l.strength === "STRONG" ? "Major Resistance" : "Resistance zone") : (l.strength === "STRONG" ? "Major Support" : "Support zone");
+  }
+}
+function teLevelClass(r) {
+  if (r.kind === "current") return "te-lv-cur";
+  if (r.kind === "bos" || r.kind === "choch") return "te-lv-bos";
+  if (r.kind === "sweep") return "te-lv-liq";
+  if (r.side === "resistance") return "te-lv-res";
+  if (r.side === "support") return "te-lv-sup";
+  return "te-lv-neu";
+}
+
+function renderTE(d) {
+  TE._day = d.asOf ? teDay(d.asOf) : null;
+  // stats
+  teEl("te-name").textContent = d.name || "—";
+  teEl("te-spot").textContent = d.spot != null ? teNum(d.spot, 2) : "—";
+  const cs = d.candles || [];
+  const last = cs[cs.length - 1];
+  const first = cs.find((c) => teDay(c.time) === (last ? teDay(last.time) : "")) || cs[0];
+  const chg = last && first ? { pts: last.close - first.open, pct: (last.close - first.open) / first.open * 100 } : null;
+  const scEl = teEl("te-spot-chg");
+  if (scEl) { if (chg) { scEl.textContent = `${chg.pts >= 0 ? "+" : ""}${teNum(chg.pts, 1)} (${chg.pct >= 0 ? "+" : ""}${chg.pct.toFixed(2)}%)`; scEl.className = "te-spot-chg " + (chg.pts >= 0 ? "te-up" : "te-down"); } else scEl.textContent = ""; }
+  if (last) { teEl("te-o").textContent = teNum(last.open, 2); teEl("te-h").textContent = teNum(last.high, 2); teEl("te-l").textContent = teNum(last.low, 2); teEl("te-c").textContent = teNum(last.close, 2); teEl("te-vol").textContent = teK(last.volume); }
+  const ov = d.overlays || {};
+  const lastVal = (a) => { if (!Array.isArray(a)) return null; for (let i = a.length - 1; i >= 0; i--) if (a[i] != null) return a[i]; return null; };
+  teEl("te-vwap").textContent = teNum(lastVal(ov.vwap), 2);
+  teEl("te-vix").textContent = d.vix && d.vix.available && d.vix.value != null ? Number(d.vix.value).toFixed(2) : "—";
+  const st = d.structure && d.structure.current || "—";
+  const stEl = teEl("te-structure"); if (stEl) { stEl.textContent = st.toUpperCase(); stEl.className = "te-stat-v " + (st === "Bullish" ? "te-up" : st === "Bearish" ? "te-down" : ""); }
+  const em = d.earlyMove;
+  teEl("te-setup").textContent = em && em.label ? em.label : (d.confirmationFlow ? d.confirmationFlow.reason.replace(/^WAIT — /, "") : "—");
+  const tf = d.timeframes || {};
+  const trend = (id, v) => { const e = teEl(id); if (e) { e.textContent = v === "BULLISH" ? "▲ BULLISH" : v === "BEARISH" ? "▼ BEARISH" : v || "—"; e.style.color = v === "BULLISH" ? "#16c784" : v === "BEARISH" ? "#f6465d" : "#8394ad"; e.style.fontWeight = "700"; } };
+  trend("te-5m", tf.m5); trend("te-15m", tf.m15); trend("te-1h", tf.m15); // 1H approximated by higher-tf read
+  // action (from the new MTS-free flow)
+  const flow = d.confirmationFlow;
+  const cd = d.cooldown;
+  const actEl = teEl("te-action"), reasonEl = teEl("te-action-reason");
+  if (actEl) {
+    const a = flow ? flow.action : (d.tradePlan && d.tradePlan.action) || "—";
+    actEl.textContent = a === "TRADE" ? "TRADE" : cd && cd.active ? "WAIT" : a;
+    actEl.style.color = a === "TRADE" ? "#16c784" : a === "DATA UNAVAILABLE" ? "#8394ad" : "#f0b429";
+  }
+  if (reasonEl) reasonEl.textContent = flow ? flow.reason : (d.tradePlan && d.tradePlan.waitReason) || "";
+  // date + live
+  teEl("te-date").textContent = last ? `${teDay(last.time)} · ${teHM(last.time)} IST` : "—";
+  const stale = !!(d.snapshot && d.snapshot.stale) || d.dataStale;
+  const liveEl = teEl("te-live"); if (liveEl) { liveEl.textContent = stale ? "STALE" : "LIVE"; liveEl.className = "te-live" + (stale ? " off" : ""); }
+  teEl("te-foot-age").textContent = d.dataAgeSec != null ? Math.round(d.dataAgeSec) + "s" : "—";
+  const conn = teEl("te-foot-conn"); if (conn) conn.innerHTML = `<span class="te-dot ${d.dhanLive ? "" : "off"}"></span> Dhan ${d.dhanLive ? "Live" : "Off"}`;
+  const fst = teEl("te-foot-status"); if (fst) { fst.textContent = stale ? "DATA STALE" : "LIVE"; fst.className = stale ? "te-pill te-pill-red" : "te-pill te-pill-green"; }
+  teEl("te-levels-title").textContent = `📊 Important Market Levels (${d.name || ""}) — sorted by price`;
+
+  // levels table + chart
+  TE._levels = teLevelRows(d);
+  renderTELevels();
+  teDrawChart(d);
+}
+
+function renderTELevels() {
+  const body = teEl("te-levels-body"); if (!body) return;
+  const rows = TE._levels || [];
+  if (!rows.length) { body.innerHTML = `<tr><td colspan="9" class="te-l te-muted">No active levels near price.</td></tr>`; return; }
+  body.innerHTML = rows.map((r, i) => {
+    const stCls = r.status === "Active" ? "te-st-active" : r.status === "Confirmed" ? "te-st-confirmed" : "te-st-live";
+    const zone = r.zoneLo != null ? `${teNum(r.zoneLo, 0)} – ${teNum(r.zoneHi, 0)}` : "—";
+    return `<tr class="${r._cur ? "te-row-cur" : ""}">` +
+      `<td>${i + 1}</td>` +
+      `<td class="te-l"><span class="te-lv ${teLevelClass(r)}">${r.type}</span></td>` +
+      `<td>${teNum(r.price, 2)}</td>` +
+      `<td>${zone}</td>` +
+      `<td>${r.strength || "—"}</td>` +
+      `<td>${r.day}</td>` +
+      `<td>${teHM(r.time)}</td>` +
+      `<td class="${stCls}">${r.status}</td>` +
+      `<td class="te-l te-muted">${r.remarks}</td>` +
+      `</tr>`;
+  }).join("");
+}
+
+function renderTETrades() {
+  const body = teEl("te-trade-body"); if (!body) return;
+  let rows = TE.trades || [];
+  if (TE.filter && TE.filter !== "All") rows = rows.filter((r) => r.status === TE.filter);
+  if (!rows.length) { body.innerHTML = `<tr><td colspan="15" class="te-l te-muted">No trades logged${TE.filter !== "All" ? " for " + TE.filter : ""} — trades appear here after execution.</td></tr>`; return; }
+  const stCls = (s) => s === "Target Hit" ? "te-b-target" : s === "SL Hit" ? "te-b-sl" : s === "Open" ? "te-b-open" : "te-b-notrade";
+  body.innerHTML = rows.map((r) => {
+    const tp = r.totalPoint != null ? `<span class="${r.totalPoint >= 0 ? "te-up" : "te-down"}">${r.totalPoint >= 0 ? "+" : ""}${teNum(r.totalPoint, 2)}</span>` : "—";
+    return `<tr>` +
+      `<td>${r.seq}</td><td class="te-l">${r.date}</td><td>${r.time}</td><td class="te-l">${r.index}</td>` +
+      `<td><span class="te-badge ${r.type === "CE" ? "te-b-ce" : "te-b-pe"}">${r.type}</span></td>` +
+      `<td>${r.strike ?? "—"}</td><td>${teNum(r.entry, 2)}</td><td class="te-down">${teNum(r.sl, 2)}</td><td class="te-up">${teNum(r.target, 2)}</td>` +
+      `<td>${tp}</td><td>${r.rr || "—"}</td>` +
+      `<td><span class="te-badge ${stCls(r.status)}">${r.status}</span></td>` +
+      `<td>${teNum(r.exitPrice, 2)}</td><td>${r.exitTime || "—"}</td><td class="te-l te-muted">${r.remarks || ""}</td>` +
+      `</tr>`;
+  }).join("");
+}
+
+function teDrawChart(d) {
+  if (!TE.chart || !TE.candle) return;
+  const cs = (d.candles || []).map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close }));
+  if (!cs.length) { TE.candle.setData([]); return; }
+  TE.candle.setData(cs);
+  const closes = cs.map((c) => c.close);
+  const ema = (p) => { const k = 2 / (p + 1); let e = closes[0]; return closes.map((v, i) => (e = i ? v * k + e * (1 - k) : v)); };
+  const e9 = ema(9), e21 = ema(21);
+  if (TE.e9) TE.e9.setData(cs.map((c, i) => ({ time: c.time, value: +e9[i].toFixed(2) })));
+  if (TE.e21) TE.e21.setData(cs.map((c, i) => ({ time: c.time, value: +e21[i].toFixed(2) })));
+  // Level price lines with labels (from the curated rows).
+  TE._levelLines.forEach((pl) => { try { TE.candle.removePriceLine(pl); } catch { /* noop */ } });
+  TE._levelLines = [];
+  const N = cs.length, showBars = Math.min(120, N);
+  const recent = cs.slice(-showBars); let lo = Infinity, hi = -Infinity;
+  recent.forEach((c) => { if (c.low < lo) lo = c.low; if (c.high > hi) hi = c.high; });
+  const pad = (hi - lo) * 0.5 || hi * 0.005;
+  (TE._levels || []).forEach((r) => {
+    if (r._cur || r.price < lo - pad || r.price > hi + pad) return;
+    const col = r.kind === "bos" || r.kind === "choch" ? "#c084fc" : r.kind === "sweep" ? "#f0b429" : r.side === "resistance" ? "#f6465d" : r.side === "support" ? "#16c784" : "#8394ad";
+    const line = TE.candle.createPriceLine({ price: r.price, color: col, lineWidth: r.strength === "STRONG" || r.strength === "CONFIRMED" ? 2 : 1, lineStyle: r.strength === "MEDIUM" ? 2 : 0, axisLabelVisible: true, title: `${r.short} ${teNum(r.price, 0)}` });
+    TE._levelLines.push(line);
+  });
+  if (TE._fitKey !== TE.sym + ":" + TE.tf) { TE.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, N - showBars), to: N + 2 }); TE._fitKey = TE.sym + ":" + TE.tf; }
+}
+
+function teExportLevels() {
+  const rows = TE._levels || [];
+  const head = ["#", "Level Type", "Price", "ZoneLo", "ZoneHi", "Strength", "Date", "Time", "Status", "Remarks"];
+  const esc = (v) => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const lines = [head.join(",")];
+  rows.forEach((r, i) => lines.push([i + 1, r.type, r.price, r.zoneLo ?? "", r.zoneHi ?? "", r.strength ?? "", r.day, r.time ? teHM(r.time) : "", r.status, r.remarks].map(esc).join(",")));
+  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `market-levels-${TE.sym.replace(/[^\w]/g, "")}.csv`; document.body.appendChild(a); a.click(); a.remove();
+}
+
 // Greeks strip for one leg. delta/theta/IV/gamma/vega are REAL when the feed
 // carries them; a null value shows "—" (never guessed).
 function otGreeksStrip(leg) {
@@ -7142,7 +7401,18 @@ function renderMCIntraday(d) {
   const act = el("mc-plan-action");
   if (act) { const a = tp.dataStale ? "STALE" : (tp.action === "NO TRADE" ? "AVOID" : (tp.action || "—")); act.textContent = a; act.className = "mc2-ia-action " + a.replace(/ /g, "."); }
   const reason = el("mc-ia-reason");
-  if (reason) reason.textContent = tp.waitReason ? tp.waitReason.replace(/^WAIT — /, "") + "." : (d.command?.finalReason || em.emaReaction || "—");
+  if (reason) {
+    // Show the MTS-free confirmation flow (MARKET DIRECTION → PRICE ACTION →
+    // STRUCTURE → ENTRY → OPTION) as a compact sequence, then the WAIT/TRADE reason.
+    const flow = d.confirmationFlow;
+    const seq = flow && flow.steps ? flow.steps.map((s) => {
+      const mark = s.ok ? "✓" : (s.state === "CONFLICT" || /CONFLICT/.test(flow.reason) && s.key === "priceAction" ? "✗" : "·");
+      const short = { marketDirection: "DIR", priceAction: "PA", structure: "STRUCT", entry: "ENTRY", option: "OPT" }[s.key] || s.key;
+      return `${short} ${mark}`;
+    }).join(" › ") : "";
+    const txt = tp.waitReason ? tp.waitReason.replace(/^WAIT — /, "") + "." : (d.command?.finalReason || em.emaReaction || "—");
+    reason.textContent = (seq ? seq + " — " : "") + txt;
+  }
 
   // ---- Levels & structure state (nearest level = "current"; next in direction) ----
   const spot = d.spot;
