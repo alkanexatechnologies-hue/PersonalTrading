@@ -6896,6 +6896,7 @@ async function loadMarketCommand(chartOnly = false) {
     }
     renderMCChart(d);
     renderMCTopStats(d);
+    renderMCIndexCards(); // refresh the India VIX card as soon as the snapshot arrives
     renderMCCommand(d);
     renderMCStatus(d);
     renderMCLiveBar(d);
@@ -7049,72 +7050,33 @@ function renderMCMarketView(d) {
 
 // Index summary cards — one batched quotes call (shared, 15s), VIX from the
 // last market-command payload. Sparkline slope reflects the real day change sign.
-async function renderMCIndexCards() {
-  const cards = document.querySelectorAll("#mc2-cards .mc2-card");
-  if (!cards.length) return;
-  let quotes = {};
-  let feed = null; // Dhan health SSOT (from /api/quotes `feed`)
-  try {
-    const q = await fetch("/api/quotes?symbols=" + encodeURIComponent("^NSEI,^NSEBANK,^CNXFIN,^NSEMDCP50")).then((r) => r.json());
-    quotes = q.quotes || {};
-    feed = q.feed || null;
-  } catch { /* keep last */ }
+// Only India VIX is shown in the top strip now (the other index cards were
+// removed to enlarge the chart). VIX rides the existing market-command snapshot,
+// so this needs NO extra /api/quotes call — freeing the Dhan budget for the
+// chart + option chain (which is what previously caused the rate-limiting).
+function renderMCIndexCards() {
+  const card = document.querySelector('#mc2-cards .mc2-card[data-card="VIX"]');
+  if (!card) return;
   const vix = MC.lastData?.vix;
-  const marketOpen = feed ? feed.marketStatus === "OPEN" : true;
-  // What to show when a value is missing — truthful, not a silent dash (§11).
-  const waitingText = (() => {
-    const st = feed && feed.state;
-    if (st === "DHAN_TOKEN_EXPIRED" || st === "DHAN_AUTH_FAILED" || st === "DHAN_FEED_DISABLED" || st === "DHAN_DISCONNECTED") return "reconnect Dhan";
-    if (st === "DHAN_CONNECTING") return "connecting…";
-    if (st === "DHAN_MARKET_CLOSED") return "market closed";
-    if (st === "DHAN_RATE_LIMITED") return "rate-limited…";
-    return "waiting for live data…";
-  })();
-  // Per-card freshness marker (§6): LIVE / FRESH / STALE / LAST GOOD.
-  const freshMark = (fr, ageMs) => {
-    if (fr === "LIVE") return `<span class="mc2-fresh live">🟢 LIVE</span>`;
-    if (fr === "FRESH") return `<span class="mc2-fresh live">🟢 ${ageMs != null ? Math.round(ageMs / 1000) + "s" : "live"}</span>`;
-    if (fr === "STALE") return `<span class="mc2-fresh stale">🟠 STALE</span>`;
-    if (fr === "LAST_GOOD") return `<span class="mc2-fresh lastgood">🌙 LAST GOOD</span>`;
-    return "";
-  };
-  const spark = (svg, chgPct) => {
-    if (!svg) return;
-    if (chgPct == null) { svg.innerHTML = `<polyline points="0,17 120,17" fill="none" stroke="#334155" stroke-width="1.5" opacity="0.6"/>`; return; }
-    const up = chgPct >= 0, col = up ? "#22c55e" : "#ef4444";
-    const pts = up ? "0,28 30,22 55,24 80,14 105,10 120,6" : "0,8 30,12 55,10 80,20 105,18 120,26";
-    svg.innerHTML = `<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.5" opacity="0.85"/>`;
-  };
-  cards.forEach((card) => {
-    const sym = card.getAttribute("data-card");
-    const valEl = card.querySelector('[data-f="val"]'), chgEl = card.querySelector('[data-f="chg"]'), sv = card.querySelector('[data-f="spark"]');
-    let price = null, chgPct = null, freshness = "NONE", ageMs = null;
-    if (sym === "VIX") {
-      price = vix?.value ?? null; chgPct = vix?.changePct ?? null;
-      // VIX rides the market-command payload; mark by session when we have a value.
-      freshness = price != null ? (marketOpen ? "FRESH" : "LAST_GOOD") : "NONE";
-    } else {
-      const q = quotes[sym];
-      price = q?.price ?? null; chgPct = q?.changePercent ?? null;
-      freshness = q?.freshness || (price != null ? "FRESH" : "NONE");
-      ageMs = q?.ageMs ?? null;
+  const valEl = card.querySelector('[data-f="val"]'), chgEl = card.querySelector('[data-f="chg"]'), sv = card.querySelector('[data-f="spark"]');
+  const marketOpen = typeof isMarketOpen === "function" ? isMarketOpen() : false;
+  const price = vix?.value ?? null, chgPct = vix?.changePct ?? null;
+  const freshMark = () => price == null ? "" : (marketOpen ? `<span class="mc2-fresh live">🟢 LIVE</span>` : `<span class="mc2-fresh lastgood">🌙 LAST GOOD</span>`);
+  if (valEl) valEl.textContent = price != null ? Number(price).toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—";
+  if (chgEl) {
+    if (price != null && chgPct != null) chgEl.innerHTML = `<span class="${chgPct >= 0 ? "up" : "down"}">${chgPct >= 0 ? "+" : ""}${chgPct}%</span> ${freshMark()}`;
+    else if (price != null) chgEl.innerHTML = freshMark();
+    else chgEl.innerHTML = `<span class="mc2-fresh waiting">${vix ? "waiting…" : "loading India VIX…"}</span>`;
+    chgEl.className = "mc2-card-chg";
+  }
+  if (sv) {
+    if (chgPct == null) sv.innerHTML = `<polyline points="0,17 120,17" fill="none" stroke="#334155" stroke-width="1.5" opacity="0.6"/>`;
+    else {
+      const up = chgPct >= 0, col = up ? "#22c55e" : "#ef4444";
+      const pts = up ? "0,28 30,22 55,24 80,14 105,10 120,6" : "0,8 30,12 55,10 80,20 105,18 120,26";
+      sv.innerHTML = `<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.5" opacity="0.85"/>`;
     }
-    if (valEl) valEl.textContent = price != null ? Number(price).toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—";
-    if (chgEl) {
-      if (price != null && chgPct != null) {
-        chgEl.innerHTML = `<span class="${chgPct >= 0 ? "up" : "down"}">${chgPct >= 0 ? "+" : ""}${chgPct}%</span> ${freshMark(freshness, ageMs)}`;
-        chgEl.className = "mc2-card-chg";
-      } else if (price != null) {
-        chgEl.innerHTML = freshMark(freshness, ageMs);
-        chgEl.className = "mc2-card-chg";
-      } else {
-        // No value yet — say WHY instead of leaving it blank (§11).
-        chgEl.innerHTML = `<span class="mc2-fresh waiting">${waitingText}</span>`;
-        chgEl.className = "mc2-card-chg";
-      }
-    }
-    spark(sv, chgPct);
-  });
+  }
 }
 
 // ===================== ADDITIVE: Multi-Timeframe Fake Move panel =====================

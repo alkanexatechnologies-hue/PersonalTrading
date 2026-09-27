@@ -4028,7 +4028,7 @@ body.mode-decisionflow #index-strip { display: none !important; }
 .mc-fullscreen-btn:hover { color: #d1d4dc; }
 
 /* Chart container — given generous height so the chart is the focus */
-.mc-chart-container { width: 100%; height: 520px; position: relative; background: #131722; flex-shrink: 0; }
+.mc-chart-container { width: 100%; height: 720px; position: relative; background: #131722; flex-shrink: 0; }
 
 /* Status cards below chart */
 .mc-status-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 6px 8px; background: #1e222d; }
@@ -4248,7 +4248,7 @@ body.mode-decisionflow #index-strip { display: none !important; }
 .mc2-status { display: flex; align-items: center; gap: 8px; margin-left: auto; font-size: 12px; color: #cbd5e1; }
 
 /* Index cards */
-.mc2-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; padding: 12px 16px; background: #0a0e17; }
+.mc2-cards { display: grid; grid-template-columns: 240px; gap: 10px; padding: 8px 16px; background: #0a0e17; }
 .mc2-card { position: relative; background: #0f1626; border: 1px solid #1c2537; border-radius: 10px; padding: 12px 14px; overflow: hidden; }
 .mc2-card-hd { font-size: 11px; font-weight: 700; color: #94a3b8; letter-spacing: .3px; }
 .mc2-card-row { display: flex; align-items: baseline; gap: 8px; margin-top: 4px; }
@@ -4276,7 +4276,7 @@ body.mode-decisionflow #index-strip { display: none !important; }
 .mc-tog input { display: none; }
 .mc-tog-dot { width: 8px; height: 8px; border-radius: 50%; }
 .mc-tog-levels-wrap { margin-left: auto; color: #cbd5e1; }
-.mc-chart-container { width: 100%; height: 520px; flex-shrink: 0; background: #0a0e17; position: relative; }
+.mc-chart-container { width: 100%; height: 720px; flex-shrink: 0; background: #0a0e17; position: relative; }
 .mc-fullscreen-btn { background: #131a2b; border: 1px solid #1c2537; color: #94a3b8; border-radius: 6px; padding: 4px 9px; cursor: pointer; }
 
 /* Right column */
@@ -4781,3 +4781,8 @@ body.te-fullwidth .content { padding:0 !important; }
 .te-pill-green { background:var(--te-green-d); color:var(--te-green); } .te-pill-red { background:var(--te-red-d); color:var(--te-red); }
 @media (max-width:1200px){ .te-stats { grid-template-columns:1fr 1fr 1fr; } .te-main { grid-template-columns:1fr; } .te-chart { min-height:360px; } }
 @media (max-width:640px){ .te-stats { grid-template-columns:1fr 1fr; } }
+
+/* Market Command index cards: only the selected index + VIX poll live; others dim. */
+#mc2-cards .mc2-card-dim { opacity: 0.45; }
+#mc2-cards .mc2-card-dim .mc2-card-val { color: #5f6f88; }
+#mc2-cards .mc2-card-active { border-color: #2f7dff; box-shadow: 0 0 0 1px rgba(47,125,255,.35); }
