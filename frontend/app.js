@@ -6060,7 +6060,7 @@ function startOptionTerminalLive() {
 // persisted /api/trade-log. Important Market Levels come from the SAME curated
 // engine as Market Command (buildMCLevels). Nothing is fabricated.
 const TE = {
-  sym: "^NSEI", tf: "15m", filter: "All", chart: null, candle: null, e9: null, e21: null,
+  sym: "^NSEI", tf: "15m", filter: "All", chart: null, candle: null, e9: null, e20: null, e50: null, vwap: null,
   timer: null, loading: false, lastData: null, trades: [], _levels: [], _init: false, _fitKey: null, _tick: 0, _levelLines: [],
 };
 function teEl(id) { return document.getElementById(id); }
@@ -6074,16 +6074,38 @@ function initTradeExec() {
   TE._init = true;
   const c = teEl("te-chart");
   if (c && typeof LightweightCharts !== "undefined") {
+    // Date + time on the axis and in the crosshair (IST). Intraday marks show
+    // HH:MM; day boundaries show the date, and the crosshair shows both.
+    const istDate = (t) => new Date((t + 19800) * 1000);
+    const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     TE.chart = LightweightCharts.createChart(c, {
       width: c.clientWidth, height: c.clientHeight || 520,
-      layout: { background: { color: "transparent" }, textColor: "#8394ad", fontSize: 10 },
+      layout: { background: { color: "transparent" }, textColor: "#9fb0c8", fontSize: 10 },
       grid: { vertLines: { color: "rgba(30,42,64,0.5)" }, horzLines: { color: "rgba(30,42,64,0.5)" } },
-      timeScale: { borderColor: "#1e2a40", timeVisible: true, secondsVisible: false },
+      timeScale: {
+        borderColor: "#1e2a40", timeVisible: true, secondsVisible: false, rightOffset: 3,
+        tickMarkFormatter: (t, tickType) => {
+          const d = istDate(t);
+          // day-boundary ticks show the date; intraday ticks show HH:MM
+          return tickType === 2 || tickType === 3
+            ? `${d.getUTCDate()} ${MON[d.getUTCMonth()]}`
+            : `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+        },
+      },
+      localization: {
+        timeFormatter: (t) => {
+          const d = istDate(t);
+          return `${d.getUTCDate()} ${MON[d.getUTCMonth()]} ${d.getUTCFullYear()}  ${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")} IST`;
+        },
+      },
       rightPriceScale: { borderColor: "#1e2a40" }, crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
     });
     TE.candle = TE.chart.addCandlestickSeries({ upColor: "#16c784", downColor: "#f6465d", wickUpColor: "#16c784", wickDownColor: "#f6465d", borderVisible: false });
-    TE.e9 = TE.chart.addLineSeries({ color: "#f0b429", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-    TE.e21 = TE.chart.addLineSeries({ color: "#2f7dff", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    // EMA 9 / 20 / 50 + VWAP (VWAP brightest + thickest so it stands out).
+    TE.e9 = TE.chart.addLineSeries({ color: "#f0b429", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });   // gold
+    TE.e20 = TE.chart.addLineSeries({ color: "#3b82f6", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });  // blue
+    TE.e50 = TE.chart.addLineSeries({ color: "#a855f7", lineWidth: 2, priceLineVisible: false, lastValueVisible: false });  // purple
+    TE.vwap = TE.chart.addLineSeries({ color: "#00e5ff", lineWidth: 3, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }); // bright cyan
     try { new ResizeObserver(() => TE.chart.applyOptions({ width: c.clientWidth, height: c.clientHeight || 520 })).observe(c); } catch { /* noop */ }
   }
   teEl("te-idx-btns")?.querySelectorAll(".te-idxbtn").forEach((b) => b.addEventListener("click", () => {
@@ -6278,9 +6300,18 @@ function teDrawChart(d) {
   TE.candle.setData(cs);
   const closes = cs.map((c) => c.close);
   const ema = (p) => { const k = 2 / (p + 1); let e = closes[0]; return closes.map((v, i) => (e = i ? v * k + e * (1 - k) : v)); };
-  const e9 = ema(9), e21 = ema(21);
+  const e9 = ema(9), e20 = ema(20), e50 = ema(50);
   if (TE.e9) TE.e9.setData(cs.map((c, i) => ({ time: c.time, value: +e9[i].toFixed(2) })));
-  if (TE.e21) TE.e21.setData(cs.map((c, i) => ({ time: c.time, value: +e21[i].toFixed(2) })));
+  if (TE.e20) TE.e20.setData(cs.map((c, i) => ({ time: c.time, value: +e20[i].toFixed(2) })));
+  if (TE.e50) TE.e50.setData(cs.map((c, i) => ({ time: c.time, value: +e50[i].toFixed(2) })));
+  // VWAP — the real session VWAP from the engine overlays (aligned to candles).
+  if (TE.vwap) {
+    const vw = (d.overlays && d.overlays.vwap) || null;
+    TE.vwap.setData(Array.isArray(vw) ? cs.map((c, i) => (vw[i] != null ? { time: c.time, value: +Number(vw[i]).toFixed(2) } : null)).filter(Boolean) : []);
+  }
+  // Chart legend (colors match the series).
+  const note = teEl("te-chart-note");
+  if (note) note.innerHTML = `<span style="color:#f0b429">EMA9</span> · <span style="color:#3b82f6">EMA20</span> · <span style="color:#a855f7">EMA50</span> · <b style="color:#00e5ff">VWAP</b>`;
   // Level price lines with labels (from the curated rows).
   TE._levelLines.forEach((pl) => { try { TE.candle.removePriceLine(pl); } catch { /* noop */ } });
   TE._levelLines = [];
