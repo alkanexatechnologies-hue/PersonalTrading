@@ -188,6 +188,9 @@ import { CONFIG, DEFAULT_SYMBOLS, DISCLAIMER, SymbolDef, nearestStrike, SWING_SY
 import { istDateOfSec } from "../util/istTime";
 import { getOptionTopPickAuditLog } from "../optionTopPick/auditLog";
 import { buildFakeMoveResult, FakeMoveLevel, FakeMoveTFInput, FakeMoveResult } from "../analyst/fakeMove";
+import { buildConfirmationFlow } from "../analyst/confirmationFlow";
+import { getCooldownState, computeCooldown, recordExecution } from "../trade/cooldownStore";
+import { appendTrade, updateTrade, listTrades, tradesToCsv, TradeType, TradeStatus } from "../trade/tradeLogStore";
 import { scanOptionTopPick, evaluateStockBothTracks } from "../optionTopPick/scanner";
 import { OptionTopPickDeps } from "../optionTopPick/types";
 import { evaluateLiquidityStatus } from "../liquidityStatus/engine";
@@ -4327,7 +4330,9 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
     confirmations.push({ label: "OI Direction", passed: oiDirection !== "FLAT" });
     confirmations.push({ label: "Order Block", passed: !!(obValid && obInRange) });
     confirmations.push({ label: "Market Structure", passed: ms.currentStructure !== "Ranging" });
-    confirmations.push({ label: "Master Selector", passed: arbVerdict === "GO" });
+    // Master Trade Selector is intentionally NOT a confirmation in this flow (removed
+    // per the new MARKET DIRECTION → PRICE ACTION → STRUCTURE → ENTRY → OPTION → ACTION
+    // sequence). arbVerdict is still exposed for reference but never gates WAIT/TRADE.
     confirmations.push({ label: "Data Fresh", passed: !dataStale });
 
     const emaConf = ls?.structure;
@@ -4362,9 +4367,6 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
     } else if (nearOB?.status === "Invalid") {
       finalAction = "NO TRADE";
       finalReason = "Order Block invalidated — structure broken.";
-    } else if (arbVerdict === "CONFLICT") {
-      finalAction = "WAIT";
-      finalReason = "Engine conflict — models disagree.";
     } else if (allConfirmed && rec?.take) {
       finalAction = "TAKE";
       finalReason = arbReason || "All confirmations passed.";
@@ -4455,13 +4457,11 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       const inZone = !!(spotEntry && spot >= spotEntry.low && spot <= spotEntry.high);
       const entryNotReached = !!(spotEntry && !inZone && !entryMissed);
       if (dataStale) waitReason = "WAIT — DATA STALE";
-      else if (arbVerdict === "CONFLICT") waitReason = "WAIT — MARKET CONFLICT";
       else if (!latestBos || !latestBos.recent) waitReason = "WAIT — NO BREAK OF STRUCTURE";
-      else if (missing.some((m) => m !== "Master Selector")) waitReason = "WAIT — BREAK OF STRUCTURE BUT CONFIRMATION MISSING";
+      else if (missing.length) waitReason = "WAIT — BREAK OF STRUCTURE BUT CONFIRMATION MISSING";
       else if (entryMissed) waitReason = "WAIT — ENTRY ALREADY MISSED";
       else if (entryNotReached) waitReason = "WAIT — ENTRY ZONE NOT REACHED";
       else if (spotT1 == null && oiDirection !== "FLAT") waitReason = "WAIT — INSUFFICIENT ROOM";
-      else if (arbVerdict !== "GO") waitReason = "WAIT — MASTER TRADE SELECTOR BLOCKED";
       else waitReason = "WAIT — SETUP NOT READY";
     }
 
@@ -4593,6 +4593,8 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       waitReason,                     // specific reason when action is WAIT
       dataStale: displayStale, dhanLive: !isHistorical && dhanOn,
       snapshot, // provenance: every field above is from this one snapshot
+      cooldown: null as any,          // post-trade cooldown (populated below)
+      confirmationFlow: null as any,  // MTS-free confirmation flow (populated below)
     };
 
     // ---- Direction-change learning record (deduped per symbol) -------------
@@ -4686,6 +4688,53 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       } catch { fakeMoveLayer = null; }
     }
 
+    // ---- Confirmation flow (NO Master Trade Selector) + post-trade cooldown ----
+    // MARKET DIRECTION → PRICE ACTION → STRUCTURE → ENTRY → OPTION → ACTION.
+    // Price Action = the existing multi-timeframe fake-move engine (context-aware,
+    // never a single-candle read). The 15-minute cooldown is anchored to the
+    // ACTUAL execution timestamp and recovered from disk after a restart, and it
+    // hard-gates a new TRADE. SL/target/risk/strike logic is unchanged — only the
+    // WAIT/TRADE decision + reason are (re)derived here.
+    const cooldown = isHistorical ? computeCooldown(null, nowSec) : getCooldownState(symbol, nowSec);
+    const priceActionInput = fakeMoveLayer && fakeMoveLayer.available ? {
+      available: true,
+      status: fakeMoveLayer.mtfFakeMoveState.status,
+      direction: fakeMoveLayer.mtfFakeMoveState.direction,
+      confidence: fakeMoveLayer.mtfFakeMoveState.confidence,
+      confirmationState: fakeMoveLayer.confirmationState,
+      note: fakeMoveLayer.mtfFakeMoveState.note,
+    } : { available: false, status: "NONE", direction: "NONE" as const, confidence: 0, confirmationState: "NONE", note: "" };
+    const entryReadyFlow = entryState === "READY — conditions met" ||
+      (!!spotEntry && spot >= spotEntry.low && spot <= spotEntry.high && !displayStale);
+    const optionReadyFlow = !!(strikeAnalysis && strikeAnalysis.available && strikeAnalysis.primary);
+    const confirmationFlow = buildConfirmationFlow({
+      direction: marketView.direction,
+      priceAction: priceActionInput,
+      structure: ms.currentStructure,
+      entryReady: !!entryReadyFlow,
+      entryDetail: entryState,
+      optionReady: optionReadyFlow,
+      optionDetail: strikeAnalysis?.primary ? `${strikeAnalysis.primary.strike} ${strikeAnalysis.primary.side}` : (strikeAnalysis?.reason || "—"),
+      dataAvailable: !isHistorical,
+      dataStale: displayStale,
+      cooldown,
+    });
+    // Make the flow authoritative for the ACTION shown everywhere (replay and the
+    // "Order Block invalidated" NO-TRADE case are preserved from the old logic).
+    let effectiveAction = finalAction;
+    let effectiveWaitReason = waitReason as string | null;
+    if (!isHistorical && finalAction !== "NO TRADE") {
+      if (confirmationFlow.action === "TRADE") { effectiveAction = "TAKE"; effectiveWaitReason = null; }
+      else if (cooldown.active) { effectiveAction = "WAIT"; effectiveWaitReason = confirmationFlow.reason; } // cooldown wins over stale
+      else if (confirmationFlow.action === "DATA UNAVAILABLE") { effectiveAction = "DATA STALE"; effectiveWaitReason = confirmationFlow.reason; }
+      else { effectiveAction = displayStale ? "DATA STALE" : "WAIT"; effectiveWaitReason = confirmationFlow.reason; }
+      tradePlan.action = effectiveAction;
+      tradePlan.waitReason = effectiveWaitReason;
+      if (cooldown.active) tradePlan.entryState = `WAIT — ${cooldown.reason}`;
+    }
+    tradePlan.cooldown = cooldown;
+    tradePlan.confirmationFlow = confirmationFlow;
+
     res.json({
       available: true,
       symbol, name: def.name, interval, spot: Math.round(spot * 100) / 100,
@@ -4700,6 +4749,11 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       syncHealth,
       marketView,
       tradePlan,
+      // NEW confirmation flow (MARKET DIRECTION → PRICE ACTION → STRUCTURE → ENTRY
+      // → OPTION → ACTION) with NO Master Trade Selector, plus the persisted
+      // post-trade 15-minute cooldown state.
+      confirmationFlow,
+      cooldown,
       snapshot,
       lastDirectionChange,
       bos: latestBos,
@@ -4853,8 +4907,8 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
 
       // Command panel data
       command: {
-        finalAction,
-        finalReason,
+        finalAction: effectiveAction,
+        finalReason: effectiveWaitReason || finalReason,
         direction: isHistorical ? techDirection : (oiDirection === "UP" ? "BULLISH" : oiDirection === "DOWN" ? "BEARISH" : "NEUTRAL"),
         // Two-stage structure read (VWAP + candle movement)
         structureConfirmed: ms.currentStructure,
@@ -4889,6 +4943,75 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
   } catch (e: any) {
     res.status(502).json({ error: e?.message || "market-command failed", available: false });
   }
+});
+
+// ============================ Trade execution + cooldown ============================
+// Records an EXECUTED trade (Daily Log) and arms the mandatory 15-minute cooldown
+// from the ACTUAL execution timestamp. The cooldown is persisted (survives restart)
+// and enforced server-side inside /market-command — there is no client path that
+// bypasses it. This endpoint does NOT compute SL/target/risk; it stores what the
+// caller passes (already produced by the existing engines).
+router.post("/trade-execute", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
+  try {
+    const b = req.body || {};
+    const symbol = String(b.symbol || "");
+    const def = findSymbolDef(symbol);
+    if (!def) return res.status(400).json({ error: "Valid F&O symbol required" });
+    const type: TradeType = b.type === "PE" ? "PE" : "CE";
+    // Anchor to the ACTUAL execution timestamp (client may pass it; else now).
+    const execTs = Number.isFinite(Number(b.execTs)) ? Math.floor(Number(b.execTs)) : Math.floor(Date.now() / 1000);
+    const num = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : null);
+    const trade = appendTrade({
+      execTs, index: def.name, symbol: def.symbol, type,
+      strike: num(b.strike), entry: num(b.entry), sl: num(b.sl), target: num(b.target),
+      rr: b.rr != null ? String(b.rr) : null, remarks: b.remarks != null ? String(b.remarks) : "",
+    });
+    const cooldown = recordExecution({ symbol: def.symbol, execTs, side: type, strike: num(b.strike), entry: num(b.entry), source: "trade-execute" });
+    res.json({ ok: true, trade, cooldown });
+  } catch (e: any) {
+    res.status(502).json({ error: e?.message || "trade-execute failed" });
+  }
+});
+
+// Current cooldown state for a symbol (server-authoritative; recovered from disk).
+router.get("/trade-cooldown", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
+  const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
+  if (!def) return res.status(400).json({ error: "Valid F&O symbol required" });
+  res.json({ symbol: def.symbol, cooldown: getCooldownState(def.symbol) });
+});
+
+// Daily trade log (optionally by date + status filter).
+router.get("/trade-log", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
+  const date = req.query.date ? String(req.query.date) : undefined;
+  const status = req.query.status ? String(req.query.status) : undefined;
+  let rows = listTrades(date);
+  if (status && status !== "All") rows = rows.filter((r) => r.status === status);
+  res.json({ date: date || null, trades: rows });
+});
+
+// Update a logged trade's outcome (status / exit / remarks).
+router.post("/trade-log/update", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
+  const b = req.body || {};
+  if (!b.id) return res.status(400).json({ error: "id required" });
+  const num = (v: any) => (v === null ? null : Number.isFinite(Number(v)) ? Number(v) : undefined);
+  const updated = updateTrade({
+    id: String(b.id),
+    status: b.status as TradeStatus | undefined,
+    exitPrice: num(b.exitPrice),
+    exitTs: b.exitTs != null ? Math.floor(Number(b.exitTs)) : (b.exitPrice != null ? Math.floor(Date.now() / 1000) : null),
+    remarks: b.remarks != null ? String(b.remarks) : undefined,
+  });
+  if (!updated) return res.status(404).json({ error: "trade not found" });
+  res.json({ ok: true, trade: updated });
+});
+
+// CSV export of the trade log.
+router.get("/trade-log/export", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
+  const date = req.query.date ? String(req.query.date) : undefined;
+  const csv = tradesToCsv(listTrades(date));
+  res.setHeader("Content-Type", "text/csv");
+  res.setHeader("Content-Disposition", `attachment; filename="trade-log${date ? "-" + date : ""}.csv"`);
+  res.send(csv);
 });
 
 // Trader Specific Strategies — 20-session test log (read-only). Returns recorded
