@@ -1314,6 +1314,27 @@
             <!-- ===== INDEX CARDS ===== -->
             <div class="mc2-cards" id="mc2-cards">
               <div class="mc2-card" data-card="VIX"><div class="mc2-card-hd">INDIA VIX</div><div class="mc2-card-row"><span class="mc2-card-val" data-f="val">—</span><span class="mc2-card-chg" data-f="chg"></span></div><svg class="mc2-spark" data-f="spark" viewBox="0 0 120 34" preserveAspectRatio="none"></svg></div>
+              <!-- Index Direction (moved up from the right column; sits next to India VIX) -->
+              <div class="mc2-panel mc2-idxdir">
+                <div class="mc2-panel-hd">
+                  <span class="mc2-panel-title">📊 Index Direction</span>
+                  <span class="mc2-ia-badge" id="mc-ia-badge">—</span>
+                  <span class="mc2-ia-upd">LAST UPDATE <b id="mc-ia-updated">—</b></span>
+                </div>
+                <div class="mc2-ia-dirs">
+                  <div class="mc2-ia-dir"><span class="mc2-ia-k">Dir</span><span class="mc2-ia-v" id="mc-ia-dir">—</span></div>
+                  <div class="mc2-ia-dir"><span class="mc2-ia-k">5M</span><span class="mc2-ia-v" id="mc-tf-5m">—</span></div>
+                  <div class="mc2-ia-dir"><span class="mc2-ia-k">15M</span><span class="mc2-ia-v" id="mc-tf-15m">—</span></div>
+                  <div class="mc2-ia-dir"><span class="mc2-ia-k">Early Move</span><span class="mc2-ia-v" id="mc-ia-early">—</span></div>
+                </div>
+                <div class="mc2-ia-levels">
+                  <div class="mc2-ia-lv"><span class="mc2-ia-k">BOS Status</span><span class="mc2-ia-lvv" id="mc-ia-bos">—</span></div>
+                  <div class="mc2-ia-lv"><span class="mc2-ia-k">Market State</span><span class="mc2-ia-lvv" id="mc-ia-state">—</span></div>
+                  <div class="mc2-ia-lv"><span class="mc2-ia-k">Current Level</span><span class="mc2-ia-lvv" id="mc-ia-curlevel">—</span></div>
+                  <div class="mc2-ia-lv"><span class="mc2-ia-k">Next Level</span><span class="mc2-ia-lvv" id="mc-ia-nextlevel">—</span></div>
+                  <div class="mc2-ia-lv"><span class="mc2-ia-k">Invalidation</span><span class="mc2-ia-lvv sl" id="mc-ia-inval">—</span></div>
+                </div>
+              </div>
             </div>
 
             <!-- ===== MAIN: chart + right column ===== -->
@@ -1377,28 +1398,6 @@
 
               <!-- RIGHT COLUMN -->
               <div class="mc2-right">
-                <!-- Intraday Assistance -->
-                <div class="mc2-panel">
-                  <div class="mc2-panel-hd">
-                    <span class="mc2-panel-title">🎯 Intraday Assistance</span>
-                    <span class="mc2-ia-badge" id="mc-ia-badge">—</span>
-                    <span class="mc2-ia-upd">LAST UPDATE<br><b id="mc-ia-updated">—</b></span>
-                  </div>
-                  <div class="mc2-ia-dirs">
-                    <div class="mc2-ia-dir"><span class="mc2-ia-k">Dir</span><span class="mc2-ia-v" id="mc-ia-dir">—</span></div>
-                    <div class="mc2-ia-dir"><span class="mc2-ia-k">5M</span><span class="mc2-ia-v" id="mc-tf-5m">—</span></div>
-                    <div class="mc2-ia-dir"><span class="mc2-ia-k">15M</span><span class="mc2-ia-v" id="mc-tf-15m">—</span></div>
-                    <div class="mc2-ia-dir"><span class="mc2-ia-k">Early Move</span><span class="mc2-ia-v" id="mc-ia-early">—</span></div>
-                  </div>
-                  <!-- Levels & structure state (from the same snapshot / existing engines) -->
-                  <div class="mc2-ia-levels">
-                    <div class="mc2-ia-lv"><span class="mc2-ia-k">BOS Status</span><span class="mc2-ia-lvv" id="mc-ia-bos">—</span></div>
-                    <div class="mc2-ia-lv"><span class="mc2-ia-k">Market State</span><span class="mc2-ia-lvv" id="mc-ia-state">—</span></div>
-                    <div class="mc2-ia-lv"><span class="mc2-ia-k">Current Level</span><span class="mc2-ia-lvv" id="mc-ia-curlevel">—</span></div>
-                    <div class="mc2-ia-lv"><span class="mc2-ia-k">Next Level</span><span class="mc2-ia-lvv" id="mc-ia-nextlevel">—</span></div>
-                    <div class="mc2-ia-lv"><span class="mc2-ia-k">Invalidation</span><span class="mc2-ia-lvv sl" id="mc-ia-inval">—</span></div>
-                  </div>
-                </div>
 
                 <!-- ADDITIVE: OI Movement judge (5M trade / 15M direction) — read-only; hidden on older backend -->
                 <div class="mc2-panel mc2-oim-panel" id="mc-oimove-panel" hidden>

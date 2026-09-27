@@ -4786,3 +4786,13 @@ body.te-fullwidth .content { padding:0 !important; }
 #mc2-cards .mc2-card-dim { opacity: 0.45; }
 #mc2-cards .mc2-card-dim .mc2-card-val { color: #5f6f88; }
 #mc2-cards .mc2-card-active { border-color: #2f7dff; box-shadow: 0 0 0 1px rgba(47,125,255,.35); }
+
+/* Index Direction panel moved into the top strip, next to India VIX. The chart
+   below keeps its size (720px). The India VIX card sits on the left and the
+   Index Direction panel on the right, each laid out vertically (stacked). */
+.mc2-cards { display: flex !important; gap: 10px; align-items: stretch; }
+.mc2-cards .mc2-card { flex: 0 0 200px; }
+.mc2-idxdir { flex: 1; min-width: 0; padding: 8px 14px; margin: 0; }
+.mc2-idxdir .mc2-panel-hd { margin-bottom: 8px; }
+.mc2-idxdir .mc2-ia-upd { margin-left: auto; font-size: 10px; color: #5f6f88; }
+@media (max-width: 900px) { .mc2-cards { flex-wrap: wrap; } .mc2-cards .mc2-card { flex: 1 1 160px; } }
