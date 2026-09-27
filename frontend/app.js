@@ -5656,6 +5656,7 @@ function initMarketCommand() {
   // Jump to the Option Terminal (CE/PE) for the same index — Market Command runs
   // full-screen with its tab bar hidden, so this button is the way across.
   el("mc-open-optionterminal")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("optionterminal"); });
+  el("mc-open-tradeexec")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("tradeexec"); });
 
   // Wire fullscreen
   const fsBtn = el("mc-fullscreen");
@@ -5935,6 +5936,7 @@ function initOptionTerminal() {
     if (OT.lastData) renderOptionTerminal(OT.lastData);
   });
   otEl("ot-open-command")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("marketcommand"); });
+  otEl("ot-open-tradeexec")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("tradeexec"); });
   otEl("ot-groww-btn")?.addEventListener("click", otConnectGroww);
   otGrowwStatus();
 }
@@ -6098,6 +6100,7 @@ function initTradeExec() {
   }));
   teEl("te-refresh")?.addEventListener("click", () => loadTradeExec());
   teEl("te-open-command")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("marketcommand"); });
+  teEl("te-open-optionterminal")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("optionterminal"); });
   teEl("te-export-trades")?.addEventListener("click", () => {
     const url = `/api/trade-log/export${TE._day ? `?date=${TE._day}` : ""}`;
     const a = document.createElement("a"); a.href = url; a.download = ""; document.body.appendChild(a); a.click(); a.remove();
