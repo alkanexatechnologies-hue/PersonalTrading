@@ -218,6 +218,15 @@ export const CONFIG = {
   // Market-data provider. DHAN IS THE ONLY SUPPORTED SOURCE (real-time NSE via
   // the DhanHQ API; needs access token in data/dhan-config.json).
   dataProvider: "dhan" as const,
+  // Feature flag for the ADDITIVE Multi-Timeframe Fake Move layer on Market
+  // Command (see backend/analyst/fakeMove.ts). Default ON. When disabled
+  // (ENABLE_MTF_FAKE_MOVE_CHART=0 or =false) the /api/market-command response
+  // omits the fakeMove* fields entirely and the chart behaves EXACTLY as before
+  // — this layer never touches existing candle/EMA/VWAP/S-R/OI/BOS/CHoCH logic.
+  enableMtfFakeMove: (() => {
+    const v = String(process.env.ENABLE_MTF_FAKE_MOVE_CHART ?? "").trim().toLowerCase();
+    return v !== "0" && v !== "false" && v !== "off" && v !== "no";
+  })(),
 };
 
 /**

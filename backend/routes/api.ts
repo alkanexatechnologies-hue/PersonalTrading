@@ -55,6 +55,11 @@ import { analyzeVolume } from "../volume/analyze";
 import { getOiAnalysis } from "../oi/oi";
 import { dhanOiAnalysis, dhanHasOptions, dhanZeroHero, dhanRateLimitStats, DhanProvider, dhanChainForExpiry, dhanOptionCandles, dhanSpotCandles, recordDhanOk, recordDhanFail, getDhanHealth } from "../data/dhanProvider";
 import { loadDhanConfig, saveDhanConfig, dhanConfigured, disconnectDhan, testDhanConnection } from "../data/dhanConfig";
+import {
+  getDhanHealth as computeDhanHealth, decodeDhanToken, setDhanConnecting, recordDhanAuthSuccess,
+  noteDhanErrorCode, resetDhanHealth, classifyFreshness, dhanHealthLogRecord, DhanErrorCode, DhanHealth,
+} from "../data/dhanHealth";
+import type { GrowwFailureCode } from "../data/growwAuth";
 import { buildNextDayPick } from "../nextday/outlook";
 import { computeMomentumBurst } from "../scalp/momentum";
 import { computeEarlyMove } from "../movement/earlyMove";
@@ -78,13 +83,14 @@ import { detectCandlePattern } from "../signals/candles";
 import { computeTradeMinder } from "../signals/tradeMinder";
 import { saveOiSnapshot, priorDaySnapshot, latestSnapshot } from "../oi/snapshotStore";
 import { recordOiBaseline, computeOiChange, oiBaselineStrike } from "../oi/oiChange";
+import { recordOiSample, computeOiMovement, OiMoveResult } from "../oi/oiMovement";
 import { recommendOiTrades, correlateOiModels, buildOiWalls, buildOiLesson } from "../oi/oiTrade";
 import { buildMoveBulletin } from "../oi/bulletin";
 import { tickPaperAlerts, sendAlertsTest, alertsStatus } from "../alerts/paperPing";
 import { saveTelegramConfig, disconnectTelegram, createInviteLink } from "../integrations/telegramProvider";
 import { notificationStatusLive } from "../integrations/notificationService";
 import { recordConnectionTest, recordConnectionSuccess, getConnectionStatus } from "../data/connectionStatusTracker";
-import { lookupDhanSecurity } from "../data/dhanInstruments";
+import { lookupDhanSecurity, lookupDhanOption } from "../data/dhanInstruments";
 import { fetchDhanCandles, DhanBacktestInterval } from "../data/dhanHistorical";
 import { BacktestMode, DEFAULT_BACKTEST_MODE, FullMasterUnavailableError } from "../backtest/backtestMode";
 import { recordLiveSnapshot } from "../data/liveSnapshotRecorder";
@@ -108,6 +114,8 @@ import { emailConfigured } from "../auth/mailer";
 import { computeOiVolume } from "../oi/oiVolume";
 import { reviewOptionTrade } from "../backtest/optionReview";
 import { optionExpiries, optionStrikes, hasOptionData, findOption } from "../data/growwInstruments";
+import { growwOptionCandles, GrowwProvider } from "../data/growwProvider";
+import { growwProviderForOptionTerminal, growwConfigured, loadGrowwConfig, saveGrowwConfig, disconnectGroww, growwTokenExpiry } from "../data/growwConfig";
 import { directionNoMomentum, levelContext, srRoomOk, capTargetAndStop } from "../paper/entryRules";
 import {
   computeNiftyMacroSetup, classifyGlobalMarketBias, fetchGlobalMarketReads,
@@ -179,6 +187,7 @@ import { buildMarketCommentary, detectStructure, formatTradeReview } from "../co
 import { CONFIG, DEFAULT_SYMBOLS, DISCLAIMER, SymbolDef, nearestStrike, SWING_SYMBOLS, findSymbolDef, ALL_SYMBOLS } from "../config";
 import { istDateOfSec } from "../util/istTime";
 import { getOptionTopPickAuditLog } from "../optionTopPick/auditLog";
+import { buildFakeMoveResult, FakeMoveLevel, FakeMoveTFInput, FakeMoveResult } from "../analyst/fakeMove";
 import { scanOptionTopPick, evaluateStockBothTracks } from "../optionTopPick/scanner";
 import { OptionTopPickDeps } from "../optionTopPick/types";
 import { evaluateLiquidityStatus } from "../liquidityStatus/engine";
@@ -312,6 +321,14 @@ const TTL_OI = 90_000; // option chain: 90s (was 60s) - eases Groww rate-limit p
 const TTL_MC_CANDLES = 5_000;
 const getCandlesCached = (symbol: string, interval: Interval) =>
   cached(`c:${symbol}:${interval}`, interval === "1d" ? TTL_DAILY : TTL_INTRADAY, () => fetchCandles(symbol, interval));
+
+// Last-good Market-Command chart candles per symbol:interval. Resilience only:
+// when switching to a COLD index during a transient Dhan rate-limit, the live
+// candle fetch throws and the handler would 502 (blank chart). We then serve the
+// most recent successful candles for THAT symbol so the chart renders. Staleness
+// is reflected automatically via the last candle's timestamp → snapAgeSec →
+// displayStale; the OI-based decision `dataStale` is NOT changed by this.
+const _lastGoodMcCandles = new Map<string, { ts: number; v: any[] }>();
 const getDailyCached = (symbol: string, days = 40) =>
   cached(`d:${symbol}:${days}`, TTL_DAILY, () => {
     const feed = syncSessionProvider();
@@ -495,9 +512,40 @@ function dhanAuthFailed(e: unknown): boolean {
   const { code } = classifyGrowwError(e);
   return code === "INVALID_TOKEN" || code === "AUTH_FAILED";
 }
+// Map the token validator's GrowwFailureCode vocabulary onto the health SSOT's
+// DhanErrorCode so classification stays precise (§13) end-to-end.
+function toDhanErrorCode(code: GrowwFailureCode | undefined): DhanErrorCode {
+  switch (code) {
+    case "INVALID_TOKEN": return "TOKEN_EXPIRED";
+    case "AUTH_FAILED": return "AUTH_FAILED";
+    case "RATE_LIMIT": return "RATE_LIMITED";
+    case "API_UNAVAILABLE": return "API_UNAVAILABLE";
+    case "NETWORK_ERROR": return "NETWORK_ERROR";
+    default: return "UNEXPECTED";
+  }
+}
 function disconnectDhanFeedOnAuthFailure(e: unknown): void {
-  if (!dhanAuthFailed(e)) return;
+  const { code, detail } = classifyGrowwError(e);
+  // Always record the classified error into the SSOT so the UI can explain WHY.
+  noteDhanErrorCode(toDhanErrorCode(code), detail);
+  // Only an AUTH problem (expired/invalid/forbidden) disables the feed. Transient
+  // network / 5xx / rate-limit errors must NOT flip the feed off (§13) — the
+  // existing rate limiter + retry logic handles those without a false disconnect.
+  if (code !== "INVALID_TOKEN" && code !== "AUTH_FAILED") return;
   try { setFeedFlags({ dhan: false }); } catch { /* ignore */ }
+}
+
+// ---- Canonical Dhan health (SINGLE SOURCE OF TRUTH, §12) --------------------
+// Composes the pure health state machine (data/dhanHealth.ts) with the live
+// feed-flag + market-session context. Every screen/endpoint reads THIS.
+export function dhanHealthNow(): DhanHealth {
+  const feed = syncSessionProvider();
+  return computeDhanHealth({
+    configured: feed.configured,
+    feedEnabled: feed.dhanOn,
+    skipLive: feed.skipLive,
+    marketOpen: feed.marketOpen,
+  });
 }
 
 async function fetchCandles(symbol: string, interval: Interval) {
@@ -640,7 +688,20 @@ router.get("/data-status", async (_req: Request, res: Response) => {
     },
     refreshAt: nowSec,
     refreshIst: new Date(nowSec * 1000 + 19800000).toISOString().slice(11, 19) + " IST",
+    // Canonical Dhan lifecycle health (SINGLE SOURCE OF TRUTH, §12). Existing
+    // fields above are kept for backward-compat; new UI reads `dhanHealth`.
+    dhanHealth: dhanHealthNow(),
   });
+});
+
+// ============================ Dhan health (SINGLE SOURCE OF TRUTH) ============================
+// §16: the ONE authoritative endpoint the UI polls to decide what to show for
+// Dhan connection/token/feed/freshness. Available to any authenticated user
+// (behind the global auth gate) — it exposes NO secrets: only statuses, the JWT
+// `exp` timestamp, and data-age telemetry. Every screen consumes THIS instead
+// of independently guessing from token presence.
+router.get("/dhan/health", (_req: Request, res: Response) => {
+  res.json(dhanHealthNow());
 });
 
 // Current data-source connection status.
@@ -820,6 +881,7 @@ router.post("/groww/forget-token", requireAdmin, (req: Request, res: Response) =
   disconnectDhan();
   setFeedFlags({ dhan: false });
   clearQuoteLastGood();
+  resetDhanHealth();
   const admin = getSession(bearerToken(req));
   logAuditEvent({ type: "DHAN_DISCONNECTED", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "dhan", result: "success" });
   return res.json({ ok: true, tokenMasked: "", configured: false, message: "Saved token removed. Paste a fresh Dhan access token to reconnect." });
@@ -838,11 +900,17 @@ router.post("/connect", requireAdmin, async (req: Request, res: Response) => {
   // Save the token to Dhan config and validate
   saveDhanConfig({ accessToken: token });
   setActiveProvider("dhan");
+  // New token supplied (§14): enter CONNECTING/VALIDATING — never show LIVE
+  // until validation confirms real data below.
+  resetDhanHealth();
+  setDhanConnecting(true);
 
   const v = await validateGrowwToken();
   const admin = getSession(bearerToken(req));
 
   if (!v.ok) {
+    noteDhanErrorCode(toDhanErrorCode(v.code), v.message);
+    setDhanConnecting(false);
     recordGrowwFail();
     recordConnectionTest("dhan", false);
     logAuditEvent({
@@ -857,7 +925,8 @@ router.post("/connect", requireAdmin, async (req: Request, res: Response) => {
 
   setFeedFlags({ dhan: true });
   recordGrowwReconnect();
-  recordGrowwOk(v.latencyMs);
+  recordGrowwOk(v.latencyMs); // validateGrowwToken fetched a real quote ⇒ first live data confirmed
+  setDhanConnecting(false);
   recordConnectionSuccess("dhan");
   recordConnectionTest("dhan", true);
   logAuditEvent({
@@ -910,12 +979,22 @@ router.get("/quotes", async (req: Request, res: Response) => {
   const quotes: Record<string, any> = {};
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const feed = syncSessionProvider();
+  const marketOpen = isTradingTimeIST();
+  // Attach truthful freshness metadata to each quote (§6) WITHOUT changing the
+  // existing shape (price/changePercent/marketTime/stale stay). New fields are
+  // additive so old consumers keep working: source, fetchedAt, ageMs, freshness.
+  const decorate = (base: any, fetchedAt: number | null, servedFromCache: boolean) => {
+    if (!base || base.price == null) return base ?? null;
+    const ageMs = fetchedAt != null ? Date.now() - fetchedAt : null;
+    const freshness = classifyFreshness({ ageMs, marketOpen, servedFromCache, hasValue: base.price != null });
+    return { ...base, source: "DHAN", fetchedAt, ageMs, freshness };
+  };
+  const lgMeta = (sym: string) => decorate({ ...quoteLastGoodFresh(sym), stale: true }, lastGoodQuote[sym]?.ts ?? null, true);
   if (feed.skipLive) {
     for (const sym of symbols) {
-      const lg = quoteLastGoodFresh(sym);
-      quotes[sym] = lg ? { ...lg, stale: true } : null;
+      quotes[sym] = quoteLastGoodFresh(sym) ? lgMeta(sym) : null;
     }
-    return res.json({ ts: Math.floor(Date.now() / 1000), marketOpen: isTradingTimeIST(), quotes });
+    return res.json({ ts: Math.floor(Date.now() / 1000), marketOpen, quotes, feed: dhanHealthNow() });
   }
   for (let i = 0; i < symbols.length; i += 5) {
     const chunk = symbols.slice(i, i + 5);
@@ -927,22 +1006,20 @@ router.get("/quotes", async (req: Request, res: Response) => {
         });
         if (v && v.price != null) {
           lastGoodQuote[sym] = { v, ts: Date.now() };
-          quotes[sym] = v;
+          quotes[sym] = decorate(v, Date.now(), false);
           if (v.marketTime) recordGrowwOk(0);
         } else {
-          const lg = quoteLastGoodFresh(sym);
-          quotes[sym] = lg ? { ...lg, stale: true } : v;
+          quotes[sym] = quoteLastGoodFresh(sym) ? lgMeta(sym) : (v ? decorate(v, Date.now(), false) : v);
         }
       } catch (e) {
         recordGrowwFail();
         disconnectDhanFeedOnAuthFailure(e);
-        const lg = quoteLastGoodFresh(sym);
-        quotes[sym] = lg ? { ...lg, stale: true } : null;
+        quotes[sym] = quoteLastGoodFresh(sym) ? lgMeta(sym) : null;
       }
     }));
     if (i + 5 < symbols.length) await sleep(40);
   }
-  res.json({ ts: Math.floor(Date.now() / 1000), marketOpen: isTradingTimeIST(), quotes });
+  res.json({ ts: Math.floor(Date.now() / 1000), marketOpen, quotes, feed: dhanHealthNow() });
 });
 
 // OPENING PLAY (9:20 AM): compare TODAY's early OI to the PRIOR session's OI
@@ -3781,10 +3858,12 @@ async function assembleExtInputs(
         const expiry: string = oi.expiry;
         const cacheKey = `opt-premium:${underlying}:${idea.strike}:${idea.optionType}:${expiry}`;
         premiumSeries = await cached(cacheKey, 45_000, async () => {
-          const inst = await findOption(underlying, idea.optionType, idea.strike, expiry);
-          if (!inst) return [] as number[];
+          // Dhan charts need the option's own numeric securityId (a Groww trading
+          // symbol is rejected with DH-905), so resolve via the Dhan scrip master.
+          const dhanOpt = await lookupDhanOption(underlying, idea.optionType, idea.strike, expiry);
+          if (!dhanOpt) return [] as number[];
           const now = Math.floor(Date.now() / 1000);
-          const oc = await dhanOptionCandles(inst.tradingSymbol, now - 2 * 24 * 3600, now, 5);
+          const oc = await dhanOptionCandles(dhanOpt.securityId, now - 2 * 24 * 3600, now, 5);
           return (oc || []).map((c: any) => Number(c.close)).filter((n: number) => Number.isFinite(n));
         });
       }
@@ -4134,7 +4213,19 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       // ONE authoritative candle cache (shared key `c:`). Market Command drives a
       // fast 5s refresh here; background jobs read the SAME key at their 30s TTL,
       // so they reuse this fresh fetch instead of issuing a duplicate Dhan call.
-      candles = await cached(`c:${symbol}:${interval}`, interval === "1d" ? TTL_DAILY : TTL_MC_CANDLES, () => fetchCandles(symbol, interval));
+      const ckey = `c:${symbol}:${interval}`;
+      try {
+        candles = await cached(ckey, interval === "1d" ? TTL_DAILY : TTL_MC_CANDLES, () => fetchCandles(symbol, interval));
+        if (candles && candles.length) _lastGoodMcCandles.set(ckey, { ts: Date.now(), v: candles });
+      } catch (e) {
+        // Transient Dhan rate-limit / timeout on a cold index → serve the recent
+        // last-good candles so the chart isn't blank. If we have NONE yet, keep the
+        // original behaviour (surface the failure). This never fabricates bars and
+        // never marks stale data as live (freshness comes from the candle time).
+        const lg = _lastGoodMcCandles.get(ckey);
+        if (lg && lg.v && lg.v.length) candles = lg.v;
+        else throw e;
+      }
     }
     if (!candles || candles.length < 5) return res.json({ error: "Not enough candle data", available: false });
 
@@ -4161,10 +4252,16 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
     // next candle → BOS). Cross-checks the OTHER timeframe's structure for a
     // conflict. Read-only; never manufactures a trade.
     let structOther: "Bullish" | "Bearish" | "Ranging" | null = null;
+    // Retain the other-timeframe candles + full structure so the ADDITIVE fake-move
+    // layer can reuse them (no extra fetch, no recompute of a new engine). These
+    // are used only by the new layer; existing behaviour is unchanged.
+    let coCandles: any[] | null = null;
+    let msOther: any = null;
+    const otherTfIv = (interval === "5m" ? "15m" : "5m") as Interval;
     try {
-      const otherTf = (interval === "5m" ? "15m" : "5m") as Interval;
-      const co = isHistorical ? null : await cached(`c:${symbol}:${otherTf}`, TTL_MC_CANDLES, () => fetchCandles(symbol, otherTf));
-      if (co && co.length >= 20) structOther = detectMarketStructure(co, 3, vwap(co)).currentStructure;
+      const co = isHistorical ? null : await cached(`c:${symbol}:${otherTfIv}`, TTL_MC_CANDLES, () => fetchCandles(symbol, otherTfIv));
+      coCandles = co;
+      if (co && co.length >= 20) { msOther = detectMarketStructure(co, 3, vwap(co)); structOther = msOther.currentStructure; }
     } catch { structOther = null; }
     const recentCut = candles.length - 3;
     const swHi = ms.swingPoints.filter((p: any) => (p.type === "HH" || p.type === "LH") && p.index < recentCut).slice(-1)[0]?.price ?? null;
@@ -4314,7 +4411,9 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
     const spotT2 = cmdDirection === "BEARISH" ? (oiData?.management?.support ?? null) : (oiData?.management?.resistance ?? null);
     const spotEntry = rec?.spotTarget ? { low: Math.min(spot, rec.spotTarget), high: Math.max(spot, rec.spotTarget) } : oiData?.levels ? { low: oiData.levels.orbLow || spot - currentAtr, high: oiData.levels.orbHigh || spot } : null;
 
-    const strikeAnalysis = analyzeStrikes(skipOi ? null : oiChain, cmdDirection, { stale: dataStale, finalAction, masterVerdict: arbVerdict, name: def.name, spotSL, spotTarget: spotT1 ?? spotT2 });
+    // Live option-strike analysis is computed AFTER the market view below, so the
+    // Best/Second Strike follow the SAME validated direction the screen displays
+    // (marketView.direction) instead of the raw OI cmdDirection.
 
     // Per-component sync health (real timestamps + ages). OI freshness uses a
     // flat 30/90s band (chain refreshes continuously); candle freshness is
@@ -4389,10 +4488,40 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       obSide: nearOB?.side ?? null, obStatus: nearOB?.status ?? null, obStage: nearOB?.stage ?? null,
       confirmations,
       invalidationSpot: (oiData?.management?.invalidation ?? spotSL) ?? null,
-      optionView: strikeAnalysis?.side ?? null,
-      preferredStrike: strikeAnalysis?.primary ? `${strikeAnalysis.primary.strike} ${strikeAnalysis.primary.side}` : null,
+      optionView: null,          // echo-only; set after strikeAnalysis is computed below
+      preferredStrike: null,     // echo-only; set after strikeAnalysis is computed below
       dataStale,
     });
+
+    // ---- Live option-strike analysis (read-only). DATA-MAPPING FIX: the strike
+    // SIDE follows the SAME validated direction the Trade Plan / panel displays
+    // (marketView.direction), not the raw OI cmdDirection — which is NEUTRAL when
+    // OI is flat and previously blanked Best/Second Strike even though the screen
+    // showed a clear BEARISH/BULLISH bias. The strikeAnalysis ENGINE is unchanged;
+    // only the direction it is given is made consistent with the displayed view.
+    const strikeDirection: "BULLISH" | "BEARISH" | "NEUTRAL" =
+      marketView.direction === "BULLISH" || marketView.direction === "BEARISH" ? marketView.direction : "NEUTRAL";
+    const strikeAnalysis = analyzeStrikes(skipOi ? null : oiChain, strikeDirection, { stale: dataStale, finalAction, masterVerdict: arbVerdict, name: def.name, spotSL, spotTarget: spotT1 ?? spotT2 });
+
+    // ADDITIVE (read-only): dual-timeframe OI-MOVEMENT judge — 5M for trade, 15M
+    // for direction. Records the ATM±5 CE/PE OI sums this request already has and
+    // derives windowed OI movement. Wrapped so it can NEVER affect the response
+    // path; it only produces a NEW `oiMove` field below. Live reads only (skipped
+    // on replay / stale). Nothing here votes into marketView / tradePlan.
+    let oiMove: OiMoveResult | null = null;
+    try {
+      if (!isHistorical && !skipOi && !dataStale && oiChain?.available && Array.isArray(oiChain.topStrikes) && oiChain.topStrikes.length) {
+        const ceSum = oiChain.topStrikes.reduce((a: number, s: any) => a + (Number(s.ceOi) || 0), 0);
+        const peSum = oiChain.topStrikes.reduce((a: number, s: any) => a + (Number(s.peOi) || 0), 0);
+        const pcrVal = Number.isFinite(oiChain.pcr as any) ? (oiChain.pcr as number) : (ceSum > 0 ? peSum / ceSum : 0);
+        recordOiSample(symbol, { asOf: oiChain.asOf || nowSec, ceOi: ceSum, peOi: peSum, pcr: pcrVal, spot });
+        oiMove = computeOiMovement(symbol);
+      }
+    } catch { oiMove = null; }
+    // Echo the chosen strike view back into the already-built market view. These are
+    // DISPLAY-only fields and do NOT affect the direction vote (validateDirection).
+    marketView.optionView = strikeAnalysis?.side ?? null;
+    marketView.preferredStrike = strikeAnalysis?.primary ? `${strikeAnalysis.primary.strike} ${strikeAnalysis.primary.side}` : null;
 
     // ---- ONE CONSISTENT SNAPSHOT + provenance (proves which data produced the
     // decision). Every field of this response was computed in a single request
@@ -4480,6 +4609,83 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
     // Assemble indicator overlay data aligned to candle times
     const align = (arr: any[]) => candles.map((_: any, i: number) => arr[i] ?? null);
 
+    // ============================ ADDITIVE LAYER ============================
+    // Multi-Timeframe Fake Move (feature-flagged). This ONLY interprets values
+    // the existing engines already produced (candles, structure swing points,
+    // OI / support-resistance levels, per-TF direction). It never mutates them,
+    // never overrides marketView.direction / tradePlan, and is OMITTED entirely
+    // when the flag is off — so the chart behaves exactly as before.
+    let fakeMoveLayer: FakeMoveResult | null = null;
+    if (CONFIG.enableMtfFakeMove) {
+      try {
+        const numOf = (x: any): number | null =>
+          x == null ? null : (typeof x === "number" ? x : (typeof x.strike === "number" ? x.strike : null));
+        const lv = (oiData?.levels || {}) as any;
+        // Shared price levels (OI walls + S/R + ORB + PDH/PDL) classified by side
+        // relative to spot. Every value is from the EXISTING OI-command output.
+        const sharedLevels: FakeMoveLevel[] = [];
+        const pushShared = (raw: any, label: string) => {
+          const p = numOf(raw);
+          if (p == null || !isFinite(p)) return;
+          sharedLevels.push({ price: Math.round(p * 100) / 100, label, side: p >= spot ? "resistance" : "support" });
+        };
+        pushShared(oiData?.management?.resistance, "OI Resistance");
+        pushShared(oiData?.management?.support, "OI Support");
+        pushShared(lv.strongResistance, "Strong R");
+        pushShared(lv.strongSupport, "Strong S");
+        pushShared(lv.weakResistance, "Resistance");
+        pushShared(lv.weakSupport, "Support");
+        pushShared(lv.orbHigh, "ORB High");
+        pushShared(lv.orbLow, "ORB Low");
+        pushShared(lv.pdh, "Prev Day High");
+        pushShared(lv.pdl, "Prev Day Low");
+        // Per-TF swing highs/lows from the EXISTING structure engine output.
+        const swingLevels = (msObj: any, cndls: any[] | null): FakeMoveLevel[] => {
+          if (!msObj || !Array.isArray(msObj.swingPoints) || !cndls) return [];
+          return msObj.swingPoints.slice(-6).map((p: any) => {
+            const price = Math.round(p.price * 100) / 100;
+            const isHigh = p.type === "HH" || p.type === "LH";
+            return { price, label: isHigh ? "Swing High" : "Swing Low", side: (price >= spot ? "resistance" : "support") as "resistance" | "support" };
+          });
+        };
+        // Map candle sets / structures to 5M vs 15M (whichever the request covers).
+        const fiveCandles = interval === "5m" ? candles : (otherTfIv === "5m" ? coCandles : null);
+        const fifteenCandles = interval === "15m" ? candles : (otherTfIv === "15m" ? coCandles : null);
+        const fiveMs = interval === "5m" ? ms : (otherTfIv === "5m" ? msOther : null);
+        const fifteenMs = interval === "15m" ? ms : (otherTfIv === "15m" ? msOther : null);
+        const mkInput = (label: string, cndls: any[] | null, msObj: any, dir: string): FakeMoveTFInput | null =>
+          cndls && cndls.length >= 3 ? {
+            tfLabel: label,
+            candles: cndls.map((c: any) => ({ open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume, time: c.time })),
+            levels: [...sharedLevels, ...swingLevels(msObj, cndls)],
+            structure: dir as any,
+          } : null;
+        const tf5 = mkInput("5M", fiveCandles, fiveMs, timeframes.m5);
+        const tf15 = mkInput("15M", fifteenCandles, fifteenMs, timeframes.m15);
+
+        // Higher-timeframe (1H) context — best-effort, cached long (60m bars move
+        // slowly). Skipped in the fast chart-only view / historical replay; falls
+        // back to the 15M structure when 1H isn't available.
+        let htfStructure: string | null = null;
+        let htfAvailable = false;
+        let htfTf = "1H";
+        if (!isHistorical && !viewChart) {
+          try {
+            const c60 = await cached(`c:${symbol}:60m`, 60_000, () => fetchCandles(symbol, "60m" as Interval));
+            if (c60 && c60.length >= 20) { htfStructure = detectMarketStructure(c60, 3, vwap(c60)).currentStructure; htfAvailable = true; }
+          } catch { htfAvailable = false; }
+        }
+        if (!htfAvailable) { htfTf = "15M"; htfStructure = structOther; htfAvailable = structOther != null; }
+
+        fakeMoveLayer = buildFakeMoveResult({
+          tf5, tf15,
+          higher: { timeframe: htfTf, structure: htfStructure, available: htfAvailable },
+          existingDirection: marketView.direction,
+          dataStale: displayStale,
+        });
+      } catch { fakeMoveLayer = null; }
+    }
+
     res.json({
       available: true,
       symbol, name: def.name, interval, spot: Math.round(spot * 100) / 100,
@@ -4499,6 +4705,26 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       bos: latestBos,
       earlyMove,
       timeframes,
+      // ADDITIVE (read-only): dual-timeframe OI-movement judge (5M trade / 15M
+      // direction). Null on replay / stale / early session. Does not affect any
+      // existing field or logic above.
+      oiMove,
+      // ADDITIVE: Multi-Timeframe Fake Move layer (feature-flagged). These are
+      // NEW fields only — no existing field above/below is changed. When the
+      // flag is off, none of these appear and the UI falls back to prior behaviour.
+      ...(fakeMoveLayer ? {
+        fakeMoveEnabled: true,
+        fakeMoveVersion: fakeMoveLayer.version,
+        fakeMove5m: fakeMoveLayer.fakeMove5m,
+        fakeMove15m: fakeMoveLayer.fakeMove15m,
+        mtfFakeMoveState: fakeMoveLayer.mtfFakeMoveState,
+        higherTimeframeContext: fakeMoveLayer.higherTimeframeContext,
+        confirmationState: fakeMoveLayer.confirmationState,
+        fakeMoveConflict: fakeMoveLayer.conflict,
+        counterTrend: fakeMoveLayer.counterTrend,
+        mtfDirection: fakeMoveLayer.mtfDirection,
+        fakeScenario: fakeMoveLayer.scenario,
+      } : {}),
       // Option chain rows (ATM ±3) for the trader table — real CE/PE from the live chain.
       optionChain: (() => {
         if (skipOi || !oiChain?.available || !Array.isArray(oiChain.topStrikes) || oiChain.underlying == null) return { available: false, atmStrike: null, rows: [] };
@@ -5183,9 +5409,58 @@ router.post("/dhan/test", requireAdmin, async (req: Request, res: Response) => {
 });
 router.post("/dhan/disconnect", requireAdmin, (req: Request, res: Response) => {
   disconnectDhan();
+  setFeedFlags({ dhan: false });
+  resetDhanHealth();
   const admin = getSession(bearerToken(req));
   logAuditEvent({ type: "DHAN_DISCONNECTED", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "dhan", result: "success" });
   res.json({ ok: true });
+});
+
+// ---- GROWW connection (OPTION TERMINAL premium data ONLY) ----
+// Dhan stays the source for Market Command and everything else; a connected Groww
+// token is used ONLY for the Option Terminal's premium candles / structure. The
+// token is validated with a real Groww quote before it's saved.
+function growwStatusPayload() {
+  const cfg = loadGrowwConfig();
+  const exp = growwTokenExpiry(cfg);
+  const key = cfg.apiKey || "";
+  return {
+    configured: growwConfigured(cfg),
+    tokenExpiresAt: exp ? new Date(exp * 1000).toISOString() : null,
+    expired: exp != null ? exp * 1000 < Date.now() : null,
+    apiKeySet: !!key,
+    apiKeyMasked: key ? (key.length > 8 ? key.slice(0, 4) + "••••" + key.slice(-4) : "••••") : null,
+  };
+}
+
+router.get("/groww/status", requireAdmin, (_req: Request, res: Response) => {
+  res.json(growwStatusPayload());
+});
+
+router.post("/groww/connect", requireAdmin, async (req: Request, res: Response) => {
+  const token = String(req.body?.token ?? req.body?.accessToken ?? "").trim();
+  const apiKey = String(req.body?.apiKey ?? "").trim();
+  if (!token) return res.status(400).json({ ok: false, error: "Paste a Groww access token." });
+  try {
+    const probe = new GrowwProvider(token);
+    const q = await probe.getQuote("^NSEI");
+    if (!q || !(Number(q.price) > 0)) {
+      return res.status(400).json({ ok: false, error: "Token accepted but Groww returned no usable price. Check the API subscription is active." });
+    }
+  } catch (e: any) {
+    return res.status(400).json({ ok: false, error: "Groww rejected the token: " + String(e?.message || e).slice(0, 180) });
+  }
+  saveGrowwConfig({ accessToken: token, apiKey: apiKey || undefined });
+  const admin = getSession(bearerToken(req));
+  logAuditEvent({ type: "GROWW_CREDENTIAL_UPDATED", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "groww", result: "success" });
+  res.json({ ok: true, ...growwStatusPayload() });
+});
+
+router.post("/groww/disconnect", requireAdmin, (req: Request, res: Response) => {
+  disconnectGroww();
+  const admin = getSession(bearerToken(req));
+  logAuditEvent({ type: "GROWW_DISCONNECTED", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "groww", result: "success" });
+  res.json({ ok: true, configured: false });
 });
 
 // ---- AI data-collection status (backend/data/liveSnapshotRecorder.ts) ----
@@ -6027,18 +6302,112 @@ router.get("/option-candles", async (req: Request, res: Response) => {
   const interval = Math.max(1, Math.min(60, Number(req.query.interval) || 15));
   if (!underlying || !expiry || !Number.isFinite(strike)) return res.status(400).json({ error: "symbol, type, strike, expiry required" });
   try {
-    const inst = await findOption(underlying, type, strike, expiry);
-    if (!inst) return res.json({ available: false, message: `${underlying} ${strike} ${type} (${expiry}) instrument नहीं मिला।` });
+    const inst = await findOption(underlying, type, strike, expiry); // Groww symbol + lot/display
     const now = Math.floor(Date.now() / 1000);
     const start = now - 5 * 24 * 3600; // last ~5 days
-    const candles = await dhanOptionCandles(inst.tradingSymbol, start, now, interval);
+    // OPTION TERMINAL: prefer Groww premium candles (real volume, friendlier rate
+    // limits) when a Groww token is connected. Everything else stays on Dhan.
+    const gp = growwProviderForOptionTerminal();
+    if (gp && inst) {
+      try {
+        const candles = await growwOptionCandles(gp, inst.tradingSymbol, start, now, interval);
+        return res.json({
+          available: candles.length > 0, source: "groww", tradingSymbol: inst.tradingSymbol,
+          underlying, name: def?.name || underlying, type, strike, expiry, interval, lotSize: inst.lotSize ?? null,
+          candles, message: candles.length ? undefined : "Groww ने इस option का candle नहीं दिया।",
+        });
+      } catch (ge: any) {
+        console.error("[option-candles] Groww failed, falling back to Dhan:", ge?.message || ge);
+      }
+    }
+    // Dhan fallback: needs the option's own numeric securityId (a Groww symbol → DH-905).
+    const dhanOpt = await lookupDhanOption(underlying, type, strike, expiry);
+    if (!dhanOpt) return res.json({ available: false, source: "dhan", message: `${underlying} ${strike} ${type} (${expiry}) — contract नहीं मिला।` });
+    const candles = await dhanOptionCandles(dhanOpt.securityId, start, now, interval);
     res.json({
-      available: candles.length > 0, tradingSymbol: inst.tradingSymbol,
-      underlying, name: def?.name || underlying, type, strike, expiry, interval, lotSize: inst.lotSize,
+      available: candles.length > 0, source: "dhan", tradingSymbol: inst?.tradingSymbol ?? null, securityId: dhanOpt.securityId,
+      underlying, name: def?.name || underlying, type, strike, expiry, interval, lotSize: inst?.lotSize ?? null,
       candles, message: candles.length ? undefined : "इस option का candle नहीं मिला (rate-limit या नया strike)।",
     });
   } catch (e: any) {
     res.status(502).json({ error: e?.message || "option candles failed" });
+  }
+});
+
+// ---- OPTION TERMINAL: per-side option-PREMIUM structure levels (ADDITIVE) ----
+// /api/option-structure?symbol=^NSEI&strike=23000&expiry=2026-09-25&interval=15
+// Fetches the selected strike's CE & PE PREMIUM candles from the SAME Dhan source
+// as /api/option-candles, then runs the EXISTING detectMarketStructure engine on
+// the PREMIUM series (NOT the index) to derive, per side:
+//   R2/R1/SWP/S1/S2 + support/resistance (from premium swing highs/lows),
+//   BIOS = "Break In Option Structure" (the latest premium BOS event), and
+//   SWP  = latest premium swing point.
+// Timeframe-aware (uses the requested interval's candles). Nothing is fabricated:
+// missing values are null. No existing API/engine is modified.
+router.get("/option-structure", async (req: Request, res: Response) => {
+  const provider = getProvider();
+  if (provider.name !== "dhan") return res.json({ available: false, message: "Option structure needs the Dhan feed." });
+  const def = findSymbolDef(String(req.query.symbol || ""));
+  const underlying = (def?.nseSymbol || String(req.query.symbol || "").replace(/\.NS$/i, "")).toUpperCase();
+  const strike = Number(req.query.strike);
+  const expiry = String(req.query.expiry || "");
+  const interval = Math.max(1, Math.min(60, Number(req.query.interval) || 15));
+  if (!underlying || !expiry || !Number.isFinite(strike)) return res.status(400).json({ error: "symbol, strike, expiry required" });
+
+  const r2n = (n: number) => Math.round(n * 100) / 100;
+  const buildSide = async (type: "CE" | "PE") => {
+    try {
+      const now = Math.floor(Date.now() / 1000);
+      const start = now - 5 * 24 * 3600; // same window the existing /api/option-candles uses
+      // Prefer Groww premium candles for the Option Terminal (same source as the
+      // chart); fall back to Dhan when Groww isn't connected or errors.
+      let candles: any[] | null = null;
+      const gp = growwProviderForOptionTerminal();
+      const inst = await findOption(underlying, type, strike, expiry);
+      if (gp && inst) {
+        try { candles = await growwOptionCandles(gp, inst.tradingSymbol, start, now, interval); }
+        catch { candles = null; }
+      }
+      if (!candles || !candles.length) {
+        const dhanOpt = await lookupDhanOption(underlying, type, strike, expiry);
+        if (!dhanOpt) return { available: false, reason: "contract not found" };
+        candles = await dhanOptionCandles(dhanOpt.securityId, start, now, interval);
+      }
+      if (!candles || candles.length < 10) return { available: false, reason: "not enough premium candles" };
+      // EXISTING structure engine, run on the PREMIUM candles.
+      const ms = detectMarketStructure(candles, 3, vwap(candles));
+      const cur = candles[candles.length - 1].close;
+      const swings = ms.swingPoints.map((p: any) => ({ type: p.type, price: r2n(p.price), time: candles[p.index]?.time ?? null }));
+      const highs = swings.filter((s) => s.type === "HH" || s.type === "LH").map((s) => s.price);
+      const lows = swings.filter((s) => s.type === "HL" || s.type === "LL").map((s) => s.price);
+      const above = [...new Set(highs.filter((p) => p > cur))].sort((a, b) => a - b);
+      const below = [...new Set(lows.filter((p) => p < cur))].sort((a, b) => b - a);
+      const lastBos = ms.bosEvents.length ? ms.bosEvents[ms.bosEvents.length - 1] : null;
+      return {
+        available: true,
+        current: r2n(cur),
+        r1: above[0] ?? null, r2: above[1] ?? null,
+        s1: below[0] ?? null, s2: below[1] ?? null,
+        swp: swings.length ? swings[swings.length - 1].price : null,
+        support: below[0] ?? null,
+        resistance: above[0] ?? null,
+        bios: lastBos ? {
+          price: r2n(lastBos.level),
+          time: candles[lastBos.breakIndex]?.time ?? lastBos.breakTime ?? null,
+          direction: lastBos.direction === "Bullish" ? "BULLISH" : "BEARISH",
+          stage: lastBos.stage,
+        } : null,
+        structure: ms.currentStructure,
+        swings: swings.slice(-8),
+      };
+    } catch (e: any) { return { available: false, reason: e?.message || "structure failed" }; }
+  };
+
+  try {
+    const [ce, pe] = await Promise.all([buildSide("CE"), buildSide("PE")]);
+    res.json({ available: !!((ce as any).available || (pe as any).available), symbol: underlying, strike, expiry, interval, ce, pe });
+  } catch (e: any) {
+    res.status(502).json({ error: e?.message || "option-structure failed" });
   }
 });
 
@@ -6962,10 +7331,10 @@ function paperDeps(force = false): TickDeps {
         return await cached(`optprem:${symbol}:${type}:${strike}:${expiry}`, 30_000, async () => {
           const def = findSymbolDef(symbol);
           const underlying = (def?.nseSymbol || symbol.replace(/\.NS$/i, "")).toUpperCase();
-          const inst = await findOption(underlying, type, strike, expiry);
-          if (!inst) return null;
+          const dhanOpt = await lookupDhanOption(underlying, type, strike, expiry);
+          if (!dhanOpt) return null;
           const now = Math.floor(Date.now() / 1000);
-          const candles = await dhanOptionCandles(inst.tradingSymbol, now - 2 * 24 * 3600, now, 5);
+          const candles = await dhanOptionCandles(dhanOpt.securityId, now - 2 * 24 * 3600, now, 5);
           return candles.length ? candles[candles.length - 1].close : null;
         });
       } catch { return null; }
@@ -7309,20 +7678,52 @@ export function startHourlyScheduler() {
   hourlySchedulerStarted = true;
   try { syncSessionProvider(); } catch { /* ignore */ }
   setInterval(() => { try { syncSessionProvider(); } catch { /* ignore */ } }, 30_000);
-  // Boot: a saved token was loaded without a Groww probe. Validate now; if it
-  // is expired/rejected, turn the live feed off (file kept so the admin can
-  // paste a replacement). Does not block listen().
+  // Boot token lifecycle (§3): a saved token was loaded without a probe.
+  //  1. If the JWT is already expired locally, do NOT validate or poll with a
+  //     dead token — leave the feed off; health reports TOKEN_EXPIRED.
+  //  2. Otherwise perform ONE authenticated validation. Success ⇒ LIVE.
+  //     An AUTH failure (expired/invalid) disables the feed; a transient
+  //     network/5xx/rate-limit error does NOT — we stay CONNECTING and let the
+  //     normal polling recover (no false "disconnected"). Does not block listen().
   void (async () => {
     if (!hasGrowwToken()) return;
+    if (decodeDhanToken().expired) {
+      setFeedFlags({ dhan: false });
+      setDhanConnecting(false);
+      noteDhanErrorCode("TOKEN_EXPIRED", "Saved token expired at boot (local JWT check)");
+      console.log("[dhan] boot: saved token expired — live feed OFF, reconnect required.");
+      return;
+    }
     try {
       const v = await validateGrowwToken();
-      if (v.ok) { recordGrowwOk(v.latencyMs); recordConnectionSuccess("groww"); }
-      else { setFeedFlags({ dhan: false }); recordGrowwFail(); }
-    } catch {
-      try { setFeedFlags({ dhan: false }); } catch { /* ignore */ }
+      if (v.ok) {
+        recordGrowwOk(v.latencyMs);
+        recordDhanAuthSuccess();
+        recordConnectionSuccess("groww");
+        setDhanConnecting(false);
+        console.log("[dhan] boot: token validated — live feed ON.");
+      } else {
+        const dc = toDhanErrorCode(v.code);
+        noteDhanErrorCode(dc, v.message);
+        recordGrowwFail();
+        setDhanConnecting(false);
+        // Only disable the feed for a genuine auth failure (§13).
+        if (dc === "TOKEN_EXPIRED" || dc === "AUTH_FAILED") setFeedFlags({ dhan: false });
+        console.log(`[dhan] boot: validation failed (${dc}) — ${dc === "TOKEN_EXPIRED" || dc === "AUTH_FAILED" ? "feed OFF" : "feed kept, will retry"}.`);
+      }
+    } catch (e) {
+      // Unexpected throw: treat as transient, keep the feed, record the error.
+      noteDhanErrorCode(toDhanErrorCode(classifyGrowwError(e).code), classifyGrowwError(e).detail);
       recordGrowwFail();
+      setDhanConnecting(false);
     }
   })();
+  // Structured, secret-free health heartbeat (§15) — one line/min so operators
+  // can see auth/feed/freshness transitions in the server log without the token.
+  setInterval(() => {
+    try { console.log("[dhan-health]", JSON.stringify(dhanHealthLogRecord(dhanHealthNow()))); }
+    catch { /* ignore */ }
+  }, 60_000);
   // Daily login-credential rotation (08:00 IST) - checked every minute so the
   // 08:00 boundary is caught promptly without polling too often; the rotation
   // itself is a no-op unless today hasn't rotated yet (see credentials.ts).

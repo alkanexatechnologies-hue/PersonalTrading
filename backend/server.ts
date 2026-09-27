@@ -23,6 +23,7 @@ import { CONFIG } from "./config";
 import { getProvider, setActiveProvider } from "./data";
 import { setFeedFlags, syncSessionProvider } from "./data/sessionFeed";
 import { dhanConfigured } from "./data/dhanConfig";
+import { decodeDhanToken, setDhanConnecting } from "./data/dhanHealth";
 import { getExitCheckHealth } from "./paper/engine";
 
 const app = express();
@@ -68,12 +69,26 @@ process.on("unhandledRejection", (err) => {
 });
 
 // Auto-connect Dhan on boot using the saved access token.
+// Boot-time token lifecycle (§3): decode the JWT expiry LOCALLY first. If the
+// stored token is already expired we do NOT enable the live feed and do NOT
+// start pointless polling with a dead token — the health state reports
+// TOKEN_EXPIRED and the UI shows a Reconnect action. If it looks valid we enter
+// the CONNECTING state and enable the feed so the boot probe (startHourlyScheduler)
+// can perform ONE authenticated validation; only that success flips us to LIVE.
 function autoConnectDhan(): void {
   if (!dhanConfigured()) return;
+  const tok = decodeDhanToken();
+  if (tok.expired) {
+    // Keep the token file (operator can reconnect) but leave the feed OFF.
+    setFeedFlags({ dhan: false });
+    console.log(`  Dhan          : saved token EXPIRED — live feed OFF, reconnect required.`);
+    return;
+  }
   try {
     setActiveProvider("dhan");
+    setDhanConnecting(true); // not LIVE until validation succeeds (§3, §14)
     setFeedFlags({ dhan: true });
-    console.log(`  Dhan          : reconnecting with saved token...`);
+    console.log(`  Dhan          : validating saved token...`);
   } catch {
     /* provider construction failed - feed stays off */
   }

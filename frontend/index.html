@@ -7,7 +7,7 @@
          under the home indicator. Android ignores it harmlessly. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>BC Data Status</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=20260925-grwconn" />
     <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   </head>
   <body class="oi-focus">
@@ -278,6 +278,43 @@
           </table>
         </div>
       </div>
+    </div>
+
+    <!-- Groww Connection settings (admin-only) — Option Terminal PREMIUM data only.
+         Dhan stays the source for Market Command and everything else. Opened from the
+         Admin Control Center's Connections card ("Manage" on the Groww row). -->
+    <div id="groww-connect-panel" class="connect-panel gc-panel hidden">
+      <div class="cp-head">
+        <h4>Groww Connection</h4>
+        <button id="groww-connect-close" class="cp-close" aria-label="Close">&times;</button>
+      </div>
+
+      <div class="gc-source">OPTION TERMINAL DATA&nbsp; <b>🟢 GROWW</b> <span class="wl-sub">premium candles / levels only</span></div>
+
+      <label class="cp-label" for="groww-conn-key">Groww API Key</label>
+      <div class="gc-field">
+        <input id="groww-conn-key" type="text" placeholder="Your Groww Trade API key" autocomplete="off" autocapitalize="off" spellcheck="false" />
+      </div>
+
+      <label class="cp-label" for="groww-conn-token">Groww Access Token</label>
+      <div class="gc-field">
+        <input id="groww-conn-token" type="password" placeholder="Paste your Groww Trade API access token" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        <button type="button" class="gc-eye" data-target="groww-conn-token" aria-label="Show/hide">👁</button>
+      </div>
+
+      <button id="groww-conn-save" class="gc-primary">SAVE &amp; CONNECT</button>
+      <div id="groww-conn-status" class="conn-status"></div>
+
+      <button id="groww-conn-disconnect" class="gc-test">DISCONNECT GROWW</button>
+      <div id="groww-conn-info" class="gc-test-result"></div>
+
+      <p class="wl-sub cp-note">
+        Groww is used <b>only</b> for the Option Terminal's premium candles and hourly levels — Market Command and every
+        other screen stay on Dhan. Create an <b>API key</b> in the Groww Trade API portal and generate an
+        <b>access token</b> (API key + secret / TOTP). Paste both above and press <b>SAVE &amp; CONNECT</b> — it is accepted
+        only after a real Groww request succeeds, then stored securely server-side (data/groww-config.json). The access
+        token is what authenticates; Groww tokens expire (typically daily) — paste a fresh one when it lapses.
+      </p>
     </div>
 
     <!-- Dhan Connection settings card (desktop + mobile) — admin-only, opened
@@ -1290,16 +1327,18 @@
                     <span class="mc-sym-tf" id="mc-sym-tf">· 15m · NSE</span>
                     <span class="mc-spot" id="mc-spot">—</span>
                     <span class="mc-spot-chg" id="mc-spot-chg"></span>
+                    <span class="mc-chart-date" id="mc-chart-date" title="Session date shown on chart"></span>
                     <span class="mc2-chart-icons"><button class="mc-fullscreen-btn" id="mc-fullscreen" title="Fullscreen">⛶</button></span>
                   </div>
                   <div class="mc-ohlc-detail" id="mc-ohlc-detail">
+                    <span class="mc-sel-time">🕘 <b id="mc-ohlc-t">—</b></span><span class="mc-leg-sep">·</span>
                     <span>O <b id="mc-ohlc-o">—</b></span><span>H <b id="mc-ohlc-h">—</b></span>
                     <span>L <b id="mc-ohlc-l">—</b></span><span>C <b id="mc-ohlc-c">—</b></span>
                     <span class="mc-leg-vol">Vol <b id="mc-leg-vol-v">—</b></span>
                     <span class="mc-leg-sep">·</span>
                     <span style="color:#3b82f6">EMA9 <b id="mc-leg-ema9-v">—</b></span>
                     <span style="color:#f0b90b">EMA21 <b id="mc-leg-ema21-v">—</b></span>
-                    <span style="color:#94a3b8">VWAP <b id="mc-leg-vwap-v">—</b></span>
+                    <span style="color:#22c55e">VWAP <b id="mc-leg-vwap-v">—</b></span>
                     <span class="mc-leg-sep">·</span>
                     <span>VIX <b id="mc-leg-vix-v">—</b></span>
                     <span>5M <b id="mc-leg-5m">—</b></span>
@@ -1312,7 +1351,7 @@
                       <label class="mc-tog"><input type="checkbox" id="mc-tog-ema21" checked><span class="mc-tog-dot" style="background:#f0b90b"></span>EMA 21</label>
                       <label class="mc-tog"><input type="checkbox" id="mc-tog-ema50" checked><span class="mc-tog-dot" style="background:#a855f7"></span>EMA 50</label>
                       <label class="mc-tog"><input type="checkbox" id="mc-tog-ema200" checked><span class="mc-tog-dot" style="background:#e056a0"></span>EMA 200</label>
-                      <label class="mc-tog"><input type="checkbox" id="mc-tog-vwap" checked><span class="mc-tog-dot" style="background:#64748b"></span>VWAP</label>
+                      <label class="mc-tog"><input type="checkbox" id="mc-tog-vwap" checked><span class="mc-tog-dot" style="background:#22c55e"></span>VWAP</label>
                       <label class="mc-tog"><input type="checkbox" id="mc-tog-vol" checked><span class="mc-tog-dot" style="background:#16c784"></span>Volume</label>
                       <label class="mc-tog mc-tog-levels-wrap"><input type="checkbox" id="mc-tog-levels" checked><span class="mc-tog-dot" style="background:#2962ff"></span>Important Levels</label>
                       <label class="mc-tog"><input type="checkbox" id="mc-tog-bos" checked><span class="mc-tog-dot" style="background:#a855f7"></span>BOS / CHoCH</label>
@@ -1371,6 +1410,87 @@
                     <div class="mc2-ia-cell action"><span class="mc2-ia-k">Action</span><span class="mc2-ia-action" id="mc-plan-action">—</span></div>
                   </div>
                   <div class="mc2-ia-reason"><span class="mc2-ia-bulb">💡</span><span><b>Reason:</b> <span id="mc-ia-reason">—</span></span></div>
+                </div>
+
+                <!-- ADDITIVE: OI Movement judge (5M trade / 15M direction) — read-only; hidden on older backend -->
+                <div class="mc2-panel mc2-oim-panel" id="mc-oimove-panel" hidden>
+                  <div class="mc2-panel-hd">
+                    <span class="mc2-panel-title">🔀 OI Movement</span>
+                    <span class="mc2-oim-sum" id="mc-oim-summary">—</span>
+                  </div>
+                  <div class="mc2-oim-rows">
+                    <div class="mc2-oim-row">
+                      <span class="mc2-oim-tag trade">5M · TRADE</span>
+                      <span class="mc2-oim-sig" id="mc-oim-trade-sig">—</span>
+                      <span class="mc2-oim-flow" id="mc-oim-trade-flow">—</span>
+                      <div class="mc2-oim-guid" id="mc-oim-trade-guid">—</div>
+                    </div>
+                    <div class="mc2-oim-row">
+                      <span class="mc2-oim-tag dir">15M · DIRECTION</span>
+                      <span class="mc2-oim-sig" id="mc-oim-dir-sig">—</span>
+                      <span class="mc2-oim-flow" id="mc-oim-dir-flow">—</span>
+                      <div class="mc2-oim-guid" id="mc-oim-dir-guid">—</div>
+                    </div>
+                  </div>
+                  <div class="mc2-oim-note" id="mc-oim-note"></div>
+                </div>
+
+                <!-- ADDITIVE: Multi-Timeframe Direction (existing per-TF directions + counter-trend annotation) -->
+                <div class="mc2-panel mc2-fm-panel" id="mc-mtfdir-panel" hidden>
+                  <div class="mc2-panel-hd">
+                    <span class="mc2-panel-title">Multi-Timeframe Direction</span>
+                    <span class="mc2-fm-sub">existing logic · display only</span>
+                  </div>
+                  <div class="mc2-tfcards">
+                    <div class="mc2-tfcard">
+                      <div class="mc2-tfcard-tf">1H</div>
+                      <div class="mc2-tfcard-ico" id="mc-mtf-1h-ico">•</div>
+                      <div class="mc2-tfcard-lbl" id="mc-mtf-1h">—</div>
+                    </div>
+                    <div class="mc2-tfcard">
+                      <div class="mc2-tfcard-tf">15M</div>
+                      <div class="mc2-tfcard-ico" id="mc-mtf-15m-ico">•</div>
+                      <div class="mc2-tfcard-lbl" id="mc-mtf-15m">—</div>
+                    </div>
+                    <div class="mc2-tfcard mc2-tfcard-accent">
+                      <div class="mc2-tfcard-tf">5M</div>
+                      <div class="mc2-tfcard-ico" id="mc-mtf-5m-ico">•</div>
+                      <div class="mc2-tfcard-lbl" id="mc-mtf-5m">—</div>
+                      <div class="mc2-tfcard-sub" id="mc-mtf-5m-sub"></div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- ADDITIVE: Multi-Timeframe Fake Move Detector (feature-flagged; hidden when off) -->
+                <div class="mc2-panel mc2-fm-panel" id="mc-fakemove-panel" hidden>
+                  <div class="mc2-panel-hd">
+                    <span class="mc2-panel-title">Fake Move Detector</span>
+                    <span class="mc2-fm-badge" id="mc-fm-badge">—</span>
+                  </div>
+                  <div class="mc2-tfcards">
+                    <div class="mc2-tfcard"><div class="mc2-tfcard-tf">5M</div><div class="mc2-fm-pill" id="mc-fm-5m">—</div></div>
+                    <div class="mc2-tfcard"><div class="mc2-tfcard-tf">15M</div><div class="mc2-fm-pill" id="mc-fm-15m">—</div></div>
+                    <div class="mc2-tfcard"><div class="mc2-tfcard-tf">1H</div><div class="mc2-fm-pill" id="mc-fm-htf">—</div></div>
+                  </div>
+                  <div class="mc2-fm-detail">
+                    <div class="mc2-fm-cell"><span class="mc2-ia-k">Candle Event</span><span class="mc2-fm-v" id="mc-fm-candle">—</span></div>
+                    <div class="mc2-fm-cell"><span class="mc2-ia-k">CT Status</span><span class="mc2-fm-v" id="mc-fm-ctstatus">—</span></div>
+                    <div class="mc2-fm-cell"><span class="mc2-ia-k">Existing Dir</span><span class="mc2-fm-v" id="mc-fm-existing">—</span></div>
+                    <div class="mc2-fm-cell"><span class="mc2-ia-k">MTF Implies</span><span class="mc2-fm-v" id="mc-fm-mtf-implied">—</span></div>
+                  </div>
+                  <div class="mc2-fm-conflict" id="mc-fm-conflict" hidden></div>
+                  <div class="mc2-ia-reason"><span class="mc2-ia-bulb">🧭</span><span><b>MTF:</b> <span id="mc-fm-reason">—</span></span></div>
+                </div>
+
+                <!-- ADDITIVE: Confirmation & Next Scenario (presentation only) -->
+                <div class="mc2-panel mc2-fm-panel" id="mc-scenario-panel" hidden>
+                  <div class="mc2-panel-hd">
+                    <span class="mc2-panel-title">Confirmation &amp; Next Scenario</span>
+                  </div>
+                  <div class="mc2-scen-statusrow"><span class="mc2-ia-k">Status</span><span class="mc2-fm-pill" id="mc-scen-status">—</span></div>
+                  <div class="mc2-scen-note" id="mc-scen-note" hidden></div>
+                  <div class="mc2-scen-line"><b>Confirmation needed:</b> <span id="mc-scen-conf">—</span></div>
+                  <div class="mc2-scen-rev"><span class="mc2-rev-pill">REVERSAL WATCH</span><span id="mc-scen-rev">—</span></div>
                 </div>
 
                 <!-- Option Chain -->
@@ -1432,19 +1552,47 @@
           <div class="ot-wrap">
             <div class="ot-topbar">
               <div class="ot-brand"><span class="ot-logo">📈</span> Option Terminal <span class="ot-muted" style="font-weight:500">· CE / PE premium · Market Option Selection</span></div>
+              <span class="ot-datasrc" id="ot-datasrc" title="Where the Option Terminal's premium candles / levels come from">Source: —</span>
+              <button class="ot-navbtn ot-grww" id="ot-groww-btn" title="Connect a Groww Trade API token for Option Terminal premium data">Connect Groww</button>
               <button class="ot-navbtn" id="ot-open-command">⚡ Market Command</button>
             </div>
-            <!-- context strip: index/BOS/VIX + AUTO/MANUAL + strike -->
+            <!-- context strip: indices + spot + market structure + setup + VIX -->
             <div class="ot-strip">
-              <div class="ot-cell ot-index">
-                <div class="ot-lbl">Market · Index <span class="ot-src" id="ot-src">follows Market Command</span></div>
-                <div class="ot-idx" id="ot-idx-btns">
-                  <button class="ot-idxbtn active" data-sym="^NSEI">NIFTY 50</button>
-                  <button class="ot-idxbtn" data-sym="^NSEBANK">BANKNIFTY</button>
-                  <button class="ot-idxbtn" data-sym="^CNXFIN">FINNIFTY</button>
-                  <button class="ot-idxbtn" data-sym="^NSEMDCP50">MIDCAP</button>
+              <div class="ot-idx" id="ot-idx-btns">
+                <button class="ot-idxbtn active" data-sym="^NSEI">NIFTY 50</button>
+                <button class="ot-idxbtn" data-sym="^NSEBANK">BANKNIFTY</button>
+                <button class="ot-idxbtn" data-sym="^CNXFIN">FINNIFTY</button>
+                <button class="ot-idxbtn" data-sym="^NSEMDCP50">MIDCAP</button>
+              </div>
+              <div class="ot-ctxline">
+                <span class="ot-ck">Spot</span><b class="ot-cv" id="ot-spot">—</b><span class="ot-spot-chg" id="ot-spot-chg"></span>
+                <span class="ot-csep"></span>
+                <span class="ot-ck">India VIX</span><b class="ot-cv" id="ot-ctx-vix">—</b>
+                <span class="ot-csep"></span>
+                <span class="ot-ck">Market Structure</span><b class="ot-cv" id="ot-ctx-struct">—</b>
+                <span class="ot-csep"></span>
+                <span class="ot-ck">Current Setup</span><b class="ot-cv ot-setup" id="ot-ctx-setup">—</b>
+                <span class="ot-src" id="ot-src" style="margin-left:auto">follows Market Command</span>
+              </div>
+            </div>
+
+            <!-- strike-selection row: manual only (AUTO removed) + view + timeframe + summary -->
+            <div class="ot-strikerow">
+              <div class="ot-manualbadge">Only Manual Strike Selection<span>(Auto removed)</span></div>
+              <div class="ot-srk-field">
+                <label>Strike Selection (Manual)</label>
+                <div class="ot-srk-row">
+                  <select id="ot-strike-sel"></select>
+                  <div class="ot-view" id="ot-view-btns">
+                    <button class="ot-viewbtn" data-view="CE">CE</button>
+                    <button class="ot-viewbtn" data-view="PE">PE</button>
+                    <button class="ot-viewbtn active" data-view="BOTH">BOTH</button>
+                  </div>
                 </div>
-                <div class="ot-spot"><span class="ot-spot-val" id="ot-spot">—</span><span class="ot-spot-chg" id="ot-spot-chg"></span></div>
+                <div class="ot-selstate" id="ot-selstate">MANUAL STRIKE</div>
+              </div>
+              <div class="ot-srk-field">
+                <label>Timeframe</label>
                 <div class="ot-tf" id="ot-tf-btns">
                   <button class="ot-tfbtn" data-tf="5m">5m</button>
                   <button class="ot-tfbtn active" data-tf="15m">15m</button>
@@ -1452,29 +1600,25 @@
                   <button class="ot-tfbtn" data-tf="60m">1h</button>
                 </div>
               </div>
-              <div class="ot-cell ot-bos-cell">
-                <div class="ot-lbl">Structure</div>
-                <div class="ot-bos" id="ot-bos"><span class="ot-muted">Loading structure…</span></div>
-              </div>
-              <div class="ot-cell ot-sel-cell">
-                <div class="ot-lbl">Market Option Selection</div>
-                <div class="ot-mode" id="ot-mode-btns">
-                  <button class="ot-modebtn active" data-mode="AUTO">AUTO</button>
-                  <button class="ot-modebtn" data-mode="MANUAL">MANUAL</button>
+              <div class="ot-summary">
+                <div class="ot-sumcard">
+                  <span class="ot-sc-k">Selected Strike</span>
+                  <b class="ot-sc-v" id="ot-sum-strike">—</b>
                 </div>
-                <div class="ot-strikepick">
-                  <label class="ot-muted" for="ot-strike-sel">Strike</label>
-                  <select id="ot-strike-sel" disabled></select>
+                <div class="ot-sumcard ce">
+                  <span class="ot-sc-k" id="ot-sum-ce-name">— CE</span>
+                  <b class="ot-sc-v" id="ot-sum-ce-ltp">—</b>
+                  <small id="ot-sum-ce-chg"></small>
                 </div>
-                <div class="ot-selstate" id="ot-selstate">AUTO MODE ACTIVE</div>
-              </div>
-              <div class="ot-cell ot-vix-cell">
-                <div class="ot-lbl">Volatility</div>
-                <div class="ot-vixgrid" id="ot-vix"><span class="ot-muted">—</span></div>
+                <div class="ot-sumcard pe">
+                  <span class="ot-sc-k" id="ot-sum-pe-name">— PE</span>
+                  <b class="ot-sc-v" id="ot-sum-pe-ltp">—</b>
+                  <small id="ot-sum-pe-chg"></small>
+                </div>
               </div>
             </div>
 
-            <!-- MAIN: CE + PE charts -->
+            <!-- MAIN: CE + PE premium charts (EMA9/21 in header) -->
             <div class="ot-charts">
               <div class="ot-cpanel">
                 <div class="ot-chead">
@@ -1482,11 +1626,12 @@
                   <span class="ot-tag ot-tag-ce">CALL</span>
                   <span class="ot-ltp" id="ot-ce-ltp">—</span>
                   <span class="ot-chg" id="ot-ce-chg"></span>
+                  <span class="ot-ema"><b style="color:#f0b429">EMA9</b> <span id="ot-ce-ema9">—</span></span>
+                  <span class="ot-ema"><b style="color:#2f7dff">EMA21</b> <span id="ot-ce-ema21">—</span></span>
                   <span class="ot-resp" id="ot-ce-resp"></span>
                 </div>
-                <div class="ot-gstrip" id="ot-ce-greeks"></div>
                 <div class="ot-chart" id="ot-ce-chart"></div>
-                <div class="ot-clegend"><b style="color:#f0b429">EMA9</b><b style="color:#2f7dff">EMA21</b><span class="ot-muted" id="ot-ce-note"></span></div>
+                <div class="ot-clegend"><span class="ot-muted" id="ot-ce-note"></span></div>
               </div>
               <div class="ot-cpanel">
                 <div class="ot-chead">
@@ -1494,35 +1639,55 @@
                   <span class="ot-tag ot-tag-pe">PUT</span>
                   <span class="ot-ltp" id="ot-pe-ltp">—</span>
                   <span class="ot-chg" id="ot-pe-chg"></span>
+                  <span class="ot-ema"><b style="color:#f0b429">EMA9</b> <span id="ot-pe-ema9">—</span></span>
+                  <span class="ot-ema"><b style="color:#2f7dff">EMA21</b> <span id="ot-pe-ema21">—</span></span>
                   <span class="ot-resp" id="ot-pe-resp"></span>
                 </div>
-                <div class="ot-gstrip" id="ot-pe-greeks"></div>
                 <div class="ot-chart" id="ot-pe-chart"></div>
-                <div class="ot-clegend"><b style="color:#f0b429">EMA9</b><b style="color:#2f7dff">EMA21</b><span class="ot-muted" id="ot-pe-note"></span></div>
+                <div class="ot-clegend"><span class="ot-muted" id="ot-pe-note"></span></div>
               </div>
             </div>
 
-            <!-- LOWER PANELS -->
-            <div class="ot-lower">
-              <div class="ot-lp" id="ot-analytics">
-                <h3>Σ Option Analytics · same strike</h3>
-                <div id="ot-analytics-body"><span class="ot-muted">—</span></div>
+            <!-- BOTTOM: Option Data (CE) | Hourly Levels | Option Data (PE) -->
+            <div class="ot-databottom">
+              <div class="ot-lp ot-optdata">
+                <h3>Option Data — <span id="ot-ce-data-title">CE</span></h3>
+                <div id="ot-ce-data-body"><span class="ot-muted">—</span></div>
               </div>
-              <div class="ot-lp" id="ot-response">
-                <h3>⚡ Option Response vs Underlying</h3>
-                <div id="ot-response-body"><span class="ot-muted">—</span></div>
+              <div class="ot-lp ot-hourlylp" id="ot-hourly">
+                <h3>Hourly Levels · Option Premium <span class="ot-muted" id="ot-hourly-tf" style="font-weight:500"></span></h3>
+                <div id="ot-hourly-body"><span class="ot-muted">—</span></div>
               </div>
-              <div class="ot-lp" id="ot-liq">
-                <h3>◉ Liquidity / OI</h3>
-                <div id="ot-liq-body"><span class="ot-muted">—</span></div>
-              </div>
-              <div class="ot-lp" id="ot-intraday">
-                <h3>◈ Intraday Assistance</h3>
-                <div id="ot-intraday-body"><span class="ot-muted">—</span></div>
+              <div class="ot-lp ot-optdata">
+                <h3>Option Data — <span id="ot-pe-data-title">PE</span></h3>
+                <div id="ot-pe-data-body"><span class="ot-muted">—</span></div>
               </div>
             </div>
 
-            <!-- FOOTER -->
+            <!-- FOOTER BAND: Market Context | BIOS/SWP Definition | Levels Source -->
+            <div class="ot-footband">
+              <div class="ot-fb">
+                <h4>Market Context <span class="ot-muted">(From Market Command)</span></h4>
+                <div id="ot-context-body"><span class="ot-muted">—</span></div>
+              </div>
+              <div class="ot-fb">
+                <h4>BIOS / SWP Definition</h4>
+                <div class="ot-def"><span class="ot-deftag bios">BIOS</span><div><b>Break In Option Structure</b><small>Option-premium structure break (from the existing structure engine)</small></div></div>
+                <div class="ot-def"><span class="ot-deftag swp">SWP</span><div><b>Swing Point</b><small>Important premium swing level on the selected option</small></div></div>
+              </div>
+              <div class="ot-fb">
+                <h4>Levels Source</h4>
+                <ul class="ot-srclist">
+                  <li>Hourly option-premium levels (tf-aware)</li>
+                  <li>Support / Resistance — CALL &amp; PUT (independent)</li>
+                  <li>BIOS = latest premium break of structure</li>
+                  <li>SWP = latest premium swing point</li>
+                  <li>Computed from the selected option's premium candles</li>
+                </ul>
+              </div>
+            </div>
+
+            <!-- FOOTER: freshness -->
             <div class="ot-foot">
               <span id="ot-foot-conn"><span class="ot-dot"></span> Dhan</span>
               <span>Market Time <b id="ot-foot-mkt">—</b></span>
@@ -1789,6 +1954,6 @@
       </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=20260925-grwconn"></script>
   </body>
 </html>

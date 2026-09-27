@@ -217,12 +217,19 @@ function cadencePanelHtml(c, d) {
 }
 // §5–7/§18 Dhan connection & data-health detail panel (opens from the status pill).
 function dhanHealthPanelHtml(S, gh, d, c) {
+  const H = d.dhanHealth || null; // canonical Dhan health (SSOT) when present
+  const fmtWhen = (ts) => (ts ? new Date(ts).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false }) : "—");
   const rows = [
-    ["Status", S.txt],
+    ["Status", H ? (H.ui && H.ui.detail) || S.txt : S.txt],
+    ["State", H ? H.state : "—"],
+    ["Auth", H ? H.authStatus : "—"],
+    ["Feed", H ? H.feedStatus : "—"],
     ["Data Source", "DHAN"],
     ["Market", d.marketOpen ? "OPEN" : "CLOSED"],
-    ["Last Update", gh.lastDataTs ? new Date(gh.lastDataTs).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false }) : "—"],
-    ["Data Age", gh.dataAgeSec != null ? gh.dataAgeSec + " sec" : "—"],
+    ["Data Freshness", H ? H.freshness : "—"],
+    ["Token Expires", H ? fmtWhen(H.tokenExpiresAt) : "—"],
+    ["Last Live Data", H && H.lastSuccessfulDataAt ? fmtWhen(H.lastSuccessfulDataAt) : (gh.lastDataTs ? new Date(gh.lastDataTs).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false }) : "—")],
+    ["Data Age", H && H.dataAgeMs != null ? Math.round(H.dataAgeMs / 1000) + " sec" : (gh.dataAgeSec != null ? gh.dataAgeSec + " sec" : "—")],
     ["API Latency", gh.latencyMs != null ? gh.latencyMs + " ms" : "—"],
     ["Updates", gh.updates != null ? Number(gh.updates).toLocaleString() : "—"],
     ["Failures", gh.failures != null ? gh.failures : "—"],
@@ -280,20 +287,44 @@ async function updateDataStatus() {
     // per the strict live-option policy) + whether the feed is degraded/after-hours.
     // §5–7 Dhan connection / data-health readout — Dhan is the ONLY source.
     const gs = el("dhan-status");
-    const gh = d.dhanHealth || d.growwHealth || {};
-    const status = gh.status || d.dhanStatus || d.growwStatus || (d.hasDhanToken || d.hasGrowwToken ? (d.marketOpen ? "YELLOW" : "CLOSED") : "GREY");
-    const STATUS = {
-      GREEN:  { dot: "🟢", txt: "DHAN CONNECTED — LIVE", cls: "open" },
-      YELLOW: { dot: "🟡", txt: "DHAN CONNECTED — DELAYED", cls: "pre" },
-      RED:    { dot: "🔴", txt: "DHAN DISCONNECTED", cls: "closed" },
-      GREY:   { dot: "⚪", txt: "DHAN NOT CONFIGURED", cls: "" },
-      CLOSED: { dot: "🌙", txt: "MARKET CLOSED", cls: "pre" },
-    };
-    const S = STATUS[status] || STATUS.GREY;
+    const gh = d.growwHealth || d.dhanHealth || {};
+    // TRUTHFUL status from the single source of truth (§1, §5). Token presence is
+    // NOT "connected" — the backend only reports DHAN_LIVE after real data arrived.
+    const H = d.dhanHealth && d.dhanHealth.ui ? d.dhanHealth : null;
+    let S;
+    if (H) {
+      const LEVEL = {
+        green:  { dot: "🟢", cls: "open" },
+        yellow: { dot: "🟡", cls: "pre" },
+        orange: { dot: "🟠", cls: "pre" },
+        red:    { dot: "🔴", cls: "closed" },
+        blue:   { dot: "🌙", cls: "pre" },
+        grey:   { dot: "⚪", cls: "" },
+      };
+      const L = LEVEL[H.ui.level] || LEVEL.grey;
+      S = { dot: L.dot, txt: H.ui.label, cls: L.cls, detail: H.ui.detail, action: H.ui.action };
+    } else {
+      // Backward-compat fallback when the SSOT field isn't present.
+      const status = gh.status || d.dhanStatus || d.growwStatus || (d.hasDhanToken || d.hasGrowwToken ? (d.marketOpen ? "YELLOW" : "CLOSED") : "GREY");
+      const STATUS = {
+        GREEN:  { dot: "🟢", txt: "DHAN LIVE", cls: "open" },
+        YELLOW: { dot: "🟡", txt: "DHAN DELAYED", cls: "pre" },
+        RED:    { dot: "🔴", txt: "DHAN DISCONNECTED", cls: "closed" },
+        GREY:   { dot: "⚪", txt: "DHAN NOT CONFIGURED", cls: "" },
+        CLOSED: { dot: "🌙", txt: "MARKET CLOSED", cls: "pre" },
+      };
+      S = STATUS[status] || STATUS.GREY;
+      S.detail = S.txt;
+    }
     if (gs) {
-      gs.textContent = `${S.dot} ${S.txt}`;
+      // Optional inline "Reconnect Dhan" action opens the existing connect flow.
+      const actionHtml = S.action
+        ? ` <a href="#" class="dhan-reconnect" onclick="manageConnection('dhan');return false;">${S.action} ›</a>`
+        : "";
+      gs.innerHTML = `${S.dot} ${S.txt}${actionHtml}`;
       gs.className = "pill market-status " + S.cls;
-      gs.title = `Data source: DHAN (only). ${d.feedMode || ""}`.trim();
+      const expLine = H && H.tokenExpiresAt ? `\nToken expires: ${new Date(H.tokenExpiresAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}` : "";
+      gs.title = `${S.detail || S.txt}${expLine}\nData source: DHAN (only). ${d.feedMode || ""}`.trim();
       const gp = el("dhan-health-panel");
       if (gp) gp.innerHTML = dhanHealthPanelHtml(S, gh, d, c);
     }
@@ -989,7 +1020,7 @@ function styleBadge(node, score) {
 // fixed-position panel styling, so only one is ever shown at a time.
 let _dhanPollTimer = null;
 function closeAllConnectPanels() {
-  ["connect-panel", "telegram-panel", "dhan-panel"].forEach((id) => {
+  ["connect-panel", "telegram-panel", "dhan-panel", "groww-connect-panel"].forEach((id) => {
     const p = el(id);
     if (p) p.classList.add("hidden");
   });
@@ -1880,7 +1911,11 @@ function switchTab(name) {
   document.body.classList.toggle("ot-fullwidth", name === "optionterminal");
   if (name === "optionterminal") {
     initOptionTerminal(); syncOTFromMC(); startOptionTerminalLive();
-    setTimeout(otResize, 60);
+    // Charts can be created/sized before the panel has final layout, leaving them
+    // blank until something else triggers a resize. Force several resizes as the
+    // layout settles so the CE/PE charts paint immediately on open.
+    requestAnimationFrame(otResize);
+    setTimeout(otResize, 60); setTimeout(otResize, 250); setTimeout(otResize, 600);
   }
   if (name === "bullrank" && !state.bullRankLoaded) { state.bullRankLoaded = true; loadBullRank(); }
   if (name === "stockoptions" && !state.stockOptionsInit) { state.stockOptionsInit = true; initStockOptions(); }
@@ -5698,6 +5733,7 @@ function initMarketCommand() {
     if (!param || !param.time || !MC._candles) return;
     const c = MC._candles.find((x) => x.time === param.time);
     if (!c) return;
+    const tE = el("mc-ohlc-t"); if (tE) tE.textContent = mcSelDateTime(param.time); // selected candle date-time
     const oE = el("mc-ohlc-o"), hE = el("mc-ohlc-h"), lE = el("mc-ohlc-l"), cE = el("mc-ohlc-c");
     if (oE) oE.textContent = c.open?.toFixed(2);
     if (hE) hE.textContent = c.high?.toFixed(2);
@@ -5708,17 +5744,80 @@ function initMarketCommand() {
     if (vE && v) vE.textContent = mcFmtVol(v.value);
   });
 
-  MC.ema9Series = MC.chart.addLineSeries({ color: "#3b82f6", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-  MC.ema21Series = MC.chart.addLineSeries({ color: "#f0b90b", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-  MC.ema50Series = MC.chart.addLineSeries({ color: "#a855f7", lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
+  // EMA 9 / 21 / 50 carry a NAME on the chart (title + last-value tag on the axis).
+  MC.ema9Series = MC.chart.addLineSeries({ color: "#3b82f6", lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: "EMA 9" });
+  MC.ema21Series = MC.chart.addLineSeries({ color: "#f0b90b", lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: "EMA 21" });
+  MC.ema50Series = MC.chart.addLineSeries({ color: "#a855f7", lineWidth: 2, priceLineVisible: false, lastValueVisible: true, title: "EMA 50" });
   MC.ema200Series = MC.chart.addLineSeries({ color: "#e056a0", lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
-  MC.vwapSeries = MC.chart.addLineSeries({ color: "#64748b", lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
+  // VWAP: SOLID (lineStyle 0) and GREEN, with its name shown on the chart.
+  MC.vwapSeries = MC.chart.addLineSeries({ color: "#22c55e", lineWidth: 2, lineStyle: 0, priceLineVisible: false, lastValueVisible: true, title: "VWAP" });
 
   window.addEventListener("resize", () => {
     if (MC.chart) MC.chart.applyOptions({ width: container.clientWidth, height: Math.max(container.clientHeight, 500) });
   });
 
+  // ---- ADDITIVE: fake-move on-chart overlay (presentation only) ----
+  // Separate transparent layer OVER the chart. It does NOT touch the chart's
+  // data, series, size or the Dhan feed. Repositioned on data render + pan/zoom
+  // + resize (rAF-throttled → no flicker). Any failure just hides it (defensive),
+  // so the chart is never affected. Feature-gated by the payload having fakeMove*.
+  try {
+    ensureMCFakeOverlay(container);
+    MC.chart.timeScale().subscribeVisibleTimeRangeChange(() => scheduleMCFakeReposition());
+    if (typeof ResizeObserver !== "undefined") {
+      MC._fakeRO = new ResizeObserver(() => scheduleMCFakeReposition());
+      MC._fakeRO.observe(container);
+    }
+    wireMCNomenclature();
+  } catch { /* overlay/legend are optional presentation — never block the chart */ }
+
   loadMarketCommand(true); // fast chart first, then full
+}
+
+// IST date-time helpers for the selected-candle readout + chart session date.
+// Candle time is epoch seconds (UTC); IST = UTC + 5:30 (+19800s).
+const _MC_MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function mcSelDateTime(sec) {
+  if (!sec) return "—";
+  const d = new Date((sec + 19800) * 1000);
+  const hh = String(d.getUTCHours()).padStart(2, "0"), mm = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${d.getUTCDate()} ${_MC_MON[d.getUTCMonth()]} · ${hh}:${mm} IST`;
+}
+function mcSessionDate(sec) {
+  if (!sec) return "";
+  const d = new Date((sec + 19800) * 1000);
+  return `${d.getUTCDate()} ${_MC_MON[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
+// Create the transparent overlay layer once. Pure DOM; no chart coupling.
+function ensureMCFakeOverlay(container) {
+  if (MC.fakeOverlay || !container) return MC.fakeOverlay;
+  const layer = document.createElement("div");
+  layer.className = "mcfo-layer";
+  layer.id = "mc-fake-overlay";
+  layer.hidden = true;
+  layer.innerHTML =
+    '<div class="mcfo-zone" id="mcfo-zone" hidden></div>' +
+    '<div class="mcfo-zone-lbl" id="mcfo-zone-lbl" hidden>Resistance / Pullback Zone</div>' +
+    '<svg class="mcfo-svg" id="mcfo-svg">' +
+      '<path id="mcfo-cone" fill="rgba(239,68,68,0.14)" stroke="none" style="display:none"></path>' +
+      '<line id="mcfo-3pm-line" stroke="#f59e0b" stroke-width="1.2" stroke-dasharray="4 4" opacity="0.85" style="display:none"></line>' +
+      '<line id="mcfo-proj-line" stroke="#ef4444" stroke-width="1" stroke-dasharray="4 3" style="display:none"></line>' +
+      '<line id="mcfo-conn" class="mcfo-conn" style="display:none"></line>' +
+    '</svg>' +
+    '<div class="mcfo-3pm-lbl" id="mcfo-3pm-lbl" hidden>3:00 PM CLOSE</div>' +
+    '<div class="mcfo-proj-chip" id="mcfo-proj-chip" hidden></div>' +
+    '<div class="mcfo-callout" id="mcfo-callout" hidden><div class="ttl" id="mcfo-callout-ttl">COUNTER-TREND CANDLE</div><div class="sub" id="mcfo-callout-sub">FAKE WATCH</div></div>' +
+    '<div class="mcfo-tip" id="mcfo-tip" hidden></div>';
+  container.appendChild(layer);
+  MC.fakeOverlay = layer;
+  return layer;
+}
+
+// rAF-throttled reposition — collapses a burst of pan/zoom events into one paint.
+function scheduleMCFakeReposition() {
+  if (MC._fakeRaf) return;
+  MC._fakeRaf = requestAnimationFrame(() => { MC._fakeRaf = 0; positionMCFakeOverlay(); });
 }
 
 function startMarketCommandLive() {
@@ -5753,12 +5852,14 @@ function startMarketCommandLive() {
 // Only one mode updates the selected strike at a time. Nothing is fabricated: missing
 // data shows DATA UNAVAILABLE / STRIKE DATA UNAVAILABLE / NO VALID STRIKE.
 const OT = {
-  sym: "^NSEI", tf: "15m", mode: "AUTO", manualStrike: null,
+  sym: "^NSEI", tf: "15m", view: "BOTH", manualStrike: null, // MANUAL-ONLY (AUTO removed)
   ceChart: null, ceCandle: null, ceE9: null, ceE21: null,
   peChart: null, peCandle: null, peE9: null, peE21: null,
   timer: null, loading: false, lastData: null,
   _init: false, _candleKey: null, _candleAt: 0, _chartFitKey: null,
   _ceCandles: null, _peCandles: null, _ceMsg: null, _peMsg: null, _tick: 0,
+  _struct: null, _structKey: null, _structAt: 0, _ceLines: [], _peLines: [], // option-premium structure
+  _src: null, // "groww" | "dhan" — where the OT premium candles came from
 };
 
 function otEl(id) { return document.getElementById(id); }
@@ -5784,13 +5885,18 @@ function otMakeChart(containerId) {
   if (!c || typeof LightweightCharts === "undefined") return null;
   const chart = LightweightCharts.createChart(c, {
     width: c.clientWidth, height: c.clientHeight || 360,
-    layout: { background: { color: "transparent" }, textColor: "#8394ad", fontSize: 10 },
+    layout: { background: { color: "transparent" }, textColor: "#b2b5be", fontSize: 12 },
     grid: { vertLines: { color: "rgba(30,42,64,0.5)" }, horzLines: { color: "rgba(30,42,64,0.5)" } },
-    timeScale: { borderColor: "#1c2740", timeVisible: true, secondsVisible: false },
-    rightPriceScale: { borderColor: "#1c2740" },
+    // Same clear bars + IST time axis as the Market Command chart.
+    localization: { timeFormatter: (t) => fmtIST(t, true) },
+    timeScale: {
+      borderColor: "#2a2e39", timeVisible: true, secondsVisible: false,
+      tickMarkFormatter: (t) => fmtIST(t, false), barSpacing: 10, minBarSpacing: 4, rightOffset: 3,
+    },
+    rightPriceScale: { borderColor: "#2a2e39", scaleMargins: { top: 0.08, bottom: 0.24 } },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
   });
-  const candle = chart.addCandlestickSeries({ upColor: "#16c784", downColor: "#f6465d", wickUpColor: "#16c784", wickDownColor: "#f6465d", borderVisible: false });
+  const candle = chart.addCandlestickSeries({ upColor: "#16c784", downColor: "#ea3943", wickUpColor: "#16c784", wickDownColor: "#ea3943", borderVisible: false });
   const e9 = chart.addLineSeries({ color: "#f0b429", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
   const e21 = chart.addLineSeries({ color: "#2f7dff", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
   try { new ResizeObserver(() => chart.applyOptions({ width: c.clientWidth, height: c.clientHeight || 360 })).observe(c); } catch { /* noop */ }
@@ -5804,24 +5910,73 @@ function initOptionTerminal() {
   const pe = otMakeChart("ot-pe-chart"); if (pe) { OT.peChart = pe.chart; OT.peCandle = pe.candle; OT.peE9 = pe.e9; OT.peE21 = pe.e21; }
   otEl("ot-idx-btns")?.querySelectorAll(".ot-idxbtn").forEach((b) => b.addEventListener("click", () => {
     otEl("ot-idx-btns").querySelectorAll(".ot-idxbtn").forEach((x) => x.classList.remove("active"));
-    b.classList.add("active"); OT.sym = b.getAttribute("data-sym"); OT.manualStrike = null; OT._candleKey = null; loadOptionTerminal();
+    b.classList.add("active"); OT.sym = b.getAttribute("data-sym"); OT.manualStrike = null; OT._candleKey = null; OT._structKey = null; loadOptionTerminal();
   }));
   otEl("ot-tf-btns")?.querySelectorAll(".ot-tfbtn").forEach((b) => b.addEventListener("click", () => {
     otEl("ot-tf-btns").querySelectorAll(".ot-tfbtn").forEach((x) => x.classList.remove("active"));
-    b.classList.add("active"); OT.tf = b.getAttribute("data-tf"); OT._candleKey = null; loadOptionTerminal();
+    b.classList.add("active"); OT.tf = b.getAttribute("data-tf"); OT._candleKey = null; OT._structKey = null; loadOptionTerminal();
   }));
-  otEl("ot-mode-btns")?.querySelectorAll(".ot-modebtn").forEach((b) => b.addEventListener("click", () => {
-    OT.mode = b.getAttribute("data-mode");
-    otEl("ot-mode-btns").querySelectorAll(".ot-modebtn").forEach((x) => x.classList.toggle("active", x === b));
-    const sel = otEl("ot-strike-sel"); if (sel) sel.disabled = (OT.mode !== "MANUAL");
-    OT._candleKey = null;
-    if (OT.lastData) renderOptionTerminal(OT.lastData);
+  // CE / PE / BOTH view toggle (replaces the removed AUTO/MANUAL mode toggle).
+  otEl("ot-view-btns")?.querySelectorAll(".ot-viewbtn").forEach((b) => b.addEventListener("click", () => {
+    OT.view = b.getAttribute("data-view") || "BOTH";
+    otEl("ot-view-btns").querySelectorAll(".ot-viewbtn").forEach((x) => x.classList.toggle("active", x === b));
+    otApplyView();
   }));
   otEl("ot-strike-sel")?.addEventListener("change", (e) => {
-    OT.manualStrike = Number(e.target.value) || null; OT._candleKey = null;
+    // MANUAL strike is sticky — it only changes when the user picks here.
+    OT.manualStrike = Number(e.target.value) || null; OT._candleKey = null; OT._structKey = null;
     if (OT.lastData) renderOptionTerminal(OT.lastData);
   });
   otEl("ot-open-command")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("marketcommand"); });
+  otEl("ot-groww-btn")?.addEventListener("click", otConnectGroww);
+  otGrowwStatus();
+}
+
+// ---- Groww connection (Option Terminal premium data ONLY) ----
+async function otGrowwStatus() {
+  try {
+    const s = await fetchJSON("/api/groww/status", 12000);
+    const btn = otEl("ot-groww-btn");
+    if (!btn) return;
+    const conn = !!(s && s.configured && !s.expired);
+    btn.classList.toggle("connected", conn);
+    btn.textContent = s && s.configured ? (s.expired ? "Groww: token expired" : "Groww: connected") : "Connect Groww";
+    btn.title = s && s.tokenExpiresAt
+      ? "Groww token expires " + new Date(s.tokenExpiresAt).toLocaleString("en-IN")
+      : "Connect a Groww Trade API token for Option Terminal premium data";
+  } catch { /* ignore */ }
+}
+
+async function otConnectGroww() {
+  const token = window.prompt("Paste your Groww Trade API access token.\n\nUsed ONLY for Option Terminal premium candles/levels — Market Command and everything else stay on Dhan.");
+  if (token == null) return;
+  const t = String(token).trim();
+  if (!t) return;
+  const btn = otEl("ot-groww-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "Validating…"; }
+  try {
+    const r = await fetch("/api/groww/connect", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: t }),
+    }).then((x) => x.json());
+    if (r && r.ok) {
+      OT._candleKey = null; OT._structKey = null; // force a fresh fetch from Groww
+      loadOptionTerminal();
+      alert("Groww connected. Option Terminal premium data now comes from Groww.");
+    } else {
+      alert("Groww connect failed: " + (r && r.error ? r.error : "unknown error"));
+    }
+  } catch (e) {
+    alert("Groww connect error: " + (e && e.message ? e.message : e));
+  }
+  if (btn) btn.disabled = false;
+  otGrowwStatus();
+}
+
+function otUpdateDataSrc(src) {
+  const e = otEl("ot-datasrc"); if (!e) return;
+  const s = (src || "").toLowerCase();
+  e.className = "ot-datasrc " + (s === "groww" ? "groww" : s === "dhan" ? "dhan" : "off");
+  e.textContent = "Source: " + (s === "groww" ? "Groww" : s === "dhan" ? "Dhan" : "—");
 }
 
 // Follow Market Command's selected index + timeframe on entry.
@@ -5832,9 +5987,16 @@ function syncOTFromMC() {
 }
 
 function otResize() {
-  const c1 = otEl("ot-ce-chart"), c2 = otEl("ot-pe-chart");
-  if (OT.ceChart && c1) OT.ceChart.applyOptions({ width: c1.clientWidth, height: c1.clientHeight || 360 });
-  if (OT.peChart && c2) OT.peChart.applyOptions({ width: c2.clientWidth, height: c2.clientHeight || 360 });
+  // Skip while the panel has no width yet (tab just opened / still hidden) so we
+  // never lock a chart at 0px — the retries on tab-open will size it once laid out.
+  const fit = (chart, cont) => {
+    if (!chart || !cont) return;
+    const w = cont.clientWidth;
+    if (!w) return;
+    chart.applyOptions({ width: w, height: cont.clientHeight || 360 });
+  };
+  fit(OT.ceChart, otEl("ot-ce-chart"));
+  fit(OT.peChart, otEl("ot-pe-chart"));
 }
 
 async function loadOptionTerminal() {
@@ -5844,8 +6006,27 @@ async function loadOptionTerminal() {
     const url = `/api/market-command?symbol=${encodeURIComponent(OT.sym)}&interval=${OT.tf}`;
     const d = await fetchJSON(url, 25000);
     if (d && !d.error) { OT.lastData = d; renderOptionTerminal(d); }
-  } catch (e) { console.error("[OptionTerminal]", e); }
+    else otShowError((d && d.error) || "No data from Market Command.");
+  } catch (e) { console.error("[OptionTerminal]", e); otShowError("Network error loading Option Terminal."); }
   OT.loading = false;
+}
+
+// Surface WHY the terminal is empty (most often: Dhan feed off / token expired)
+// instead of leaving both AUTO and MANUAL silently blank.
+function otShowError(msg) {
+  const dhanOff = /dhan feed off|not configured|reconnect|token/i.test(msg || "");
+  const line = dhanOff ? "Dhan feed is OFF — reconnect a fresh Dhan token (Admin → Connections) to load live CE/PE data." : msg;
+  const sel = otEl("ot-selstate"); if (sel) sel.textContent = dhanOff ? "DHAN FEED OFF" : "DATA UNAVAILABLE";
+  const setBody = (id, txt) => { const e = otEl(id); if (e) e.innerHTML = `<span class="ot-muted">${txt}</span>`; };
+  setBody("ot-analytics-body", line);
+  setBody("ot-response-body", line);
+  setBody("ot-liq-body", line);
+  setBody("ot-intraday-body", line);
+  const ceN = otEl("ot-ce-note"); if (ceN) ceN.textContent = line;
+  const peN = otEl("ot-pe-note"); if (peN) peN.textContent = line;
+  if (typeof otDrawChart === "function") { otDrawChart("CE", null); otDrawChart("PE", null); }
+  const st = otEl("ot-foot-status"); if (st) { st.textContent = dhanOff ? "DHAN OFF" : "DATA UNAVAILABLE"; st.className = "ot-pill ot-pill-red"; }
+  const conn = otEl("ot-foot-conn"); if (conn) conn.innerHTML = `<span class="ot-dot off"></span> Dhan off`;
 }
 
 function startOptionTerminalLive() {
@@ -5857,6 +6038,9 @@ function startOptionTerminalLive() {
     if (!pn || !pn.classList.contains("active") || OT.loading) return;
     const open = (typeof isMarketOpen === "function" && isMarketOpen()) || (typeof isFeedWindow === "function" && isFeedWindow());
     OT._tick++;
+    // Same cadence as Market Command: 5s while open, 30s when closed. The heavy
+    // chain still comes from /api/market-command (Dhan); the premium candles/levels
+    // now come from Groww (friendlier rate limits), so this is safe to run at 5s.
     if (open || OT._tick % 6 === 0) loadOptionTerminal();
   }, 5000);
 }
@@ -5905,13 +6089,20 @@ async function otFetchOptionCandles(sym, strike, expiry, interval) {
     const [ceR, peR] = await Promise.all([fetchJSON(q("CE"), 25000), fetchJSON(q("PE"), 25000)]);
     OT._ceCandles = ceR && ceR.available ? ceR.candles : null;
     OT._peCandles = peR && peR.available ? peR.candles : null;
+    OT._src = (ceR && ceR.source) || (peR && peR.source) || null;
+    otUpdateDataSrc(OT._src);
     OT._ceMsg = ceR && !ceR.available ? (ceR.message || "no candles") : null;
     OT._peMsg = peR && !peR.available ? (peR.message || "no candles") : null;
     otDrawChart("CE", OT._ceCandles);
     otDrawChart("PE", OT._peCandles);
     OT._chartFitKey = OT._candleKey;
-    // Now that candles are in, refresh the LTP-change + response + notes.
-    if (OT.lastData) { otRenderResponse(OT.lastData); otRenderLtpChange(); }
+    // Now that candles are in, refresh the LTP-change + response + context + notes,
+    // and re-apply the displayed LTP + Option Data so they match the chart.
+    if (OT.lastData) {
+      const r = otSelectedRow(OT.lastData);
+      otRenderResponse(OT.lastData); otRenderLtpChange(); otRenderContext(OT.lastData, r);
+      otRefreshLtpDisplay(OT.lastData, r); otRenderOptionData(OT.lastData, r);
+    }
     // When the snapshot is stale (e.g. market closed → last-good expired-contract
     // chain), say so instead of a bare "no candles" — live candles resume at open.
     const staleNote = OT._stale ? "Market closed / stale — live premium candles resume at open" : null;
@@ -5924,30 +6115,71 @@ function otDrawChart(side, candles) {
   const chart = side === "CE" ? OT.ceChart : OT.peChart;
   const cs = side === "CE" ? OT.ceCandle : OT.peCandle;
   const e9 = side === "CE" ? OT.ceE9 : OT.peE9, e21 = side === "CE" ? OT.ceE21 : OT.peE21;
+  const e9Hdr = otEl(side === "CE" ? "ot-ce-ema9" : "ot-pe-ema9");
+  const e21Hdr = otEl(side === "CE" ? "ot-ce-ema21" : "ot-pe-ema21");
   if (!chart || !cs) return;
-  if (!candles || !candles.length) { cs.setData([]); if (e9) e9.setData([]); if (e21) e21.setData([]); return; }
+  if (!candles || !candles.length) { cs.setData([]); if (e9) e9.setData([]); if (e21) e21.setData([]); if (e9Hdr) e9Hdr.textContent = "—"; if (e21Hdr) e21Hdr.textContent = "—"; return; }
   const data = candles.map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close }));
   cs.setData(data);
   const closes = data.map((c) => c.close);
   const a9 = otEma(closes, 9), a21 = otEma(closes, 21);
   if (e9) e9.setData(data.map((c, i) => ({ time: c.time, value: +a9[i].toFixed(2) })));
   if (e21) e21.setData(data.map((c, i) => ({ time: c.time, value: +a21[i].toFixed(2) })));
+  // Header EMA readouts (last value) — from the selected option premium candles.
+  if (e9Hdr) e9Hdr.textContent = a9.length ? otNum(a9[a9.length - 1], 2) : "—";
+  if (e21Hdr) e21Hdr.textContent = a21.length ? otNum(a21[a21.length - 1], 2) : "—";
   // Re-frame only on a view change (new strike/expiry/tf) — a periodic refresh
-  // keeps the trader's current zoom/scroll (no jump on data refresh).
-  if (OT._chartFitKey !== OT._candleKey) chart.timeScale().fitContent();
+  // keeps the trader's current zoom/scroll (no jump on data refresh). Show a
+  // fixed window of recent bars (like Market Command) so candles stay clear and
+  // wide instead of cramming every bar into the panel.
+  if (OT._chartFitKey !== OT._candleKey) {
+    const N = data.length;
+    const showBars = Math.min(60, N);
+    chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, N - showBars), to: N + 2 });
+  }
 }
 
 // LTP change % (from the premium candles' intraday move) for both legs.
 function otRenderLtpChange() {
-  const set = (id, candles) => {
+  const set = (id, candles, base) => {
     const e = otEl(id); if (!e) return;
     const ch = otIntradayChange(candles);
     if (!ch) { e.textContent = ""; return; }
     e.textContent = `${ch.pts >= 0 ? "+" : ""}${otNum(ch.pts, 2)} (${ch.pct >= 0 ? "+" : ""}${ch.pct.toFixed(2)}%)`;
-    e.className = "ot-chg " + (ch.pts >= 0 ? "ot-up" : "ot-down");
+    e.className = ((base == null ? "ot-chg" : base) + " " + (ch.pts >= 0 ? "ot-up" : "ot-down")).trim();
   };
   set("ot-ce-chg", OT._ceCandles);
   set("ot-pe-chg", OT._peCandles);
+  set("ot-sum-ce-chg", OT._ceCandles, "");
+  set("ot-sum-pe-chg", OT._peCandles, "");
+}
+
+// Last close of a premium candle series (freshest traded premium we have).
+function otLastClose(candles) { return (candles && candles.length) ? candles[candles.length - 1].close : null; }
+
+// The premium to DISPLAY for one side. When the live option chain is fresh, the
+// chain LTP is the real-time price. But when the chain snapshot is STALE (e.g.
+// off-hours / weekend) it can lag the premium candles by a whole session — in
+// that case we show the latest candle close so the headline number MATCHES the
+// chart instead of a day-old chain value. Never fabricated: both are real Dhan.
+function otDisplayLtp(side, leg) {
+  const chainLtp = leg && leg.ltp != null ? leg.ltp : null;
+  const candleClose = otLastClose(side === "CE" ? OT._ceCandles : OT._peCandles);
+  if (!OT._stale && chainLtp != null) return chainLtp; // live chain → real-time LTP
+  return candleClose != null ? candleClose : chainLtp;  // stale chain → freshest candle
+}
+
+// Keep the header LTP + summary-card LTP consistent with the chart (same source).
+function otRefreshLtpDisplay(d, row) {
+  d = d || OT.lastData; if (!d) return;
+  row = row || otSelectedRow(d);
+  const set = (id, v) => { const e = otEl(id); if (e) e.textContent = v; };
+  const ce = row ? otDisplayLtp("CE", row.ce) : null;
+  const pe = row ? otDisplayLtp("PE", row.pe) : null;
+  set("ot-ce-ltp", ce != null ? otNum(ce, 2) : "—");
+  set("ot-pe-ltp", pe != null ? otNum(pe, 2) : "—");
+  set("ot-sum-ce-ltp", ce != null ? otNum(ce, 2) : "—");
+  set("ot-sum-pe-ltp", pe != null ? otNum(pe, 2) : "—");
 }
 
 function otRenderResponse(d) {
@@ -5968,14 +6200,82 @@ function otRenderResponse(d) {
     `<div class="ot-muted" style="font-size:10px;margin-top:7px">Response = actual premium move ÷ (|delta| × underlying move), last ${Math.min(5, (OT._ceCandles || []).length)} bars. Detects "index moved but option didn't".</div>`;
 }
 
-// Which strike row is selected (AUTO = analyser pick / ATM fallback; MANUAL = chosen).
+// Which strike row is selected. MANUAL-ONLY (AUTO removed): the user's picked
+// strike, else the ATM default on first load / index change (then pinned sticky
+// in renderOptionTerminal so it never auto-switches as spot/OI/direction move).
 function otSelectedRow(d) {
   const m = d.optionMatrix;
   if (!m || !m.available || !Array.isArray(m.rows)) return null;
-  let strike;
-  if (OT.mode === "AUTO") strike = m.autoStrike != null ? m.autoStrike : m.atmStrike;
-  else strike = OT.manualStrike != null ? OT.manualStrike : m.atmStrike;
+  const strike = OT.manualStrike != null ? OT.manualStrike : m.atmStrike;
   return m.rows.find((r) => r.strike === Number(strike)) || null;
+}
+
+// CE / PE / BOTH view — show/hide a premium chart column (no chart logic change).
+function otApplyView() {
+  const ceP = otEl("ot-ce-chart") && otEl("ot-ce-chart").closest(".ot-cpanel");
+  const peP = otEl("ot-pe-chart") && otEl("ot-pe-chart").closest(".ot-cpanel");
+  if (ceP) ceP.style.display = (OT.view === "PE") ? "none" : "";
+  if (peP) peP.style.display = (OT.view === "CE") ? "none" : "";
+  setTimeout(otResize, 30);
+}
+
+// Fetch per-side option-PREMIUM structure levels (new /api/option-structure) and
+// draw them. Consumes existing Dhan option candles via the existing engine — no
+// new data source, no fabrication.
+async function otFetchStructure(sym, strike, expiry, intervalMin) {
+  try {
+    const r = await fetchJSON(`/api/option-structure?symbol=${encodeURIComponent(sym)}&strike=${strike}&expiry=${encodeURIComponent(expiry)}&interval=${intervalMin}`, 25000);
+    OT._struct = r && !r.error ? r : null;
+  } catch (e) { console.error("[OT structure]", e); OT._struct = null; }
+  otDrawStructure("CE"); otDrawStructure("PE"); otRenderHourlyLevels();
+}
+
+// Draw R2/R1/SWP/S1/S2 premium levels + BIOS/SWP markers on one side's chart.
+// Own tracked price lines (removed each redraw); markers are exclusive to the OT
+// premium charts so setMarkers here touches nothing else.
+function otDrawStructure(side) {
+  const cs = side === "CE" ? OT.ceCandle : OT.peCandle;
+  const ref = side === "CE" ? "_ceLines" : "_peLines";
+  if (!cs) return;
+  (OT[ref] || []).forEach((l) => { try { cs.removePriceLine(l); } catch {} });
+  OT[ref] = [];
+  const s = OT._struct && OT._struct[side.toLowerCase()];
+  if (!s || !s.available) { try { cs.setMarkers([]); } catch {} return; }
+  const add = (price, title, color, style) => {
+    if (price == null || !isFinite(price)) return;
+    try { OT[ref].push(cs.createPriceLine({ price, color, lineWidth: 1, lineStyle: style == null ? 2 : style, axisLabelVisible: true, title })); } catch {}
+  };
+  add(s.r2, "R2", "#f6465d", 2);
+  add(s.r1, "R1", "#f6465d", 2);
+  add(s.swp, "SWP", "#a855f7", 1);
+  add(s.s1, "S1", "#16c784", 2);
+  add(s.s2, "S2", "#16c784", 2);
+  const markers = [];
+  if (s.bios && s.bios.time) {
+    const bull = s.bios.direction === "BULLISH";
+    markers.push({ time: s.bios.time, position: bull ? "belowBar" : "aboveBar", color: "#f0b90b", shape: bull ? "arrowUp" : "arrowDown", text: "BIOS" });
+  }
+  const lastSwing = (s.swings || []).slice(-1)[0];
+  if (lastSwing && lastSwing.time) markers.push({ time: lastSwing.time, position: "aboveBar", color: "#a855f7", shape: "circle", text: "SWP" });
+  try { cs.setMarkers(markers); } catch {}
+}
+
+// Center panel: CALL + PUT hourly (tf-aware) premium levels for the selected strike.
+function otRenderHourlyLevels() {
+  const box = otEl("ot-hourly-body"); if (!box) return;
+  const tfEl = otEl("ot-hourly-tf"); if (tfEl) tfEl.textContent = "· " + String(OT.tf || "").toUpperCase();
+  const s = OT._struct;
+  if (!s || !s.available) { box.innerHTML = `<span class="ot-muted">DATA UNAVAILABLE — no option-premium structure yet.</span>`; return; }
+  const strike = s.strike != null ? s.strike : (OT.manualStrike != null ? OT.manualStrike : "");
+  const col = (label, side, obj) => {
+    if (!obj || !obj.available) return `<div class="ot-hl-col"><div class="ot-hl-hd ${side}">${label} ${strike}</div><span class="ot-muted">DATA UNAVAILABLE</span></div>`;
+    const v = (x) => x != null ? otNum(x, 2) : "—";
+    const rows = [["R2", obj.r2, "r"], ["R1", obj.r1, "r"], ["SWP", obj.swp, "swp"], ["S1", obj.s1, "s"], ["S2", obj.s2, "s"]];
+    return `<div class="ot-hl-col"><div class="ot-hl-hd ${side}">${label} ${strike}</div>` +
+      rows.map(([k, val, cls]) => `<div class="ot-hl-row ${cls}"><span>${k}</span><b>${v(val)}</b></div>`).join("") + `</div>`;
+  };
+  box.innerHTML = `<div class="ot-hl-grid">${col("CALL", "ce", s.ce)}${col("PUT", "pe", s.pe)}</div>` +
+    `<div class="ot-muted" style="font-size:9.5px;margin-top:6px">From the selected option's ${String(OT.tf || "").toUpperCase()} premium structure (existing structure engine). <b>BIOS</b> = Break In Option Structure · <b>SWP</b> = Swing Point. Option-premium levels — not index levels; no fabricated values.</div>`;
 }
 
 function renderOptionTerminal(d) {
@@ -6010,47 +6310,66 @@ function renderOptionTerminal(d) {
     } else vixEl.innerHTML = `<span class="ot-muted">India VIX ${d.vix?.status || "UNAVAILABLE"}</span>`;
   }
 
-  // ---- selection mode + strike dropdown ----
+  // ---- MANUAL strike dropdown (AUTO removed) ----
   const selstate = otEl("ot-selstate");
   const sel = otEl("ot-strike-sel");
   const rows = m && m.available ? m.rows : [];
+  // Pin to ATM once on first load / after an index change so the strike never
+  // auto-drifts with spot; from then on it changes ONLY when the user picks.
+  if (OT.manualStrike == null && m && m.available && m.atmStrike != null) OT.manualStrike = m.atmStrike;
   if (sel) {
     const key = rows.map((r) => r.strike).join(",");
     if (sel._key !== key) {
       sel._key = key;
       sel.innerHTML = rows.map((r) => `<option value="${r.strike}">${r.strike}${r.moneyness === "ATM" ? " (ATM)" : ""}</option>`).join("");
     }
-    sel.disabled = OT.mode !== "MANUAL";
+    sel.disabled = false; // always manual
   }
   const row = otSelectedRow(d);
   let selStrike = row ? row.strike : null;
   if (sel && selStrike != null) sel.value = String(selStrike);
 
-  // Selection state message — honest about failures.
+  // Selection state message — honest about failures. MANUAL only.
   if (selstate) {
     if (!m || !m.available) selstate.textContent = m && m.reason ? m.reason : "DATA UNAVAILABLE";
-    else if (OT.mode === "AUTO" && m.autoStrike == null && m.atmStrike == null) selstate.textContent = "NO VALID STRIKE";
-    else if (OT.mode === "MANUAL" && OT.manualStrike != null && !row) selstate.textContent = "STRIKE DATA UNAVAILABLE";
-    else selstate.textContent = (OT.mode === "AUTO" ? "AUTO MODE ACTIVE" : "MANUAL MODE ACTIVE") + (OT.mode === "AUTO" && m.autoSide ? ` · prefers ${m.autoStrike} ${m.autoSide}` : "");
+    else if (OT.manualStrike != null && !row) selstate.textContent = "STRIKE DATA UNAVAILABLE";
+    else selstate.textContent = selStrike != null ? `MANUAL · ${selStrike}` : "SELECT A STRIKE";
   }
 
   // ---- names, LTP, greeks strips ----
   const idxName = (m && m.index) || d.name || "";
   otEl("ot-ce-name").textContent = selStrike != null ? `${idxName} ${selStrike} CE` : "— CE";
   otEl("ot-pe-name").textContent = selStrike != null ? `${idxName} ${selStrike} PE` : "— PE";
-  otEl("ot-ce-ltp").textContent = row && row.ce.ltp != null ? otNum(row.ce.ltp, 2) : "—";
-  otEl("ot-pe-ltp").textContent = row && row.pe.ltp != null ? otNum(row.pe.ltp, 2) : "—";
-  otEl("ot-ce-greeks").innerHTML = otGreeksStrip(row ? row.ce : null);
-  otEl("ot-pe-greeks").innerHTML = otGreeksStrip(row ? row.pe : null);
-  // AUTO-preferred side highlight on the response chip area.
+  // Header LTP is set via otRefreshLtpDisplay() below (kept consistent with the chart).
+  // (Greeks now live in the per-side Option Data panels; the old chart-header strip is removed.)
+  // (AUTO-pick highlight removed — Option Terminal is manual-strike only.)
   const ceResp = otEl("ot-ce-resp"), peResp = otEl("ot-pe-resp");
-  if (ceResp) { const on = m && m.autoSide === "CE" && OT.mode === "AUTO"; ceResp.textContent = on ? "★ AUTO PICK" : ""; ceResp.className = "ot-resp" + (on ? " ot-pill-green" : ""); }
-  if (peResp) { const on = m && m.autoSide === "PE" && OT.mode === "AUTO"; peResp.textContent = on ? "★ AUTO PICK" : ""; peResp.className = "ot-resp" + (on ? " ot-pill-red" : ""); }
+  if (ceResp) { ceResp.textContent = ""; ceResp.className = "ot-resp"; }
+  if (peResp) { peResp.textContent = ""; peResp.className = "ot-resp"; }
 
-  // ---- analytics / liquidity / intraday ----
-  otRenderAnalytics(d, row);
-  otRenderLiquidity(d, row);
-  otRenderOTIntraday(d);
+  // ---- summary cards (Selected Strike / CE LTP / PE LTP) ----
+  const otSet = (id, v) => { const e = otEl(id); if (e) e.textContent = v; };
+  otSet("ot-sum-strike", selStrike != null ? String(selStrike) : "—");
+  otSet("ot-sum-ce-name", selStrike != null ? `${selStrike} CE` : "— CE");
+  otSet("ot-sum-pe-name", selStrike != null ? `${selStrike} PE` : "— PE");
+  otRefreshLtpDisplay(d, row); // header + summary LTP, consistent with the chart
+
+  // ---- context strip readouts (Market Structure / Current Setup / India VIX) ----
+  const otDir = (d.marketView && d.marketView.direction) || (d.tradePlan && d.tradePlan.direction) || "—";
+  const structEl = otEl("ot-ctx-struct");
+  if (structEl) { structEl.textContent = otDir; structEl.className = "ot-cv " + (otDir || ""); }
+  const setupEl = otEl("ot-ctx-setup");
+  if (setupEl) {
+    const tp = d.tradePlan || {}; const em = d.earlyMove || {};
+    let setup = em.label || tp.entryState || (tp.action === "NO TRADE" ? "AVOID" : tp.action) || (d.structure && d.structure.current) || "";
+    setupEl.textContent = setup ? String(setup).toUpperCase() : "—";
+  }
+  const cvix = otEl("ot-ctx-vix");
+  if (cvix) cvix.textContent = d.vix && d.vix.available && d.vix.value != null ? otNum(d.vix.value, 2) : (d.vix && d.vix.status ? d.vix.status : "—");
+
+  // ---- per-side Option Data panels + Market Context (replaces analytics/liq/intraday) ----
+  otRenderOptionData(d, row);
+  otRenderContext(d, row);
 
   // ---- footer freshness ----
   const s = d.snapshot || {};
@@ -6067,19 +6386,29 @@ function renderOptionTerminal(d) {
   const expiry = m && m.expiry;
   if (m && m.available && selStrike != null && expiry) {
     const ckey = `${OT.sym}:${selStrike}:${expiry}:${intervalMin}`;
-    if (OT._candleKey !== ckey || (Date.now() - OT._candleAt > 15000)) {
+    // Refresh the premium candles on ~every 5s poll (matches Market Command's chart
+    // cadence). Groww's own throttle/back-off absorbs the rate safely.
+    if (OT._candleKey !== ckey || (Date.now() - OT._candleAt > 4000)) {
       OT._candleKey = ckey; OT._candleAt = Date.now();
       otFetchOptionCandles(OT.sym, selStrike, expiry, intervalMin);
     } else {
-      // same view, refreshed <15s ago — just recompute response/change from cache.
+      // polled again <4s after the last fetch — just recompute response/change from cache.
       otRenderResponse(d); otRenderLtpChange();
+    }
+    // Option-PREMIUM structure levels (R2/R1/SWP/S1/S2 + BIOS), tf-aware. Levels are
+    // slower-moving, so refresh ~every 12s (still far faster than before).
+    if (OT._structKey !== ckey || (Date.now() - OT._structAt > 12000)) {
+      OT._structKey = ckey; OT._structAt = Date.now();
+      otFetchStructure(OT.sym, selStrike, expiry, intervalMin);
     }
   } else {
     otDrawChart("CE", null); otDrawChart("PE", null);
     otRenderResponse(d);
+    OT._struct = null; otDrawStructure("CE"); otDrawStructure("PE"); otRenderHourlyLevels();
     const cn = otEl("ot-ce-note"); if (cn) cn.textContent = (m && m.reason) || "No strike selected";
     const pn = otEl("ot-pe-note"); if (pn) pn.textContent = (m && m.reason) || "No strike selected";
   }
+  otApplyView();
 }
 
 function otRenderOTBos(d) {
@@ -6116,10 +6445,12 @@ function otRenderAnalytics(d, row) {
     rowT("OI", otK(row.ce.oi), otK(row.pe.oi)) +
     rowT("OI Δ", row.ce.oiChg != null ? (row.ce.oiChg >= 0 ? "+" : "") + otK(row.ce.oiChg) : "—", row.pe.oiChg != null ? (row.pe.oiChg >= 0 ? "+" : "") + otK(row.pe.oiChg) : "—") +
     rowT("Volume", otK(row.ce.vol), otK(row.pe.vol)) +
-    rowT("Spread", "N/A", "N/A") +
+    rowT("Bid", "DATA UNAVAILABLE", "DATA UNAVAILABLE") +
+    rowT("Ask", "DATA UNAVAILABLE", "DATA UNAVAILABLE") +
+    rowT("Spread", "DATA UNAVAILABLE", "DATA UNAVAILABLE") +
     rowT("Balanced Price", "N/A", "N/A") +
     `</tbody></table>` +
-    `<div class="ot-muted" style="font-size:10px;margin-top:6px">Spread/depth is not in the Dhan option feed; "Balanced Price" is not defined in this application — both shown N/A rather than invented.</div>`;
+    `<div class="ot-muted" style="font-size:10px;margin-top:6px">Bid/Ask/Spread/depth are not in the Dhan option feed → DATA UNAVAILABLE (never guessed). "Balanced Price" is not defined in this app.</div>`;
 }
 
 function otRenderLiquidity(d, row) {
@@ -6155,16 +6486,94 @@ function otRenderOTIntraday(d) {
     `<div class="ot-muted" style="font-size:10.5px;margin-top:7px">${tp.waitReason || tp.stopLossReason || ""}</div>`;
 }
 
+// Per-side Option Data panel (design's "Option Data — CE / PE"). All values are REAL
+// live chain data. Bid/Ask/Spread are not in the Dhan option feed → DATA UNAVAILABLE
+// (never guessed). One panel per side.
+function otRenderOptionData(d, row) {
+  const fill = (bodyId, titleId, leg, side) => {
+    const t = otEl(titleId); if (t) t.textContent = (row && row.strike != null ? row.strike + " " : "") + side;
+    const box = otEl(bodyId); if (!box) return;
+    if (!leg) { box.innerHTML = `<span class="ot-muted">DATA UNAVAILABLE — no live option chain.</span>`; return; }
+    const f = (v, dp) => v != null ? Number(v).toFixed(dp) : "—";
+    const dLtp = otDisplayLtp(side, leg);
+    const rows = [
+      ["LTP", dLtp != null ? otNum(dLtp, 2) : "—", ""],
+      ["Delta", f(leg.delta, 2), ""],
+      ["Theta/day", f(leg.theta, 2), "ot-down"],
+      ["Gamma", f(leg.gamma, 4), ""],
+      ["Vega", f(leg.vega, 2), ""],
+      ["IV", leg.iv != null ? f(leg.iv, 1) + "%" : "—", ""],
+      ["OI", otK(leg.oi), ""],
+      ["OI Change", leg.oiChg != null ? (leg.oiChg >= 0 ? "+" : "") + otK(leg.oiChg) : "—", leg.oiChg > 0 ? "ot-up" : leg.oiChg < 0 ? "ot-down" : ""],
+      ["Volume", otK(leg.vol), ""],
+      ["Bid", "DATA UNAVAILABLE", "na"],
+      ["Ask", "DATA UNAVAILABLE", "na"],
+      ["Spread", "DATA UNAVAILABLE", "na"],
+    ];
+    box.innerHTML = `<table><tbody>` +
+      rows.map(([k, v, cls]) => `<tr><td>${k}</td><td class="${cls || ""}">${v}</td></tr>`).join("") +
+      `</tbody></table>` +
+      staleNote +
+      `<div class="ot-muted" style="font-size:9.5px;margin-top:6px">Greeks/OI/Vol are live Dhan chain values. Bid/Ask/Spread are not in the feed → DATA UNAVAILABLE (never guessed).</div>`;
+  };
+  // When the option chain snapshot is stale (off-hours), greeks/OI can be a whole
+  // session older than the premium candles — say so, and note LTP follows the chart.
+  const chainAsOf = OT._stale && d.snapshot && d.snapshot.marketTs ? otHM(d.snapshot.marketTs) : null;
+  const staleNote = chainAsOf
+    ? `<div class="ot-muted" style="font-size:9.5px;margin-top:6px;color:#f0b429">⚠ Chain greeks/OI as of ${chainAsOf} (stale). LTP shown follows the latest premium candle to match the chart.</div>`
+    : "";
+  fill("ot-ce-data-body", "ot-ce-data-title", row ? row.ce : null, "CE");
+  fill("ot-pe-data-body", "ot-pe-data-title", row ? row.pe : null, "PE");
+}
+
+// Market Context band (design's "Market Context (From Market Command)"). Reads the
+// SAME market-command payload Market Command uses — no recompute, no fabrication.
+function otRenderContext(d, row) {
+  const box = otEl("ot-context-body"); if (!box) return;
+  const mv = d.marketView || {}; const tp = d.tradePlan || {}; const em = d.earlyMove || {}; const b = d.bos;
+  const trend = mv.direction || tp.direction || "—";
+  const structure = (d.structure && d.structure.current) || (b ? `${b.previousStructure || "—"} → ${b.newStructure || "—"}` : "—");
+  const event = em.label || tp.entryState || (tp.action === "NO TRADE" ? "AVOID" : tp.action) || "—";
+  const keyLevel = b && b.price != null ? `${otNum(b.price, 2)} · BOS` : (tp.entryZone || "—");
+  const updated = d.snapshot && d.snapshot.marketTs ? otHM(d.snapshot.marketTs) : "—";
+  const vixTxt = d.vix && d.vix.available && d.vix.value != null ? otNum(d.vix.value, 2) : (d.vix && d.vix.status ? d.vix.status : "—");
+  const cell = (k, v, cls) => `<div class="cell"><span class="k">${k}</span><span class="v ${cls || ""}">${v}</span></div>`;
+  // CALL / PUT response (actual premium move vs delta-expected) — same classifier as the response engine.
+  let respLine = "";
+  if (row) {
+    const ce = otResponse("CE", row.ce, d.candles, OT._ceCandles);
+    const pe = otResponse("PE", row.pe, d.candles, OT._peCandles);
+    respLine = `<div class="ot-miniline" style="margin-top:8px"><span class="ot-muted">CALL response</span><b>${ce.cls}</b></div>` +
+      `<div class="ot-miniline"><span class="ot-muted">PUT response</span><b>${pe.cls}</b></div>`;
+  }
+  box.innerHTML = `<div class="ot-ctxgrid">` +
+    cell("Trend", trend, trend) +
+    cell("Structure", structure) +
+    cell("Current Event", event) +
+    cell("Key Level", keyLevel) +
+    cell("India VIX", vixTxt) +
+    cell("Updated", updated) +
+    `</div>` + respLine;
+}
+
 async function loadMarketCommand(chartOnly = false) {
   // chartOnly (view=chart) skips the heavy OI pipeline so the chart paints fast;
   // a full load follows to fill the OI-based command panel. Replay never uses it.
   if (MC.loading) return;
   MC.loading = true;
+  // Remember what we're fetching. If the user switches index/timeframe while this
+  // request is in flight, the response is STALE and must NOT be rendered — doing so
+  // would paint the old symbol's candles into the new symbol's view and then the
+  // incremental-update path keeps showing stale data (the "only NIFTY works" bug).
+  const reqSym = MC.sym, reqTf = MC.tf, reqReplay = MC.replayDate || null;
   try {
     let url = `/api/market-command?symbol=${encodeURIComponent(MC.sym)}&interval=${MC.tf}`;
     if (MC.replayDate) url += `&date=${MC.replayDate}`;
     else if (chartOnly) url += `&view=chart`;
     const d = await fetchJSON(url, 25000);
+    if (MC.sym !== reqSym || MC.tf !== reqTf || (MC.replayDate || null) !== reqReplay) {
+      MC.loading = false; return; // user switched mid-flight — discard stale payload
+    }
     if (!d || d.error) {
       const cmd = el("mc-cmd-action");
       if (cmd) { cmd.className = "mc-cmd-action stale"; }
@@ -6176,6 +6585,12 @@ async function loadMarketCommand(chartOnly = false) {
       return;
     }
     MC.lastData = d;
+    // Chart session-date badge — which date this chart represents (live or replay).
+    const _de = el("mc-chart-date");
+    if (_de) {
+      const _lt = (d.candles && d.candles.length) ? d.candles[d.candles.length - 1].time : d.lastCandleTime;
+      _de.textContent = "📅 " + (d.asOfDate ? d.asOfDate : mcSessionDate(_lt)) + (d.historical ? " · REPLAY" : " · LIVE");
+    }
     renderMCChart(d);
     renderMCTopStats(d);
     renderMCCommand(d);
@@ -6186,6 +6601,8 @@ async function loadMarketCommand(chartOnly = false) {
     renderMCPlan(d);
     renderMCOptionChain(d);
     renderMCIntraday(d);
+    renderMCOiMove(d);   // ADDITIVE: OI-movement judge panel (no-ops when field absent)
+    renderMCFakeMove(d); // ADDITIVE: new MTF fake-move panel (no-ops when flag off)
     renderMCBottom(d);
   } catch (e) {
     console.error("[MarketCommand]", e);
@@ -6333,11 +6750,31 @@ async function renderMCIndexCards() {
   const cards = document.querySelectorAll("#mc2-cards .mc2-card");
   if (!cards.length) return;
   let quotes = {};
+  let feed = null; // Dhan health SSOT (from /api/quotes `feed`)
   try {
     const q = await fetch("/api/quotes?symbols=" + encodeURIComponent("^NSEI,^NSEBANK,^CNXFIN,^NSEMDCP50")).then((r) => r.json());
     quotes = q.quotes || {};
+    feed = q.feed || null;
   } catch { /* keep last */ }
   const vix = MC.lastData?.vix;
+  const marketOpen = feed ? feed.marketStatus === "OPEN" : true;
+  // What to show when a value is missing — truthful, not a silent dash (§11).
+  const waitingText = (() => {
+    const st = feed && feed.state;
+    if (st === "DHAN_TOKEN_EXPIRED" || st === "DHAN_AUTH_FAILED" || st === "DHAN_FEED_DISABLED" || st === "DHAN_DISCONNECTED") return "reconnect Dhan";
+    if (st === "DHAN_CONNECTING") return "connecting…";
+    if (st === "DHAN_MARKET_CLOSED") return "market closed";
+    if (st === "DHAN_RATE_LIMITED") return "rate-limited…";
+    return "waiting for live data…";
+  })();
+  // Per-card freshness marker (§6): LIVE / FRESH / STALE / LAST GOOD.
+  const freshMark = (fr, ageMs) => {
+    if (fr === "LIVE") return `<span class="mc2-fresh live">🟢 LIVE</span>`;
+    if (fr === "FRESH") return `<span class="mc2-fresh live">🟢 ${ageMs != null ? Math.round(ageMs / 1000) + "s" : "live"}</span>`;
+    if (fr === "STALE") return `<span class="mc2-fresh stale">🟠 STALE</span>`;
+    if (fr === "LAST_GOOD") return `<span class="mc2-fresh lastgood">🌙 LAST GOOD</span>`;
+    return "";
+  };
   const spark = (svg, chgPct) => {
     if (!svg) return;
     if (chgPct == null) { svg.innerHTML = `<polyline points="0,17 120,17" fill="none" stroke="#334155" stroke-width="1.5" opacity="0.6"/>`; return; }
@@ -6348,15 +6785,330 @@ async function renderMCIndexCards() {
   cards.forEach((card) => {
     const sym = card.getAttribute("data-card");
     const valEl = card.querySelector('[data-f="val"]'), chgEl = card.querySelector('[data-f="chg"]'), sv = card.querySelector('[data-f="spark"]');
-    let price = null, chgPct = null;
-    if (sym === "VIX") { price = vix?.value ?? null; chgPct = vix?.changePct ?? null; }
-    else { const q = quotes[sym]; price = q?.price ?? null; chgPct = q?.changePercent ?? null; }
+    let price = null, chgPct = null, freshness = "NONE", ageMs = null;
+    if (sym === "VIX") {
+      price = vix?.value ?? null; chgPct = vix?.changePct ?? null;
+      // VIX rides the market-command payload; mark by session when we have a value.
+      freshness = price != null ? (marketOpen ? "FRESH" : "LAST_GOOD") : "NONE";
+    } else {
+      const q = quotes[sym];
+      price = q?.price ?? null; chgPct = q?.changePercent ?? null;
+      freshness = q?.freshness || (price != null ? "FRESH" : "NONE");
+      ageMs = q?.ageMs ?? null;
+    }
     if (valEl) valEl.textContent = price != null ? Number(price).toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—";
     if (chgEl) {
-      if (chgPct != null) { chgEl.textContent = `${chgPct >= 0 ? "+" : ""}${chgPct}%`; chgEl.className = "mc2-card-chg " + (chgPct >= 0 ? "up" : "down"); }
-      else chgEl.textContent = "";
+      if (price != null && chgPct != null) {
+        chgEl.innerHTML = `<span class="${chgPct >= 0 ? "up" : "down"}">${chgPct >= 0 ? "+" : ""}${chgPct}%</span> ${freshMark(freshness, ageMs)}`;
+        chgEl.className = "mc2-card-chg";
+      } else if (price != null) {
+        chgEl.innerHTML = freshMark(freshness, ageMs);
+        chgEl.className = "mc2-card-chg";
+      } else {
+        // No value yet — say WHY instead of leaving it blank (§11).
+        chgEl.innerHTML = `<span class="mc2-fresh waiting">${waitingText}</span>`;
+        chgEl.className = "mc2-card-chg";
+      }
     }
     spark(sv, chgPct);
+  });
+}
+
+// ===================== ADDITIVE: Multi-Timeframe Fake Move panel =====================
+// Reads ONLY the new fakeMove* fields from the market-command payload. When those
+// fields are absent (feature flag off, or an older backend) the panel hides and any
+// chart annotation is removed — the existing chart/panels are completely unaffected.
+// ADDITIVE: OI-movement judge panel (5M trade / 15M direction). Reads ONLY the
+// new d.oiMove field; never touches direction/tradePlan/Best Strike. Hidden on an
+// older backend that doesn't send oiMove; shows a "building" state until enough
+// live OI history accrues (never fabricates values).
+function renderMCOiMove(d) {
+  const panel = el("mc-oimove-panel");
+  if (!panel) return;
+  const m = d.oiMove;
+  if (!m) { panel.hidden = true; return; } // older backend / field absent
+  panel.hidden = false;
+  const sumEl = el("mc-oim-summary"); if (sumEl) sumEl.textContent = m.summary || "—";
+  const noteEl = el("mc-oim-note"); if (noteEl) noteEl.textContent = m.note || "";
+  const kfmt = (n) => {
+    const a = Math.abs(n);
+    if (a >= 1e7) return (n / 1e7).toFixed(2) + "Cr";
+    if (a >= 1e5) return (n / 1e5).toFixed(2) + "L";
+    if (a >= 1e3) return (n / 1e3).toFixed(1) + "K";
+    return String(Math.round(n));
+  };
+  const signed = (n) => (n >= 0 ? "+" : "") + kfmt(n);
+  const paint = (win, sigId, flowId, guidId) => {
+    const sig = el(sigId), flow = el(flowId), guid = el(guidId);
+    if (!win || !win.available) {
+      if (sig) { sig.textContent = win && win.building ? "BUILDING" : "—"; sig.className = "mc2-oim-sig NEUTRAL"; }
+      if (flow) flow.textContent = "—";
+      if (guid) guid.textContent = win && win.building ? "Collecting live OI…" : "—";
+      return;
+    }
+    if (sig) { sig.textContent = win.signal + (win.confirmed ? " ✓" : ""); sig.className = "mc2-oim-sig " + win.signal; }
+    if (flow) flow.innerHTML = `CE <b>${signed(win.ceOiChg)}</b> · PE <b>${signed(win.peOiChg)}</b> · <b>${win.strength}</b>` + (win.building ? " · partial" : "");
+    if (guid) guid.textContent = win.guidance || "—";
+  };
+  paint(m.trade, "mc-oim-trade-sig", "mc-oim-trade-flow", "mc-oim-trade-guid");
+  paint(m.direction, "mc-oim-dir-sig", "mc-oim-dir-flow", "mc-oim-dir-guid");
+}
+
+// It never changes the existing direction; it shows EXISTING vs MTF side by side and
+// flags a LOGIC CONFLICT when they disagree (per the no-override rule).
+function renderMCFakeMove(d) {
+  const panel = el("mc-fakemove-panel");
+  const mtfPanel = el("mc-mtfdir-panel");
+  const scenPanel = el("mc-scenario-panel");
+  const hasLayer = d && d.fakeMove5m && d.fakeMove15m && d.mtfFakeMoveState;
+  // Remove any prior chart annotation first (independent of existing price lines).
+  if (MC.fakeMoveLine && MC.candleSeries) { try { MC.candleSeries.removePriceLine(MC.fakeMoveLine); } catch {} MC.fakeMoveLine = null; }
+  if (!hasLayer) {
+    if (panel) panel.hidden = true;
+    if (mtfPanel) mtfPanel.hidden = true;
+    if (scenPanel) scenPanel.hidden = true;
+    MC._fakeData = null;
+    if (MC.fakeOverlay) MC.fakeOverlay.hidden = true;
+    return;
+  }
+  if (panel) panel.hidden = false;
+  if (mtfPanel) mtfPanel.hidden = false;
+  if (scenPanel) scenPanel.hidden = false;
+
+  const fm5 = d.fakeMove5m, fm15 = d.fakeMove15m, mtf = d.mtfFakeMoveState;
+  const htf = d.higherTimeframeContext || {};
+  const conf = d.confirmationState || "NONE";
+  const conflict = d.fakeMoveConflict || { exists: false };
+
+  const dirWord = (fm) => {
+    if (!fm || fm.direction === "NONE" || fm.status === "NONE") return "—";
+    const arrow = fm.direction === "UP" ? "▲ FAKE-UP" : "▼ FAKE-DOWN";
+    return `${arrow} · ${fm.status}`;
+  };
+  const dirCls = (fm) => {
+    if (!fm || fm.direction === "NONE" || fm.status === "NONE") return "neutral";
+    // A fake-UP is bearish, a fake-DOWN is bullish.
+    return fm.direction === "UP" ? "bear" : "bull";
+  };
+  const set = (id, txt, cls) => {
+    const e = el(id); if (!e) return;
+    e.textContent = txt;
+    if (cls != null) e.className = e.className.replace(/\b(bull|bear|neutral|watch|confirmed|conflict)\b/g, "").trim() + " " + cls;
+  };
+
+  // Headline badge from the MTF state.
+  const badgeMap = {
+    FAILED_BREAKOUT: { t: "BEARISH FAKE-UP", c: "bear" },
+    FAILED_BREAKDOWN: { t: "BULLISH FAKE-DOWN", c: "bull" },
+    EARLY_REJECTION: { t: "EARLY REJECTION", c: "watch" },
+    BREAKOUT_ACCEPTED: { t: "BREAKOUT ACCEPTED", c: "confirmed" },
+    RETEST: { t: "RETEST IN PROGRESS", c: "watch" },
+    CONFLICT: { t: "TIMEFRAME CONFLICT", c: "conflict" },
+    NONE: { t: "NO FAKE MOVE", c: "neutral" },
+  };
+  const b = badgeMap[mtf.status] || badgeMap.NONE;
+  set("mc-fm-badge", b.t + (mtf.confidence ? ` · ${mtf.confidence}%` : ""), b.c);
+  // Top TF pills (mockup style): 5M = counter-trend/fake status; 15M & 1H = existing directions.
+  const _mtfd = d.mtfDirection || {};
+  const _ct = d.counterTrend || {};
+  const dirPillCls = (x) => x === "BULLISH" ? "bull" : x === "BEARISH" ? "bear" : "neutral";
+  let p5txt, p5cls;
+  if (_ct.active && _ct.status && _ct.status !== "NONE") { p5txt = _ct.status; p5cls = _ct.status === "REVERSAL WATCH" ? "conflict" : "watch"; }
+  else if (fm5 && fm5.direction !== "NONE" && fm5.status !== "NONE") { p5txt = (fm5.direction === "UP" ? "FAKE-UP" : "FAKE-DOWN") + (fm5.status === "CONFIRMED" ? " CONF" : " WATCH"); p5cls = fm5.direction === "UP" ? "bear" : "bull"; }
+  else { p5txt = (_mtfd.m5 && _mtfd.m5.direction) || "—"; p5cls = dirPillCls(_mtfd.m5 && _mtfd.m5.direction); }
+  set("mc-fm-5m", p5txt, p5cls);
+  set("mc-fm-15m", (_mtfd.m15 && _mtfd.m15.direction) || "—", dirPillCls(_mtfd.m15 && _mtfd.m15.direction));
+  set("mc-fm-htf", htf.available ? (htf.direction || "—") : "—", dirPillCls(htf.direction));
+  const confCls = conf === "CONFIRMED_ALIGNED" ? "confirmed" : conf === "CONFLICT" ? "conflict" : conf === "WATCH" ? "watch" : "neutral";
+  set("mc-fm-conf", conf.replace(/_/g, " "), confCls);
+  set("mc-fm-reason", mtf.note || (fm15.status !== "NONE" ? fm15.reason : fm5.reason) || "—");
+
+  // EXISTING vs MTF (never overwrite the existing direction — show both).
+  set("mc-fm-existing", (d.marketView && d.marketView.direction) || "—");
+  set("mc-fm-mtf-implied", conflict.mtfImplied || "NEUTRAL");
+  const cf = el("mc-fm-conflict");
+  if (cf) {
+    if (conflict.exists) {
+      cf.hidden = false;
+      cf.textContent = `⚠ LOGIC CONFLICT — existing ${conflict.existingDirection}; MTF implies ${conflict.mtfImplied}. Existing direction unchanged — WAIT for confirmation.`;
+    } else {
+      cf.hidden = true;
+    }
+  }
+
+  // ---- MULTI-TIMEFRAME DIRECTION panel (existing directions + annotation) ----
+  // These directions come straight from the EXISTING per-TF structure — this
+  // only DISPLAYS them; it never changes them. The 5M annotation flags a
+  // counter-trend pullback WITHOUT flipping the 5M direction.
+  const mtfd = d.mtfDirection || {};
+  const ct = d.counterTrend || {};
+  const dirGlyph = (x) => x === "BULLISH" ? "▲" : x === "BEARISH" ? "▼" : x === "RANGING" ? "◆" : "•";
+  const dirCls2 = (x) => x === "BULLISH" ? "bull" : x === "BEARISH" ? "bear" : "neutral";
+  const setIco = (id, g, cls) => { const e = el(id); if (e) { e.textContent = g; e.className = "mc2-tfcard-ico " + cls; } };
+  const h1d = mtfd.h1 && mtfd.h1.direction, m15d = mtfd.m15 && mtfd.m15.direction, m5d = (mtfd.m5 && mtfd.m5.direction) || "—";
+  setIco("mc-mtf-1h-ico", dirGlyph(h1d), dirCls2(h1d)); set("mc-mtf-1h", h1d || "—", dirCls2(h1d));
+  setIco("mc-mtf-15m-ico", dirGlyph(m15d), dirCls2(m15d)); set("mc-mtf-15m", m15d || "—", dirCls2(m15d));
+  // 5M shows the EXISTING direction; if a counter-trend candle is active, show the
+  // annotation as the label (amber) with the unchanged direction beneath it.
+  const m5annot = mtfd.m5 && mtfd.m5.annotation;
+  setIco("mc-mtf-5m-ico", m5annot ? "↩" : dirGlyph(m5d), m5annot ? "watch" : dirCls2(m5d));
+  set("mc-mtf-5m", m5annot ? m5annot : m5d, m5annot ? "watch" : dirCls2(m5d));
+  const m5sub = el("mc-mtf-5m-sub");
+  if (m5sub) m5sub.textContent = m5annot ? `${dirGlyph(m5d)} ${m5d} (unchanged)` : "";
+
+  // ---- Counter-trend candle row inside the Fake Move Detector ----
+  const candleEvt = ct.active
+    ? `${ct.candleColor === "GREEN" ? "🟢" : ct.candleColor === "RED" ? "🔴" : "⬜"} COUNTER-TREND CANDLE`
+    : (ct.candleColor ? `${ct.candleColor === "GREEN" ? "🟢" : ct.candleColor === "RED" ? "🔴" : "⬜"} continuation` : "—");
+  set("mc-fm-candle", candleEvt, ct.active ? "watch" : "neutral");
+  const ctStatusCls = ct.status === "REVERSAL WATCH" ? "conflict" : ct.status === "FAKE WATCH" ? "watch" : "neutral";
+  set("mc-fm-ctstatus", ct.status || "NONE", ctStatusCls);
+
+  // ---- CONFIRMATION & NEXT SCENARIO panel ----
+  const scen = d.fakeScenario || {};
+  set("mc-scen-status", scen.status || "—", ct.active ? "watch" : "neutral");
+  const scConf = el("mc-scen-conf"); if (scConf) scConf.textContent = scen.confirmationNeeded || "—";
+  const scRev = el("mc-scen-rev"); if (scRev) scRev.textContent = scen.reversalWatchNote || "—";
+  // Counter-trend explanatory note (the "not a reversal" line from the design).
+  const scNote = el("mc-scen-note");
+  if (scNote) { scNote.textContent = ct.note || ""; scNote.hidden = !ct.note; }
+
+  // ---- Build the on-chart OVERLAY dataset (presentation only) ----
+  // Consumes existing values only (candles, levels, marketView direction, fake
+  // fields). Never draws a competing signal; never touches chart data/series.
+  const cndls = MC._candles || [];
+  const lastC = cndls.length ? cndls[cndls.length - 1] : null;
+  const spot = d.spot;
+  const numOf = (x) => x == null ? null : (typeof x === "number" ? x : (typeof x.strike === "number" ? x.strike : null));
+  const lv = d.levels || {}, oiv = d.oi || {};
+  const supBelow = [numOf(oiv.support), numOf(lv.strongSupport), numOf(lv.weakSupport)].filter((v) => v != null && spot != null && v < spot).sort((a, b) => b - a);
+  const resAbove = [numOf(oiv.resistance), numOf(lv.strongResistance), numOf(lv.weakResistance)].filter((v) => v != null && spot != null && v > spot).sort((a, b) => a - b);
+  const existingDir = (d.marketView && d.marketView.direction) || "";
+  // Pullback / resistance zone from the fake-move level (or nearest resistance).
+  const fmLevel = (fm15 && fm15.level) || (fm5 && fm5.level) || resAbove[0] || null;
+  const zone = (fmLevel != null && spot != null)
+    ? { hi: fmLevel, lo: fmLevel - Math.max(spot * 0.0009, 4), label: "Resistance / Pullback Zone" }
+    : null;
+  // Projected close by ~3:00 PM: nearest level in the EXISTING direction.
+  const projClose = existingDir === "BEARISH" ? (supBelow[0] ?? null) : existingDir === "BULLISH" ? (resAbove[0] ?? null) : null;
+  const intervalSec = ({ "5m": 300, "15m": 900, "30m": 1800, "60m": 3600, "1h": 3600 })[MC.tf] || 900;
+  let barsAhead = 0;
+  if (lastC && lastC.time) {
+    const dayUTC = Math.floor(lastC.time / 86400) * 86400;
+    const threePm = dayUTC + 34200; // 15:00 IST == 09:30 UTC
+    barsAhead = Math.max(0, Math.min(40, Math.round((threePm - lastC.time) / intervalSec)));
+  }
+  // Counter-trend / fake callout content (all from existing fields; never flips dir).
+  let calloutTitle = null, calloutSub = null, calloutSubCls = "watch", calloutNote = null;
+  if (ct.active) {
+    calloutTitle = "COUNTER-TREND CANDLE"; calloutSub = ct.status || "FAKE WATCH";
+    calloutSubCls = ct.status === "REVERSAL WATCH" ? "watch" : "watch"; calloutNote = ct.note || null;
+  } else if (fm5 && fm5.direction !== "NONE" && fm5.status !== "NONE") {
+    calloutTitle = (fm5.direction === "UP" ? "FAKE-UP" : "FAKE-DOWN"); calloutSub = fm5.status;
+    calloutSubCls = fm5.direction === "UP" ? "bear" : "bull"; calloutNote = fm5.reason || null;
+  }
+  const active = !!(calloutTitle || zone || (projClose != null && barsAhead > 0));
+  MC._fakeData = active ? {
+    active: true,
+    lastTime: lastC ? lastC.time : null,
+    lastClose: lastC ? lastC.close : null,
+    lastLogical: cndls.length ? cndls.length - 1 : null,
+    ct: calloutTitle ? { title: calloutTitle, sub: calloutSub, subCls: calloutSubCls, note: calloutNote } : null,
+    zone,
+    proj: (projClose != null && barsAhead > 0) ? { barsAhead, projClose, projLabel: "~" + Math.round(projClose).toLocaleString("en-IN") } : (barsAhead > 0 ? { barsAhead, projClose: null, projLabel: "" } : null),
+  } : null;
+  positionMCFakeOverlay();
+}
+
+// Position the overlay elements from MC._fakeData using the chart's coordinate
+// APIs. Fully defensive: any missing coordinate hides that element; any throw
+// hides the whole layer. NEVER mutates chart data/series/size.
+function positionMCFakeOverlay() {
+  const layer = MC.fakeOverlay;
+  if (!layer) return;
+  const data = MC._fakeData;
+  if (!data || !data.active || !MC.chart || !MC.candleSeries) { layer.hidden = true; return; }
+  try {
+    const ts = MC.chart.timeScale();
+    const W = layer.clientWidth, H = layer.clientHeight;
+    const priceY = (p) => { if (p == null) return null; const y = MC.candleSeries.priceToCoordinate(p); return (y == null || !isFinite(y)) ? null : y; };
+    const timeX = (t) => { if (t == null) return null; const x = ts.timeToCoordinate(t); return (x == null || !isFinite(x)) ? null : x; };
+    const logiX = (l) => { if (l == null) return null; try { const x = ts.logicalToCoordinate(l); return (x == null || !isFinite(x)) ? null : x; } catch { return null; } };
+    layer.hidden = false;
+
+    // Zone band
+    const zoneEl = el("mcfo-zone"), zoneLbl = el("mcfo-zone-lbl");
+    if (data.zone) {
+      const yT = priceY(data.zone.hi), yB = priceY(data.zone.lo);
+      if (yT != null && yB != null) {
+        const top = Math.min(yT, yB), h = Math.max(2, Math.abs(yB - yT));
+        zoneEl.style.top = top + "px"; zoneEl.style.height = h + "px"; zoneEl.hidden = false;
+        zoneLbl.style.top = top + "px"; zoneLbl.textContent = data.zone.label; zoneLbl.hidden = false;
+      } else { zoneEl.hidden = true; zoneLbl.hidden = true; }
+    } else { zoneEl.hidden = true; zoneLbl.hidden = true; }
+
+    // 3 PM line + projection cone
+    const cone = el("mcfo-cone"), projLine = el("mcfo-proj-line"), pmLine = el("mcfo-3pm-line"), conn = el("mcfo-conn");
+    const pmLbl = el("mcfo-3pm-lbl"), projChip = el("mcfo-proj-chip");
+    let xNow = data.lastTime != null ? timeX(data.lastTime) : null;
+    let yLast = data.lastClose != null ? priceY(data.lastClose) : null;
+    let x3pm = data.proj ? logiX((data.lastLogical ?? 0) + data.proj.barsAhead) : null;
+    let yProj = (data.proj && data.proj.projClose != null) ? priceY(data.proj.projClose) : null;
+    if (x3pm != null) {
+      pmLine.setAttribute("x1", x3pm); pmLine.setAttribute("x2", x3pm); pmLine.setAttribute("y1", 0); pmLine.setAttribute("y2", H); pmLine.style.display = "";
+      pmLbl.style.left = x3pm + "px"; pmLbl.style.top = "4px"; pmLbl.hidden = false;
+    } else { pmLine.style.display = "none"; pmLbl.hidden = true; }
+    if (xNow != null && yLast != null && x3pm != null && yProj != null) {
+      projLine.setAttribute("x1", xNow); projLine.setAttribute("y1", yLast); projLine.setAttribute("x2", x3pm); projLine.setAttribute("y2", yProj); projLine.style.display = "";
+      const spread = Math.max(10, H * 0.05);
+      cone.setAttribute("d", `M${xNow},${yLast} L${x3pm},${yProj - spread} L${x3pm},${yProj + spread} Z`); cone.style.display = "";
+      projChip.style.left = x3pm + "px"; projChip.style.top = yProj + "px"; projChip.textContent = data.proj.projLabel || ""; projChip.hidden = !data.proj.projLabel;
+    } else { projLine.style.display = "none"; cone.style.display = "none"; projChip.hidden = true; }
+
+    // Counter-trend callout + tooltip + connector
+    const co = el("mcfo-callout"), coTtl = el("mcfo-callout-ttl"), coSub = el("mcfo-callout-sub"), tip = el("mcfo-tip");
+    if (data.ct) {
+      coTtl.textContent = data.ct.title; coSub.textContent = data.ct.sub || ""; coSub.className = "sub " + (data.ct.subCls || "watch");
+      const cx = xNow != null ? xNow : W * 0.55, cy = yLast != null ? yLast : H * 0.4;
+      const bx = Math.max(6, Math.min(cx - 100, W - 200)), by = Math.max(6, cy - 74);
+      co.style.left = bx + "px"; co.style.top = by + "px"; co.hidden = false;
+      if (xNow != null && yLast != null) {
+        conn.setAttribute("x1", bx + 90); conn.setAttribute("y1", by + 34); conn.setAttribute("x2", xNow); conn.setAttribute("y2", yLast); conn.style.display = "";
+      } else { conn.style.display = "none"; }
+      if (data.ct.note) {
+        tip.textContent = data.ct.note;
+        const tx = Math.max(6, Math.min(cx + 14, W - 184)), ty = Math.max(6, cy - 6);
+        tip.style.left = tx + "px"; tip.style.top = ty + "px"; tip.hidden = false;
+      } else tip.hidden = true;
+    } else { co.hidden = true; tip.hidden = true; conn.style.display = "none"; }
+  } catch { layer.hidden = true; }
+}
+
+// Collapsible Technical Nomenclature legend. Appended below the chart's existing
+// levels legend (does NOT change chart height). Built once, toggled on click.
+function wireMCNomenclature() {
+  const anchor = el("mc-levels-legend");
+  if (!anchor || el("mc-nomen-wrap")) return;
+  const wrap = document.createElement("div");
+  wrap.className = "mc-nomen-wrap";
+  wrap.id = "mc-nomen-wrap";
+  const cols = [
+    ["MARKET STRUCTURE", [["SWH", "Swing High (local high / resistance)"], ["SwL", "Swing Low (local low / support)"], ["BOS", "Break of Structure"], ["CHoCH", "Change of Character"], ["OB", "Order Block"]]],
+    ["LEVELS", [["PDH / PDL", "Previous Day High / Low"], ["R1 / R2", "Resistance levels"], ["S1 / S2 / S3", "Support levels"], ["VWAP", "Volume-Weighted Avg Price"], ["ORB", "Opening Range Breakout"]]],
+    ["INDICATORS", [["EMA", "Exp. Moving Avg (9/21/50/200)"], ["ATR", "Average True Range"], ["RVOL", "Relative Volume"], ["VIX", "India Volatility Index"], ["ADX", "Trend strength"]]],
+    ["OPTIONS / OI", [["OI", "Open Interest"], ["OI Wall", "Large-OI strike (S/R)"], ["CE / PE", "Call / Put"], ["PCR", "Put-Call Ratio"], ["LTP", "Last Traded Price"]]],
+    ["SIGNAL / FAKE MOVE", [["MTF", "Multi-Timeframe (1H/15M/5M)"], ["Fake Watch", "Possible fake break/pullback"], ["Counter-Trend", "Candle vs structure"], ["Reversal Watch", "Needs break+hold (unconfirmed)"], ["SL / R:R", "Stop-Loss / Risk-Reward"]]],
+  ];
+  const panelHtml = cols.map(([h, rows]) =>
+    `<div class="mc-nomen-col"><h5>${h}</h5>${rows.map(([k, v]) => `<div><b>${k}</b> — ${v}</div>`).join("")}</div>`
+  ).join("");
+  wrap.innerHTML =
+    '<button type="button" class="mc-nomen-btn" id="mc-nomen-btn">ⓘ Technical Nomenclature ▾</button>' +
+    '<div class="mc-nomen-panel" id="mc-nomen-panel" hidden>' + panelHtml + '</div>';
+  anchor.parentNode.insertBefore(wrap, anchor.nextSibling);
+  el("mc-nomen-btn").addEventListener("click", () => {
+    const p = el("mc-nomen-panel");
+    if (p) p.hidden = !p.hidden;
   });
 }
 
@@ -6552,7 +7304,13 @@ function renderMCChart(d) {
   const chartViewKey = MC.sym + ":" + MC.tf + ":" + (MC.replayDate || "live");
   const sameView = MC._chartViewKey === chartViewKey;
   const prevN = MC._candles ? MC._candles.length : 0;
-  if (sameView && prevN && candles.length && candles.length - prevN >= 0 && candles.length - prevN <= 2) {
+  // Only take the fast incremental path when the series is CONTINUOUS (same first
+  // bar) — otherwise the data is a different symbol/session and needs a full
+  // setData, even if the length happens to match.
+  const prevFirst = prevN ? MC._candles[0].time : null;
+  const newFirst = candles.length ? candles[0].time : null;
+  const continuous = prevFirst != null && newFirst != null && prevFirst === newFirst;
+  if (sameView && continuous && prevN && candles.length && candles.length - prevN >= 0 && candles.length - prevN <= 2) {
     for (let i = Math.max(0, prevN - 1); i < candles.length; i++) {
       MC.candleSeries.update(candles[i]);
       if (MC.volSeries && MC.show.vol !== false) MC.volSeries.update(volumes[i]);
@@ -12099,17 +12857,107 @@ function enterAdminMode() {
 // existing open/save/test logic in setupConnect() rather than duplicating it.
 const CONNECTION_MANAGE_BTN = { dhan: "connect-btn", telegram: "telegram-btn" };
 function manageConnection(provider) {
+  if (provider === "groww") { openGrowwConnectPanel(); return; }
   const btnId = CONNECTION_MANAGE_BTN[provider];
   if (btnId) el(btnId)?.click();
+}
+
+// ---- Groww connection panel (admin Connections → Groww "Manage") ----
+// Uses the real Groww endpoints (/api/groww/connect|status|disconnect). This is
+// the Option Terminal's premium data source only; Dhan is unaffected.
+let _growwConnWired = false;
+function openGrowwConnectPanel() {
+  const panel = el("groww-connect-panel"); if (!panel) return;
+  closeAllConnectPanels();
+  if (!_growwConnWired) {
+    _growwConnWired = true;
+    el("groww-connect-close")?.addEventListener("click", () => panel.classList.add("hidden"));
+    el("groww-conn-save")?.addEventListener("click", doSaveGrowwConnect);
+    el("groww-conn-disconnect")?.addEventListener("click", doDisconnectGroww);
+    panel.querySelector('.gc-eye[data-target="groww-conn-token"]')?.addEventListener("click", () => {
+      const inp = el("groww-conn-token"); if (inp) inp.type = inp.type === "password" ? "text" : "password";
+    });
+  }
+  panel.classList.remove("hidden");
+  refreshGrowwConnStatus();
+}
+
+async function refreshGrowwConnStatus() {
+  const info = el("groww-conn-info");
+  try {
+    const s = await fetch("/api/groww/status").then((r) => r.json());
+    const keyEl = el("groww-conn-key");
+    if (keyEl && s.apiKeyMasked && !keyEl.value) keyEl.placeholder = "Saved: " + s.apiKeyMasked;
+    if (info) {
+      if (s.configured) {
+        const exp = s.tokenExpiresAt ? new Date(s.tokenExpiresAt).toLocaleString("en-IN") : "—";
+        info.textContent = s.expired
+          ? `Token EXPIRED (was valid till ${exp}) — paste a fresh one.`
+          : `Connected ✓ — token valid till ${exp}${s.apiKeySet ? " · API key saved" : ""}`;
+        info.className = "gc-test-result " + (s.expired ? "err" : "ok");
+      } else {
+        info.textContent = "Not connected. Paste an access token to enable Groww for the Option Terminal.";
+        info.className = "gc-test-result";
+      }
+    }
+  } catch { if (info) info.textContent = ""; }
+}
+
+async function doSaveGrowwConnect() {
+  const status = el("groww-conn-status"); const btn = el("groww-conn-save");
+  const token = (el("groww-conn-token")?.value || "").trim();
+  const apiKey = (el("groww-conn-key")?.value || "").trim();
+  if (!token) { if (status) { status.textContent = "Paste a Groww access token."; status.className = "conn-status err"; } return; }
+  if (btn) btn.disabled = true;
+  if (status) { status.textContent = "Validating with Groww…"; status.className = "conn-status"; }
+  try {
+    const r = await fetch("/api/groww/connect", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token, apiKey }),
+    }).then((x) => x.json());
+    if (r && r.ok) {
+      if (status) { status.textContent = "Connected ✓ Option Terminal now uses Groww for premium data."; status.className = "conn-status ok"; }
+      const t = el("groww-conn-token"); if (t) t.value = "";
+      if (typeof loadAdminConnectionsSummary === "function") loadAdminConnectionsSummary();
+      if (typeof otGrowwStatus === "function") otGrowwStatus();
+    } else if (status) {
+      status.textContent = "Failed: " + (r?.error || "unknown error"); status.className = "conn-status err";
+    }
+  } catch (e) {
+    if (status) { status.textContent = "Error: " + (e?.message || e); status.className = "conn-status err"; }
+  }
+  if (btn) btn.disabled = false;
+  refreshGrowwConnStatus();
+}
+
+async function doDisconnectGroww() {
+  if (!confirm("Disconnect Groww? The Option Terminal will fall back to Dhan for premium data.")) return;
+  const status = el("groww-conn-status");
+  try {
+    await fetch("/api/groww/disconnect", { method: "POST" }).then((x) => x.json());
+    if (status) { status.textContent = "Disconnected. Option Terminal will use Dhan."; status.className = "conn-status"; }
+    if (typeof loadAdminConnectionsSummary === "function") loadAdminConnectionsSummary();
+    if (typeof otGrowwStatus === "function") otGrowwStatus();
+  } catch (e) {
+    if (status) { status.textContent = "Error: " + (e?.message || e); status.className = "conn-status err"; }
+  }
+  refreshGrowwConnStatus();
 }
 async function loadAdminConnectionsSummary() {
   const body = el("ac-connections-body");
   if (!body) return;
   try {
     const d = await fetch("/api/admin/connections").then((r) => r.json());
+    // Real Groww connection (Option Terminal data source) — separate from the
+    // legacy groww-named Dhan routes. Status comes from /api/groww/status.
+    let gw = null; try { gw = await fetch("/api/groww/status").then((r) => r.json()); } catch { /* ignore */ }
+    const growwInfo = {
+      status: gw ? (gw.configured ? (gw.expired ? "ERROR" : "CONNECTED") : "NOT CONNECTED") : "UNKNOWN",
+      lastConnectedAt: null, lastTestedAt: null,
+    };
     const fmt = (ts) => (ts ? new Date(ts).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—");
     const rows = [
       { key: "dhan", label: "Dhan", info: d.dhan || d.groww },
+      { key: "groww", label: "Groww (Option Terminal)", info: growwInfo },
       { key: "telegram", label: "Telegram", info: d.telegram },
     ];
     body.innerHTML = rows.map(({ key, label, info }) => {

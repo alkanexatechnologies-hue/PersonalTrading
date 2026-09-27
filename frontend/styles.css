@@ -4501,3 +4501,216 @@ body.ot-fullwidth .content { padding: 0 !important; }
 .mc2-ia-lvv.sl { color:#f6768a; }
 .mc-leg-sep { color:#33415a; }
 .mc-leg-conn { font-weight:800; letter-spacing:.03em; }
+
+/* ---- Dhan live-data freshness markers (Market Command index cards) ---- */
+/* Truthful LIVE vs LAST GOOD vs STALE indication per §6 of the Dhan lifecycle. */
+.mc2-fresh { font-size: 0.68rem; font-weight: 600; letter-spacing: 0.02em; opacity: 0.9; white-space: nowrap; }
+.mc2-fresh.live { color: #22c55e; }
+.mc2-fresh.stale { color: #f59e0b; }
+.mc2-fresh.lastgood { color: #60a5fa; }
+.mc2-fresh.waiting { color: #f59e0b; font-style: italic; font-weight: 500; }
+.mc2-card-chg .up { color: #22c55e; }
+.mc2-card-chg .down { color: #ef4444; }
+/* Inline "Reconnect Dhan ›" action inside the connection status pill. */
+.dhan-reconnect { color: #f87171; font-weight: 700; text-decoration: none; margin-left: 6px; }
+.dhan-reconnect:hover { text-decoration: underline; }
+
+/* ---- ADDITIVE: Multi-Timeframe Fake Move Detector panel ---- */
+/* Standalone panel; does not alter any existing Market Command styling. */
+.mc2-fm-panel .mc2-fm-badge { margin-left: auto; font-size: 0.72rem; font-weight: 800; padding: 2px 8px; border-radius: 6px; letter-spacing: 0.03em; }
+.mc2-fm-badge.bull { color: #052e16; background: #16c784; }
+.mc2-fm-badge.bear { color: #2a0507; background: #ea3943; }
+.mc2-fm-badge.watch { color: #3a2a00; background: #f0b90b; }
+.mc2-fm-badge.confirmed { color: #052e16; background: #22c55e; }
+.mc2-fm-badge.conflict { color: #fff; background: #a855f7; }
+.mc2-fm-badge.neutral { color: #cbd5e1; background: #334155; }
+.mc2-fm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; margin: 8px 0; }
+.mc2-fm-cell { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.mc2-fm-v { font-weight: 700; font-size: 0.8rem; }
+.mc2-fm-v.bull { color: #16c784; }
+.mc2-fm-v.bear { color: #ea3943; }
+.mc2-fm-v.watch { color: #f0b90b; }
+.mc2-fm-v.confirmed { color: #22c55e; }
+.mc2-fm-v.conflict { color: #c084fc; }
+.mc2-fm-v.neutral { color: #94a3b8; }
+.mc2-fm-conflict { margin: 6px 0; padding: 6px 8px; border-radius: 6px; background: rgba(168,85,247,0.14); border: 1px solid rgba(168,85,247,0.5); color: #e9d5ff; font-size: 0.74rem; font-weight: 600; }
+
+/* ---- ADDITIVE: MTF Direction + Confirmation/Scenario panels ---- */
+.mc2-fm-sub { margin-left: auto; font-size: 0.62rem; color: #64748b; font-style: italic; }
+.mc2-mtf-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 8px 0 2px; }
+.mc2-mtf-tf { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 4px; background: rgba(148,163,184,0.06); border-radius: 6px; }
+.mc2-mtf-tf .mc2-ia-k { font-size: 0.62rem; letter-spacing: 0.05em; }
+.mc2-mtf-sub { font-size: 0.58rem; color: #94a3b8; }
+.mc2-scen-note { margin: 6px 0; padding: 6px 8px; border-radius: 6px; background: rgba(240,185,11,0.12); border: 1px solid rgba(240,185,11,0.4); color: #fde68a; font-size: 0.74rem; }
+
+/* ============================================================================
+   ADDITIVE: Fake-Move on-chart OVERLAY layer (presentation only)
+   Sits transparently over #mc-chart-container (already position:relative, fixed
+   520px height) so it NEVER changes chart size/weight and never intercepts mouse
+   (pointer-events:none). If positioning ever fails, JS hides it — the chart is
+   completely unaffected. Nothing here modifies existing chart/candle/overlay CSS.
+   ============================================================================ */
+.mcfo-layer { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 6; }
+.mcfo-layer[hidden] { display: none; }
+.mcfo-layer > * { position: absolute; pointer-events: none; }
+
+/* Pullback / resistance zone band */
+.mcfo-zone { left: 0; right: 0; background: rgba(239,68,68,0.10); border-top: 1px dashed rgba(239,68,68,0.5); border-bottom: 1px dashed rgba(239,68,68,0.5); }
+.mcfo-zone-lbl { left: 8px; transform: translateY(-100%); font: 700 9.5px "Segoe UI",Arial,sans-serif; color: #fca5a5; background: rgba(42,17,19,0.9); border: 1px solid #7f1d1d; border-radius: 6px; padding: 1px 6px; white-space: nowrap; }
+
+/* Projection SVG (3 PM cone/line) fills the layer; shapes drawn in user coords */
+.mcfo-svg { left: 0; top: 0; width: 100%; height: 100%; }
+.mcfo-3pm-lbl { transform: translateX(-50%); font: 700 9px "Segoe UI",Arial,sans-serif; color: #fbbf24; background: rgba(58,42,5,0.95); border: 1px solid #f59e0b; border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
+.mcfo-proj-chip { transform: translate(6px,-50%); font: 700 9px "Segoe UI",Arial,sans-serif; color: #fff; background: #166534; border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+
+/* Counter-trend callout + tooltip */
+.mcfo-callout { max-width: 190px; background: #1a1205; border: 1px solid #f0b90b; border-radius: 6px; padding: 5px 8px; box-shadow: 0 4px 14px rgba(0,0,0,0.45); }
+.mcfo-callout .ttl { font: 700 9.5px "Segoe UI",Arial,sans-serif; color: #f0b90b; letter-spacing: 0.02em; }
+.mcfo-callout .sub { font: 600 8.5px "Segoe UI",Arial,sans-serif; margin-top: 2px; }
+.mcfo-callout .sub.bear { color: #fca5a5; } .mcfo-callout .sub.bull { color: #86efac; } .mcfo-callout .sub.watch { color: #fde68a; }
+.mcfo-tip { max-width: 176px; background: #0f1b2e; border: 1px solid #334155; border-radius: 6px; padding: 5px 8px; font: 500 8.5px "Segoe UI",Arial,sans-serif; color: #cbd5e1; line-height: 1.35; box-shadow: 0 4px 14px rgba(0,0,0,0.45); }
+.mcfo-conn { stroke: #f0b90b; stroke-width: 1; stroke-dasharray: 3 2; }
+
+/* ---- Collapsible Technical Nomenclature legend (below chart; never resizes chart) ---- */
+.mc-nomen-wrap { margin: 4px 0 0; border-top: 1px solid #1c2537; }
+.mc-nomen-btn { display: inline-flex; align-items: center; gap: 6px; background: #0f1727; border: 1px solid #1c2537; color: #93c5fd; border-radius: 6px; padding: 3px 10px; font-size: 11px; font-weight: 600; cursor: pointer; margin: 6px 0; }
+.mc-nomen-btn:hover { border-color: #2563eb; }
+.mc-nomen-panel { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px 18px; padding: 8px 10px; background: #0a1220; border: 1px solid #22314a; border-radius: 8px; }
+.mc-nomen-panel[hidden] { display: none; }
+.mc-nomen-col h5 { margin: 0 0 4px; font-size: 9px; letter-spacing: 0.5px; color: #38bdf8; font-weight: 700; }
+.mc-nomen-col div { font-size: 8.5px; color: #cbd5e1; line-height: 1.5; }
+.mc-nomen-col b { font-weight: 700; }
+@media (max-width: 900px) { .mc-nomen-panel { grid-template-columns: repeat(2, 1fr); } }
+
+/* ADDITIVE: chart session-date badge + selected-candle time readout */
+.mc-chart-date { margin-left: 10px; font-size: 11px; font-weight: 600; color: #93c5fd; background: #0f1727; border: 1px solid #1c2537; border-radius: 6px; padding: 2px 8px; white-space: nowrap; }
+.mc-sel-time { color: #cbd5e1; font-weight: 600; }
+.mc-sel-time b { color: #fff; }
+
+/* ---- Option Terminal: manual-only (AUTO removed) additions ---- */
+.ot-view { display: inline-flex; gap: 3px; margin-left: 8px; }
+.ot-viewbtn { background: #0f1727; border: 1px solid #1c2537; color: #93a4bd; border-radius: 5px; padding: 2px 9px; font-size: 11px; font-weight: 700; cursor: pointer; }
+.ot-viewbtn.active { background: #1d4ed8; border-color: #2563eb; color: #fff; }
+.ot-viewbtn:hover { border-color: #2563eb; }
+#ot-auto-removed { color: #f59e0b; }
+/* Hourly Levels (Option Premium) panel */
+.ot-hl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.ot-hl-col { background: rgba(148,163,184,0.05); border: 1px solid #1c2537; border-radius: 6px; padding: 6px 8px; }
+.ot-hl-hd { font-size: 11px; font-weight: 800; letter-spacing: 0.03em; margin-bottom: 4px; }
+.ot-hl-hd.ce { color: #16c784; }
+.ot-hl-hd.pe { color: #f6465d; }
+.ot-hl-row { display: flex; justify-content: space-between; font-size: 11px; line-height: 1.7; }
+.ot-hl-row > span { color: #7c8aa5; }
+.ot-hl-row.r b { color: #f6465d; }
+.ot-hl-row.s b { color: #16c784; }
+.ot-hl-row.swp b { color: #c084fc; }
+.ot-ema { font-size: 10px; }
+
+/* ==================================================================
+   Option Terminal — reference-design layout (manual-only, 3-col bottom)
+   Additive/override styles. Reuses --ot-* variables. Market Command
+   styling is untouched.
+   ================================================================== */
+
+/* Context strip: indices + spot + structure + setup + VIX in one row */
+.ot-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
+  grid-template-columns: none; background: var(--ot-panel); border: 1px solid var(--ot-border);
+  border-radius: 10px; padding: 9px 12px; margin-bottom: 10px; }
+.ot-ctxline { display: flex; align-items: center; gap: 8px; flex: 1; flex-wrap: wrap; font-size: 12px; }
+.ot-ctxline .ot-ck { font-size: 9px; letter-spacing: .06em; text-transform: uppercase; color: var(--ot-muted2); font-weight: 700; }
+.ot-ctxline .ot-cv { font-weight: 800; font-variant-numeric: tabular-nums; }
+.ot-ctxline .ot-cv.BULLISH { color: var(--ot-green); } .ot-ctxline .ot-cv.BEARISH { color: var(--ot-red); } .ot-ctxline .ot-cv.NEUTRAL { color: #94a3b8; }
+.ot-ctxline .ot-setup { color: var(--ot-amber); letter-spacing: .02em; }
+.ot-csep { width: 1px; height: 15px; background: var(--ot-border2); }
+
+/* Strike-selection row */
+.ot-strikerow { display: flex; align-items: stretch; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.ot-manualbadge { display: flex; flex-direction: column; justify-content: center; background: var(--ot-red-d);
+  border: 1px solid #7a2530; color: #ff8a8a; border-radius: 10px; padding: 8px 14px; font-size: 12px; font-weight: 800; letter-spacing: .01em; }
+.ot-manualbadge span { font-size: 10px; font-weight: 600; color: #d98a92; margin-top: 2px; }
+.ot-srk-field { background: var(--ot-panel); border: 1px solid var(--ot-border); border-radius: 10px; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+.ot-srk-field > label { font-size: 9px; letter-spacing: .07em; text-transform: uppercase; color: var(--ot-muted2); font-weight: 700; }
+.ot-srk-row { display: flex; align-items: center; gap: 8px; }
+.ot-srk-row select { background: var(--ot-panel2); color: var(--ot-text); border: 1px solid var(--ot-border2);
+  border-radius: 6px; padding: 5px 9px; font-size: 13px; font-family: inherit; min-width: 118px; font-weight: 700; }
+.ot-strikerow .ot-tf { margin-top: 0; }
+.ot-strikerow .ot-selstate { margin-top: 0; }
+
+/* Summary cards (Selected Strike / CE LTP / PE LTP) */
+.ot-summary { display: flex; gap: 10px; margin-left: auto; }
+.ot-sumcard { min-width: 108px; background: var(--ot-panel); border: 1px solid var(--ot-border); border-radius: 10px; padding: 7px 12px; display: flex; flex-direction: column; justify-content: center; }
+.ot-sumcard.ce { border-color: rgba(22,199,132,.35); }
+.ot-sumcard.pe { border-color: rgba(246,70,93,.35); }
+.ot-sc-k { font-size: 9px; letter-spacing: .05em; text-transform: uppercase; color: var(--ot-muted2); font-weight: 700; }
+.ot-sc-v { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 1px; }
+.ot-sumcard.ce .ot-sc-v { color: var(--ot-green); }
+.ot-sumcard.pe .ot-sc-v { color: var(--ot-red); }
+.ot-sumcard small { font-size: 10px; font-weight: 700; margin-top: 1px; }
+
+/* Chart header EMA readouts */
+.ot-chead .ot-ema { font-size: 11px; font-weight: 700; color: var(--ot-muted); font-variant-numeric: tabular-nums; }
+.ot-chead .ot-ema b { font-weight: 800; }
+
+/* Bottom 3-column: Option Data CE | Hourly Levels | Option Data PE */
+.ot-databottom { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.ot-hourlylp { border-color: var(--ot-blue) !important; }
+.ot-optdata table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.ot-optdata th { font-size: 8.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--ot-muted2); font-weight: 600; text-align: right; padding: 4px 5px; }
+.ot-optdata th:first-child, .ot-optdata td:first-child { text-align: left; color: var(--ot-muted); }
+.ot-optdata td { padding: 4px 5px; border-top: 1px solid var(--ot-border); text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ot-optdata td.na { color: var(--ot-muted2); font-weight: 600; font-size: 10px; letter-spacing: .02em; }
+.ot-optdata td.ot-down { color: var(--ot-red); }
+
+/* Footer band: Market Context / BIOS-SWP Definition / Levels Source */
+.ot-footband { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.ot-fb { background: var(--ot-panel); border: 1px solid var(--ot-border); border-radius: 10px; padding: 10px 12px; }
+.ot-fb h4 { margin: 0 0 8px; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--ot-muted); font-weight: 700; }
+.ot-fb h4 .ot-muted { text-transform: none; letter-spacing: 0; font-weight: 500; }
+.ot-ctxgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+.ot-ctxgrid .cell { background: rgba(148,163,184,.05); border: 1px solid var(--ot-border); border-radius: 7px; padding: 6px 8px; }
+.ot-ctxgrid .cell .k { font-size: 8.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ot-muted2); font-weight: 700; display: block; }
+.ot-ctxgrid .cell .v { font-size: 12.5px; font-weight: 800; margin-top: 2px; }
+.ot-ctxgrid .cell .v.BULLISH { color: var(--ot-green); } .ot-ctxgrid .cell .v.BEARISH { color: var(--ot-red); } .ot-ctxgrid .cell .v.NEUTRAL { color: #94a3b8; }
+.ot-def { display: flex; align-items: flex-start; gap: 9px; margin-bottom: 8px; }
+.ot-def:last-child { margin-bottom: 0; }
+.ot-deftag { flex: 0 0 auto; font-size: 10px; font-weight: 800; letter-spacing: .03em; padding: 3px 8px; border-radius: 6px; }
+.ot-deftag.bios { background: var(--ot-blue-d); color: #7fb0ff; border: 1px solid var(--ot-blue); }
+.ot-deftag.swp { background: #241a3a; color: #c084fc; border: 1px solid #7c3aed; }
+.ot-def b { font-size: 11.5px; display: block; }
+.ot-def small { font-size: 10px; color: var(--ot-muted); display: block; margin-top: 1px; }
+.ot-srclist { margin: 0; padding-left: 16px; }
+.ot-srclist li { font-size: 10.5px; color: var(--ot-muted); line-height: 1.6; }
+
+@media (max-width: 1200px) {
+  .ot-databottom { grid-template-columns: 1fr; }
+  .ot-footband { grid-template-columns: 1fr; }
+  .ot-summary { margin-left: 0; width: 100%; }
+}
+
+/* Option Terminal — data-source badge + Groww connect button */
+.ot-datasrc { margin-left: auto; font-size: 11px; font-weight: 700; letter-spacing: .02em;
+  padding: 4px 10px; border-radius: 7px; border: 1px solid var(--ot-border2); color: var(--ot-muted); background: var(--ot-panel2); white-space: nowrap; }
+.ot-datasrc.groww { color: #062e1a; background: #16c784; border-color: #16c784; }
+.ot-datasrc.dhan { color: #cfe0ff; background: var(--ot-blue-d); border-color: var(--ot-blue); }
+.ot-datasrc.off { color: #ff9aa6; background: var(--ot-red-d); border-color: #7a2530; }
+.ot-navbtn.ot-grww { background: #0e2a20; border-color: #16c784; color: #4ade9e; margin-left: 8px; }
+.ot-navbtn.ot-grww:hover { background: #123a2b; }
+.ot-navbtn.ot-grww.connected { background: #16c784; color: #062e1a; }
+
+/* ADDITIVE: Market Command — OI Movement panel (5M trade / 15M direction) */
+.mc2-oim-panel .mc2-oim-sum { margin-left: auto; font-size: 0.72rem; font-weight: 700; color: #93c5fd; white-space: nowrap; }
+.mc2-oim-rows { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.mc2-oim-row { display: grid; grid-template-columns: auto auto 1fr; align-items: center; gap: 8px 10px;
+  padding: 8px 10px; border-radius: 8px; background: rgba(148,163,184,0.06); border: 1px solid #1c2537; }
+.mc2-oim-tag { font-size: 0.6rem; font-weight: 800; letter-spacing: 0.05em; padding: 3px 7px; border-radius: 5px; white-space: nowrap; }
+.mc2-oim-tag.trade { color: #fde68a; background: rgba(240,185,11,0.15); border: 1px solid rgba(240,185,11,0.45); }
+.mc2-oim-tag.dir { color: #93c5fd; background: rgba(47,125,255,0.15); border: 1px solid rgba(47,125,255,0.45); }
+.mc2-oim-sig { font-size: 0.78rem; font-weight: 800; letter-spacing: 0.02em; padding: 2px 8px; border-radius: 6px; white-space: nowrap; }
+.mc2-oim-sig.BULLISH { color: #052e16; background: #16c784; }
+.mc2-oim-sig.BEARISH { color: #2a0507; background: #ea3943; }
+.mc2-oim-sig.CAUTION { color: #3a2a00; background: #f0b90b; }
+.mc2-oim-sig.NEUTRAL { color: #cbd5e1; background: #334155; }
+.mc2-oim-flow { font-size: 0.72rem; color: #cbd5e1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mc2-oim-flow b { color: #e6ecf5; }
+.mc2-oim-guid { grid-column: 1 / -1; font-size: 0.72rem; color: #b8c2d4; line-height: 1.4; }
+.mc2-oim-note { margin-top: 7px; font-size: 0.64rem; color: #64748b; font-style: italic; }

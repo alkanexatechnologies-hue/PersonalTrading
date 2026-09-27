@@ -23,8 +23,23 @@ export interface DhanSecurity {
   instrument: "INDEX" | "EQUITY";
 }
 
+// Dhan F&O option contract — needed by the historical/intraday charts API, which
+// requires the OPTION's own numeric securityId (a Groww trading symbol is rejected
+// with DH-905). Segment for NSE F&O historical data is "NSE_FNO".
+export interface DhanOptionSecurity {
+  securityId: string;
+  exchangeSegment: "NSE_FNO";
+  instrument: "OPTIDX" | "OPTSTK";
+}
+
 let index: Map<string, DhanSecurity> | null = null;
+let optionIndex: Map<string, DhanOptionSecurity> | null = null;
 let loadingPromise: Promise<void> | null = null;
+
+// Contract key: UNDERLYING|EXPIRY(yyyy-mm-dd)|STRIKE(number)|CE|PE
+function optionKey(underlying: string, expiry: string, strike: number, type: "CE" | "PE"): string {
+  return `${underlying.toUpperCase()}|${expiry}|${Number(strike)}|${type}`;
+}
 
 async function downloadCsv(): Promise<void> {
   const res = await fetch(CSV_URL);
@@ -43,12 +58,14 @@ function csvFresh(): boolean {
   }
 }
 
-function parseCsv(): Map<string, DhanSecurity> {
+function parseCsv(): void {
   const map = new Map<string, DhanSecurity>();
+  const opts = new Map<string, DhanOptionSecurity>();
   const raw = fs.readFileSync(CSV_PATH, "utf8");
   const lines = raw.split(/\r?\n/);
   // Header: EXCH_ID,SEGMENT,SECURITY_ID,ISIN,INSTRUMENT,UNDERLYING_SECURITY_ID,
-  //         UNDERLYING_SYMBOL,SYMBOL_NAME,DISPLAY_NAME,INSTRUMENT_TYPE,...
+  //   UNDERLYING_SYMBOL,SYMBOL_NAME,DISPLAY_NAME,INSTRUMENT_TYPE,SERIES,LOT_SIZE,
+  //   SM_EXPIRY_DATE,STRIKE_PRICE,OPTION_TYPE,...
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i];
     if (!line) continue;
@@ -60,9 +77,19 @@ function parseCsv(): Map<string, DhanSecurity> {
       if (!map.has(underlying)) map.set(underlying, { securityId, exchangeSegment: "IDX_I", instrument: "INDEX" });
     } else if (segment === "E" && instrument === "EQUITY") {
       if (!map.has(underlying)) map.set(underlying, { securityId, exchangeSegment: "NSE_EQ", instrument: "EQUITY" });
+    } else if ((instrument === "OPTIDX" || instrument === "OPTSTK") && c.length >= 15) {
+      // Option contract row → index by underlying|expiry|strike|type for the
+      // charts API (needs the option's own securityId, not a trading symbol).
+      const expiry = (c[12] || "").trim();          // SM_EXPIRY_DATE (yyyy-mm-dd)
+      const strike = Number(c[13]);                  // STRIKE_PRICE
+      const type = (c[14] || "").trim().toUpperCase(); // OPTION_TYPE (CE/PE)
+      if (!expiry || !Number.isFinite(strike) || (type !== "CE" && type !== "PE")) continue;
+      const key = optionKey(underlying, expiry, strike, type);
+      if (!opts.has(key)) opts.set(key, { securityId, exchangeSegment: "NSE_FNO", instrument });
     }
   }
-  return map;
+  index = map;
+  optionIndex = opts;
 }
 
 // Stale-while-revalidate, same pattern as growwInstruments.ts: a stale-but-
@@ -74,7 +101,7 @@ function refreshInBackground(): void {
   if (backgroundRefreshing) return;
   backgroundRefreshing = true;
   downloadCsv()
-    .then(() => { index = parseCsv(); })
+    .then(() => { parseCsv(); })
     .catch(() => { /* keep serving the already-parsed stale copy */ })
     .finally(() => { backgroundRefreshing = false; });
 }
@@ -84,16 +111,16 @@ async function ensureLoaded(): Promise<void> {
   if (loadingPromise) return loadingPromise;
   loadingPromise = (async () => {
     if (csvFresh()) {
-      index = parseCsv();
+      parseCsv();
       return;
     }
     if (fs.existsSync(CSV_PATH)) {
-      index = parseCsv();
+      parseCsv();
       refreshInBackground();
       return;
     }
     await downloadCsv();
-    index = parseCsv();
+    parseCsv();
   })();
   try {
     await loadingPromise;
@@ -105,4 +132,18 @@ async function ensureLoaded(): Promise<void> {
 export async function lookupDhanSecurity(nseSymbol: string): Promise<DhanSecurity | null> {
   await ensureLoaded();
   return index?.get(nseSymbol.toUpperCase()) || null;
+}
+
+// Resolve the Dhan securityId for a specific option contract so the charts API
+// can fetch its premium candles. Returns null when the contract isn't in the
+// scrip master (unknown strike/expiry) — the caller then reports DATA UNAVAILABLE
+// rather than guessing.
+export async function lookupDhanOption(
+  underlying: string,
+  type: "CE" | "PE",
+  strike: number,
+  expiry: string,
+): Promise<DhanOptionSecurity | null> {
+  await ensureLoaded();
+  return optionIndex?.get(optionKey(underlying, expiry, strike, type)) || null;
 }

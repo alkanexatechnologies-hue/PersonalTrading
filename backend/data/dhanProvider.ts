@@ -11,6 +11,7 @@ import { dhanFetch } from "./dhanClient";
 import { lookupDhanSecurity, DhanSecurity } from "./dhanInstruments";
 import { fetchDhanCandles, DhanBacktestInterval } from "./dhanHistorical";
 import { CONFIG } from "../config/arbitration";
+import { recordDhanDataSuccess, recordDhanError } from "./dhanHealth";
 
 const round2 = (n: number) => Math.round(Number(n) * 100) / 100;
 const num = (v: any): number => { const n = Number(v); return isFinite(n) ? n : 0; };
@@ -35,8 +36,18 @@ const INTERVAL_MAP: Record<Interval, DhanBacktestInterval | null> = {
 let _lastOk = 0;
 let _lastFail = 0;
 let _lastFailMsg = "";
-export function recordDhanOk() { _lastOk = Date.now(); }
-export function recordDhanFail(msg = "") { _lastFail = Date.now(); _lastFailMsg = msg; }
+export function recordDhanOk(kind: "quote" | "candle" | "chain" | "vix" | "other" = "other") {
+  _lastOk = Date.now();
+  // Feed the single-source-of-truth health state: a real data response proves
+  // both authentication AND fresh data (clears any sticky error / confirms live).
+  recordDhanDataSuccess(kind);
+}
+export function recordDhanFail(msg = "") {
+  _lastFail = Date.now();
+  _lastFailMsg = msg;
+  // Classify + record into the SSOT so the UI can show WHY (expired/auth/rate/etc.).
+  recordDhanError(msg);
+}
 export function getDhanHealth() {
   return {
     lastOk: _lastOk,
@@ -104,7 +115,7 @@ export class DhanProvider implements MarketDataProvider {
       candles = resample(candles, 2);
     }
 
-    recordDhanOk();
+    recordDhanOk("candle");
     return candles;
   }
 
@@ -137,7 +148,7 @@ export class DhanProvider implements MarketDataProvider {
     const t = Number(data.last_traded_time ?? data.exchange_time ?? 0);
     if (Number.isFinite(t) && t > 0) marketTime = t > 1e12 ? Math.floor(t / 1000) : Math.floor(t);
 
-    recordDhanOk();
+    recordDhanOk("quote");
     return {
       symbol,
       name: def.name,
@@ -187,7 +198,7 @@ export async function getIndiaVix(): Promise<IndiaVix> {
     let ts: number | null = null;
     const t = Number(data.last_traded_time ?? data.exchange_time ?? 0);
     if (Number.isFinite(t) && t > 0) ts = t > 1e12 ? Math.floor(t / 1000) : Math.floor(t);
-    recordDhanOk();
+    recordDhanOk("vix");
     return { available: value > 0, value: value > 0 ? value : null, prevClose: prevClose > 0 ? prevClose : null, change, changePct, dayHigh: round2(num(ohlc.high)) || null, dayLow: round2(num(ohlc.low)) || null, ts };
   } catch (e: any) {
     recordDhanFail(e?.message);
@@ -322,7 +333,7 @@ export async function dhanChainForExpiry(def: SymbolDef, expiryOffset = 0): Prom
     }).filter((s: any) => s.strike > 0).sort((a: any, b: any) => a.strike - b.strike);
 
     if (!strikes.length || !spot) return { available: false, message: "Empty chain." };
-    recordDhanOk();
+    recordDhanOk("chain");
     return { available: true, expiries: list, expiry, expiryIdx: idx, spot, strikes };
   } catch (e: any) {
     recordDhanFail(e?.message);
@@ -515,19 +526,16 @@ export async function dhanOptionCandles(
   const fromDate = new Date((startEpoch - 86400) * 1000).toISOString().slice(0, 10);
   const toDate = new Date((endEpoch + 86400) * 1000).toISOString().slice(0, 10);
   const interval = String(intervalMin) as DhanBacktestInterval;
-  const sec: DhanSecurity = {
-    securityId: optionSecurityId,
-    exchangeSegment: "NSE_EQ", // options are NSE_FO but we'll try
-    instrument: "EQUITY",
-  };
-  // For options, Dhan uses NSE_FO segment
+  // Dhan v2 F&O segment enum is "NSE_FNO" (NOT "NSE_FO" — that value is rejected
+  // with DH-905 Input_Exception). Index options are instrument "OPTIDX". This
+  // matches the segment the option-chain endpoint uses for the same contracts.
   const cfg = loadDhanConfig();
   if (!cfg.accessToken) throw new Error("Dhan not connected.");
   const res = await dhanFetch("/charts/intraday", {
     method: "POST",
     body: {
       securityId: optionSecurityId,
-      exchangeSegment: "NSE_FO",
+      exchangeSegment: "NSE_FNO",
       instrument: "OPTIDX",
       interval: Number(intervalMin),
       fromDate,
