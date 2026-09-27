@@ -51,6 +51,9 @@ export const DEFAULT_SYMBOLS: SymbolDef[] = [
   // More F&O INDICES (lot sizes per NSE Jan-2026 revision).
   { symbol: "^CNXFIN", name: "FIN NIFTY", type: "index", fno: true, lotSize: 60, strikeStep: 50, nseSymbol: "FINNIFTY", isIndex: true },
   { symbol: "^NSEMDCP50", name: "MIDCAP NIFTY", type: "index", fno: true, lotSize: 120, strikeStep: 25, nseSymbol: "MIDCPNIFTY", isIndex: true },
+  // BSE SENSEX — Dhan index securityId 51 (IDX_I); options on BSE_FNO. nseSymbol
+  // "SENSEX" resolves the Dhan instrument for the chain + candles.
+  { symbol: "^BSESN", name: "SENSEX", type: "index", fno: true, lotSize: 20, strikeStep: 100, nseSymbol: "SENSEX", isIndex: true },
   // More liquid F&O STOCKS. NOTE: lot sizes are APPROXIMATE - NSE revises them
   // periodically; verify against your broker before live trading (fine for paper sim).
   { symbol: "KOTAKBANK.NS", name: "Kotak Mahindra Bank", type: "equity", fno: true, lotSize: 400, strikeStep: 10, nseSymbol: "KOTAKBANK" },

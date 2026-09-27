@@ -3866,7 +3866,7 @@ async function assembleExtInputs(
           const dhanOpt = await lookupDhanOption(underlying, idea.optionType, idea.strike, expiry);
           if (!dhanOpt) return [] as number[];
           const now = Math.floor(Date.now() / 1000);
-          const oc = await dhanOptionCandles(dhanOpt.securityId, now - 2 * 24 * 3600, now, 5);
+          const oc = await dhanOptionCandles(dhanOpt.securityId, now - 2 * 24 * 3600, now, 5, dhanOpt.exchangeSegment);
           return (oc || []).map((c: any) => Number(c.close)).filter((n: number) => Number.isFinite(n));
         });
       }
@@ -6446,7 +6446,7 @@ router.get("/option-candles", async (req: Request, res: Response) => {
     // Dhan fallback: needs the option's own numeric securityId (a Groww symbol → DH-905).
     const dhanOpt = await lookupDhanOption(underlying, type, strike, expiry);
     if (!dhanOpt) return res.json({ available: false, source: "dhan", message: `${underlying} ${strike} ${type} (${expiry}) — contract नहीं मिला।` });
-    const candles = await dhanOptionCandles(dhanOpt.securityId, start, now, interval);
+    const candles = await dhanOptionCandles(dhanOpt.securityId, start, now, interval, dhanOpt.exchangeSegment);
     res.json({
       available: candles.length > 0, source: "dhan", tradingSymbol: inst?.tradingSymbol ?? null, securityId: dhanOpt.securityId,
       underlying, name: def?.name || underlying, type, strike, expiry, interval, lotSize: inst?.lotSize ?? null,
@@ -6494,7 +6494,7 @@ router.get("/option-structure", async (req: Request, res: Response) => {
       if (!candles || !candles.length) {
         const dhanOpt = await lookupDhanOption(underlying, type, strike, expiry);
         if (!dhanOpt) return { available: false, reason: "contract not found" };
-        candles = await dhanOptionCandles(dhanOpt.securityId, start, now, interval);
+        candles = await dhanOptionCandles(dhanOpt.securityId, start, now, interval, dhanOpt.exchangeSegment);
       }
       if (!candles || candles.length < 10) return { available: false, reason: "not enough premium candles" };
       // EXISTING structure engine, run on the PREMIUM candles.
@@ -7457,7 +7457,7 @@ function paperDeps(force = false): TickDeps {
           const dhanOpt = await lookupDhanOption(underlying, type, strike, expiry);
           if (!dhanOpt) return null;
           const now = Math.floor(Date.now() / 1000);
-          const candles = await dhanOptionCandles(dhanOpt.securityId, now - 2 * 24 * 3600, now, 5);
+          const candles = await dhanOptionCandles(dhanOpt.securityId, now - 2 * 24 * 3600, now, 5, dhanOpt.exchangeSegment);
           return candles.length ? candles[candles.length - 1].close : null;
         });
       } catch { return null; }

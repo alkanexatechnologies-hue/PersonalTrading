@@ -28,7 +28,7 @@ export interface DhanSecurity {
 // with DH-905). Segment for NSE F&O historical data is "NSE_FNO".
 export interface DhanOptionSecurity {
   securityId: string;
-  exchangeSegment: "NSE_FNO";
+  exchangeSegment: "NSE_FNO" | "BSE_FNO"; // BSE_FNO for BSE index options (SENSEX)
   instrument: "OPTIDX" | "OPTSTK";
 }
 
@@ -72,12 +72,16 @@ function parseCsv(): void {
     const c = line.split(",");
     if (c.length < 8) continue;
     const exch = c[0], segment = c[1], securityId = c[2], instrument = c[4], underlying = (c[6] || "").toUpperCase();
-    if (!underlying || exch !== "NSE") continue;
+    // NSE fully; BSE only for its INDICES and INDEX OPTIONS (SENSEX) — Dhan treats
+    // the index underlying as IDX_I and its options as BSE_FNO. BSE equities are
+    // skipped to avoid symbol collisions with the NSE equity of the same name.
+    if (!underlying || (exch !== "NSE" && exch !== "BSE")) continue;
+    const isBse = exch === "BSE";
     if (segment === "I" && instrument === "INDEX") {
       if (!map.has(underlying)) map.set(underlying, { securityId, exchangeSegment: "IDX_I", instrument: "INDEX" });
-    } else if (segment === "E" && instrument === "EQUITY") {
+    } else if (!isBse && segment === "E" && instrument === "EQUITY") {
       if (!map.has(underlying)) map.set(underlying, { securityId, exchangeSegment: "NSE_EQ", instrument: "EQUITY" });
-    } else if ((instrument === "OPTIDX" || instrument === "OPTSTK") && c.length >= 15) {
+    } else if ((instrument === "OPTIDX" || (!isBse && instrument === "OPTSTK")) && c.length >= 15) {
       // Option contract row → index by underlying|expiry|strike|type for the
       // charts API (needs the option's own securityId, not a trading symbol).
       const expiry = (c[12] || "").trim();          // SM_EXPIRY_DATE (yyyy-mm-dd)
@@ -85,7 +89,7 @@ function parseCsv(): void {
       const type = (c[14] || "").trim().toUpperCase(); // OPTION_TYPE (CE/PE)
       if (!expiry || !Number.isFinite(strike) || (type !== "CE" && type !== "PE")) continue;
       const key = optionKey(underlying, expiry, strike, type);
-      if (!opts.has(key)) opts.set(key, { securityId, exchangeSegment: "NSE_FNO", instrument });
+      if (!opts.has(key)) opts.set(key, { securityId, exchangeSegment: isBse ? "BSE_FNO" : "NSE_FNO", instrument });
     }
   }
   index = map;

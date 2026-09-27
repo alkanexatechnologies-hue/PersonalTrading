@@ -522,6 +522,7 @@ export async function dhanOptionCandles(
   startEpoch: number,
   endEpoch: number,
   intervalMin = 5,
+  exchangeSegment = "NSE_FNO", // BSE index options (SENSEX) use "BSE_FNO"
 ): Promise<Candle[]> {
   const fromDate = new Date((startEpoch - 86400) * 1000).toISOString().slice(0, 10);
   const toDate = new Date((endEpoch + 86400) * 1000).toISOString().slice(0, 10);
@@ -535,7 +536,7 @@ export async function dhanOptionCandles(
     method: "POST",
     body: {
       securityId: optionSecurityId,
-      exchangeSegment: "NSE_FNO",
+      exchangeSegment,
       instrument: "OPTIDX",
       interval: Number(intervalMin),
       fromDate,
