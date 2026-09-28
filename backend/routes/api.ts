@@ -4727,16 +4727,60 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
     const entryReadyFlow = entryState === "READY — conditions met" ||
       (!!spotEntry && spot >= spotEntry.low && spot <= spotEntry.high && !displayStale);
     const optionReadyFlow = !!(strikeAnalysis && strikeAnalysis.available && strikeAnalysis.primary);
+
+    // ---- Gate inputs (all from EXISTING engine reads; no fabrication) ----------
+    const _pxLv = (x: any) => x == null ? null : (typeof x === "number" ? x : (typeof x.strike === "number" ? x.strike : null));
+    const _lvF = oiData?.levels || {};
+    const orbHiF = _pxLv(_lvF.orbHigh), orbLoF = _pxLv(_lvF.orbLow), pdhF = _pxLv(_lvF.pdh), pdlF = _pxLv(_lvF.pdl);
+    const regimeStr = String((ext && ext.regime) || "");
+    // MARKET STATE — opening-range break / trending / range / transitioning. Not
+    // locked from the first move; recomputed every request off the live structure.
+    let marketState = "UNKNOWN";
+    if (ms.directionChange && ms.directionChange.stage && ms.directionChange.stage !== "None") marketState = "TRANSITIONING";
+    else if (orbHiF != null && spot > orbHiF) marketState = "OPENING_BREAK_UP";
+    else if (orbLoF != null && spot < orbLoF) marketState = "OPENING_BREAK_DOWN";
+    else if (ms.currentStructure !== "Ranging") marketState = "TRENDING";
+    else marketState = "RANGE";
+    // ROOM — distance to the next OPPOSING valid level in the trade direction.
+    const _swF = ms.swingPoints || [];
+    const swHiF = ([..._swF].reverse().find((p: any) => (p.type === "HH" || p.type === "LH") && p.price > spot) || {}).price ?? null;
+    const swLoF = ([..._swF].reverse().find((p: any) => (p.type === "HL" || p.type === "LL") && p.price < spot) || {}).price ?? null;
+    const resAbove = [_pxLv(_lvF.strongResistance), _pxLv(_lvF.weakResistance), oiData?.management?.resistance, swHiF, orbHiF, pdhF].filter((v: any) => v != null && v > spot) as number[];
+    const supBelow = [_pxLv(_lvF.strongSupport), _pxLv(_lvF.weakSupport), oiData?.management?.support, swLoF, orbLoF, pdlF].filter((v: any) => v != null && v < spot) as number[];
+    const nextRes = resAbove.length ? Math.min(...resAbove) : null;
+    const nextSup = supBelow.length ? Math.max(...supBelow) : null;
+    const roomDir = marketView.direction;
+    const roomPtsRaw = roomDir === "BULLISH" ? (nextRes != null ? nextRes - spot : null) : roomDir === "BEARISH" ? (nextSup != null ? spot - nextSup : null) : null;
+    const roomInput = { pts: roomPtsRaw != null ? Math.round(roomPtsRaw) : null, minPts: 20, nextLevel: roomDir === "BULLISH" ? nextRes : roomDir === "BEARISH" ? nextSup : null, nextLabel: roomDir === "BULLISH" ? "resistance" : roomDir === "BEARISH" ? "support" : null };
+    // EMA21 — conditional reversal check (OFF trend-continuation / ACTIVE testing /
+    // CONFIRMED closed-through with structure). Never blocks a valid trend trade.
+    const ema21Last = last(ema21Arr);
+    let ema21State: "OFF" | "ACTIVE" | "CONFIRMED" = "OFF";
+    let ema21Detail = "Trend continuation";
+    if (ema21Last != null && (marketView.direction === "BULLISH" || marketView.direction === "BEARISH")) {
+      const near = Math.abs(spot - ema21Last) <= currentAtr * 0.5;
+      const bear = marketView.direction === "BEARISH";
+      const onTrendSide = bear ? spot < ema21Last : spot > ema21Last;
+      const flipStruct = bear ? ms.currentStructure === "Bullish" : ms.currentStructure === "Bearish";
+      if (!onTrendSide && flipStruct) { ema21State = "CONFIRMED"; ema21Detail = `Closed ${bear ? "above" : "below"} EMA21 + structure → reversal`; }
+      else if (!onTrendSide || near) { ema21State = "ACTIVE"; ema21Detail = near ? "Testing EMA21 — reversal check" : `${bear ? "Above" : "Below"} EMA21 — reversal check`; }
+      else { ema21State = "OFF"; ema21Detail = `${bear ? "Below" : "Above"} EMA21 — continuation`; }
+    }
+
     const confirmationFlow = buildConfirmationFlow({
+      dataAvailable: !isHistorical,
+      dataStale: displayStale,
+      marketState,
+      regime: regimeStr,
       direction: marketView.direction,
       priceAction: priceActionInput,
       structure: ms.currentStructure,
+      room: roomInput,
+      ema21: { state: ema21State, detail: ema21Detail },
       entryReady: !!entryReadyFlow,
       entryDetail: entryState,
       optionReady: optionReadyFlow,
       optionDetail: strikeAnalysis?.primary ? `${strikeAnalysis.primary.strike} ${strikeAnalysis.primary.side}` : (strikeAnalysis?.reason || "—"),
-      dataAvailable: !isHistorical,
-      dataStale: displayStale,
       cooldown,
     });
     // Make the flow authoritative for the ACTION shown everywhere (replay and the
@@ -4775,6 +4819,19 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
           target: bs?.targetPremium ?? null,
           rr: bs?.rr != null ? `1:${bs.rr}` : null,
           remarks: `Auto signal · ${confirmationFlow.reason}`,
+          // Immutable decision snapshot — reconstruct THIS trade's logic later.
+          snapshot: {
+            snapshotId: snapshot.id, marketTs: snapshot.marketTs, calcTs: snapshot.calcTs, dataAgeSec: snapshot.dataAgeSec,
+            spot: Math.round(spot * 100) / 100, marketState, activePhase: confirmationFlow.activePhase,
+            direction: marketView.direction, priceAction: priceActionInput, structure: ms.currentStructure,
+            room: roomInput, ema21: { state: ema21State, detail: ema21Detail },
+            gates: confirmationFlow.gates, reason: confirmationFlow.reason,
+            side, strike: sigStrike, optionLtp: bs?.entryPremium ?? null, sl: bs?.stopPremium ?? null,
+            target: bs?.targetPremium ?? null, rr: bs?.rr ?? null,
+            support: nextSup, resistance: nextRes, bos: latestBos,
+            optionDetail: strikeAnalysis?.primary ? `${strikeAnalysis.primary.strike} ${strikeAnalysis.primary.side}` : null,
+            basedOn: marketView.basedOn || null,
+          },
         });
         const armed = recordExecution({ symbol: def.symbol, execTs: nowSec, side, strike: sigStrike, entry: bs?.entryPremium ?? null, source: "auto-signal" });
         tradePlan.cooldown = armed;            // reflect the freshly-armed cooldown

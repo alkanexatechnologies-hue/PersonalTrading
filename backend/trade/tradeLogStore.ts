@@ -30,6 +30,10 @@ export interface TradeRow {
   exitPrice: number | null;
   exitTime: string | null;     // HH:MM:SS IST
   remarks: string;
+  // Immutable decision snapshot captured at execution — the gates/context that
+  // produced this trade, so clicking the row reconstructs THAT trade's logic
+  // (never today's current logic). Free-form; written once, never recomputed.
+  snapshot?: any;
 }
 
 const istDay = (e: number) => new Date(e * 1000 + 19800000).toISOString().slice(0, 10);
@@ -70,6 +74,7 @@ export interface AppendTradeInput {
   target: number | null;
   rr?: string | null;
   remarks?: string;
+  snapshot?: any;
 }
 
 /** Record a newly executed trade. Returns the stored row (with its day-sequence). */
@@ -83,6 +88,7 @@ export function appendTrade(inp: AppendTradeInput): TradeRow {
     entry: inp.entry, sl: inp.sl, target: inp.target, totalPoint: null,
     rr: inp.rr ?? null, status: "Open", exitPrice: null, exitTime: null,
     remarks: inp.remarks || "",
+    snapshot: inp.snapshot ?? null,
   };
   appendLine(row);
   return row;
