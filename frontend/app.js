@@ -6128,6 +6128,30 @@ function initTradeExec() {
     b.classList.add("active"); TE.filter = b.getAttribute("data-f"); renderTETrades();
   }));
   teEl("te-refresh")?.addEventListener("click", () => loadTradeExec());
+  // Manual "Log Trade" — records the current signal (from the live snapshot) to
+  // the Daily Log via /api/trade-execute (advisory; arms the 15-min cooldown).
+  teEl("te-log-trade")?.addEventListener("click", async () => {
+    const d = TE.lastData;
+    if (!d || !d.tradePlan) { alert("No signal to log yet — open the screen during market data."); return; }
+    const tp = d.tradePlan;
+    let strike = null, type = tp.direction === "BEARISH" ? "PE" : "CE";
+    const m = (tp.preferredStrike || "").match(/(\d+(?:\.\d+)?)\s*(CE|PE)/i);
+    if (m) { strike = Number(m[1]); type = m[2].toUpperCase(); }
+    const bs = tp.bestSetup || {};
+    const body = {
+      symbol: TE.sym, type, strike,
+      entry: bs.entryPremium ?? null, sl: bs.stopPremium ?? null, target: bs.targetPremium ?? null,
+      rr: bs.rr != null ? `1:${bs.rr}` : null,
+      remarks: `Manual log · ${tp.direction || ""} · ${(d.confirmationFlow && d.confirmationFlow.action) || tp.action || ""}`,
+    };
+    const btn = teEl("te-log-trade");
+    try {
+      if (btn) btn.disabled = true;
+      const r = await fetch("/api/trade-execute", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((x) => x.json());
+      if (r && r.ok) loadTradeExec(); else alert("Log failed: " + ((r && r.error) || "unknown"));
+    } catch (e) { alert("Log error: " + e.message); }
+    finally { if (btn) btn.disabled = false; }
+  });
   teEl("te-open-command")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("marketcommand"); });
   teEl("te-open-optionterminal")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("optionterminal"); });
   teEl("te-export-trades")?.addEventListener("click", () => {

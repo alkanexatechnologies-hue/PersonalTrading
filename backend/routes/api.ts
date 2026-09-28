@@ -4735,6 +4735,33 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
     tradePlan.cooldown = cooldown;
     tradePlan.confirmationFlow = confirmationFlow;
 
+    // ---- Auto-log a fresh TRADE signal to the Daily Log (advisory: it records
+    // the SIGNAL, never places an order). The 15-minute post-trade cooldown that
+    // arms on logging also DEDUPES it — once logged, the flow returns WAIT until
+    // the cooldown expires, so a signal is written at most once per cooldown
+    // window. Strike/entry/SL/target come from the existing engines (unchanged).
+    if (!isHistorical && !displayStale && confirmationFlow.action === "TRADE" && !cooldown.active) {
+      try {
+        const side: "CE" | "PE" = strikeAnalysis?.primary?.side === "PE" ? "PE"
+          : strikeAnalysis?.primary?.side === "CE" ? "CE"
+          : (optionType === "PE" ? "PE" : optionType === "CE" ? "CE" : (marketView.direction === "BEARISH" ? "PE" : "CE"));
+        const sigStrike = strikeAnalysis?.primary?.strike ?? (typeof strike === "number" ? strike : null);
+        const bs = strikeAnalysis?.bestSetup;
+        appendTrade({
+          execTs: nowSec, index: def.name, symbol: def.symbol, type: side,
+          strike: sigStrike,
+          entry: bs?.entryPremium ?? null,
+          sl: bs?.stopPremium ?? null,
+          target: bs?.targetPremium ?? null,
+          rr: bs?.rr != null ? `1:${bs.rr}` : null,
+          remarks: `Auto signal · ${confirmationFlow.reason}`,
+        });
+        const armed = recordExecution({ symbol: def.symbol, execTs: nowSec, side, strike: sigStrike, entry: bs?.entryPremium ?? null, source: "auto-signal" });
+        tradePlan.cooldown = armed;            // reflect the freshly-armed cooldown
+        confirmationFlow.cooldownActive = true;
+      } catch { /* logging is best-effort; never blocks the response */ }
+    }
+
     res.json({
       available: true,
       symbol, name: def.name, interval, spot: Math.round(spot * 100) / 100,
