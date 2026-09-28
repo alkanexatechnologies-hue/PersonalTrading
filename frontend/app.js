@@ -6019,8 +6019,13 @@ async function loadOptionTerminal() {
     const url = `/api/market-command?symbol=${encodeURIComponent(OT.sym)}&interval=${OT.tf}`;
     const d = await fetchJSON(url, 25000);
     if (d && !d.error) { OT.lastData = d; renderOptionTerminal(d); }
-    else otShowError((d && d.error) || "No data from Market Command.");
-  } catch (e) { console.error("[OptionTerminal]", e); otShowError("Network error loading Option Terminal."); }
+    else if (OT.lastData) {
+      // Transient error (rate-limit / token expiry) but we have prior data — keep
+      // the last render and just flag it in the footer, so the screen never blanks
+      // and auto-recovers on the next poll once the feed returns.
+      const st = otEl("ot-foot-status"); if (st) { st.textContent = /dhan|token|feed|reconnect/i.test((d && d.error) || "") ? "DHAN OFF — reconnect token" : "RECONNECTING…"; st.className = "ot-pill ot-pill-red"; }
+    } else otShowError((d && d.error) || "No data from Market Command.");
+  } catch (e) { console.error("[OptionTerminal]", e); if (!OT.lastData) otShowError("Network error loading Option Terminal."); }
   OT.loading = false;
 }
 

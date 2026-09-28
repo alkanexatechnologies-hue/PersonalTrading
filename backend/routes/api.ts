@@ -332,6 +332,21 @@ const getCandlesCached = (symbol: string, interval: Interval) =>
 // is reflected automatically via the last candle's timestamp → snapAgeSec →
 // displayStale; the OI-based decision `dataStale` is NOT changed by this.
 const _lastGoodMcCandles = new Map<string, { ts: number; v: any[] }>();
+// Persist last-good candles to disk so the chart + levels survive a restart and a
+// Dhan token expiry (the recurring "feed off" after-hours issue): Market Command /
+// Trade Execution then keep showing the last session (clearly stale-flagged) and
+// auto-recover when connectivity/token returns, instead of a hard 502 blank.
+const _lgDiskAt = new Map<string, number>();
+function _lgFile(ckey: string): string {
+  const dir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(process.cwd(), "data");
+  return path.join(dir, "mc-lastgood", ckey.replace(/[^\w.-]/g, "_") + ".json");
+}
+function persistLastGoodCandles(ckey: string, v: any[]): void {
+  try { const f = _lgFile(ckey); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify({ ts: Date.now(), v })); } catch { /* best-effort */ }
+}
+function loadLastGoodCandlesDisk(ckey: string): { ts: number; v: any[] } | null {
+  try { const o = JSON.parse(fs.readFileSync(_lgFile(ckey), "utf8")); return o && Array.isArray(o.v) ? o : null; } catch { return null; }
+}
 const getDailyCached = (symbol: string, days = 40) =>
   cached(`d:${symbol}:${days}`, TTL_DAILY, () => {
     const feed = syncSessionProvider();
@@ -4219,13 +4234,18 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       const ckey = `c:${symbol}:${interval}`;
       try {
         candles = await cached(ckey, interval === "1d" ? TTL_DAILY : TTL_MC_CANDLES, () => fetchCandles(symbol, interval));
-        if (candles && candles.length) _lastGoodMcCandles.set(ckey, { ts: Date.now(), v: candles });
+        if (candles && candles.length) {
+          _lastGoodMcCandles.set(ckey, { ts: Date.now(), v: candles });
+          // Throttle disk writes to ~60s so the fast 5s refresh doesn't churn disk.
+          if (Date.now() - (_lgDiskAt.get(ckey) || 0) > 60_000) { persistLastGoodCandles(ckey, candles); _lgDiskAt.set(ckey, Date.now()); }
+        }
       } catch (e) {
-        // Transient Dhan rate-limit / timeout on a cold index → serve the recent
-        // last-good candles so the chart isn't blank. If we have NONE yet, keep the
-        // original behaviour (surface the failure). This never fabricates bars and
-        // never marks stale data as live (freshness comes from the candle time).
-        const lg = _lastGoodMcCandles.get(ckey);
+        // Transient Dhan rate-limit / timeout / token-expiry → serve the recent
+        // last-good candles (memory, else disk) so the chart isn't blank. Only if
+        // we have NONE anywhere do we surface the failure. Never fabricates bars
+        // and never marks stale data as live (freshness comes from the candle time).
+        let lg = _lastGoodMcCandles.get(ckey);
+        if (!lg) { const disk = loadLastGoodCandlesDisk(ckey); if (disk) { lg = disk; _lastGoodMcCandles.set(ckey, disk); } }
         if (lg && lg.v && lg.v.length) candles = lg.v;
         else throw e;
       }
@@ -4968,7 +4988,11 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       } : null,
     });
   } catch (e: any) {
-    res.status(502).json({ error: e?.message || "market-command failed", available: false });
+    // Graceful 200 (not 502) so the screens degrade cleanly and keep polling to
+    // auto-recover. Includes the Dhan health so the UI can show a precise reason
+    // (e.g. token expired → reconnect) instead of a generic error.
+    let feed: any = null; try { feed = dhanHealthNow(); } catch { /* ignore */ }
+    res.json({ available: false, error: e?.message || "market-command failed", feed });
   }
 });
 
