@@ -6151,8 +6151,9 @@ function initTradeExec() {
     const bs = tp.bestSetup || {};
     const f = d.confirmationFlow || {};
     const snap = d.snapshot || {};
+    const expiry = d.expiry || (d.oi && d.oi.expiry) || (d.optionMatrix && d.optionMatrix.expiry) || null;
     const body = {
-      symbol: TE.sym, type, strike,
+      symbol: TE.sym, type, strike, expiry,
       entry: bs.entryPremium ?? null, sl: bs.stopPremium ?? null, target: bs.targetPremium ?? null,
       rr: bs.rr != null ? `1:${bs.rr}` : null,
       remarks: `Manual log · ${tp.direction || ""} · ${f.action || tp.action || ""}`,
@@ -6171,7 +6172,9 @@ function initTradeExec() {
     try {
       if (btn) btn.disabled = true;
       const r = await fetch("/api/trade-execute", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((x) => x.json());
-      if (r && r.ok) loadTradeExec(); else alert("Log failed: " + ((r && r.error) || "unknown"));
+      if (r && r.ok) loadTradeExec();
+      else if (r && r.blocked) alert(r.reason || "Trade not logged (outside window / no valid levels).");
+      else alert("Log failed: " + ((r && r.error) || "unknown"));
     } catch (e) { alert("Log error: " + e.message); }
     finally { if (btn) btn.disabled = false; }
   });

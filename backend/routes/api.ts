@@ -194,6 +194,7 @@ import { buildFakeMoveResult, FakeMoveLevel, FakeMoveTFInput, FakeMoveResult } f
 import { buildConfirmationFlow } from "../analyst/confirmationFlow";
 import { getCooldownState, computeCooldown, recordExecution } from "../trade/cooldownStore";
 import { appendTrade, updateTrade, listTrades, tradesToCsv, weeklySummary, TradeType, TradeStatus } from "../trade/tradeLogStore";
+import { resolveFromCandles, isMonitorable } from "../trade/tradeMonitor";
 import { scanOptionTopPick, evaluateStockBothTracks } from "../optionTopPick/scanner";
 import { OptionTopPickDeps } from "../optionTopPick/types";
 import { evaluateLiquidityStatus } from "../liquidityStatus/engine";
@@ -4807,19 +4808,25 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
     // arms on logging also DEDUPES it — once logged, the flow returns WAIT until
     // the cooldown expires, so a signal is written at most once per cooldown
     // window. Strike/entry/SL/target come from the existing engines (unchanged).
-    if (!isHistorical && !displayStale && confirmationFlow.action === "TRADE" && !cooldown.active) {
+    // Only log a fresh auto trade inside the trade-entry window (09:20–15:12 IST)
+    // AND when the setup carries a real entry/SL/target — never on stale data or
+    // outside hours (that produced the pre-market DATA-STALE rows that never close).
+    if (!isHistorical && !displayStale && isTradeEntryWindowIST() && confirmationFlow.action === "TRADE" && !cooldown.active) {
       try {
         const side: "CE" | "PE" = strikeAnalysis?.primary?.side === "PE" ? "PE"
           : strikeAnalysis?.primary?.side === "CE" ? "CE"
           : (optionType === "PE" ? "PE" : optionType === "CE" ? "CE" : (marketView.direction === "BEARISH" ? "PE" : "CE"));
         const sigStrike = strikeAnalysis?.primary?.strike ?? (typeof strike === "number" ? strike : null);
         const bs = strikeAnalysis?.bestSetup;
+        const sigEntry = bs?.entryPremium ?? null, sigSl = bs?.stopPremium ?? null, sigTarget = bs?.targetPremium ?? null;
+        // A trade with no real entry/SL/target can never be resolved — skip it.
+        if (!(sigEntry && sigSl && sigTarget)) throw new Error("no resolvable levels");
         appendTrade({
           execTs: nowSec, index: def.name, symbol: def.symbol, type: side,
-          strike: sigStrike,
-          entry: bs?.entryPremium ?? null,
-          sl: bs?.stopPremium ?? null,
-          target: bs?.targetPremium ?? null,
+          strike: sigStrike, expiry: oiChain?.expiry ?? (oiData as any)?.expiry ?? null,
+          entry: sigEntry,
+          sl: sigSl,
+          target: sigTarget,
           rr: bs?.rr != null ? `1:${bs.rr}` : null,
           remarks: `Auto signal · ${confirmationFlow.reason}`,
           // Immutable decision snapshot — reconstruct THIS trade's logic later.
@@ -5090,9 +5097,22 @@ router.post("/trade-execute", requirePermission("oiAnalysis"), (req: Request, re
     // Anchor to the ACTUAL execution timestamp (client may pass it; else now).
     const execTs = Number.isFinite(Number(b.execTs)) ? Math.floor(Number(b.execTs)) : Math.floor(Date.now() / 1000);
     const num = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : null);
+    // Do not log a trade outside the entry window (09:20–15:12 IST) — the desk is
+    // for market-hours signals, and off-hours data is stale (that produced the
+    // 07:13 DATA-STALE rows that could never resolve). `force:true` overrides for
+    // deliberate manual back-entry.
+    if (!isTradeEntryWindowIST() && !b.force) {
+      return res.json({ ok: false, blocked: true, reason: `Outside trade window — trades are logged only 09:20–15:12 IST (market movement window).` });
+    }
+    const entry = num(b.entry), sl = num(b.sl), target = num(b.target);
+    // Require a real, resolvable setup so the monitor can later close it.
+    if (!b.force && !(entry && sl && target && target > entry && sl < entry)) {
+      return res.json({ ok: false, blocked: true, reason: `Trade needs a real entry, SL (below entry) and target (above entry) so it can be tracked to Target/SL — not logged.` });
+    }
     const trade = appendTrade({
       execTs, index: def.name, symbol: def.symbol, type,
-      strike: num(b.strike), entry: num(b.entry), sl: num(b.sl), target: num(b.target),
+      strike: num(b.strike), expiry: b.expiry != null ? String(b.expiry) : (b.snapshot && b.snapshot.expiry) || null,
+      entry, sl, target,
       rr: b.rr != null ? String(b.rr) : null, remarks: b.remarks != null ? String(b.remarks) : "",
       // Optional immutable decision snapshot passed by the client (manual Log Trade
       // captures the current flow) so the row can reconstruct its own logic.
@@ -5141,6 +5161,49 @@ router.post("/trade-log/update", requirePermission("oiAnalysis"), (req: Request,
   if (!updated) return res.status(404).json({ error: "trade not found" });
   res.json({ ok: true, trade: updated });
 });
+
+// ---- Trade monitor: close Open trades when their option premium hits Target/SL ----
+// Advisory only (no real order): reads the option's OWN premium candles since entry
+// and marks Target Hit / SL Hit, so trades stop sitting "Open" forever. Runs every
+// 60s during feed hours; after 15:12 IST it squares off anything still open.
+async function fetchTradePremiumCandles(def: any, type: TradeType, strike: number, expiry: string, interval: number): Promise<{ time: number; open: number; high: number; low: number; close: number }[]> {
+  const underlying = (def?.nseSymbol || String(def?.symbol || "").replace(/\.NS$/i, "")).toUpperCase();
+  const now = Math.floor(Date.now() / 1000);
+  const start = now - 2 * 24 * 3600;
+  const gp = growwProviderForOptionTerminal();
+  try {
+    const inst = await findOption(underlying, type, strike, expiry);
+    if (gp && inst) { const c = await growwOptionCandles(gp, inst.tradingSymbol, start, now, interval); if (c && c.length) return c as any; }
+  } catch { /* fall through to Dhan */ }
+  try {
+    const dhanOpt = await lookupDhanOption(underlying, type, strike, expiry);
+    if (dhanOpt) return (await dhanOptionCandles(dhanOpt.securityId, start, now, interval, dhanOpt.exchangeSegment)) as any;
+  } catch { /* no candles */ }
+  return [];
+}
+let _tradeMonitorRunning = false;
+async function tradeMonitorTick(): Promise<void> {
+  if (_tradeMonitorRunning || !isFeedWindowIST()) return;
+  _tradeMonitorRunning = true;
+  try {
+    const today = new Date(Date.now() + 19800000).toISOString().slice(0, 10);
+    const open = listTrades(today).filter((t) => t.status === "Open");
+    const windowEnded = tradeWindowEndedIST();
+    for (const t of open) {
+      if (t.strike == null || !t.expiry) continue;
+      if (!isMonitorable({ execTs: t.execTs, entry: t.entry, sl: t.sl, target: t.target })) continue;
+      const def = findSymbolDef(t.symbol); if (!def) continue;
+      let candles: any[] = [];
+      try { candles = await fetchTradePremiumCandles(def, t.type, t.strike, t.expiry, 5); } catch { continue; }
+      if (!candles.length) continue;
+      const r = resolveFromCandles({ execTs: t.execTs, entry: t.entry, sl: t.sl, target: t.target }, candles, windowEnded);
+      if (r) updateTrade({ id: t.id, status: r.status, exitPrice: r.exitPrice, exitTs: r.exitTs, remarks: (t.remarks ? t.remarks + " · " : "") + r.remark });
+    }
+  } catch { /* best-effort */ } finally { _tradeMonitorRunning = false; }
+}
+const _tradeMonitorTimer = setInterval(() => { tradeMonitorTick().catch(() => {}); }, 60_000);
+// Don't keep the process alive just for this timer (so tests/CLI can exit cleanly).
+if (typeof (_tradeMonitorTimer as any).unref === "function") (_tradeMonitorTimer as any).unref();
 
 // CSV export of the trade log.
 router.get("/trade-log/export", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
@@ -7948,6 +8011,19 @@ function isTradingTimeIST(d = new Date()): boolean {
   const mins = ist.getUTCHours() * 60 + ist.getUTCMinutes();
   return mins >= 555 && mins <= 930; // 09:15 - 15:30
 }
+// New TRADE-ENTRY window: no new trade is logged (auto OR manual) before 09:20 or
+// after 15:12 IST — the user's rule (skip opening volatility + last minutes). The
+// monitor's EOD square-off then closes anything still open after 15:12.
+const TRADE_WINDOW_START = 9 * 60 + 20;  // 09:20
+const TRADE_WINDOW_END = 15 * 60 + 12;   // 15:12
+function tradeWindowMinsIST(d = new Date()): number { const ist = new Date(d.getTime() + 19800000); return ist.getUTCHours() * 60 + ist.getUTCMinutes(); }
+function isTradeEntryWindowIST(d = new Date()): boolean {
+  const ist = new Date(d.getTime() + 19800000);
+  const day = ist.getUTCDay(); if (day === 0 || day === 6) return false;
+  const mins = tradeWindowMinsIST(d);
+  return mins >= TRADE_WINDOW_START && mins <= TRADE_WINDOW_END;
+}
+function tradeWindowEndedIST(d = new Date()): boolean { const ist = new Date(d.getTime() + 19800000); const day = ist.getUTCDay(); if (day === 0 || day === 6) return true; return tradeWindowMinsIST(d) > TRADE_WINDOW_END; }
 /** Weekday 09:00–15:35 IST — pre-open warmup + a few minutes after close. */
 function isFeedWindowIST(d = new Date()): boolean {
   const ist = new Date(d.getTime() + 19800000);

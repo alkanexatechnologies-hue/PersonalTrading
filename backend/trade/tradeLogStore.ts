@@ -21,6 +21,7 @@ export interface TradeRow {
   symbol: string;        // ^NSEI / …
   type: TradeType;       // CE / PE
   strike: number | null;
+  expiry?: string | null; // option expiry (yyyy-mm-dd) — lets the monitor fetch this contract's premium
   entry: number | null;
   sl: number | null;
   target: number | null;
@@ -69,6 +70,7 @@ export interface AppendTradeInput {
   symbol: string;
   type: TradeType;
   strike: number | null;
+  expiry?: string | null;
   entry: number | null;
   sl: number | null;
   target: number | null;
@@ -84,7 +86,7 @@ export function appendTrade(inp: AppendTradeInput): TradeRow {
   const row: TradeRow = {
     id: `${inp.symbol}:${inp.execTs}:${inp.type}:${inp.strike ?? ""}`,
     seq, date: day, time: istTime(inp.execTs), execTs: inp.execTs,
-    index: inp.index, symbol: inp.symbol, type: inp.type, strike: inp.strike,
+    index: inp.index, symbol: inp.symbol, type: inp.type, strike: inp.strike, expiry: inp.expiry ?? null,
     entry: inp.entry, sl: inp.sl, target: inp.target, totalPoint: null,
     rr: inp.rr ?? null, status: "Open", exitPrice: null, exitTime: null,
     remarks: inp.remarks || "",
