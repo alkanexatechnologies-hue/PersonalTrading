@@ -5602,7 +5602,7 @@ function startDecisionFlowLive() { dfStartLive("flow"); }
 const MC = {
   sym: "^NSEI", tf: "15m", chart: null, candleSeries: null,
   ema9Series: null, ema21Series: null, ema50Series: null, vwapSeries: null,
-  obMarkers: [], priceLine: null, timer: null, loading: false, lastData: null,
+  obMarkers: [], _levelLines: [], _overlaySig: null, _obSig: null, _indSig: null, priceLine: null, timer: null, loading: false, lastData: null,
   show: { vwap: true, ema21: true, ema50: true, ema9: false, ema200: true, ob: true, vol: true, levels: true, bos: true, liq: true, orb: false },
   replayDate: null, // yyyy-mm-dd when replaying a past session; null = live
 };
@@ -6472,41 +6472,41 @@ function teDrawChart(d) {
   if (!TE.chart || !TE.candle) return;
   const cs = (d.candles || []).map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close }));
   if (!cs.length) { TE.candle.setData([]); if (TE.vol) TE.vol.setData([]); return; }
-  TE.candle.setData(cs);
-  // Volume bars (green on up-candles, red on down) at the bottom of the chart.
-  if (TE.vol) {
-    TE.vol.setData((d.candles || []).map((c) => ({
-      time: c.time, value: c.volume || 0,
-      color: c.close >= c.open ? "rgba(22,199,132,0.5)" : "rgba(246,70,93,0.5)",
-    })));
+  // Anti-flicker: only re-setData the series when the candles actually changed
+  // (bar count / last bar time+close). On an unchanged poll we touch nothing.
+  const lastC = cs[cs.length - 1];
+  const candleSig = cs.length + ":" + (lastC ? lastC.time + ":" + lastC.close + ":" + lastC.high + ":" + lastC.low : "");
+  if (TE._candleSig !== candleSig) {
+    TE._candleSig = candleSig;
+    TE.candle.setData(cs);
+    if (TE.vol) TE.vol.setData((d.candles || []).map((c) => ({ time: c.time, value: c.volume || 0, color: c.close >= c.open ? "rgba(22,199,132,0.5)" : "rgba(246,70,93,0.5)" })));
+    const closes = cs.map((c) => c.close);
+    const ema = (p) => { const k = 2 / (p + 1); let e = closes[0]; return closes.map((v, i) => (e = i ? v * k + e * (1 - k) : v)); };
+    const e9 = ema(9), e20 = ema(20), e50 = ema(50);
+    if (TE.e9) TE.e9.setData(cs.map((c, i) => ({ time: c.time, value: +e9[i].toFixed(2) })));
+    if (TE.e20) TE.e20.setData(cs.map((c, i) => ({ time: c.time, value: +e20[i].toFixed(2) })));
+    if (TE.e50) TE.e50.setData(cs.map((c, i) => ({ time: c.time, value: +e50[i].toFixed(2) })));
+    if (TE.vwap) { const vw = (d.overlays && d.overlays.vwap) || null; TE.vwap.setData(Array.isArray(vw) ? cs.map((c, i) => (vw[i] != null ? { time: c.time, value: +Number(vw[i]).toFixed(2) } : null)).filter(Boolean) : []); }
   }
-  const closes = cs.map((c) => c.close);
-  const ema = (p) => { const k = 2 / (p + 1); let e = closes[0]; return closes.map((v, i) => (e = i ? v * k + e * (1 - k) : v)); };
-  const e9 = ema(9), e20 = ema(20), e50 = ema(50);
-  if (TE.e9) TE.e9.setData(cs.map((c, i) => ({ time: c.time, value: +e9[i].toFixed(2) })));
-  if (TE.e20) TE.e20.setData(cs.map((c, i) => ({ time: c.time, value: +e20[i].toFixed(2) })));
-  if (TE.e50) TE.e50.setData(cs.map((c, i) => ({ time: c.time, value: +e50[i].toFixed(2) })));
-  // VWAP — the real session VWAP from the engine overlays (aligned to candles).
-  if (TE.vwap) {
-    const vw = (d.overlays && d.overlays.vwap) || null;
-    TE.vwap.setData(Array.isArray(vw) ? cs.map((c, i) => (vw[i] != null ? { time: c.time, value: +Number(vw[i]).toFixed(2) } : null)).filter(Boolean) : []);
-  }
-  // Chart legend (colors match the series).
   const note = teEl("te-chart-note");
   if (note) note.innerHTML = `<span style="color:#f0b429">EMA9</span> · <span style="color:#3b82f6">EMA20</span> · <span style="color:#a855f7">EMA50</span> · <b style="color:#00e5ff">VWAP</b>`;
-  // Level price lines with labels (from the curated rows).
-  TE._levelLines.forEach((pl) => { try { TE.candle.removePriceLine(pl); } catch { /* noop */ } });
-  TE._levelLines = [];
+  // Level price-lines: only rebuild when the level set changed (else they'd blink
+  // on every poll). Signature = short+price of each drawn level.
   const N = cs.length, showBars = Math.min(120, N);
   const recent = cs.slice(-showBars); let lo = Infinity, hi = -Infinity;
   recent.forEach((c) => { if (c.low < lo) lo = c.low; if (c.high > hi) hi = c.high; });
   const pad = (hi - lo) * 0.5 || hi * 0.005;
-  (TE._levels || []).forEach((r) => {
-    if (r._cur || r.price < lo - pad || r.price > hi + pad) return;
-    const col = r.kind === "bos" || r.kind === "choch" ? "#c084fc" : r.kind === "sweep" ? "#f0b429" : r.side === "resistance" ? "#f6465d" : r.side === "support" ? "#16c784" : "#8394ad";
-    const line = TE.candle.createPriceLine({ price: r.price, color: col, lineWidth: r.strength === "STRONG" || r.strength === "CONFIRMED" ? 2 : 1, lineStyle: r.strength === "MEDIUM" ? 2 : 0, axisLabelVisible: true, title: `${r.short} ${teNum(r.price, 0)}` });
-    TE._levelLines.push(line);
-  });
+  const visible = (TE._levels || []).filter((r) => !r._cur && r.price >= lo - pad && r.price <= hi + pad);
+  const levelSig = visible.map((r) => r.short + r.price).join("|");
+  if (TE._levelSig !== levelSig) {
+    TE._levelSig = levelSig;
+    TE._levelLines.forEach((pl) => { try { TE.candle.removePriceLine(pl); } catch { /* noop */ } });
+    TE._levelLines = [];
+    visible.forEach((r) => {
+      const col = r.kind === "bos" || r.kind === "choch" ? "#c084fc" : r.kind === "sweep" ? "#f0b429" : r.side === "resistance" ? "#f6465d" : r.side === "support" ? "#16c784" : "#8394ad";
+      TE._levelLines.push(TE.candle.createPriceLine({ price: r.price, color: col, lineWidth: r.strength === "STRONG" || r.strength === "CONFIRMED" ? 2 : 1, lineStyle: r.strength === "MEDIUM" ? 2 : 0, axisLabelVisible: true, title: `${r.short} ${teNum(r.price, 0)}` }));
+    });
+  }
   if (TE._fitKey !== TE.sym + ":" + TE.tf) { TE.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, N - showBars), to: N + 2 }); TE._fitKey = TE.sym + ":" + TE.tf; }
 }
 
@@ -6593,16 +6593,25 @@ function otDrawChart(side, candles) {
   const e9Hdr = otEl(side === "CE" ? "ot-ce-ema9" : "ot-pe-ema9");
   const e21Hdr = otEl(side === "CE" ? "ot-ce-ema21" : "ot-pe-ema21");
   if (!chart || !cs) return;
-  if (!candles || !candles.length) { cs.setData([]); if (e9) e9.setData([]); if (e21) e21.setData([]); if (e9Hdr) e9Hdr.textContent = "—"; if (e21Hdr) e21Hdr.textContent = "—"; return; }
+  const sigRef = side === "CE" ? "_ceChartSig" : "_peChartSig";
+  if (!candles || !candles.length) { OT[sigRef] = "empty"; cs.setData([]); if (e9) e9.setData([]); if (e21) e21.setData([]); if (e9Hdr) e9Hdr.textContent = "—"; if (e21Hdr) e21Hdr.textContent = "—"; return; }
   const data = candles.map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close }));
-  cs.setData(data);
-  const closes = data.map((c) => c.close);
-  const a9 = otEma(closes, 9), a21 = otEma(closes, 21);
-  if (e9) e9.setData(data.map((c, i) => ({ time: c.time, value: +a9[i].toFixed(2) })));
-  if (e21) e21.setData(data.map((c, i) => ({ time: c.time, value: +a21[i].toFixed(2) })));
-  // Header EMA readouts (last value) — from the selected option premium candles.
-  if (e9Hdr) e9Hdr.textContent = a9.length ? otNum(a9[a9.length - 1], 2) : "—";
-  if (e21Hdr) e21Hdr.textContent = a21.length ? otNum(a21[a21.length - 1], 2) : "—";
+  // Anti-flicker: only re-setData the premium candles + EMAs when they actually
+  // changed (bar count / last bar). Off-hours and between forming ticks the poll
+  // brings identical bars, so the chart stays perfectly still.
+  const last = data[data.length - 1];
+  const sig = data.length + ":" + last.time + ":" + last.close + ":" + last.high + ":" + last.low;
+  if (OT[sigRef] !== sig) {
+    OT[sigRef] = sig;
+    cs.setData(data);
+    const closes = data.map((c) => c.close);
+    const a9 = otEma(closes, 9), a21 = otEma(closes, 21);
+    if (e9) e9.setData(data.map((c, i) => ({ time: c.time, value: +a9[i].toFixed(2) })));
+    if (e21) e21.setData(data.map((c, i) => ({ time: c.time, value: +a21[i].toFixed(2) })));
+    // Header EMA readouts (last value) — from the selected option premium candles.
+    if (e9Hdr) e9Hdr.textContent = a9.length ? otNum(a9[a9.length - 1], 2) : "—";
+    if (e21Hdr) e21Hdr.textContent = a21.length ? otNum(a21[a21.length - 1], 2) : "—";
+  }
   // Re-frame only on a view change (new strike/expiry/tf) — a periodic refresh
   // keeps the trader's current zoom/scroll (no jump on data refresh). Show a
   // fixed window of recent bars (like Market Command) so candles stay clear and
@@ -6711,10 +6720,22 @@ async function otFetchStructure(sym, strike, expiry, intervalMin) {
 function otDrawStructure(side) {
   const cs = side === "CE" ? OT.ceCandle : OT.peCandle;
   const ref = side === "CE" ? "_ceLines" : "_peLines";
+  const sigRef = side === "CE" ? "_ceLineSig" : "_peLineSig";
   if (!cs) return;
+  const s = OT._struct && OT._struct[side.toLowerCase()];
+  // Anti-flicker: skip the teardown/rebuild when the premium levels + markers are
+  // unchanged (they refresh slowly), so the R/S lines don't blink every ~12s.
+  const markers = [];
+  if (s && s.available) {
+    if (s.bios && s.bios.time) { const bull = s.bios.direction === "BULLISH"; markers.push({ time: s.bios.time, position: bull ? "belowBar" : "aboveBar", color: "#f0b90b", shape: bull ? "arrowUp" : "arrowDown", text: "BIOS" }); }
+    const lastSwing = (s.swings || []).slice(-1)[0];
+    if (lastSwing && lastSwing.time) markers.push({ time: lastSwing.time, position: "aboveBar", color: "#a855f7", shape: "circle", text: "SWP" });
+  }
+  const sig = (!s || !s.available) ? "none" : JSON.stringify({ r2: s.r2, r1: s.r1, swp: s.swp, s1: s.s1, s2: s.s2, m: markers.map((mk) => mk.time + mk.shape + mk.text) });
+  if (OT[sigRef] === sig) return;
+  OT[sigRef] = sig;
   (OT[ref] || []).forEach((l) => { try { cs.removePriceLine(l); } catch {} });
   OT[ref] = [];
-  const s = OT._struct && OT._struct[side.toLowerCase()];
   if (!s || !s.available) { try { cs.setMarkers([]); } catch {} return; }
   const add = (price, title, color, style) => {
     if (price == null || !isFinite(price)) return;
@@ -6725,13 +6746,6 @@ function otDrawStructure(side) {
   add(s.swp, "SWP", "#a855f7", 1);
   add(s.s1, "S1", "#16c784", 2);
   add(s.s2, "S2", "#16c784", 2);
-  const markers = [];
-  if (s.bios && s.bios.time) {
-    const bull = s.bios.direction === "BULLISH";
-    markers.push({ time: s.bios.time, position: bull ? "belowBar" : "aboveBar", color: "#f0b90b", shape: bull ? "arrowUp" : "arrowDown", text: "BIOS" });
-  }
-  const lastSwing = (s.swings || []).slice(-1)[0];
-  if (lastSwing && lastSwing.time) markers.push({ time: lastSwing.time, position: "aboveBar", color: "#a855f7", shape: "circle", text: "SWP" });
   try { cs.setMarkers(markers); } catch {}
 }
 
@@ -7265,6 +7279,26 @@ function idxNewsKeywords(sym) {
     default: return ["nifty 50", "nifty50", "nifty"];
   }
 }
+// Macro drivers that move the whole index/market — scored so the news panel
+// surfaces and highlights market-affecting headlines ahead of routine noise.
+const MC_MOVERS = [
+  { re: /\b(rbi|repo rate|reverse repo|monetary policy|mpc)\b/i, w: 5, tag: "RBI" },
+  { re: /\b(fed|fomc|powell|rate cut|rate hike|jackson hole)\b/i, w: 5, tag: "FED" },
+  { re: /\b(inflation|cpi|wpi|retail inflation|price index)\b/i, w: 4, tag: "INFLATION" },
+  { re: /\b(gdp|iip|pmi|core sector|economic growth)\b/i, w: 4, tag: "GDP" },
+  { re: /\b(fii|dii|fpi|foreign (investor|inflow|outflow|fund))/i, w: 4, tag: "FII/DII" },
+  { re: /\b(budget|fiscal deficit|sebi|tariff|geopolit|war|election|rate decision)\b/i, w: 3, tag: "POLICY" },
+  { re: /\b(crude|brent|oil price)\b/i, w: 3, tag: "CRUDE" },
+  { re: /\b(rupee|dollar|usd\/?inr|forex|currency)\b/i, w: 3, tag: "RUPEE" },
+  { re: /\b(us (stock|market|equit)|dow jones|nasdaq|s&p 500|wall street|asian market)\b/i, w: 3, tag: "GLOBAL" },
+  { re: /\b(q[1-4] (result|earning)|net profit|earnings|results season)\b/i, w: 2, tag: "RESULTS" },
+];
+function mcMoverInfo(title) {
+  const t = title || "";
+  let score = 0, tag = null;
+  for (const m of MC_MOVERS) { if (m.re.test(t)) { score += m.w; if (!tag || m.w > 0) tag = tag || m.tag; } }
+  return { score, tag };
+}
 async function loadIndexNews() {
   const flashEl = document.getElementById("mc-idxnews-flash");
   if (!flashEl) return;
@@ -7276,9 +7310,18 @@ async function loadIndexNews() {
     const generic = /nifty|sensex|rbi|fed|fii|dii|rupee|crude|market|index|option|sebi|inflation|gdp|nse|bse/i;
     const matchKw = (t) => kw.some((k) => (t || "").toLowerCase().includes(k));
     let items = d.items.filter((n) => matchKw(n.title));
-    if (items.length < 3) items = items.concat(d.items.filter((n) => !matchKw(n.title) && generic.test(n.title || "")));
-    // "Best" = high-impact first (stable sort keeps the feed's newest-first order).
-    items = items.map((n, i) => ({ n, i })).sort((a, b) => ((b.n.impact === "high" ? 1 : 0) - (a.n.impact === "high" ? 1 : 0)) || (a.i - b.i)).map((x) => x.n).slice(0, 6);
+    if (items.length < 4) items = items.concat(d.items.filter((n) => !matchKw(n.title) && generic.test(n.title || "")));
+    // Annotate each headline with its market-mover score/tag, then rank so the news
+    // most likely to move THIS index (macro driver + index-relevant + high impact)
+    // rises to the top and gets highlighted.
+    items = items.map((n, i) => {
+      const mv = mcMoverInfo(n.title);
+      const idxRel = matchKw(n.title) ? 2 : 0;
+      const impact = n.impact === "high" ? 3 : 0;
+      return { ...n, _mover: mv.tag, _score: mv.score + idxRel + impact, _feed: i };
+    });
+    items.sort((a, b) => (b._score - a._score) || (a._feed - b._feed));
+    items = items.slice(0, 6);
     IDXNEWS.items = items; IDXNEWS.sym = sym; IDXNEWS.idx = 0;
     const biasEl = document.getElementById("mc-idxnews-bias");
     if (biasEl) biasEl.textContent = d.summary && d.summary.bias ? `bias: ${d.summary.bias}` : "";
@@ -7299,12 +7342,20 @@ function renderIndexNewsFlash() {
   const pos = IDXNEWS.idx % items.length;
   const n = items[pos];
   const sent = n.sentiment === "positive" ? "pos" : n.sentiment === "negative" ? "neg" : "neu";
-  flashEl.className = "mc2-idxnews-flash " + sent;
+  // Market-moving headlines (macro driver or high impact) get a highlight class so
+  // the segment visibly flags what actually affects the index.
+  const isMover = !!n._mover || n.impact === "high" || (n._score || 0) >= 4;
+  flashEl.className = "mc2-idxnews-flash " + sent + (isMover ? " mover" : "");
   flashEl.href = n.link || "#";
   if (dotEl) dotEl.textContent = n.sentiment === "positive" ? "▲" : n.sentiment === "negative" ? "▼" : "•";
-  if (titleEl) titleEl.textContent = (n.title || "").slice(0, 150) + (n.impact === "high" ? "  ⚡" : "");
+  if (titleEl) {
+    const esc = (s) => String(s == null ? "" : s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    const badge = n._mover ? `<span class="mc2-idxnews-tag">${esc(n._mover)}</span>` : "";
+    const bolt = n.impact === "high" ? ' <span class="mc2-idxnews-bolt">⚡ HIGH</span>' : "";
+    titleEl.innerHTML = badge + esc((n.title || "").slice(0, 150)) + bolt;
+  }
   if (srcEl) srcEl.textContent = `${n.source || ""}${n.ago ? " · " + n.ago : ""}`;
-  if (dotsEl) dotsEl.innerHTML = items.map((_, i) => `<span class="${i === pos ? "on" : ""}"></span>`).join("");
+  if (dotsEl) dotsEl.innerHTML = items.map((it, i) => `<span class="${i === pos ? "on" : ""}${it._mover || it.impact === "high" ? " hot" : ""}"></span>`).join("");
   flashEl.classList.remove("flash"); void flashEl.offsetWidth; flashEl.classList.add("flash");
 }
 function startIndexNewsLive() {
@@ -7827,6 +7878,9 @@ function renderMCChart(d) {
   // only on a symbol / timeframe / replay change.
   const chartViewKey = MC.sym + ":" + MC.tf + ":" + (MC.replayDate || "live");
   const sameView = MC._chartViewKey === chartViewKey;
+  // On a symbol / timeframe / replay switch, force every overlay to rebuild for the
+  // new instrument (the anti-flicker signatures below must not carry across views).
+  if (!sameView) { MC._overlaySig = null; MC._obSig = null; MC._indSig = null; }
   const prevN = MC._candles ? MC._candles.length : 0;
   // Only take the fast incremental path when the series is CONTINUOUS (same first
   // bar) — otherwise the data is a different symbol/session and needs a full
@@ -7866,10 +7920,13 @@ function renderMCChart(d) {
   MC._inView = (p) => p != null && p >= vlo - pad && p <= vhi + pad;
   applyMCOverlays();
 
-  // Clear existing price-line + level overlays.
-  if (MC.priceLine) { try { MC.candleSeries.removePriceLine(MC.priceLine); } catch {} }
-  MC.obMarkers.forEach((pl) => { try { MC.candleSeries.removePriceLine(pl); } catch {} });
-  MC.obMarkers = [];
+  // Current price line — updated IN PLACE (applyOptions), never torn down, so the
+  // live spot marker glides instead of blinking on every 5s poll.
+  if (d.spot) {
+    let ok = false;
+    if (MC.priceLine) { try { MC.priceLine.applyOptions({ price: d.spot }); ok = true; } catch { MC.priceLine = null; } }
+    if (!ok) { try { MC.priceLine = MC.candleSeries.createPriceLine({ price: d.spot, color: "#2962ff", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "" }); } catch {} }
+  } else if (MC.priceLine) { try { MC.candleSeries.removePriceLine(MC.priceLine); } catch {} MC.priceLine = null; }
 
   // Candle-origin markers. BOS markers come from the EXISTING structure engine
   // output (d.structure.bosEvents) UNCHANGED — this only *displays* them; the
@@ -7886,54 +7943,45 @@ function renderMCChart(d) {
     });
   }
 
-  // Important Levels OFF → clean chart (BOS markers still show if that toggle is on).
-  if (!MC.show.levels) {
-    MC.candleSeries.setMarkers(markers);
-    MC._activeLevels = [];
-    renderMCLevelsLegend(d);
-    const vk0 = MC.sym + ":" + MC.tf;
-    if (MC._fitKey !== vk0) { MC.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, N - showBars), to: N + 2 }); MC._fitKey = vk0; }
-    return;
-  }
-
-  // Current price line
-  if (d.spot) {
-    MC.priceLine = MC.candleSeries.createPriceLine({ price: d.spot, color: "#2962ff", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "" });
-  }
-
-  // Order-Block liquidity zones — gated by the Liquidity toggle now.
-  if (MC.show.liq && MC.show.ob && d.orderBlocks) {
-    d.orderBlocks.forEach((ob) => { if (MC._inView(ob.high) || MC._inView(ob.low)) drawMCOrderBlock(ob); });
-  }
-
-  // ---- Curated IMPORTANT LEVELS (max 7, nearest to price) from existing engine
-  // outputs. Each line's axis label = TYPE PRICE; event levels (BOS/CHoCH/Sweep/
-  // Swing) also drop a marker on the candle that created them (originates there).
-  // The nearest level is drawn bold ("◀") — prominence as price approaches.
-  const all = buildMCLevels(d);
+  // Curated IMPORTANT LEVELS (max 7, nearest to price) from existing engine outputs.
   const kindOn = (k) => (k === "bos" || k === "choch") ? MC.show.bos !== false
     : k === "sweep" ? MC.show.liq !== false
     : k === "orb" ? MC.show.orb === true
     : true;
-  const visible = all.filter((l) => kindOn(l.kind) && MC._inView(l.price)).slice(0, 7);
+  const visible = MC.show.levels ? buildMCLevels(d).filter((l) => kindOn(l.kind) && MC._inView(l.price)).slice(0, 7) : [];
   MC._activeLevels = visible;
   const nearest = visible[0] || null;
   visible.forEach((l) => {
-    const near = l === nearest;
-    const col = mcLevelColor(l);
-    // Structural walls = solid; ORB/PDH-PDL/swing = dashed; invalidation = dotted.
-    const style = l.kind === "invalidation" ? 1 : (l.kind === "orb" || l.kind === "pdhl" || l.kind === "swing" || l.strength === "MEDIUM") ? 2 : 0;
-    const line = MC.candleSeries.createPriceLine({ price: l.price, color: col, lineWidth: near ? 2 : 1, lineStyle: style, axisLabelVisible: true, title: `${l.short} ${mcFmtP(l.price)}${near ? " ◀" : ""}` });
-    MC.obMarkers.push(line);
     if (l.time && (l.kind === "bos" || l.kind === "choch" || l.kind === "sweep" || l.kind === "swing")) {
       markers.push({
-        time: l.time, position: l.side === "support" ? "belowBar" : "aboveBar", color: col,
+        time: l.time, position: l.side === "support" ? "belowBar" : "aboveBar", color: mcLevelColor(l),
         shape: l.kind === "sweep" ? "circle" : l.kind === "swing" ? "square" : (l.side === "support" ? "arrowUp" : "arrowDown"),
         text: l.short,
       });
     }
   });
-  MC.candleSeries.setMarkers(markers);
+
+  // Anti-flicker: only tear down + rebuild the level price-lines and markers when
+  // the set actually changed. On an unchanged poll (very common — levels update
+  // slowly) nothing is recreated, so the lines/markers stay perfectly still.
+  const overlaySig = JSON.stringify({
+    lv: MC.show.levels, bos: MC.show.bos, liq: MC.show.liq, orb: MC.show.orb,
+    L: visible.map((l) => l.kind + "|" + l.price + "|" + l.short + "|" + (l === nearest ? 1 : 0)),
+    M: markers.map((m) => m.time + "|" + m.shape + "|" + m.text + "|" + m.color),
+  });
+  if (MC._overlaySig !== overlaySig) {
+    MC._overlaySig = overlaySig;
+    MC._levelLines.forEach((pl) => { try { MC.candleSeries.removePriceLine(pl); } catch {} });
+    MC._levelLines = [];
+    visible.forEach((l) => {
+      const near = l === nearest;
+      const col = mcLevelColor(l);
+      // Structural walls = solid; ORB/PDH-PDL/swing = dashed; invalidation = dotted.
+      const style = l.kind === "invalidation" ? 1 : (l.kind === "orb" || l.kind === "pdhl" || l.kind === "swing" || l.strength === "MEDIUM") ? 2 : 0;
+      MC._levelLines.push(MC.candleSeries.createPriceLine({ price: l.price, color: col, lineWidth: near ? 2 : 1, lineStyle: style, axisLabelVisible: true, title: `${l.short} ${mcFmtP(l.price)}${near ? " ◀" : ""}` }));
+    });
+    MC.candleSeries.setMarkers(markers);
+  }
   renderMCLevelsLegend(d);
 
   // Frame the recent ~120 bars on first render / symbol / timeframe switch only.
@@ -8056,22 +8104,30 @@ function applyMCOverlays() {
   const candles = MC._candles || [];
   const align = (arr) => candles.map((c, i) => arr && arr[i] != null ? { time: c.time, value: arr[i] } : null).filter(Boolean);
 
-  MC.ema9Series.setData(MC.show.ema9 ? align(ov.ema9) : []);
-  MC.ema21Series.setData(MC.show.ema21 ? align(ov.ema21) : []);
-  MC.ema50Series.setData(MC.show.ema50 ? align(ov.ema50) : []);
-  if (MC.ema200Series) MC.ema200Series.setData(MC.show.ema200 ? align(ov.ema200) : []);
-  MC.vwapSeries.setData(MC.show.vwap ? align(ov.vwap) : []);
-  if (MC.volSeries) MC.volSeries.setData(MC.show.vol ? (MC._volumes || []) : []);
+  // Indicator series — only re-setData when the values or toggles changed, so the
+  // EMA/VWAP/volume lines don't repaint on every poll (a source of flicker).
+  const lastBar = candles.length ? candles[candles.length - 1].time : 0;
+  const indSig = JSON.stringify({ n: candles.length, t: lastBar, s: [MC.show.ema9, MC.show.ema21, MC.show.ema50, MC.show.ema200, MC.show.vwap, MC.show.vol] });
+  if (MC._indSig !== indSig) {
+    MC._indSig = indSig;
+    MC.ema9Series.setData(MC.show.ema9 ? align(ov.ema9) : []);
+    MC.ema21Series.setData(MC.show.ema21 ? align(ov.ema21) : []);
+    MC.ema50Series.setData(MC.show.ema50 ? align(ov.ema50) : []);
+    if (MC.ema200Series) MC.ema200Series.setData(MC.show.ema200 ? align(ov.ema200) : []);
+    MC.vwapSeries.setData(MC.show.vwap ? align(ov.vwap) : []);
+    if (MC.volSeries) MC.volSeries.setData(MC.show.vol ? (MC._volumes || []) : []);
+  }
 
-  // Re-render OB zones — gated on "Show Levels" (default OFF = clean chart).
-  MC.obMarkers.forEach((pl) => { try { MC.candleSeries.removePriceLine(pl); } catch {} });
-  MC.obMarkers = [];
-  if (MC.show.levels && MC.show.ob && MC._orderBlocks) {
-    const inView = MC._inView || (() => true);
-    MC._orderBlocks.forEach((ob) => {
-      if (!inView(ob.high) && !inView(ob.low)) return;
-      drawMCOrderBlock(ob);
-    });
+  // Re-render OB zones — gated on "Show Levels" (default OFF = clean chart). Guarded
+  // by a signature so unchanged order blocks don't blink every poll.
+  const inView = MC._inView || (() => true);
+  const obs = (MC.show.levels && MC.show.ob && MC._orderBlocks) ? MC._orderBlocks.filter((ob) => inView(ob.high) || inView(ob.low)) : [];
+  const obSig = JSON.stringify(obs.map((ob) => ob.side + "|" + ob.stage + "|" + ob.high + "|" + ob.low));
+  if (MC._obSig !== obSig) {
+    MC._obSig = obSig;
+    MC.obMarkers.forEach((pl) => { try { MC.candleSeries.removePriceLine(pl); } catch {} });
+    MC.obMarkers = [];
+    obs.forEach((ob) => drawMCOrderBlock(ob));
   }
 }
 
