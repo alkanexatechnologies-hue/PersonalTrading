@@ -4935,3 +4935,51 @@ body.te-fullwidth .content { padding:0 !important; }
 .te-plan-body .te-miniline b, .te-exec-body .te-miniline b { font-variant-numeric:tabular-nums; }
 .te-trade-row-sel { background:rgba(47,125,255,.12); }
 @media (max-width:1100px){ .te-bottom { grid-template-columns:1fr; } }
+
+/* ============================================================================
+   MOBILE / PHONE LAYOUT — the three trading screens (Market Command, Option
+   Terminal, Trade Execution). Dense desktop multi-column strips are stacked to
+   a single column so nothing is clipped and every value stays readable on a
+   phone. Scoped to each panel id and to small widths, so laptop/desktop layouts
+   are untouched. Breakpoints follow CLAUDE.md (phone 375–430, tablet ≤820).
+   ============================================================================ */
+
+/* ---- Tablet & down: give the dense side-by-side strips room to wrap ---- */
+@media (max-width: 820px) {
+  /* Market Command top strip (India VIX + Index Direction + Index News) wraps. */
+  #panel-marketcommand .mc2-cards { flex-wrap: wrap; }
+  #panel-marketcommand .mc2-idxdir { flex: 1 1 100%; max-width: none; }
+}
+
+/* ---- Phone: stack everything to one clean column ---- */
+@media (max-width: 640px) {
+  /* Market Command — stack the whole top strip vertically so the Index
+     Direction panel is never squished/clipped against India VIX. */
+  #panel-marketcommand .mc2-cards { flex-direction: column; align-items: stretch; }
+  #panel-marketcommand .mc2-cards > .mc2-card,
+  #panel-marketcommand .mc2-idxdir,
+  #panel-marketcommand .mc2-idxnews {
+    flex: 1 1 auto !important; max-width: none !important; width: 100%; min-width: 0;
+  }
+  /* Let the Index Direction level rows wrap instead of running off-screen. */
+  #panel-marketcommand .mc2-idxdir .mc2-ia-levels { flex-wrap: wrap; gap: 2px 14px; }
+  #panel-marketcommand .mc2-idxdir .mc2-ia-dirs { flex-wrap: wrap; }
+  /* India VIX card doesn't need to be tall on a phone. */
+  #panel-marketcommand #mc2-cards .mc2-card { min-height: 0; }
+  /* The chart region and the right-hand panels each get a workable height and
+     scroll as one page (mc2-main already switches to a column ≤900px). */
+  #panel-marketcommand .mc2-main { overflow: visible; }
+  #panel-marketcommand .mc2-chart-area { overflow: visible; min-height: 380px; }
+
+  /* Option Terminal — let the header wrap and drop the long inline subtitle so
+     the brand + Source/Groww controls sit cleanly on a phone. */
+  #panel-optionterminal .ot-topbar { flex-wrap: wrap; row-gap: 8px; }
+  #panel-optionterminal .ot-topbar .ot-brand { flex: 1 1 100%; }
+  #panel-optionterminal .ot-brand .ot-muted { display: none; }
+
+  /* Trade Execution — keep the two-up stat grid, and make the horizontally
+     scrolling pipeline/journey obviously swipeable with momentum scrolling. */
+  #panel-tradeexec .te-pipeline,
+  #panel-tradeexec .te-journey { -webkit-overflow-scrolling: touch; scroll-snap-type: x proximity; }
+  #panel-tradeexec .te-gate { scroll-snap-align: start; }
+}
