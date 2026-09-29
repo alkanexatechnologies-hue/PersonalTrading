@@ -2433,6 +2433,10 @@ body.mode-option .index-strip { display: flex; }
 .mg-stockoption:hover { border-color: #a855f7; }
 .mg-stockoption .mg-t { color: #c084fc; }
 .mg-stockoption .mg-cta { border-color: rgba(168,85,247,0.5); color: #c084fc; }
+.mg-sentiment { border-color: rgba(56,189,248,0.35); }
+.mg-sentiment:hover { border-color: #38bdf8; }
+.mg-sentiment .mg-t { color: #7dd3fc; }
+.mg-sentiment .mg-cta { border-color: rgba(56,189,248,0.5); color: #7dd3fc; }
 .mg-dhanbacktest { border-color: rgba(245,158,11,0.35); }
 .mg-dhanbacktest:hover { border-color: #f59e0b; }
 .mg-dhanbacktest .mg-t { color: #fbbf24; }

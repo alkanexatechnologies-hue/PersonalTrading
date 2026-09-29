@@ -2037,9 +2037,12 @@ function setupMobileNav() {
 
 // ---------- desk mode (Option Trading vs Stock Swing Trading) ----------
 const MODE_KEY = "nsa_mode";
-const VALID_MODES = ["marketcommand", "option", "stockOption", "swing", "dhanbacktest", "aipaper"];
-const MODE_FIRST = { marketcommand: "marketcommand", option: "oicommand", stockOption: "toppicks", swing: "news", dhanbacktest: "dhanbacktest", aipaper: "aipdash" };
+const VALID_MODES = ["premarket", "marketcommand", "option", "stockOption", "swing", "dhanbacktest", "aipaper"];
+const MODE_FIRST = { premarket: "premarket", marketcommand: "marketcommand", option: "oicommand", stockOption: "toppicks", swing: "news", dhanbacktest: "dhanbacktest", aipaper: "aipdash" };
 const MODE_TABS = {
+  // Market Sentiment desk: opens on the read-only sentiment screen, with the
+  // Market Command / Option Terminal / Trade Execution siblings reachable from it.
+  premarket: ["premarket", "marketcommand", "optionterminal", "tradeexec"],
   marketcommand: ["marketcommand"],
   // Index Option Trading: Option Top Pick + Early Moves now live on the Stock
   // Option desk, and AI Paper Trading moved to its own AI Paper Desk, so all
@@ -7400,9 +7403,9 @@ function initPremarket() {
   root.innerHTML = `
   <div class="pm-wrap">
     <div class="pm-top">
-      <div class="pm-brand"><div class="pm-logo">◎</div><div><h1>09:10 Market &amp; Global Sentiment</h1><p>Pre-Market Intelligence · Global &amp; Indian Market Context</p></div></div>
+      <div class="pm-brand"><div class="pm-logo">◎</div><div><h1>Market Sentiment</h1><p>Pre-Market Intelligence · Global &amp; Indian Market Context</p></div></div>
       <div class="pm-nav">
-        <button class="on"><span class="ico">📊</span>09:10 Sentiment</button>
+        <button class="on"><span class="ico">📊</span>Market Sentiment</button>
         <button data-pm-go="marketcommand"><span class="ico">⚡</span>Market Command</button>
         <button data-pm-go="tradeexec"><span class="ico">🧾</span>Trade Execution</button>
         <button data-pm-go="optionterminal"><span class="ico">📈</span>Option Chain</button>
