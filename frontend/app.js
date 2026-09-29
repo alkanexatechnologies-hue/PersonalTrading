@@ -6459,6 +6459,8 @@ function renderTELogicDetails(t) {
   const box = teEl("te-logic-body"); if (!box) return;
   const s = t.snapshot;
   if (!s) { box.innerHTML = `<span class="te-muted">No decision snapshot stored for this trade (logged before snapshots, or a manual entry).</span>`; return; }
+  // ORB strategy trades carry their own evaluation → show the ORB logic here.
+  if (s.strategy === "ORB" && s.evaluation) { renderTEOrbLogic(t, s); return; }
   const item = (k, v, cls) => `<div class="te-logic-item"><span class="k">${k}</span><span class="v ${cls || ""}">${v ?? "—"}</span></div>`;
   const paTxt = s.priceAction ? `${(s.priceAction.direction === "UP" ? "BULLISH" : s.priceAction.direction === "DOWN" ? "BEARISH" : "—")} · ${s.priceAction.status || ""}` : "—";
   const gatesTxt = Array.isArray(s.gates) ? s.gates.map((g) => `${g.label}: ${g.status}`).join(" · ") : "—";
@@ -6485,6 +6487,36 @@ function renderTELogicDetails(t) {
     `<span>Data age ${s.dataAgeSec != null ? Math.round(s.dataAgeSec) + "s" : "—"}</span>` +
     `<span>Spot ${teNum(s.spot, 2)}</span>` +
     `</div>`;
+}
+
+// ORB strategy logic view for the Trade Logic Details panel (when an ORB trade is
+// clicked in the daily log). Shows the Opening Range, the gate chain, levels and
+// the deterministic reason — the same logic the Test Zone card shows.
+function renderTEOrbLogic(t, s) {
+  const box = teEl("te-logic-body"); if (!box) return;
+  const title = teEl("te-logic-title"); if (title) title.textContent = `📐 ORB Logic — #${t.seq} · ${t.time} ${t.index} ${t.type} ${t.strike ?? ""}`;
+  const sub = teEl("te-logic-sub"); if (sub) sub.textContent = "Opening Range Breakout — deterministic snapshot at execution";
+  const e = s.evaluation, a = s.audit || {}, lv = e.levels || {};
+  const item = (k, v, cls) => `<div class="te-logic-item"><span class="k">${k}</span><span class="v ${cls || ""}">${v == null || v === "" ? "—" : v}</span></div>`;
+  const g = (label, st) => { const c = st === "PASS" ? "orb-pass" : st === "FAIL" ? "orb-fail" : "orb-na"; return `<div class="orb-gate ${c}"><span>${label}</span><b>${st}</b></div>`; };
+  const dirCls = e.direction === "BULLISH" ? "te-up" : e.direction === "BEARISH" ? "te-down" : "";
+  const finalCls = e.final === "TAKE CE" ? "te-up" : e.final === "TAKE PE" ? "te-down" : "";
+  box.innerHTML =
+    `<div class="te-logic-grid">` +
+    item("OR High", teNum(e.orHigh, 2)) + item("OR Low", teNum(e.orLow, 2)) +
+    item("OR Range", teNum(e.orRange, 2)) + item("OR Mid", teNum(e.orMid, 2)) +
+    item("Direction", e.direction, dirCls) + item("Status", e.status) +
+    item("Breakout Price", teNum(a.breakoutPrice, 2)) +
+    item("Volume / Ratio", a.volume != null ? `${teNum(a.volume, 0)}${a.volumeRatio != null ? " · " + a.volumeRatio + "x" : ""}` : "—") +
+    item("VWAP", teNum(a.vwap, 2)) + item("EMA9 / EMA21", `${teNum(a.ema9, 2)} / ${teNum(a.ema21, 2)}`) +
+    item("Structure", a.marketStructure || "—") + item("Opposing / Room", `${teNum(a.opposingLevel, 2)}${lv.roomPoints != null ? " · " + lv.roomPoints + " pts" : ""}`) +
+    item("Entry", teNum(lv.entry, 2)) + item("SL / Target", `${teNum(lv.sl, 2)} / ${teNum(lv.target, 2)}`, "") +
+    item("R:R", lv.rr != null ? "1:" + lv.rr : "—") +
+    `</div>` +
+    `<div class="orb-gates" style="margin-top:8px">${g("VOLUME", e.gates.volume)}${g("VWAP", e.gates.vwap)}${g("EMA", e.gates.ema)}${g("STRUCTURE", e.gates.structure)}${g("LIQUIDITY", e.gates.liquidity)}${g("OI", e.gates.oi)}${g("ROOM", e.gates.room)}${g("R:R", e.gates.rr)}${g("MASTER", e.gates.master)}</div>` +
+    `<div class="te-logic-item" style="margin-top:8px"><span class="k">Final Decision</span><span class="v ${finalCls}">${e.final} — ${e.reasonText || ""}</span></div>` +
+    (e.reasons && e.reasons.length ? `<div class="orb-codes" style="margin-top:6px">${e.reasons.map((c) => `<span class="orb-code">${c}</span>`).join("")}</div>` : "") +
+    `<div class="te-logic-meta"><span>Strategy ORB (Test Zone · paper)</span><span>Break 09:15–09:30 range · entries 09:20–11:30</span></div>`;
 }
 
 // Weekly summary (Date · Trades · Win · Loss · P/L).
