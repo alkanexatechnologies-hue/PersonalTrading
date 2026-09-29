@@ -18,6 +18,7 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import fs from "fs";
+import { logMarketDataStartup } from "./sentiment/marketDataProvider";
 import apiRouter, { startHourlyScheduler } from "./routes/api";
 import { CONFIG } from "./config";
 import { getProvider, setActiveProvider } from "./data";
@@ -100,6 +101,7 @@ app.listen(CONFIG.port, () => {
   console.log(`  Data provider : ${getProvider().name}`);
   console.log(`  Dashboard     : http://localhost:${CONFIG.port}`);
   console.log(`  API base      : http://localhost:${CONFIG.port}/api\n`);
+  try { logMarketDataStartup(); } catch { /* optional diagnostic */ }
   autoConnectDhan();
   // Auto-record the hourly 15-min-model shortlist (9:30-15:30 IST) for evening backtest.
   startHourlyScheduler();

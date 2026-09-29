@@ -53,6 +53,15 @@ services:
         sync: false
       - key: DHAN_CLIENT_ID
         sync: false
+      # --- External market data for the 09:10 Sentiment desk ONLY (global indices,
+      # FX, macro, commodities). Does NOT feed Indian trading signals. No key ⇒
+      # those fields show DATA UNAVAILABLE. Never exposed to the browser. ---
+      - key: MARKET_DATA_PROVIDER
+        value: twelvedata
+      - key: MARKET_DATA_API_KEY
+        sync: false
+      - key: FII_DATA_URL
+        sync: false
       # --- Alerts / notifications (optional) ---
       - key: SMTP_HOST
         sync: false

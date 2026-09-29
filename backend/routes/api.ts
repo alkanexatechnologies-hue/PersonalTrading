@@ -170,6 +170,9 @@ import {
 } from "../liquidity/liquidityAudit";
 import { writeBaseline as writeStrategyBaseline, checkStrategyIntegrity } from "../qa/strategyIntegrity";
 import { getMarketNews } from "../news/news";
+import { buildPremarketOverview } from "../sentiment/overview";
+import { todaySnapshots } from "../sentiment/snapshotStore";
+import { getMarketDataHealth } from "../sentiment/marketDataProvider";
 import fs from "fs";
 import path from "path";
 import {
@@ -7219,6 +7222,30 @@ router.get("/news", async (req: Request, res: Response) => {
   } catch (e: any) {
     res.status(502).json({ error: e?.message || "Failed to fetch news." });
   }
+});
+
+// ===================== 09:10 Market & Global Sentiment desk (READ-ONLY) =====================
+// Market-context intelligence only — it never trades, never emits CE/PE orders,
+// and never touches the Market Command gates. Live feeds (indices/VIX/macro) come
+// from the existing Dhan provider + the pluggable external provider; sentiment is
+// assembled per request (the 30-min snapshot is stored inside). Every value is
+// real-or-DATA-UNAVAILABLE; the API key is never returned to the browser.
+router.get("/premarket/overview", async (_req: Request, res: Response) => {
+  try {
+    const data = await buildPremarketOverview();
+    res.json(data);
+  } catch (e: any) {
+    res.json({ available: false, error: e?.message || "overview failed" });
+  }
+});
+router.get("/premarket/timeline", async (_req: Request, res: Response) => {
+  try { res.json({ slots: todaySnapshots() }); }
+  catch (e: any) { res.json({ slots: [], error: e?.message || "timeline failed" }); }
+});
+// Provider health for the "External Data Status" pill — NEVER includes the key.
+router.get("/premarket/health", async (_req: Request, res: Response) => {
+  try { res.json(await getMarketDataHealth()); }
+  catch (e: any) { res.json({ provider: null, configured: false, status: "ERROR", lastError: e?.message || "health failed" }); }
 });
 
 // Best trade RIGHT NOW on the 15-min model (the top safety-gated option play).

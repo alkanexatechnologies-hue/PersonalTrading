@@ -1924,6 +1924,9 @@ function switchTab(name) {
     const teResize = () => { const c = teEl("te-chart"); if (TE.chart && c) TE.chart.applyOptions({ width: c.clientWidth, height: c.clientHeight || 520 }); };
     requestAnimationFrame(teResize); setTimeout(teResize, 80); setTimeout(teResize, 300); setTimeout(teResize, 700);
   }
+  // 09:10 Market & Global Sentiment — read-only intelligence desk (full-width).
+  document.body.classList.toggle("pm-fullwidth", name === "premarket");
+  if (name === "premarket") { if (typeof initPremarket === "function") initPremarket(); if (typeof startPremarketLive === "function") startPremarketLive(); }
   if (name === "bullrank" && !state.bullRankLoaded) { state.bullRankLoaded = true; loadBullRank(); }
   if (name === "stockoptions" && !state.stockOptionsInit) { state.stockOptionsInit = true; initStockOptions(); }
 
@@ -7370,6 +7373,251 @@ function startIndexNewsLive() {
     const pn = document.getElementById("panel-marketcommand");
     if (pn && pn.classList.contains("active")) loadIndexNews();
   }, 120000);
+}
+
+// ============================ 09:10 Market & Global Sentiment (read-only) ============================
+// Renders /api/premarket/overview into the institutional intelligence dashboard.
+// Market-context only — it never trades. Every value shows its own freshness;
+// missing data renders as DATA UNAVAILABLE (never faked). The layout is the 1:1
+// master composition; CSS reflows it for tablet / laptop / TV / mobile.
+const PM = { built: false, liveTimer: null, data: null, health: null };
+
+function pmEl(id) { return document.getElementById(id); }
+function pmNum(v, dec) { if (v == null || !isFinite(v)) return "—"; return Number(v).toLocaleString("en-IN", { minimumFractionDigits: dec || 0, maximumFractionDigits: dec || 0 }); }
+function pmPct(v) { if (v == null || !isFinite(v)) return ""; return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`; }
+function pmCls(v) { return v == null ? "neu" : v > 0 ? "up" : v < 0 ? "dn" : "neu"; }
+function pmEsc(s) { return String(s == null ? "" : s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+function pmFreshBadge(f) {
+  const map = { LIVE: "live", DELAYED: "dly", STALE: "stale", CLOSED: "closed", DISCONNECTED: "disc", UNAVAILABLE: "na" };
+  const txt = f === "UNAVAILABLE" ? "DATA UNAVAILABLE" : f || "—";
+  return `<span class="pm-fr ${map[f] || "na"}">${txt}</span>`;
+}
+function pmBias(b) { return `<span class="pm-bias ${(b || "NEUTRAL").toLowerCase()}">${b || "—"}</span>`; }
+
+function initPremarket() {
+  if (PM.built) return;
+  const root = pmEl("pm-root"); if (!root) return;
+  root.innerHTML = `
+  <div class="pm-wrap">
+    <div class="pm-top">
+      <div class="pm-brand"><div class="pm-logo">◎</div><div><h1>09:10 Market &amp; Global Sentiment</h1><p>Pre-Market Intelligence · Global &amp; Indian Market Context</p></div></div>
+      <div class="pm-nav">
+        <button class="on"><span class="ico">📊</span>09:10 Sentiment</button>
+        <button data-pm-go="marketcommand"><span class="ico">⚡</span>Market Command</button>
+        <button data-pm-go="tradeexec"><span class="ico">🧾</span>Trade Execution</button>
+        <button data-pm-go="optionterminal"><span class="ico">📈</span>Option Chain</button>
+        <button data-pm-go="aipanalysis"><span class="ico">📉</span>Market Analysis</button>
+        <button data-pm-go="dhanbacktest"><span class="ico">🧪</span>Backtest</button>
+      </div>
+      <div class="pm-live"><span class="pm-livebadge" id="pm-livebadge">● —</span><span class="pm-t" id="pm-clock">—</span><span class="pm-d" id="pm-date">—</span></div>
+    </div>
+    <div class="pm-substrip">
+      <span id="pm-updated" class="pm-upd">Last Update: — · Next Sentiment Update: —</span>
+      <span class="pm-extstatus" id="pm-extstatus">External Data: —</span>
+    </div>
+    <div class="pm-strip" id="pm-strip"></div>
+    <div class="pm-grid">
+      <section class="pm-panel a-s"><div class="pm-ph"><span class="pm-num">1</span><h2>Overall Market Sentiment</h2><span class="pm-sub">(Pre-Market)</span><span class="pm-r" id="pm-sent-fr"></span></div><div id="pm-sentiment"></div></section>
+      <section class="pm-panel a-p"><div class="pm-ph"><span class="pm-num">2</span><h2>Index Direction Probability</h2><span class="pm-sub">(Next Session)</span></div><div class="pm-prob-wrap" id="pm-prob"></div></section>
+      <section class="pm-panel a-e"><div class="pm-ph"><span class="pm-num">3</span><h2>India Market Sector Analysis</h2><span class="pm-r" id="pm-sector-fr"></span></div><div class="pm-scroll"><table id="pm-sector"></table></div><div class="pm-note" id="pm-sector-note"></div></section>
+      <section class="pm-panel a-f"><div class="pm-ph"><span class="pm-num">4</span><h2>FII Positioning — Index Futures</h2><span class="pm-r" id="pm-fii-fr"></span></div><div id="pm-fii"></div></section>
+      <section class="pm-panel a-b"><div class="pm-ph"><span class="pm-num">5</span><h2>Bank Leaders</h2><span class="pm-sub">High NIFTY Impact</span><span class="pm-r" id="pm-bank-fr"></span></div><div id="pm-banks"></div></section>
+      <section class="pm-panel a-m"><div class="pm-ph"><span class="pm-num">6</span><h2>Top Index Movers</h2><span class="pm-r" id="pm-mv-fr"></span></div><div id="pm-movers"></div></section>
+      <section class="pm-panel a-n"><div class="pm-ph"><span class="pm-num">9</span><h2>Market News Flash</h2><span class="pm-sub">⚡ Auto</span><span class="pm-r" id="pm-news-fr"></span></div><div class="pm-news" id="pm-news"></div></section>
+      <section class="pm-panel a-g"><div class="pm-ph"><span class="pm-num">7</span><h2>Global Market Sentiment</h2><span class="pm-r" id="pm-global-fr"></span></div><div id="pm-global"></div></section>
+      <section class="pm-panel a-c"><div class="pm-ph"><span class="pm-num">8</span><h2>Macro &amp; Risk</h2><span class="pm-sub">(Live)</span><span class="pm-r" id="pm-macro-fr"></span></div><div class="pm-mac-grid" id="pm-macro"></div></section>
+      <section class="pm-panel a-t"><div class="pm-ph"><span class="pm-num">10</span><h2>Sentiment Timeline</h2><span class="pm-sub">(30-min snapshots)</span></div><div class="pm-tl" id="pm-timeline"></div><button class="pm-cta" data-pm-go="marketcommand">Open Market Command →<small>Go to Trading Decision Desk</small></button></section>
+    </div>
+  </div>`;
+  root.querySelectorAll("[data-pm-go]").forEach((b) => b.addEventListener("click", () => { const t = b.getAttribute("data-pm-go"); if (typeof switchTab === "function") switchTab(t); }));
+  PM.built = true;
+  loadPremarket();
+}
+
+function startPremarketLive() {
+  if (PM.liveTimer) return;
+  const tick = () => { const pn = pmEl("panel-premarket"); if (pn && pn.classList.contains("active")) loadPremarket(); pmClock(); };
+  pmClock();
+  PM.liveTimer = setInterval(tick, 20000); // live feeds; server caches external calls (rate-limit safe)
+}
+function pmClock() {
+  const now = new Date();
+  const t = now.toLocaleTimeString("en-IN", { hour12: false, timeZone: "Asia/Kolkata" });
+  const d = now.toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
+  const c = pmEl("pm-clock"), dd = pmEl("pm-date"); if (c) c.textContent = t + " IST"; if (dd) dd.textContent = d;
+}
+
+async function loadPremarket() {
+  try {
+    const [d, h] = await Promise.all([
+      fetch("/api/premarket/overview").then((r) => r.json()).catch(() => null),
+      fetch("/api/premarket/health").then((r) => r.json()).catch(() => null),
+    ]);
+    if (d && !d.error) { PM.data = d; renderPremarket(d); }
+    if (h) { PM.health = h; renderPMExtStatus(h); }
+    renderPMTimeline();
+  } catch (e) { /* keep last render */ }
+}
+
+function renderPremarket(d) {
+  // header LIVE badge
+  const lb = pmEl("pm-livebadge");
+  if (lb) { lb.textContent = d.marketOpen ? "● LIVE" : "● CLOSED"; lb.className = "pm-livebadge " + (d.marketOpen ? "on" : "off"); }
+  const upd = pmEl("pm-updated");
+  if (upd) upd.textContent = `Last Update: ${d.slot} · Next Sentiment Update: ${pmNextSlot(d.slot)}`;
+  renderPMStrip(d.strip);
+  renderPMSentiment(d.overall);
+  renderPMProbability(d.probability);
+  renderPMSector(d.sectors);
+  renderPMFii(d.fii);
+  renderPMBanks(d.banks);
+  renderPMMovers(d.movers);
+  renderPMGlobal(d.global);
+  renderPMMacro(d.macro);
+  renderPMNews(d.news);
+}
+function pmNextSlot(slot) {
+  const S = ["09:10","09:40","10:10","10:40","11:10","11:40","12:10","12:40","13:10","13:40","14:10","14:40","15:10"];
+  const i = S.indexOf(slot); return i >= 0 && i < S.length - 1 ? S[i + 1] : "—";
+}
+
+function renderPMStrip(strip) {
+  const box = pmEl("pm-strip"); if (!box || !Array.isArray(strip)) return;
+  box.innerHTML = strip.map((q) => {
+    const na = q.value == null;
+    const cls = pmCls(q.changePct);
+    const tm = q.ts ? new Date(q.ts * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" }) : "";
+    return `<div class="pm-ix ${na ? "pm-ix-na" : ""}"><div class="pm-ix-n">${pmEsc(q.label)}</div>
+      <div class="pm-ix-v">${na ? "—" : pmNum(q.value, q.value < 100 ? 2 : 2)}</div>
+      <div class="pm-ix-c ${cls}">${na ? "" : (pmNum(q.change, 2) + " · " + pmPct(q.changePct))}</div>
+      <div class="pm-ix-f">${tm ? tm + " " : ""}${pmFreshBadge(q.freshness)}</div></div>`;
+  }).join("");
+}
+
+function renderPMSentiment(o) {
+  if (!o) return;
+  const fr = pmEl("pm-sent-fr"); if (fr) fr.innerHTML = pmFreshBadge(o.freshness);
+  const box = pmEl("pm-sentiment"); if (!box) return;
+  const breadthTot = (o.breadthUp + o.breadthDown + o.breadthNeutral) || 1;
+  box.innerHTML = `
+    <div class="pm-sent-grid">
+      <div class="pm-tile"><div class="pm-k">Market Bias</div><div class="pm-big">${pmBias(o.bias)}</div></div>
+      <div class="pm-tile"><div class="pm-k">Confidence</div><div class="pm-big" style="color:#7fb0ff">${o.confidence != null ? o.confidence + "%" : "—"}</div></div>
+      <div class="pm-tile"><div class="pm-k">Est. NIFTY Move</div><div class="pm-big ${o.bias === "BEARISH" ? "dn" : o.bias === "BULLISH" ? "up" : "neu"}">${o.estNiftyMove || "—"}</div></div>
+      <div class="pm-tile"><div class="pm-k">Sector Breadth</div><div class="pm-breadth"><span class="up">${o.breadthUp}</span><span class="dn">${o.breadthDown}</span><span class="neu">${o.breadthNeutral}</span></div><div class="pm-bbar"><span style="flex:${o.breadthUp};background:#22c785"></span><span style="flex:${o.breadthDown};background:#ef4757"></span><span style="flex:${Math.max(0.001,o.breadthNeutral)};background:#5f6f8e"></span></div><div class="pm-k">UP · DOWN · NEU</div></div>
+      <div class="pm-tile"><div class="pm-k">Banking Bias</div><div class="pm-big">${pmBias(o.bankingBias)}</div></div>
+      <div class="pm-tile"><div class="pm-k">Global Sentiment</div><div class="pm-big">${pmBias(o.globalBias)}</div></div>
+      <div class="pm-tile"><div class="pm-k">Risk Level</div><div class="pm-big ${o.riskLevel === "HIGH" ? "dn" : o.riskLevel === "LOW" ? "up" : "neu"}">${o.riskLevel || "—"}</div></div>
+    </div>
+    <div class="pm-factors">
+      <div class="pm-fcol"><div class="pm-fh up">Top Positive Factors</div>${(o.positives || []).length ? o.positives.map((p) => `<div class="pm-fitem">▲ ${pmEsc(p)}</div>`).join("") : '<div class="pm-fitem mut">—</div>'}</div>
+      <div class="pm-fcol"><div class="pm-fh dn">Top Negative Factors</div>${(o.negatives || []).length ? o.negatives.map((p) => `<div class="pm-fitem">▼ ${pmEsc(p)}</div>`).join("") : '<div class="pm-fitem mut">—</div>'}</div>
+    </div>`;
+}
+
+function renderPMProbability(probs) {
+  const box = pmEl("pm-prob"); if (!box || !Array.isArray(probs)) return;
+  box.innerHTML = probs.map((p) => {
+    if (!p.available) return `<div class="pm-prob"><div class="pm-prob-ttl">${pmEsc(p.index)}</div><div class="pm-na">${pmEsc(p.note)}</div></div>`;
+    const c = `conic-gradient(#ef4757 0 ${p.downside}%,#f2b03a ${p.downside}% ${p.downside + p.range}%,#22c785 ${p.downside + p.range}% 100%)`;
+    return `<div class="pm-prob"><div class="pm-prob-ttl">${pmEsc(p.index)} ${pmBias(p.bias)}</div>
+      <div class="pm-don" style="background:${c}"></div>
+      <div class="pm-arc"><div class="pm-seg"><span class="pm-pctv dn">${p.downside}%</span><span class="pm-lbl">Downside</span></div>
+        <div class="pm-seg"><span class="pm-pctv neu">${p.range}%</span><span class="pm-lbl">Range</span></div>
+        <div class="pm-seg"><span class="pm-pctv up">${p.upside}%</span><span class="pm-lbl">Upside</span></div></div>
+      <div class="pm-em">Expected ${p.expectedLow != null ? `<b>${pmNum(p.expectedLow)}–${pmNum(p.expectedHigh)}</b>` : "—"} · Conf <b>${p.confidence || "—"}</b></div></div>`;
+  }).join("");
+}
+
+function pmDirCell(d) { return d === "UP" ? '<span class="up">▲ UP</span>' : d === "DOWN" ? '<span class="dn">▼ DOWN</span>' : '<span class="neu">■ NEUTRAL</span>'; }
+function pmStrengthPill(s) { const m = { STRONG: "strong", MODERATE: "mod", WEAK: "weak" }; return s ? `<span class="pm-pill ${m[s] || "neu"}">${s}</span>` : "—"; }
+
+function renderPMSector(sec) {
+  const fr = pmEl("pm-sector-fr"); if (fr) fr.innerHTML = pmFreshBadge(sec.freshness);
+  const note = pmEl("pm-sector-note"); if (note) note.textContent = sec.note || "";
+  const t = pmEl("pm-sector"); if (!t) return;
+  if (!sec.rows || !sec.rows.length) { t.innerHTML = `<tbody><tr><td class="pm-na">DATA UNAVAILABLE</td></tr></tbody>`; return; }
+  t.innerHTML = `<thead><tr><th>Sector</th><th>Dir</th><th class="num">% Move</th><th class="num">Weight</th><th class="num">Est Impact</th><th>Strength</th><th>Key Stocks</th></tr></thead><tbody>` +
+    sec.rows.map((r) => `<tr><td><b>${pmEsc(r.sector)}</b></td><td>${pmDirCell(r.direction)}</td><td class="num ${pmCls(r.pctMove)}">${pmPct(r.pctMove)}</td><td class="num">${r.weight != null ? r.weight + "%" : "—"}</td><td class="num ${pmCls(r.estImpact)}">${r.estImpact != null ? (r.estImpact >= 0 ? "+" : "") + pmNum(r.estImpact, 1) : "—"}</td><td>${pmStrengthPill(r.strength)}</td><td class="mut">${pmEsc((r.keyStocks || []).join(", "))}</td></tr>`).join("") + `</tbody>`;
+}
+
+function renderPMBanks(b) {
+  const fr = pmEl("pm-bank-fr"); if (fr) fr.innerHTML = pmFreshBadge(b.freshness);
+  const box = pmEl("pm-banks"); if (!box) return;
+  if (!b.rows || b.rows.every((r) => r.freshness === "UNAVAILABLE")) { box.innerHTML = `<div class="pm-na">DATA UNAVAILABLE</div>`; return; }
+  box.innerHTML = `<div class="pm-scroll"><table><thead><tr><th>Stock</th><th class="num">Price</th><th class="num">% Move</th><th class="num">Wt</th><th class="num">Pts/1%</th><th class="num">Contrib</th></tr></thead><tbody>` +
+    b.rows.map((r) => `<tr><td><b>${pmEsc(r.stock)}</b> <span class="${pmCls(r.pctMove)}">${r.direction === "UP" ? "▲" : r.direction === "DOWN" ? "▼" : ""}</span></td><td class="num">${pmNum(r.price, 2)}</td><td class="num ${pmCls(r.pctMove)}">${pmPct(r.pctMove)}</td><td class="num">${r.weight != null ? r.weight : "—"}</td><td class="num">${r.ptsPer1pct != null ? pmNum(r.ptsPer1pct, 1) : "—"}</td><td class="num ${pmCls(r.estContribution)}">${r.estContribution != null ? (r.estContribution >= 0 ? "+" : "") + pmNum(r.estContribution, 1) : "—"}</td></tr>`).join("") + `</tbody></table></div>
+    <div class="pm-subrow"><div class="pm-box"><div class="pm-k">Net Banking Impact</div><div class="pm-v ${pmCls(b.netImpact)}">${b.netImpact != null ? (b.netImpact >= 0 ? "+" : "") + pmNum(b.netImpact, 1) + " pts" : "—"}</div></div><div class="pm-box"><div class="pm-k">Banking Bias</div><div class="pm-v">${pmBias(b.bias)}</div></div></div>
+    <div class="pm-note">${pmEsc(b.note || "")}</div>`;
+}
+
+function renderPMMovers(m) {
+  const fr = pmEl("pm-mv-fr"); if (fr) fr.innerHTML = pmFreshBadge(m.freshness);
+  const box = pmEl("pm-movers"); if (!box) return;
+  const tbl = (rows, cls) => rows.length ? `<table><thead><tr><th>Stock</th><th class="num">Price</th><th class="num">%Chg</th><th class="num">Impact</th></tr></thead><tbody>` +
+    rows.map((r) => `<tr><td><b>${pmEsc(r.stock)}</b></td><td class="num">${pmNum(r.price, 2)}</td><td class="num ${cls}">${pmPct(r.changePct)}</td><td class="num ${cls}">${r.estImpact != null ? (r.estImpact >= 0 ? "+" : "") + pmNum(r.estImpact, 1) : "—"}</td></tr>`).join("") + `</tbody></table>` : `<div class="pm-na">—</div>`;
+  if ((!m.gainers || !m.gainers.length) && (!m.losers || !m.losers.length)) { box.innerHTML = `<div class="pm-na">DATA UNAVAILABLE</div>`; return; }
+  box.innerHTML = `<div class="pm-mv-cols"><div><div class="pm-mv-hd g">▲ Top Gainers</div><div class="pm-scroll">${tbl(m.gainers || [], "up")}</div></div><div><div class="pm-mv-hd l">▼ Top Losers</div><div class="pm-scroll">${tbl(m.losers || [], "dn")}</div></div></div><div class="pm-note">${pmEsc(m.note || "")}</div>`;
+}
+
+function renderPMFii(f) {
+  const fr = pmEl("pm-fii-fr"); if (fr) fr.innerHTML = pmFreshBadge(f.freshness);
+  const box = pmEl("pm-fii"); if (!box) return;
+  if (!f.available) { box.innerHTML = `<div class="pm-na">FII FUTURES — DATA UNAVAILABLE</div><div class="pm-note">${pmEsc(f.note || "")}</div>`; return; }
+  const rowsHtml = f.rows.slice(0, 8).map((r) => `<tr><td>${pmEsc(r.date)}</td><td class="num">${pmNum(r.longQty)}</td><td class="num">${pmNum(r.shortQty)}</td><td class="num ${pmCls(r.netPos)}">${r.netPos != null ? (r.netPos >= 0 ? "+" : "") + pmNum(r.netPos) : "—"}</td><td class="num ${pmCls(r.dailyChange)}">${r.dailyChange != null ? (r.dailyChange >= 0 ? "+" : "") + pmNum(r.dailyChange) : "—"}</td><td>${pmFiiPill(r.positionType)}</td></tr>`).join("");
+  box.innerHTML = `<div class="pm-scroll"><table><thead><tr><th>Date</th><th class="num">Long</th><th class="num">Short</th><th class="num">Net</th><th class="num">Δ Day</th><th>Type</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>
+    <div class="pm-fii-anal"><div><div class="pm-k">What are FIIs doing?</div><div class="pm-v ${f.behaviour && /SHORT BUILD|LONG UNW/.test(f.behaviour) ? "dn" : "up"}">${f.behaviour || "—"}</div></div>
+      <div><div class="pm-k">Directional Pressure</div><div class="pm-v ${f.pressure === "DOWNWARD" ? "dn" : f.pressure === "UPWARD" ? "up" : "neu"}">${f.pressure || "—"}</div></div>
+      <div><div class="pm-k">Current Net</div><div class="pm-v ${pmCls(f.currentNet)}">${f.currentNet != null ? (f.currentNet >= 0 ? "+" : "") + pmNum(f.currentNet) : "—"}</div></div>
+      <div><div class="pm-k">Bias</div><div class="pm-v">${pmBias(f.bias)}</div></div></div>
+    <div class="pm-note">${pmEsc(f.note || "")}</div>`;
+}
+function pmFiiPill(t) { if (!t) return "—"; const cls = /LONG BUILD/.test(t) ? "strong" : /SHORT COV/.test(t) ? "mod" : /NEUTRAL/.test(t) ? "neu" : "weak"; return `<span class="pm-pill ${cls}">${t}</span>`; }
+
+function renderPMGlobal(g) {
+  const fr = pmEl("pm-global-fr"); if (fr) fr.innerHTML = pmFreshBadge(g.freshness);
+  const box = pmEl("pm-global"); if (!box) return;
+  const cell = (q) => `<div class="pm-gl ${q.value == null ? "pm-gl-na" : ""}"><div class="pm-n">${pmEsc(q.label)}</div><div class="pm-v">${q.value == null ? "—" : pmNum(q.value, 2)}</div><div class="pm-c ${pmCls(q.changePct)}">${q.value == null ? pmFreshBadge(q.freshness) : pmPct(q.changePct)}</div></div>`;
+  const grp = (arr, name) => `<div class="pm-gl-grp"><div class="pm-gl-h">${name} ${pmBias(g.bias)}</div><div class="pm-gl-grid">${arr.map(cell).join("")}</div></div>`;
+  box.innerHTML = grp(g.us || [], "US") + grp(g.asia || [], "Asia") + grp(g.europe || [], "Europe");
+}
+
+function renderPMMacro(macro) {
+  const fr = pmEl("pm-macro-fr"); if (fr) fr.innerHTML = pmFreshBadge(macro && macro.some((q) => q.freshness === "LIVE") ? "LIVE" : (macro && macro[0] && macro[0].freshness) || "—");
+  const box = pmEl("pm-macro"); if (!box || !Array.isArray(macro)) return;
+  box.innerHTML = macro.map((q) => `<div class="pm-mac ${q.value == null ? "pm-gl-na" : ""}"><div class="pm-k">${pmEsc(q.label)}</div><div class="pm-v2">${q.value == null ? "—" : pmNum(q.value, 2)}</div><div class="pm-c ${pmCls(q.changePct)}">${q.value == null ? pmFreshBadge(q.freshness) : pmPct(q.changePct)}</div><div class="pm-src">${q.source ? pmEsc(q.source) : ""}</div></div>`).join("");
+}
+
+function renderPMNews(n) {
+  const fr = pmEl("pm-news-fr"); if (fr) fr.innerHTML = pmFreshBadge(n.freshness);
+  const box = pmEl("pm-news"); if (!box) return;
+  if (!n.items || !n.items.length) { box.innerHTML = `<div class="pm-na">DATA UNAVAILABLE</div>`; return; }
+  box.innerHTML = n.items.map((it) => `<a class="pm-nrow" href="${pmEsc(it.link || "#")}" target="_blank" rel="noopener"><span class="pm-tm">${pmEsc(it.time)}</span><span class="pm-imp ${it.impact}">${it.impact}</span><span class="pm-nti"><span class="pm-tag">${pmEsc(it.category)}</span>${pmEsc(it.title)}</span><span class="pm-src2">${pmEsc(it.source)}</span></a>`).join("");
+}
+
+async function renderPMTimeline() {
+  const box = pmEl("pm-timeline"); if (!box) return;
+  let slots = [];
+  try { const r = await fetch("/api/premarket/timeline").then((x) => x.json()); slots = r.slots || []; } catch { /* keep */ }
+  const S = ["09:10","09:40","10:10","10:40","11:10","11:40","12:10","12:40","13:10","13:40","14:10","14:40","15:10"];
+  const byslot = {}; slots.forEach((s) => byslot[s.slot] = s);
+  const curSlot = PM.data && PM.data.slot;
+  box.innerHTML = S.map((t, i) => {
+    const s = byslot[t]; const now = t === curSlot;
+    const bias = s ? s.overall : null;
+    const col = bias === "BULLISH" ? "#22c785" : bias === "BEARISH" ? "#ef4757" : bias === "MIXED" ? "#f2b03a" : "#33415a";
+    return `${i ? '<span class="pm-ln"></span>' : ""}<span class="pm-dot ${now ? "now" : ""}"><span class="pm-c" style="background:${col}"></span><span class="pm-lb">${t}</span>${bias ? `<span class="pm-lb2" style="color:${col}">${bias.slice(0,4)}</span>` : ""}</span>`;
+  }).join("");
+}
+
+function renderPMExtStatus(h) {
+  const el0 = pmEl("pm-extstatus"); if (!el0) return;
+  let label = "DISCONNECTED", cls = "disc";
+  if (!h || h.status === "NOT_CONFIGURED" || h.configured === false) { label = "NOT CONFIGURED"; cls = "na"; }
+  else if (h.status === "LIVE") { label = "CONNECTED"; cls = "live"; }
+  else if (h.status === "ERROR") { label = "DEGRADED"; cls = "dly"; }
+  const last = h && h.lastSuccessAt ? new Date(h.lastSuccessAt * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" }) : "—";
+  el0.innerHTML = `External Data (${pmEsc((h && h.provider) || "—")}): <span class="pm-fr ${cls}">${label}</span> <span class="mut">last ok ${last}</span>`;
 }
 
 // ===================== ADDITIVE: Multi-Timeframe Fake Move panel =====================

@@ -481,6 +481,7 @@
 
           <button class="tab grp-swing" data-tab="movetiming" data-group="swing">Move Timing</button>
           <button class="tab" data-tab="dhanbacktest" data-group="dhanbacktest">🧪 Backtest (Dhan)</button>
+          <button class="tab tab-primary" data-tab="premarket" data-group="marketcommand">📊 09:10 Sentiment</button>
           <button class="tab tab-primary" data-tab="marketcommand" data-group="marketcommand">⚡ Market Command</button>
           <button class="tab tab-primary" data-tab="optionterminal" data-group="marketcommand">📈 Option Terminal</button>
           <button class="tab tab-primary" data-tab="tradeexec" data-group="marketcommand">🧾 Trade Execution</button>
@@ -1258,6 +1259,15 @@
             <div id="ls-movers-list" class="otp-cand-grid"><div class="otp-empty">Not scanned yet.</div></div>
           </div>
         </div><!-- /panel-liquiditystatus -->
+
+        <!-- ============= TAB: 09:10 Market & Global Sentiment (read-only intelligence) ============= -->
+        <!-- Market-context desk only: no trades, no CE/PE orders, no gates. The whole
+             body is rendered by the PM module in app.js from /api/premarket/overview. -->
+        <div class="tab-panel" id="panel-premarket">
+          <div class="pm-root" id="pm-root">
+            <div class="pm-boot">Loading 09:10 Market &amp; Global Sentiment…</div>
+          </div>
+        </div>
 
         <!-- ================= TAB: Market Command (live Order Block trading screen) ================= -->
         <div class="tab-panel" id="panel-marketcommand">
