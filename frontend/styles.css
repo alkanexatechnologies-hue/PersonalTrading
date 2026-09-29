@@ -5187,3 +5187,35 @@ body.pm-fullwidth #tab-flow { display:none !important; }
     grid-template-areas:"s" "p" "f" "e" "b" "m" "g" "c" "n" "t";}
 }
 @media (max-width:430px){ .pm-strip{grid-template-columns:repeat(2,1fr)} }
+
+/* ---- ORB (Opening Range Breakout) Test Zone card ---- */
+.orb-card { border:1px solid rgba(56,189,248,0.28); }
+.orb-hd { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.orb-hd h5 { margin:0; }
+.orb-flags { font-size:11px; color:#8395b3; }
+.orb-flags b { font-weight:800; } .orb-flags .ok { color:#22c785; } .orb-flags .blocked { color:#ef4757; }
+.orb-sym { background:#0f1626; color:#e6ecf5; border:1px solid #24314f; border-radius:6px; padding:4px 8px; font-size:12px; margin-left:auto; }
+.orb-grid { margin-top:8px; display:flex; flex-direction:column; gap:8px; }
+.orb-top, .orb-levels { display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
+.orb-levels { grid-template-columns:repeat(5,1fr); }
+.orb-or, .orb-levels > div { background:#0f1626; border:1px solid #1b2540; border-radius:8px; padding:6px 8px; text-align:center; min-width:0; }
+.orb-or span, .orb-levels span { display:block; font-size:8.5px; color:#5f6f8e; text-transform:uppercase; letter-spacing:.3px; }
+.orb-or b, .orb-levels b { font-size:13px; font-weight:800; font-variant-numeric:tabular-nums; }
+.orb-or b.ok, .orb-levels b.ok { color:#22c785; } .orb-or b.blocked, .orb-levels b.blocked { color:#ef4757; }
+.orb-gates { display:grid; grid-template-columns:repeat(9,1fr); gap:6px; }
+.orb-gate { background:#0f1626; border:1px solid #1b2540; border-radius:8px; padding:6px 4px; text-align:center; }
+.orb-gate span { display:block; font-size:8px; color:#5f6f8e; text-transform:uppercase; letter-spacing:.2px; }
+.orb-gate b { font-size:11px; font-weight:800; }
+.orb-gate.orb-pass { border-color:rgba(34,199,133,.4); } .orb-gate.orb-pass b { color:#22c785; }
+.orb-gate.orb-fail { border-color:rgba(239,71,87,.4); } .orb-gate.orb-fail b { color:#ef4757; }
+.orb-gate.orb-na b { color:#8395b3; }
+.orb-final { text-align:center; font-size:16px; font-weight:800; padding:9px; border-radius:9px; display:flex; flex-direction:column; gap:3px; }
+.orb-final .orb-reason { font-size:10px; font-weight:500; opacity:.85; }
+.orb-final.orb-ce { background:rgba(34,199,133,.14); color:#22c785; }
+.orb-final.orb-pe { background:rgba(239,71,87,.14); color:#ef4757; }
+.orb-final.orb-wait { background:rgba(242,176,58,.12); color:#f2b03a; }
+.orb-final.orb-noedge { background:rgba(131,149,179,.14); color:#8395b3; }
+.orb-codes { display:flex; flex-wrap:wrap; gap:5px; }
+.orb-code { font-size:9px; font-weight:800; letter-spacing:.3px; background:rgba(239,71,87,.12); color:#ef8a97; padding:2px 6px; border-radius:5px; }
+@media (max-width:900px){ .orb-top, .orb-gates, .orb-levels { grid-template-columns:repeat(3,1fr); } }
+@media (max-width:520px){ .orb-top, .orb-gates, .orb-levels { grid-template-columns:repeat(2,1fr); } }

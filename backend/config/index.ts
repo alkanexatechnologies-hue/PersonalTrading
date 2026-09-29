@@ -230,6 +230,14 @@ export const CONFIG = {
     const v = String(process.env.ENABLE_MTF_FAKE_MOVE_CHART ?? "").trim().toLowerCase();
     return v !== "0" && v !== "false" && v !== "off" && v !== "no";
   })(),
+  // ORB (Opening Range Breakout) strategy — Test Zone / Strategy Lab ONLY. It is a
+  // read-only, paper/advisory strategy that hands off to the existing Master /
+  // Risk / Paper engines and NEVER places a live order. Default: test mode ON,
+  // live execution OFF (safe). Overridable via env for future rollout.
+  orb: {
+    testMode: String(process.env.ORB_TEST_MODE ?? "on").trim().toLowerCase() !== "off",
+    liveExecution: String(process.env.ORB_LIVE_EXECUTION ?? "off").trim().toLowerCase() === "on",
+  },
 };
 
 /**

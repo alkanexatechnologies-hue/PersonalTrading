@@ -14032,7 +14032,61 @@ function initStrategyLab() {
   wire("msl-run-false", () => mslRun({ kinds: ["FALSE_SETUP"] }, "FALSE SETUP TESTS"));
   wire("msl-clear", mslClearResults);
   wire("msl-modal-close", () => el("msl-modal")?.classList.add("hidden"));
+  wire("orb-refresh", loadOrbStrategy);
+  const orbSym = el("orb-sym");
+  if (orbSym && !orbSym.dataset.wired) { orbSym.dataset.wired = "1"; orbSym.addEventListener("change", loadOrbStrategy); }
   loadStrategyLab();
+  loadOrbStrategy();
+}
+
+// ---- ORB (Opening Range Breakout) Test Zone card ----
+async function loadOrbStrategy() {
+  const grid = el("orb-grid"); if (!grid) return;
+  const sym = (el("orb-sym") && el("orb-sym").value) || "^NSEI";
+  try {
+    const d = await fetch(`/api/orb-strategy?symbol=${encodeURIComponent(sym)}`).then((r) => r.json());
+    renderOrbStrategy(d);
+  } catch (e) { grid.innerHTML = `<div class="wl-sub">ORB load error: ${e.message}</div>`; }
+}
+function renderOrbStrategy(d) {
+  const grid = el("orb-grid"); if (!grid) return;
+  const fl = el("orb-flags");
+  if (fl && d.flags) fl.innerHTML = `TEST_MODE <b class="${d.flags.testMode ? "ok" : "blocked"}">${d.flags.testMode ? "ON" : "OFF"}</b> · LIVE_EXEC <b class="${d.flags.liveExecution ? "blocked" : "ok"}">${d.flags.liveExecution ? "ON" : "OFF"}</b>`;
+  if (!d || !d.available || !d.evaluation) {
+    grid.innerHTML = `<div class="orb-final orb-wait">${(d && (d.message || d.reason)) || "ORB data unavailable"}</div>`;
+    return;
+  }
+  const e = d.evaluation, lv = e.levels;
+  const gate = (label, state) => {
+    const cls = state === "PASS" ? "orb-pass" : state === "FAIL" ? "orb-fail" : "orb-na";
+    return `<div class="orb-gate ${cls}"><span>${label}</span><b>${state}</b></div>`;
+  };
+  const finalCls = e.final === "TAKE CE" ? "orb-ce" : e.final === "TAKE PE" ? "orb-pe" : e.final === "NO EDGE" ? "orb-noedge" : "orb-wait";
+  const dirCls = e.direction === "BULLISH" ? "ok" : e.direction === "BEARISH" ? "blocked" : "";
+  const num = (v, dec) => v == null ? "—" : Number(v).toLocaleString("en-IN", { minimumFractionDigits: dec || 0, maximumFractionDigits: dec || 0 });
+  grid.innerHTML = `
+    <div class="orb-top">
+      <div class="orb-or"><span>ORB HIGH</span><b>${num(e.orHigh, 2)}</b></div>
+      <div class="orb-or"><span>ORB LOW</span><b>${num(e.orLow, 2)}</b></div>
+      <div class="orb-or"><span>ORB RANGE</span><b>${num(e.orRange, 2)}</b></div>
+      <div class="orb-or"><span>OR MID</span><b>${num(e.orMid, 2)}</b></div>
+      <div class="orb-or"><span>PRICE</span><b>${num(d.price, 2)}</b></div>
+      <div class="orb-or"><span>DIRECTION</span><b class="${dirCls}">${e.direction}</b></div>
+      <div class="orb-or"><span>STATUS</span><b>${e.status}</b></div>
+    </div>
+    <div class="orb-gates">
+      ${gate("VOLUME", e.gates.volume)}${gate("VWAP", e.gates.vwap)}${gate("EMA", e.gates.ema)}${gate("STRUCTURE", e.gates.structure)}
+      ${gate("LIQUIDITY", e.gates.liquidity)}${gate("OI", e.gates.oi)}${gate("ROOM", e.gates.room)}${gate("R:R", e.gates.rr)}${gate("MASTER", e.gates.master)}
+    </div>
+    <div class="orb-levels">
+      <div><span>ENTRY</span><b>${num(lv.entry, 2)}</b></div>
+      <div><span>SL</span><b class="blocked">${num(lv.sl, 2)}</b></div>
+      <div><span>TARGET</span><b class="ok">${num(lv.target, 2)}</b></div>
+      <div><span>R:R</span><b>${lv.rr != null ? "1:" + num(lv.rr, 2) : "—"}</b></div>
+      <div><span>ROOM</span><b>${lv.roomPoints != null ? num(lv.roomPoints, 0) + " pts" : "—"}</b></div>
+    </div>
+    <div class="orb-final ${finalCls}">${e.final}<span class="orb-reason">${e.reasonText || ""}</span></div>
+    ${e.reasons && e.reasons.length ? `<div class="orb-codes">${e.reasons.map((c) => `<span class="orb-code">${c}</span>`).join("")}</div>` : ""}`;
 }
 
 async function loadStrategyLab() {

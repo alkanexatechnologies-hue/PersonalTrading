@@ -161,6 +161,8 @@ import { recordDaily, readSessions } from "../strategies/sessionStore";
 import { ConditionSnapshot } from "../strategies/types";
 import { gatedTrend, sessionOpenFrom, GATED_TREND_ENABLED } from "../strategies/regimeGate";
 import { runStrategyReplay } from "../strategies/replay";
+import { computeOpeningRange, detectOrbBreakout } from "../orb/OpeningRangeBreakoutEngine";
+import { evaluateOrb, DEFAULT_ORB_CONFIG, OrbInputs, OrbDirection } from "../strategies/orbStrategy";
 import { LIQUIDITY_CONFIG, NOT_DEFINED } from "../liquidity/liquidityConfig";
 import { buildLiquidityLevels, nearestLevel } from "../liquidity/liquidityLevels";
 import { detectLiquidity, atr14Of, entryAfterSweepConcept } from "../liquidity/sweepDetector";
@@ -5220,6 +5222,84 @@ router.get("/strategies/sessions", requirePermission("oiAnalysis"), (req: Reques
   const symbol = req.query.symbol ? String(req.query.symbol) : undefined;
   const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 40));
   res.json({ sessions: readSessions(symbol, limit) });
+});
+
+// ORB (Opening Range Breakout) — Test Zone / Strategy Lab evaluation. Reuses the
+// existing OR + breakout engine (fed 5-min candles), the existing EMA/VWAP
+// indicators and the market-structure engine; consumes them, never duplicates.
+// Read-only/paper — hands off to Master/Risk downstream, never places an order.
+router.get("/orb-strategy", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  try {
+    const symbol = String(req.query.symbol || "^NSEI");
+    const def = findSymbolDef(symbol);
+    if (!def) return res.status(400).json({ error: "Valid index symbol required" });
+    // ORB per spec is NIFTY / BANKNIFTY (index) only.
+    const isOrbIndex = /NSEI|NSEBANK/.test(def.symbol) || /^NIFTY$|BANKNIFTY/i.test(def.nseSymbol || "");
+    let candles5m: any[] = [];
+    try { candles5m = await fetchCandles(def.symbol, "5m" as Interval); } catch { candles5m = []; }
+    if (!candles5m.length) return res.json({ available: false, flags: CONFIG.orb, symbol: def.symbol, name: def.name, reason: "DATA_UNAVAILABLE", message: "5-min candles unavailable (market closed / feed off)." });
+
+    // Keep only the latest session so OR + breakout are computed on today's bars.
+    const lastTime = candles5m[candles5m.length - 1].time;
+    const sessionDay = new Date(lastTime * 1000 + 19800000).toISOString().slice(0, 10);
+    const dayBars = candles5m.filter((c) => new Date(c.time * 1000 + 19800000).toISOString().slice(0, 10) === sessionDay);
+
+    const range = computeOpeningRange(dayBars);
+    const breakout = range ? detectOrbBreakout(dayBars, range) : null;
+
+    // Indicators from the SAME 5-min candles (existing implementations).
+    const closes = dayBars.map((c) => c.close);
+    const vwapArr = vwap(dayBars);
+    const ema9 = (last(ema(closes, 9)) as number) ?? null;
+    const ema21 = (last(ema(closes, 21)) as number) ?? null;
+    const vwapNow = (last(vwapArr) as number) ?? null;
+    const price = closes.length ? closes[closes.length - 1] : null;
+
+    // Market structure (existing engine) → direction + swing levels for room.
+    const ms = dayBars.length >= 20 ? detectMarketStructure(dayBars, 3, vwapArr) : null;
+    const structureDirection: OrbDirection | null = ms ? (ms.currentStructure === "Bullish" ? "BULLISH" : ms.currentStructure === "Bearish" ? "BEARISH" : "NEUTRAL") : null;
+
+    // Opposing level = nearest structure swing beyond the breakout (real, not invented).
+    let opposingLevel: number | null = null;
+    if (breakout && ms?.swingPoints?.length) {
+      const bc = breakout.breakoutClose;
+      if (breakout.optionType === "CE") { const hs = ms.swingPoints.filter((p) => (p.type === "HH" || p.type === "LH") && p.price > bc).map((p) => p.price); if (hs.length) opposingLevel = Math.min(...hs); }
+      else { const ls = ms.swingPoints.filter((p) => (p.type === "HL" || p.type === "LL") && p.price < bc).map((p) => p.price); if (ls.length) opposingLevel = Math.max(...ls); }
+    }
+
+    // False breakout: a later 5-min bar closed back inside the range.
+    let falseBreakout = false;
+    if (breakout && range) falseBreakout = dayBars.some((c) => c.time > breakout.breakoutEpochSec && c.close <= range.high && c.close >= range.low);
+
+    const istMin = (() => { const d = new Date(lastTime * 1000 + 19800000); return d.getUTCHours() * 60 + d.getUTCMinutes(); })();
+
+    // OI is not wired into this Test-Zone route yet → UNAVAILABLE (never fabricated).
+    const inputs: OrbInputs = {
+      nowMin: istMin, range, breakout, falseBreakout, price, vwap: vwapNow, ema9, ema21,
+      structureDirection, oiSupportsDirection: null, opposingLevel, optionLiquidityOk: null,
+      masterMinRR: 2, riskOk: true, existingPosition: false,
+    };
+    const evaluation = evaluateOrb(inputs);
+
+    // Audit record (spec §16) — real values or nulls, never invented.
+    const audit = {
+      date: sessionDay, time: new Date(lastTime * 1000 + 19800000).toISOString().slice(11, 19), instrument: def.name,
+      orHigh: evaluation.orHigh, orLow: evaluation.orLow, orRange: evaluation.orRange, orMid: evaluation.orMid,
+      breakoutDirection: evaluation.direction, breakoutPrice: breakout?.breakoutClose ?? null,
+      volume: breakout?.breakoutVolume ?? null, volumeRatio: breakout && breakout.volumeSma20 > 0 ? Math.round((breakout.breakoutVolume / breakout.volumeSma20) * 100) / 100 : null,
+      vwap: vwapNow, ema9, ema21, marketStructure: structureDirection, oi: "UNAVAILABLE", opposingLevel,
+      room: evaluation.levels.roomPoints, entry: evaluation.levels.entry, sl: evaluation.levels.sl, target: evaluation.levels.target, rr: evaluation.levels.rr,
+      falseBreakout, signalState: evaluation.status, reasonCodes: evaluation.reasons,
+    };
+
+    res.json({
+      available: true, flags: CONFIG.orb, orbIndex: isOrbIndex, symbol: def.symbol, name: def.name,
+      asOf: lastTime, price, evaluation, audit,
+      candles: dayBars.slice(-90).map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume ?? 0 })),
+    });
+  } catch (e: any) {
+    res.json({ available: false, error: e?.message || "orb-strategy failed", flags: CONFIG.orb });
+  }
 });
 
 // Strategy Replay — runs the EXISTING engines + selector + gated path over one

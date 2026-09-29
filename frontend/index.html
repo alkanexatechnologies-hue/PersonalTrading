@@ -613,6 +613,21 @@
               <div id="msl-blocked" class="msl-blocked hidden"></div>
             </div>
 
+            <!-- ---------- ORB (Opening Range Breakout) — Test Zone strategy ---------- -->
+            <div class="mtg-card orb-card">
+              <div class="orb-hd">
+                <h5>📐 Opening Range Breakout (ORB) — Test Zone</h5>
+                <span class="orb-flags" id="orb-flags">—</span>
+                <select id="orb-sym" class="orb-sym">
+                  <option value="^NSEI">NIFTY</option>
+                  <option value="^NSEBANK">BANK NIFTY</option>
+                </select>
+                <button id="orb-refresh" class="gc-test">↻ Refresh</button>
+              </div>
+              <div class="wl-sub msl-note">Read-only paper strategy: 09:15–09:30 opening range, close-based break, entries 09:30–11:30. Reuses the existing OR / EMA / VWAP / structure engines and hands off to Master/Risk — it never places a live order. Nothing here is fabricated.</div>
+              <div class="orb-grid" id="orb-grid"><div class="wl-sub">Loading ORB…</div></div>
+            </div>
+
             <!-- ---------- 3. TEST CONTROL ---------- -->
             <div class="mtg-card">
               <h5>Test control</h5>
