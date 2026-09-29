@@ -6417,18 +6417,39 @@ function renderTETrades() {
       `<td><span class="te-badge ${r.type === "CE" ? "te-b-ce" : "te-b-pe"}">${r.type}</span></td>` +
       `<td>${r.strike ?? "—"}</td><td>${teNum(r.entry, 2)}</td><td class="te-down">${teNum(r.sl, 2)}</td><td class="te-up">${teNum(r.target, 2)}</td>` +
       `<td>${tp}</td><td>${r.rr || "—"}</td>` +
-      `<td><span class="te-badge ${stCls(r.status)}">${r.status}</span></td>` +
+      `<td><span class="te-badge ${stCls(r.status)}">${r.status}</span>` +
+        (r.status === "Open" ? `<span class="te-cxwrap"><button class="te-cx t" data-close="Target Hit" data-id="${r.id}" title="Mark Target Hit">T</button><button class="te-cx s" data-close="SL Hit" data-id="${r.id}" title="Mark SL Hit">S</button><button class="te-cx n" data-close="No Trade" data-id="${r.id}" title="Mark No Trade">N</button></span>` : "") +
+      `</td>` +
       `<td>${teNum(r.exitPrice, 2)}</td><td>${r.exitTime || "—"}</td><td class="te-l te-muted">${r.remarks || ""}</td>` +
       `</tr>`;
   }).join("");
   if (!body._wired) {
     body._wired = true;
     body.addEventListener("click", (e) => {
+      // Manual "mark closed" controls on an Open row take priority over row-open.
+      const cx = e.target.closest("[data-close]");
+      if (cx) { e.stopPropagation(); teCloseTrade(cx.getAttribute("data-id"), cx.getAttribute("data-close")); return; }
       const tr = e.target.closest("tr.te-trade-clickable"); if (!tr) return;
       const t = (TE.trades || []).find((x) => x.id === tr.getAttribute("data-id"));
       if (t) { TE._selTradeId = t.id; renderTELogicDetails(t); renderTETrades(); }
     });
   }
+}
+
+// Manually mark an Open trade closed (Target Hit / SL Hit / No Trade). Uses the
+// row's own target/SL as the exit so Total Pt computes; No Trade clears it with
+// no P&L. Advisory-only bookkeeping — no real order.
+async function teCloseTrade(id, status) {
+  const r = (TE.trades || []).find((x) => x.id === id); if (!r) return;
+  if (!confirm(`Mark this ${r.index} ${r.type} trade as "${status}"?`)) return;
+  const exitPrice = status === "Target Hit" ? r.target : status === "SL Hit" ? r.sl : null;
+  try {
+    const res = await fetch("/api/trade-log/update", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, status, exitPrice, exitTs: Math.floor(Date.now() / 1000), remarks: (r.remarks ? r.remarks + " · " : "") + "Marked " + status + " manually" }),
+    }).then((x) => x.json());
+    if (res && res.ok) loadTradeExec(); else alert("Update failed: " + ((res && res.error) || "unknown"));
+  } catch (e) { alert("Update error: " + e.message); }
 }
 
 // Trade Logic Details — reconstruct a trade's decision from its IMMUTABLE snapshot.
