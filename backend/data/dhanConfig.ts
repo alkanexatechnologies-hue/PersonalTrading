@@ -23,9 +23,18 @@ const FILE = dataFile("dhan-config.json");
 export function loadDhanConfig(): DhanConfig {
   let file: Partial<DhanConfig> = {};
   try { file = JSON.parse(fs.readFileSync(FILE, "utf-8")); } catch { /* none yet */ }
+  // Precedence: a UI-saved token (file) WINS over the env seed — matching Groww
+  // (growwConfig.ts). This is deliberate: the env var (DHAN_ACCESS_TOKEN) is a
+  // durable fallback that survives restarts/redeploys on ephemeral hosts, but the
+  // moment the user pastes a fresh token in the UI it must take effect. The old
+  // "env wins" ordering silently ignored every UI paste whenever the env var was
+  // set, so the app kept using the stale (expired) env token and re-prompted every
+  // session. clientId follows the same source as the token it is paired with.
+  const fileTok = file.accessToken && String(file.accessToken).trim() ? String(file.accessToken).trim() : "";
+  const fileClient = file.clientId && String(file.clientId).trim() ? String(file.clientId).trim() : "";
   return {
-    accessToken: process.env.DHAN_ACCESS_TOKEN || file.accessToken || "",
-    clientId: process.env.DHAN_CLIENT_ID || file.clientId || "",
+    accessToken: fileTok || process.env.DHAN_ACCESS_TOKEN || "",
+    clientId: fileTok ? (fileClient || process.env.DHAN_CLIENT_ID || "") : (process.env.DHAN_CLIENT_ID || fileClient || ""),
   };
 }
 

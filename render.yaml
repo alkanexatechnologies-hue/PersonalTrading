@@ -35,7 +35,18 @@ services:
         sync: false
       - key: LOGIN_PASS
         sync: false
-      # --- Live market data / broker (optional, only if used) ---
+      # --- Live market data / broker tokens ---
+      # These are a DURABLE FALLBACK that survives restarts/redeploys: on the
+      # ephemeral free-tier filesystem the UI-saved token file is wiped on a
+      # restart, so seeding the token here keeps the app connected without
+      # re-pasting. Precedence is "UI-saved token WINS, env var is the fallback"
+      # (see dhanConfig.ts / growwConfig.ts) — so pasting a fresh token in the UI
+      # always takes effect, and the env var only fills in when no saved token
+      # exists (e.g. right after a restart). NOTE: Dhan (~24h) and Groww (~daily)
+      # tokens EXPIRE, so whichever store you use must be refreshed daily —
+      # either re-paste in the UI (persists if a disk is mounted) or update the
+      # env var value here (triggers a redeploy). DHAN_CLIENT_ID is auto-derived
+      # from the token's JWT on a UI save; set it here only when seeding by env.
       - key: GROWW_ACCESS_TOKEN
         sync: false
       - key: DHAN_ACCESS_TOKEN
