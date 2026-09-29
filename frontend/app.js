@@ -14033,10 +14033,26 @@ function initStrategyLab() {
   wire("msl-clear", mslClearResults);
   wire("msl-modal-close", () => el("msl-modal")?.classList.add("hidden"));
   wire("orb-refresh", loadOrbStrategy);
+  wire("orb-activate", orbToggleActivate);
   const orbSym = el("orb-sym");
   if (orbSym && !orbSym.dataset.wired) { orbSym.dataset.wired = "1"; orbSym.addEventListener("change", loadOrbStrategy); }
   loadStrategyLab();
   loadOrbStrategy();
+}
+
+// Toggle ORB activation. When ON, the backend logs confirmed ORB TAKE signals into
+// the Trade Execution daily log (paper/advisory — never a live order).
+async function orbToggleActivate() {
+  const active = !(window.__orbActive === true);
+  const msg = active
+    ? "Activate ORB?\n\nWhen ON, a CONFIRMED ORB breakout (TAKE) between 09:20–11:30 IST will be logged into the Trade Execution daily log as a paper trade. It uses the existing option selection and never places a live order."
+    : "Deactivate ORB? No new ORB trades will be logged.";
+  if (!confirm(msg)) return;
+  try {
+    const r = await fetch("/api/orb-activate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ active }) }).then((x) => x.json());
+    window.__orbActive = !!r.orbActive;
+    loadOrbStrategy();
+  } catch (e) { alert("ORB activate error: " + e.message); }
 }
 
 // ---- ORB (Opening Range Breakout) Test Zone card ----
@@ -14051,7 +14067,13 @@ async function loadOrbStrategy() {
 function renderOrbStrategy(d) {
   const grid = el("orb-grid"); if (!grid) return;
   const fl = el("orb-flags");
-  if (fl && d.flags) fl.innerHTML = `TEST_MODE <b class="${d.flags.testMode ? "ok" : "blocked"}">${d.flags.testMode ? "ON" : "OFF"}</b> · LIVE_EXEC <b class="${d.flags.liveExecution ? "blocked" : "ok"}">${d.flags.liveExecution ? "ON" : "OFF"}</b>`;
+  window.__orbActive = !!d.orbActive;
+  const actBtn = el("orb-activate");
+  if (actBtn) {
+    actBtn.textContent = d.orbActive ? "● ACTIVE — Logging" : "Activate";
+    actBtn.classList.toggle("orb-on", !!d.orbActive);
+  }
+  if (fl && d.flags) fl.innerHTML = `TEST_MODE <b class="${d.flags.testMode ? "ok" : "blocked"}">${d.flags.testMode ? "ON" : "OFF"}</b> · LIVE_EXEC <b class="${d.flags.liveExecution ? "blocked" : "ok"}">${d.flags.liveExecution ? "ON" : "OFF"}</b> · Logs to Trade Execution: <b class="${d.orbActive ? "ok" : ""}">${d.orbActive ? "ON" : "OFF"}</b>`;
   if (!d || !d.available || !d.evaluation) {
     grid.innerHTML = `<div class="orb-final orb-wait">${(d && (d.message || d.reason)) || "ORB data unavailable"}</div>`;
     return;

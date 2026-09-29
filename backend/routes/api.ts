@@ -163,6 +163,7 @@ import { gatedTrend, sessionOpenFrom, GATED_TREND_ENABLED } from "../strategies/
 import { runStrategyReplay } from "../strategies/replay";
 import { computeOpeningRange, detectOrbBreakout } from "../orb/OpeningRangeBreakoutEngine";
 import { evaluateOrb, DEFAULT_ORB_CONFIG, OrbInputs, OrbDirection } from "../strategies/orbStrategy";
+import { getOrbActive, setOrbActive } from "../strategies/orbActive";
 import { LIQUIDITY_CONFIG, NOT_DEFINED } from "../liquidity/liquidityConfig";
 import { buildLiquidityLevels, nearestLevel } from "../liquidity/liquidityLevels";
 import { detectLiquidity, atr14Of, entryAfterSweepConcept } from "../liquidity/sweepDetector";
@@ -5228,79 +5229,118 @@ router.get("/strategies/sessions", requirePermission("oiAnalysis"), (req: Reques
 // existing OR + breakout engine (fed 5-min candles), the existing EMA/VWAP
 // indicators and the market-structure engine; consumes them, never duplicates.
 // Read-only/paper — hands off to Master/Risk downstream, never places an order.
+// Shared ORB evaluation — used by the Test-Zone route AND the auto-logger, so both
+// see exactly the same deterministic signal. Reuses the OR/breakout engine, the
+// EMA/VWAP indicators and the market-structure engine; no look-ahead, no fabrication.
+async function computeOrbEvaluation(def: any): Promise<any> {
+  const isOrbIndex = /NSEI|NSEBANK/.test(def.symbol) || /^NIFTY$|BANKNIFTY/i.test(def.nseSymbol || "");
+  let candles5m: any[] = [];
+  try { candles5m = await fetchCandles(def.symbol, "5m" as Interval); } catch { candles5m = []; }
+  if (!candles5m.length) return { available: false, symbol: def.symbol, name: def.name, reason: "DATA_UNAVAILABLE", message: "5-min candles unavailable (market closed / feed off)." };
+
+  const lastTime = candles5m[candles5m.length - 1].time;
+  const sessionDay = new Date(lastTime * 1000 + 19800000).toISOString().slice(0, 10);
+  const dayBars = candles5m.filter((c) => new Date(c.time * 1000 + 19800000).toISOString().slice(0, 10) === sessionDay);
+  const range = computeOpeningRange(dayBars);
+  const breakout = range ? detectOrbBreakout(dayBars, range) : null;
+
+  const closes = dayBars.map((c) => c.close);
+  const vwapArr = vwap(dayBars);
+  const ema9 = (last(ema(closes, 9)) as number) ?? null;
+  const ema21 = (last(ema(closes, 21)) as number) ?? null;
+  const vwapNow = (last(vwapArr) as number) ?? null;
+  const price = closes.length ? closes[closes.length - 1] : null;
+
+  const ms = dayBars.length >= 20 ? detectMarketStructure(dayBars, 3, vwapArr) : null;
+  const structureDirection: OrbDirection | null = ms ? (ms.currentStructure === "Bullish" ? "BULLISH" : ms.currentStructure === "Bearish" ? "BEARISH" : "NEUTRAL") : null;
+
+  let opposingLevel: number | null = null;
+  if (breakout && ms?.swingPoints?.length) {
+    const bc = breakout.breakoutClose;
+    if (breakout.optionType === "CE") { const hs = ms.swingPoints.filter((p) => (p.type === "HH" || p.type === "LH") && p.price > bc).map((p) => p.price); if (hs.length) opposingLevel = Math.min(...hs); }
+    else { const ls = ms.swingPoints.filter((p) => (p.type === "HL" || p.type === "LL") && p.price < bc).map((p) => p.price); if (ls.length) opposingLevel = Math.max(...ls); }
+  }
+  let falseBreakout = false;
+  if (breakout && range) falseBreakout = dayBars.some((c) => c.time > breakout.breakoutEpochSec && c.close <= range.high && c.close >= range.low);
+  const istMin = (() => { const d = new Date(lastTime * 1000 + 19800000); return d.getUTCHours() * 60 + d.getUTCMinutes(); })();
+
+  const inputs: OrbInputs = {
+    nowMin: istMin, range, breakout, falseBreakout, price, vwap: vwapNow, ema9, ema21,
+    structureDirection, oiSupportsDirection: null, opposingLevel, optionLiquidityOk: null,
+    masterMinRR: 2, riskOk: true, existingPosition: false,
+  };
+  const evaluation = evaluateOrb(inputs);
+  const audit = {
+    date: sessionDay, time: new Date(lastTime * 1000 + 19800000).toISOString().slice(11, 19), instrument: def.name,
+    orHigh: evaluation.orHigh, orLow: evaluation.orLow, orRange: evaluation.orRange, orMid: evaluation.orMid,
+    breakoutDirection: evaluation.direction, breakoutPrice: breakout?.breakoutClose ?? null,
+    volume: breakout?.breakoutVolume ?? null, volumeRatio: breakout && breakout.volumeSma20 > 0 ? Math.round((breakout.breakoutVolume / breakout.volumeSma20) * 100) / 100 : null,
+    vwap: vwapNow, ema9, ema21, marketStructure: structureDirection, oi: "UNAVAILABLE", opposingLevel,
+    room: evaluation.levels.roomPoints, entry: evaluation.levels.entry, sl: evaluation.levels.sl, target: evaluation.levels.target, rr: evaluation.levels.rr,
+    falseBreakout, signalState: evaluation.status, reasonCodes: evaluation.reasons,
+  };
+  return { available: true, orbIndex: isOrbIndex, symbol: def.symbol, name: def.name, asOf: lastTime, price, evaluation, audit, candles: dayBars.slice(-90).map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume ?? 0 })) };
+}
+
 router.get("/orb-strategy", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
   try {
-    const symbol = String(req.query.symbol || "^NSEI");
-    const def = findSymbolDef(symbol);
+    const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
     if (!def) return res.status(400).json({ error: "Valid index symbol required" });
-    // ORB per spec is NIFTY / BANKNIFTY (index) only.
-    const isOrbIndex = /NSEI|NSEBANK/.test(def.symbol) || /^NIFTY$|BANKNIFTY/i.test(def.nseSymbol || "");
-    let candles5m: any[] = [];
-    try { candles5m = await fetchCandles(def.symbol, "5m" as Interval); } catch { candles5m = []; }
-    if (!candles5m.length) return res.json({ available: false, flags: CONFIG.orb, symbol: def.symbol, name: def.name, reason: "DATA_UNAVAILABLE", message: "5-min candles unavailable (market closed / feed off)." });
-
-    // Keep only the latest session so OR + breakout are computed on today's bars.
-    const lastTime = candles5m[candles5m.length - 1].time;
-    const sessionDay = new Date(lastTime * 1000 + 19800000).toISOString().slice(0, 10);
-    const dayBars = candles5m.filter((c) => new Date(c.time * 1000 + 19800000).toISOString().slice(0, 10) === sessionDay);
-
-    const range = computeOpeningRange(dayBars);
-    const breakout = range ? detectOrbBreakout(dayBars, range) : null;
-
-    // Indicators from the SAME 5-min candles (existing implementations).
-    const closes = dayBars.map((c) => c.close);
-    const vwapArr = vwap(dayBars);
-    const ema9 = (last(ema(closes, 9)) as number) ?? null;
-    const ema21 = (last(ema(closes, 21)) as number) ?? null;
-    const vwapNow = (last(vwapArr) as number) ?? null;
-    const price = closes.length ? closes[closes.length - 1] : null;
-
-    // Market structure (existing engine) → direction + swing levels for room.
-    const ms = dayBars.length >= 20 ? detectMarketStructure(dayBars, 3, vwapArr) : null;
-    const structureDirection: OrbDirection | null = ms ? (ms.currentStructure === "Bullish" ? "BULLISH" : ms.currentStructure === "Bearish" ? "BEARISH" : "NEUTRAL") : null;
-
-    // Opposing level = nearest structure swing beyond the breakout (real, not invented).
-    let opposingLevel: number | null = null;
-    if (breakout && ms?.swingPoints?.length) {
-      const bc = breakout.breakoutClose;
-      if (breakout.optionType === "CE") { const hs = ms.swingPoints.filter((p) => (p.type === "HH" || p.type === "LH") && p.price > bc).map((p) => p.price); if (hs.length) opposingLevel = Math.min(...hs); }
-      else { const ls = ms.swingPoints.filter((p) => (p.type === "HL" || p.type === "LL") && p.price < bc).map((p) => p.price); if (ls.length) opposingLevel = Math.max(...ls); }
-    }
-
-    // False breakout: a later 5-min bar closed back inside the range.
-    let falseBreakout = false;
-    if (breakout && range) falseBreakout = dayBars.some((c) => c.time > breakout.breakoutEpochSec && c.close <= range.high && c.close >= range.low);
-
-    const istMin = (() => { const d = new Date(lastTime * 1000 + 19800000); return d.getUTCHours() * 60 + d.getUTCMinutes(); })();
-
-    // OI is not wired into this Test-Zone route yet → UNAVAILABLE (never fabricated).
-    const inputs: OrbInputs = {
-      nowMin: istMin, range, breakout, falseBreakout, price, vwap: vwapNow, ema9, ema21,
-      structureDirection, oiSupportsDirection: null, opposingLevel, optionLiquidityOk: null,
-      masterMinRR: 2, riskOk: true, existingPosition: false,
-    };
-    const evaluation = evaluateOrb(inputs);
-
-    // Audit record (spec §16) — real values or nulls, never invented.
-    const audit = {
-      date: sessionDay, time: new Date(lastTime * 1000 + 19800000).toISOString().slice(11, 19), instrument: def.name,
-      orHigh: evaluation.orHigh, orLow: evaluation.orLow, orRange: evaluation.orRange, orMid: evaluation.orMid,
-      breakoutDirection: evaluation.direction, breakoutPrice: breakout?.breakoutClose ?? null,
-      volume: breakout?.breakoutVolume ?? null, volumeRatio: breakout && breakout.volumeSma20 > 0 ? Math.round((breakout.breakoutVolume / breakout.volumeSma20) * 100) / 100 : null,
-      vwap: vwapNow, ema9, ema21, marketStructure: structureDirection, oi: "UNAVAILABLE", opposingLevel,
-      room: evaluation.levels.roomPoints, entry: evaluation.levels.entry, sl: evaluation.levels.sl, target: evaluation.levels.target, rr: evaluation.levels.rr,
-      falseBreakout, signalState: evaluation.status, reasonCodes: evaluation.reasons,
-    };
-
-    res.json({
-      available: true, flags: CONFIG.orb, orbIndex: isOrbIndex, symbol: def.symbol, name: def.name,
-      asOf: lastTime, price, evaluation, audit,
-      candles: dayBars.slice(-90).map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume ?? 0 })),
-    });
+    const r = await computeOrbEvaluation(def);
+    res.json({ ...r, flags: CONFIG.orb, orbActive: getOrbActive().active });
   } catch (e: any) {
     res.json({ available: false, error: e?.message || "orb-strategy failed", flags: CONFIG.orb });
   }
 });
+
+// Activate / deactivate ORB → when ON, a confirmed ORB TAKE is logged into the
+// Trade Execution daily log (advisory/paper, never a live order). Persisted.
+router.post("/orb-activate", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
+  const active = !!(req.body && req.body.active);
+  if (CONFIG.orb.liveExecution) { /* even if live were on, ORB stays paper here */ }
+  res.json({ ok: true, orbActive: setOrbActive(active).active, flags: CONFIG.orb });
+});
+router.get("/orb-status", requirePermission("oiAnalysis"), (_req: Request, res: Response) => {
+  const today = new Date(Date.now() + 19800000).toISOString().slice(0, 10);
+  const orbTrades = listTrades(today).filter((t) => /ORB/i.test(t.remarks || ""));
+  res.json({ orbActive: getOrbActive().active, flags: CONFIG.orb, todayOrbTrades: orbTrades.length, trades: orbTrades.slice(0, 10) });
+});
+
+// ORB auto-logger: when active + inside the 09:30–11:30 entry window, log a
+// confirmed ORB TAKE into the daily log using the EXISTING option-selection
+// (analyzeStrikes → bestSetup premiums). Deduped by the same cooldown as the main
+// auto-log; the existing trade monitor then closes it on Target/SL. No live order.
+let _orbAutoRunning = false;
+async function orbAutoLogTick(): Promise<void> {
+  if (_orbAutoRunning || !getOrbActive().active || !isTradeEntryWindowIST()) return;
+  _orbAutoRunning = true;
+  try {
+    for (const sym of ["^NSEI", "^NSEBANK"]) {
+      const def = findSymbolDef(sym); if (!def) continue;
+      if (getCooldownState(def.symbol).active) continue; // one ORB trade per cooldown window
+      let r: any; try { r = await computeOrbEvaluation(def); } catch { continue; }
+      if (!r?.available || !r.evaluation || (r.evaluation.final !== "TAKE CE" && r.evaluation.final !== "TAKE PE")) continue;
+      const side: "CE" | "PE" = r.evaluation.final === "TAKE CE" ? "CE" : "PE";
+      // Existing option-selection for the premium entry/SL/target (real data only).
+      let oiChain: any = null; try { oiChain = await getOiCached(def); } catch { oiChain = null; }
+      const sa = analyzeStrikes(oiChain, side === "CE" ? "BULLISH" : "BEARISH", { name: def.name });
+      const bs: any = sa?.bestSetup;
+      if (!(bs && bs.entryPremium > 0 && bs.stopPremium > 0 && bs.targetPremium > 0)) continue; // no resolvable premium → skip (never fabricate)
+      const nowSec = Math.floor(Date.now() / 1000);
+      appendTrade({
+        execTs: nowSec, index: def.name, symbol: def.symbol, type: side,
+        strike: bs.strike ?? r.evaluation.levels?.strike ?? null, expiry: oiChain?.expiry ?? null,
+        entry: bs.entryPremium, sl: bs.stopPremium, target: bs.targetPremium,
+        rr: bs.rr != null ? `1:${bs.rr}` : null,
+        remarks: `ORB auto · ${r.evaluation.direction} · ${side}`,
+        snapshot: { strategy: "ORB", audit: r.audit, evaluation: r.evaluation },
+      });
+      recordExecution({ symbol: def.symbol, execTs: nowSec, side, strike: bs.strike ?? null, entry: bs.entryPremium, source: "orb-auto" });
+    }
+  } catch { /* best-effort */ } finally { _orbAutoRunning = false; }
+}
+const _orbAutoTimer = setInterval(() => { orbAutoLogTick().catch(() => {}); }, 60_000);
+if (typeof (_orbAutoTimer as any).unref === "function") (_orbAutoTimer as any).unref();
 
 // Strategy Replay — runs the EXISTING engines + selector + gated path over one
 // session's REAL candles (Dhan historical, no-look-ahead) and returns the staged

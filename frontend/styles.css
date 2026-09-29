@@ -5219,3 +5219,6 @@ body.pm-fullwidth #tab-flow { display:none !important; }
 .orb-code { font-size:9px; font-weight:800; letter-spacing:.3px; background:rgba(239,71,87,.12); color:#ef8a97; padding:2px 6px; border-radius:5px; }
 @media (max-width:900px){ .orb-top, .orb-gates, .orb-levels { grid-template-columns:repeat(3,1fr); } }
 @media (max-width:520px){ .orb-top, .orb-gates, .orb-levels { grid-template-columns:repeat(2,1fr); } }
+
+.orb-hd .gc-primary.orb-on { background:#16351f; border-color:#22c785; color:#22c785; }
+.orb-hd .gc-test, .orb-hd .gc-primary { width:auto; flex:0 0 auto; padding:6px 14px; font-size:12px; }
