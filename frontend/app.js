@@ -6180,6 +6180,7 @@ function initTradeExec() {
   });
   teEl("te-open-command")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("marketcommand"); });
   teEl("te-open-optionterminal")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("optionterminal"); });
+  teEl("te-orb-activate")?.addEventListener("click", teToggleOrbActivate);
   teEl("te-export-trades")?.addEventListener("click", () => {
     const url = `/api/trade-log/export${TE._day ? `?date=${TE._day}` : ""}`;
     const a = document.createElement("a"); a.href = url; a.download = ""; document.body.appendChild(a); a.click(); a.remove();
@@ -6216,10 +6217,66 @@ async function loadTradeExec() {
     TE.trades = (tl && tl.trades) || [];
     renderTETrades();
     renderTEWeekly();
+    loadTEOrb();
     // Keep the open Trade Logic Details fresh if a trade is selected.
     if (TE._selTradeId) { const t = TE.trades.find((x) => x.id === TE._selTradeId); if (t) renderTELogicDetails(t); }
   } catch (e) { console.error("[TradeExec]", e); }
   TE.loading = false;
+}
+
+// Live ORB logic card on the Trade Execution screen — always shows the current
+// Opening Range Breakout evaluation for the selected index (OR levels, gate chain,
+// direction, final decision + reason). Read-only/paper.
+async function loadTEOrb() {
+  const body = teEl("te-orb-body"); if (!body) return;
+  try {
+    const d = await fetch(`/api/orb-strategy?symbol=${encodeURIComponent(TE.sym)}`).then((r) => r.json());
+    renderTEOrbCard(d);
+  } catch (e) { body.innerHTML = `<span class="te-muted">ORB load error: ${e.message}</span>`; }
+}
+function renderTEOrbCard(d) {
+  const body = teEl("te-orb-body"); if (!body) return;
+  const fl = teEl("te-orb-flags");
+  const act = teEl("te-orb-activate");
+  window.__orbActive = !!(d && d.orbActive);
+  if (act) { act.textContent = d && d.orbActive ? "● ACTIVE — Logging" : "Activate"; act.classList.toggle("on", !!(d && d.orbActive)); }
+  if (fl) fl.innerHTML = d && d.flags ? `TEST_MODE <b class="${d.flags.testMode ? "te-up" : "te-down"}">${d.flags.testMode ? "ON" : "OFF"}</b> · LIVE_EXEC <b class="${d.flags.liveExecution ? "te-down" : "te-up"}">${d.flags.liveExecution ? "ON" : "OFF"}</b> · Logs to Daily Log <b class="${d.orbActive ? "te-up" : ""}">${d.orbActive ? "ON" : "OFF"}</b>` : "";
+  if (!d || !d.available || !d.evaluation) {
+    body.innerHTML = `<div class="te-orb-msg">${(d && (d.message || d.reason)) || "ORB data unavailable"} — the ORB range needs 09:15–09:30 5-min candles (available during market hours).</div>`;
+    return;
+  }
+  const e = d.evaluation, a = d.audit || {}, lv = e.levels || {};
+  const item = (k, v, cls) => `<div class="te-logic-item"><span class="k">${k}</span><span class="v ${cls || ""}">${v == null || v === "" ? "—" : v}</span></div>`;
+  const g = (label, st) => { const c = st === "PASS" ? "orb-pass" : st === "FAIL" ? "orb-fail" : "orb-na"; return `<div class="orb-gate ${c}"><span>${label}</span><b>${st}</b></div>`; };
+  const dirCls = e.direction === "BULLISH" ? "te-up" : e.direction === "BEARISH" ? "te-down" : "";
+  const finalCls = e.final === "TAKE CE" ? "orb-ce" : e.final === "TAKE PE" ? "orb-pe" : e.final === "NO EDGE" ? "orb-noedge" : "orb-wait";
+  body.innerHTML =
+    `<div class="te-logic-grid">` +
+    item("OR High", teNum(e.orHigh, 2)) + item("OR Low", teNum(e.orLow, 2)) +
+    item("OR Range", teNum(e.orRange, 2)) + item("OR Mid", teNum(e.orMid, 2)) +
+    item("Price", teNum(d.price, 2)) + item("Direction", e.direction, dirCls) + item("Status", e.status) +
+    item("Breakout Price", teNum(a.breakoutPrice, 2)) +
+    item("Volume / Ratio", a.volume != null ? `${teNum(a.volume, 0)}${a.volumeRatio != null ? " · " + a.volumeRatio + "x" : ""}` : "—") +
+    item("VWAP", teNum(a.vwap, 2)) + item("EMA9 / EMA21", `${teNum(a.ema9, 2)} / ${teNum(a.ema21, 2)}`) +
+    item("Structure", a.marketStructure || "—") + item("Opposing / Room", `${teNum(a.opposingLevel, 2)}${lv.roomPoints != null ? " · " + lv.roomPoints + " pts" : ""}`) +
+    item("Entry", teNum(lv.entry, 2)) + item("SL / Target", `${teNum(lv.sl, 2)} / ${teNum(lv.target, 2)}`) +
+    item("R:R", lv.rr != null ? "1:" + lv.rr : "—") +
+    `</div>` +
+    `<div class="orb-gates" style="margin-top:8px">${g("VOLUME", e.gates.volume)}${g("VWAP", e.gates.vwap)}${g("EMA", e.gates.ema)}${g("STRUCTURE", e.gates.structure)}${g("LIQUIDITY", e.gates.liquidity)}${g("OI", e.gates.oi)}${g("ROOM", e.gates.room)}${g("R:R", e.gates.rr)}${g("MASTER", e.gates.master)}</div>` +
+    `<div class="orb-final ${finalCls}" style="margin-top:8px">${e.final}<span class="orb-reason">${e.reasonText || ""}</span></div>` +
+    (e.reasons && e.reasons.length ? `<div class="orb-codes" style="margin-top:6px">${e.reasons.map((c) => `<span class="orb-code">${c}</span>`).join("")}</div>` : "");
+}
+async function teToggleOrbActivate() {
+  const active = !(window.__orbActive === true);
+  const msg = active
+    ? "Activate ORB?\n\nWhen ON, a CONFIRMED ORB breakout (TAKE) between 09:20–11:30 IST is logged into the Daily Log above as a paper trade. It never places a live order."
+    : "Deactivate ORB? No new ORB trades will be logged.";
+  if (!confirm(msg)) return;
+  try {
+    const r = await fetch("/api/orb-activate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ active }) }).then((x) => x.json());
+    window.__orbActive = !!r.orbActive;
+    loadTEOrb();
+  } catch (e) { alert("ORB activate error: " + e.message); }
 }
 
 function startTradeExecLive() {

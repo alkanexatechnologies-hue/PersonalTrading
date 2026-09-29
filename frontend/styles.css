@@ -5222,3 +5222,14 @@ body.pm-fullwidth #tab-flow { display:none !important; }
 
 .orb-hd .gc-primary.orb-on { background:#16351f; border-color:#22c785; color:#22c785; }
 .orb-hd .gc-test, .orb-hd .gc-primary { width:auto; flex:0 0 auto; padding:6px 14px; font-size:12px; }
+
+/* ORB live-logic card on the Trade Execution screen */
+.te-orb-card .te-card-hd { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.te-orb-card #te-orb-flags { font-size:11px; }
+.te-orb-act { margin-left:auto; background:#12203a; border:1px solid #24314f; color:#9fb4d8; border-radius:7px; padding:5px 14px; font-size:12px; font-weight:700; cursor:pointer; }
+.te-orb-act:hover { color:#fff; border-color:#2f5fae; }
+.te-orb-act.on { background:#16351f; border-color:#22c785; color:#22c785; }
+.te-orb-msg { color:var(--te-muted); font-size:12px; padding:10px 2px; }
+.te-orb-card .te-logic-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:7px; }
+@media (max-width:1100px){ .te-orb-card .te-logic-grid { grid-template-columns:repeat(3,1fr); } }
+@media (max-width:640px){ .te-orb-card .te-logic-grid { grid-template-columns:repeat(2,1fr); } }
