@@ -190,7 +190,7 @@ import { getOptionTopPickAuditLog } from "../optionTopPick/auditLog";
 import { buildFakeMoveResult, FakeMoveLevel, FakeMoveTFInput, FakeMoveResult } from "../analyst/fakeMove";
 import { buildConfirmationFlow } from "../analyst/confirmationFlow";
 import { getCooldownState, computeCooldown, recordExecution } from "../trade/cooldownStore";
-import { appendTrade, updateTrade, listTrades, tradesToCsv, TradeType, TradeStatus } from "../trade/tradeLogStore";
+import { appendTrade, updateTrade, listTrades, tradesToCsv, weeklySummary, TradeType, TradeStatus } from "../trade/tradeLogStore";
 import { scanOptionTopPick, evaluateStockBothTracks } from "../optionTopPick/scanner";
 import { OptionTopPickDeps } from "../optionTopPick/types";
 import { evaluateLiquidityStatus } from "../liquidityStatus/engine";
@@ -4839,9 +4839,27 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       } catch { /* logging is best-effort; never blocks the response */ }
     }
 
+    // ---- Market Journey — today's structural events (real Dhan times/prices) ----
+    // Assembled from the SAME structure engine (open, swings, BOS, CHoCH, sweep,
+    // current). Read-only; explains why direction changed during the session.
+    const r2j = (n: number) => Math.round(n * 100) / 100;
+    const jDay = lastTime ? new Date((lastTime + 19800) * 1000).toISOString().slice(0, 10) : null;
+    const inJDay = (t: number | null | undefined) => !!t && new Date((t + 19800) * 1000).toISOString().slice(0, 10) === jDay;
+    const journey: { time: number; price: number; type: string; label: string }[] = [];
+    const firstToday = candles.find((c: any) => inJDay(c.time));
+    if (firstToday) journey.push({ time: firstToday.time, price: r2j(firstToday.open), type: "open", label: "Open" });
+    (ms.swingPoints || []).forEach((p: any) => { const t = candles[p.index]?.time; if (inJDay(t)) journey.push({ time: t, price: r2j(p.price), type: "swing", label: p.type }); });
+    (ms.bosEvents || []).forEach((b: any) => { const t = candles[b.breakIndex]?.time || b.breakTime; if (inJDay(t)) journey.push({ time: t, price: r2j(b.level), type: "bos", label: b.direction === "Bullish" ? "BOS ▲" : "BOS ▼" }); });
+    if (ms.directionChange && ms.directionChange.stage && ms.directionChange.stage !== "None" && latestBos && inJDay(latestBos.time)) journey.push({ time: latestBos.time as number, price: latestBos.price, type: "choch", label: `CHoCH ${ms.directionChange.from}→${ms.directionChange.to}` });
+    if (ls?.detection?.sweep && inJDay(ls.detection.sweep.breachTime)) journey.push({ time: ls.detection.sweep.breachTime, price: r2j(ls.detection.sweep.sweepPrice), type: "sweep", label: "Sweep" });
+    if (lastTime) journey.push({ time: lastTime, price: r2j(spot), type: "current", label: "Current" });
+    journey.sort((a, b) => a.time - b.time);
+    const marketJourney = journey.slice(-12);
+
     res.json({
       available: true,
       symbol, name: def.name, interval, spot: Math.round(spot * 100) / 100,
+      marketJourney,
       asOf: nowSec, lastCandleTime: lastTime,
       historical: isHistorical,
       asOfDate: isHistorical ? dateParam : null,
@@ -5073,6 +5091,9 @@ router.post("/trade-execute", requirePermission("oiAnalysis"), (req: Request, re
       execTs, index: def.name, symbol: def.symbol, type,
       strike: num(b.strike), entry: num(b.entry), sl: num(b.sl), target: num(b.target),
       rr: b.rr != null ? String(b.rr) : null, remarks: b.remarks != null ? String(b.remarks) : "",
+      // Optional immutable decision snapshot passed by the client (manual Log Trade
+      // captures the current flow) so the row can reconstruct its own logic.
+      snapshot: b.snapshot && typeof b.snapshot === "object" ? b.snapshot : null,
     });
     const cooldown = recordExecution({ symbol: def.symbol, execTs, side: type, strike: num(b.strike), entry: num(b.entry), source: "trade-execute" });
     res.json({ ok: true, trade, cooldown });
@@ -5095,6 +5116,11 @@ router.get("/trade-log", requirePermission("oiAnalysis"), (req: Request, res: Re
   let rows = listTrades(date);
   if (status && status !== "All") rows = rows.filter((r) => r.status === status);
   res.json({ date: date || null, trades: rows });
+});
+
+// Weekly per-day summary (Date · Trades · Win · Loss · P&L) for the Trade Log panel.
+router.get("/trade-log/week", requirePermission("oiAnalysis"), (_req: Request, res: Response) => {
+  res.json({ days: weeklySummary(7) });
 });
 
 // Update a logged trade's outcome (status / exit / remarks).

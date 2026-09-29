@@ -6143,11 +6143,23 @@ function initTradeExec() {
     const m = (tp.preferredStrike || "").match(/(\d+(?:\.\d+)?)\s*(CE|PE)/i);
     if (m) { strike = Number(m[1]); type = m[2].toUpperCase(); }
     const bs = tp.bestSetup || {};
+    const f = d.confirmationFlow || {};
+    const snap = d.snapshot || {};
     const body = {
       symbol: TE.sym, type, strike,
       entry: bs.entryPremium ?? null, sl: bs.stopPremium ?? null, target: bs.targetPremium ?? null,
       rr: bs.rr != null ? `1:${bs.rr}` : null,
-      remarks: `Manual log · ${tp.direction || ""} · ${(d.confirmationFlow && d.confirmationFlow.action) || tp.action || ""}`,
+      remarks: `Manual log · ${tp.direction || ""} · ${f.action || tp.action || ""}`,
+      // Immutable decision snapshot at the moment of logging (so click→details works).
+      snapshot: {
+        snapshotId: snap.id, marketTs: snap.marketTs, calcTs: snap.calcTs, dataAgeSec: d.dataAgeSec,
+        spot: d.spot, marketState: f.marketState, activePhase: f.activePhase,
+        direction: tp.direction, priceAction: (f.gates || []).find((g) => g.key === "priceAction") ? { direction: type === "PE" ? "DOWN" : "UP", status: (f.gates.find((g) => g.key === "priceAction") || {}).detail } : null,
+        structure: (d.structure && d.structure.current) || null, room: f.room, ema21: f.ema21,
+        gates: f.gates, reason: f.reason, side: type, strike, optionLtp: bs.entryPremium ?? null,
+        sl: bs.stopPremium ?? null, target: bs.targetPremium ?? null, rr: bs.rr ?? null,
+        optionDetail: tp.preferredStrike || null,
+      },
     };
     const btn = teEl("te-log-trade");
     try {
@@ -6164,6 +6176,17 @@ function initTradeExec() {
     const a = document.createElement("a"); a.href = url; a.download = ""; document.body.appendChild(a); a.click(); a.remove();
   });
   teEl("te-export-levels")?.addEventListener("click", () => teExportLevels());
+  teEl("te-export-week")?.addEventListener("click", async () => {
+    try {
+      const d = await fetchJSON("/api/trade-log/week", 12000);
+      const days = (d && d.days) || [];
+      const esc = (v) => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+      const lines = ["Date,Trades,Win,Loss,PL"];
+      days.forEach((s) => lines.push([s.date, s.trades, s.win, s.loss, s.pl].map(esc).join(",")));
+      const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "trade-week-summary.csv"; document.body.appendChild(a); a.click(); a.remove();
+    } catch { /* ignore */ }
+  });
 }
 
 function syncTEFromMC() {
@@ -6183,6 +6206,9 @@ async function loadTradeExec() {
     if (d && !d.error) { TE.lastData = d; renderTE(d); }
     TE.trades = (tl && tl.trades) || [];
     renderTETrades();
+    renderTEWeekly();
+    // Keep the open Trade Logic Details fresh if a trade is selected.
+    if (TE._selTradeId) { const t = TE.trades.find((x) => x.id === TE._selTradeId); if (t) renderTELogicDetails(t); }
   } catch (e) { console.error("[TradeExec]", e); }
   TE.loading = false;
 }
@@ -6287,6 +6313,64 @@ function renderTE(d) {
   TE._levels = teLevelRows(d);
   renderTELevels();
   teDrawChart(d);
+  renderTEPipeline(d);
+  renderTEJourney(d);
+  renderTEPlan(d);
+}
+
+// Decision Pipeline — the 10 mandatory/conditional gates from the flow engine.
+function renderTEPipeline(d) {
+  const box = teEl("te-pipeline"); if (!box) return;
+  const f = d.confirmationFlow;
+  const phEl = teEl("te-phase"); if (phEl) phEl.textContent = f ? (f.activePhase || "") + (f.marketState ? " · " + f.marketState.replace(/_/g, " ") : "") : "";
+  if (!f || !Array.isArray(f.gates)) { box.innerHTML = `<span class="te-muted">Pipeline unavailable.</span>`; return; }
+  box.innerHTML = f.gates.map((g, i) => {
+    const cls = "s-" + (g.status || "").toLowerCase();
+    const sym = g.status === "PASS" ? "✓ PASS" : g.status === "TRADE" ? "✓ TRADE" : g.status === "WAIT" ? "⏳ WAIT" : g.status === "FAIL" ? "✕ FAIL" : g.status === "OFF" ? "— OFF" : g.status === "PENDING" ? "◷ PENDING" : "— " + g.status;
+    return `<div class="te-gate ${cls}"><div class="g-hd"><span class="g-no">${i + 1}</span>${g.label}</div><div class="g-status">${sym}</div><div class="g-detail">${g.detail || ""}</div></div>`;
+  }).join("");
+}
+
+// Market Journey — today's structural events on a horizontal timeline.
+function renderTEJourney(d) {
+  const box = teEl("te-journey"); if (!box) return;
+  const j = d.marketJourney || [];
+  const note = teEl("te-journey-note"); if (note) note.textContent = j.length ? `${j.length} events` : "";
+  if (!j.length) { box.innerHTML = `<span class="te-muted">No journey events yet.</span>`; return; }
+  box.innerHTML = j.map((e) => {
+    const side = e.type === "swing" ? (/H/.test(e.label) ? "j-resistance" : "j-support") : "j-" + e.type;
+    return `<div class="te-jev ${side}"><span class="j-dot"></span><div class="j-time">${teHM(e.time)}</div><div class="j-label">${e.label}</div><div class="j-price">${teNum(e.price, 2)}</div></div>`;
+  }).join("");
+}
+
+// Trade Plan + Execution Status (from the live snapshot / flow).
+function renderTEPlan(d) {
+  const tp = d.tradePlan || {}; const f = d.confirmationFlow || {}; const cd = d.cooldown || {};
+  const bs = tp.bestSetup || {};
+  const line = (k, v, cls) => `<div class="te-miniline"><span class="te-muted">${k}</span><span class="${cls || ""}">${v}</span></div>`;
+  const planBody = teEl("te-plan-body");
+  if (planBody) planBody.innerHTML =
+    line("Direction", `<b class="${tp.direction === "BULLISH" ? "te-up" : tp.direction === "BEARISH" ? "te-down" : ""}">${tp.direction || "—"}</b>`) +
+    line("Strike", `<b>${tp.preferredStrike || "—"}</b>`) +
+    line("Entry Zone", tp.entryZone || "—") +
+    line("Entry", bs.entryPremium != null ? "₹" + teNum(bs.entryPremium, 2) : "—") +
+    line("SL", bs.stopPremium != null ? "₹" + teNum(bs.stopPremium, 2) : (tp.stopLoss != null ? teNum(tp.stopLoss, 2) : "—"), "te-down") +
+    line("Target", bs.targetPremium != null ? "₹" + teNum(bs.targetPremium, 2) : (tp.target1 != null ? teNum(tp.target1, 2) : "—"), "te-up") +
+    line("R:R", bs.rr != null ? "1:" + bs.rr : "—") +
+    line("Room", f.room && f.room.pts != null ? f.room.pts + " pts → " + (f.room.nextLabel || "") : "—");
+  const execBody = teEl("te-exec-body");
+  if (execBody) {
+    const act = f.action || tp.action || "—";
+    const passed = Array.isArray(f.gates) ? f.gates.filter((g) => g.status === "PASS" || g.status === "TRADE").length : 0;
+    const total = Array.isArray(f.gates) ? f.gates.filter((g) => g.status !== "OFF").length : 0;
+    execBody.innerHTML =
+      line("Final Action", `<b class="${act === "TRADE" ? "te-up" : "te-amber"}" style="${act === "TRADE" ? "" : "color:var(--te-amber)"}">${act}</b>`) +
+      line("Reason", `<span class="te-muted">${f.reason || tp.waitReason || "—"}</span>`) +
+      line("Gates Passed", `${passed} / ${total}`) +
+      line("EMA21", (f.ema21 && f.ema21.state) || "—") +
+      line("Cooldown", cd.active ? cd.reason || "ACTIVE" : "Not active") +
+      line("Market State", (f.marketState || "—").replace(/_/g, " "));
+  }
 }
 
 function renderTELevels() {
@@ -6318,7 +6402,8 @@ function renderTETrades() {
   const stCls = (s) => s === "Target Hit" ? "te-b-target" : s === "SL Hit" ? "te-b-sl" : s === "Open" ? "te-b-open" : "te-b-notrade";
   body.innerHTML = rows.map((r) => {
     const tp = r.totalPoint != null ? `<span class="${r.totalPoint >= 0 ? "te-up" : "te-down"}">${r.totalPoint >= 0 ? "+" : ""}${teNum(r.totalPoint, 2)}</span>` : "—";
-    return `<tr>` +
+    const sel = TE._selTradeId === r.id ? " te-trade-row-sel" : "";
+    return `<tr class="te-trade-clickable${sel}" data-id="${r.id}" title="Click to reconstruct this trade's decision" style="cursor:pointer">` +
       `<td>${r.seq}</td><td class="te-l">${r.date}</td><td>${r.time}</td><td class="te-l">${r.index}</td>` +
       `<td><span class="te-badge ${r.type === "CE" ? "te-b-ce" : "te-b-pe"}">${r.type}</span></td>` +
       `<td>${r.strike ?? "—"}</td><td>${teNum(r.entry, 2)}</td><td class="te-down">${teNum(r.sl, 2)}</td><td class="te-up">${teNum(r.target, 2)}</td>` +
@@ -6327,6 +6412,60 @@ function renderTETrades() {
       `<td>${teNum(r.exitPrice, 2)}</td><td>${r.exitTime || "—"}</td><td class="te-l te-muted">${r.remarks || ""}</td>` +
       `</tr>`;
   }).join("");
+  if (!body._wired) {
+    body._wired = true;
+    body.addEventListener("click", (e) => {
+      const tr = e.target.closest("tr.te-trade-clickable"); if (!tr) return;
+      const t = (TE.trades || []).find((x) => x.id === tr.getAttribute("data-id"));
+      if (t) { TE._selTradeId = t.id; renderTELogicDetails(t); renderTETrades(); }
+    });
+  }
+}
+
+// Trade Logic Details — reconstruct a trade's decision from its IMMUTABLE snapshot.
+function renderTELogicDetails(t) {
+  const title = teEl("te-logic-title"); if (title) title.textContent = `🧠 Trade Logic Details — #${t.seq} · ${t.time} ${t.index} ${t.type} ${t.strike ?? ""}`;
+  const sub = teEl("te-logic-sub"); if (sub) sub.textContent = "Immutable snapshot at execution";
+  const box = teEl("te-logic-body"); if (!box) return;
+  const s = t.snapshot;
+  if (!s) { box.innerHTML = `<span class="te-muted">No decision snapshot stored for this trade (logged before snapshots, or a manual entry).</span>`; return; }
+  const item = (k, v, cls) => `<div class="te-logic-item"><span class="k">${k}</span><span class="v ${cls || ""}">${v ?? "—"}</span></div>`;
+  const paTxt = s.priceAction ? `${(s.priceAction.direction === "UP" ? "BULLISH" : s.priceAction.direction === "DOWN" ? "BEARISH" : "—")} · ${s.priceAction.status || ""}` : "—";
+  const gatesTxt = Array.isArray(s.gates) ? s.gates.map((g) => `${g.label}: ${g.status}`).join(" · ") : "—";
+  box.innerHTML =
+    `<div class="te-logic-grid">` +
+    item("Market State", (s.marketState || "—").replace(/_/g, " ")) +
+    item("Active Logic", s.activePhase || "—") +
+    item("Direction", s.direction, s.direction === "BULLISH" ? "te-up" : s.direction === "BEARISH" ? "te-down" : "") +
+    item("Price Action", paTxt) +
+    item("Structure", s.structure || "—") +
+    item("EMA21", s.ema21 ? `${s.ema21.state} — ${s.ema21.detail || ""}` : "—") +
+    item("Option", s.optionDetail || `${s.side || ""} ${s.strike ?? ""}`) +
+    item("Room", s.room && s.room.pts != null ? `${s.room.pts} pts → ${s.room.nextLabel || ""}` : "—") +
+    item("Support / Resistance", `${teNum(s.support, 2)} / ${teNum(s.resistance, 2)}`) +
+    item("Entry", s.optionLtp != null ? "₹" + teNum(s.optionLtp, 2) : "—") +
+    item("SL / Target", `${s.sl != null ? "₹" + teNum(s.sl, 2) : "—"} / ${s.target != null ? "₹" + teNum(s.target, 2) : "—"}`) +
+    item("R:R", s.rr != null ? "1:" + s.rr : "—") +
+    `</div>` +
+    `<div class="te-logic-item" style="margin-top:8px"><span class="k">Final Decision</span><span class="v te-up">${s.reason || "—"}</span></div>` +
+    `<div class="te-logic-item" style="margin-top:4px"><span class="k">Gates</span><span class="v" style="font-size:10px;font-weight:600;color:var(--te-muted)">${gatesTxt}</span></div>` +
+    `<div class="te-logic-meta">` +
+    `<span>Snapshot ${s.snapshotId || "—"}</span>` +
+    `<span>Market ${s.marketTs ? new Date((s.marketTs + 19800) * 1000).toISOString().slice(0, 19).replace("T", " ") : "—"} IST</span>` +
+    `<span>Data age ${s.dataAgeSec != null ? Math.round(s.dataAgeSec) + "s" : "—"}</span>` +
+    `<span>Spot ${teNum(s.spot, 2)}</span>` +
+    `</div>`;
+}
+
+// Weekly summary (Date · Trades · Win · Loss · P/L).
+async function renderTEWeekly() {
+  const body = teEl("te-week-body"); if (!body) return;
+  try {
+    const d = await fetchJSON("/api/trade-log/week", 12000);
+    const days = (d && d.days) || [];
+    if (!days.length) { body.innerHTML = `<tr><td colspan="5" class="te-l te-muted">No trades this week yet.</td></tr>`; return; }
+    body.innerHTML = days.map((s) => `<tr><td class="te-l">${s.date}</td><td>${s.trades}</td><td class="te-up">${s.win}</td><td class="te-down">${s.loss}</td><td class="${s.pl >= 0 ? "te-up" : "te-down"}">${s.pl >= 0 ? "+" : ""}${teNum(s.pl, 2)}</td></tr>`).join("");
+  } catch { body.innerHTML = `<tr><td colspan="5" class="te-l te-muted">—</td></tr>`; }
 }
 
 function teDrawChart(d) {

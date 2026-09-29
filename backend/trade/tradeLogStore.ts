@@ -125,6 +125,25 @@ export function listTrades(date?: string): TradeRow[] {
   return filtered.sort((a, b) => b.execTs - a.execTs);
 }
 
+export interface DaySummary { date: string; trades: number; win: number; loss: number; pl: number; }
+
+/** Per-day win/loss/P&L summary, newest day first (default last 7 days present). */
+export function weeklySummary(days = 7): DaySummary[] {
+  const byDay = new Map<string, DaySummary>();
+  for (const r of readAll()) {
+    let s = byDay.get(r.date);
+    if (!s) { s = { date: r.date, trades: 0, win: 0, loss: 0, pl: 0 }; byDay.set(r.date, s); }
+    s.trades++;
+    if (r.status === "Target Hit") s.win++;
+    else if (r.status === "SL Hit") s.loss++;
+    if (r.totalPoint != null) s.pl += r.totalPoint;
+  }
+  return [...byDay.values()]
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, days)
+    .map((s) => ({ ...s, pl: Math.round(s.pl * 100) / 100 }));
+}
+
 const CSV_HEAD = ["SeqNo", "Date", "Time", "Index", "Type", "Strike", "Entry", "SL", "Target", "TotalPoint", "RR", "Status", "ExitPrice", "ExitTime", "Remarks"];
 
 export function tradesToCsv(rows: TradeRow[]): string {

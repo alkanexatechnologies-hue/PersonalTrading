@@ -1731,6 +1731,18 @@
               <div class="te-stat te-action-cell"><div class="te-stat-k">Action</div><div class="te-action" id="te-action">—</div><div class="te-action-reason" id="te-action-reason"></div></div>
             </div>
 
+            <!-- Decision Pipeline (mandatory gates) -->
+            <div class="te-card te-pipeline-card">
+              <div class="te-card-hd"><span class="te-card-title">◉ Decision Pipeline</span><span class="te-muted" id="te-phase"></span></div>
+              <div class="te-pipeline" id="te-pipeline"></div>
+            </div>
+
+            <!-- Market Journey (today) -->
+            <div class="te-card te-journey-card">
+              <div class="te-card-hd"><span class="te-card-title">📈 Market Journey — Today</span><span class="te-muted" id="te-journey-note"></span></div>
+              <div class="te-journey" id="te-journey"></div>
+            </div>
+
             <div class="te-main">
               <!-- LEFT: trade log + levels tables -->
               <div class="te-left">
@@ -1758,6 +1770,15 @@
                     <th>#</th><th>Level Type</th><th>Price</th><th>Zone (±)</th><th>Strength</th><th>Date</th><th>Time</th><th>Status</th><th>Remarks</th>
                   </tr></thead><tbody id="te-levels-body"></tbody></table></div>
                 </div>
+
+                <div class="te-card">
+                  <div class="te-card-hd"><span class="te-card-title">🗓 This Week</span>
+                    <button class="te-export" id="te-export-week">⬇ Export This Week</button>
+                  </div>
+                  <div class="te-table-wrap"><table class="te-table" id="te-week-table"><thead><tr>
+                    <th>Date</th><th>Trades</th><th>Win</th><th>Loss</th><th>P/L</th>
+                  </tr></thead><tbody id="te-week-body"></tbody></table></div>
+                </div>
               </div>
 
               <!-- RIGHT: levels chart -->
@@ -1768,6 +1789,22 @@
                 </div>
               </div>
             </div>
+            <!-- Trade Logic Details (click a Trade Log row) + Trade Plan + Execution -->
+            <div class="te-bottom">
+              <div class="te-card te-logic-card">
+                <div class="te-card-hd"><span class="te-card-title" id="te-logic-title">🧠 Trade Logic Details</span><span class="te-muted" id="te-logic-sub">Click a trade's serial no. to reconstruct its decision</span></div>
+                <div class="te-logic-body" id="te-logic-body"><span class="te-muted">Select a trade from the Daily Log to see the exact historical decision snapshot for that timestamp.</span></div>
+              </div>
+              <div class="te-card te-plan-card">
+                <div class="te-card-hd"><span class="te-card-title">◎ Trade Plan</span><span class="te-muted" id="te-plan-src">live signal</span></div>
+                <div class="te-plan-body" id="te-plan-body"></div>
+              </div>
+              <div class="te-card te-exec-card">
+                <div class="te-card-hd"><span class="te-card-title">▶ Execution Status</span></div>
+                <div class="te-exec-body" id="te-exec-body"></div>
+              </div>
+            </div>
+
             <div class="te-foot">
               <span id="te-foot-conn"><span class="te-dot"></span> Dhan</span>
               <span>Data Age <b id="te-foot-age">—</b></span>
