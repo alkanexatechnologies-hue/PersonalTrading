@@ -1783,7 +1783,42 @@
               <button class="oia-subtab" data-oia="summary">🧭 OI Summary<span class="oia-subtab-q">what does it indicate?</span></button>
             </div>
 
-            <div class="oia-screen" id="oia-movement"><div class="oia-empty">Loading OI movement…</div></div>
+            <!-- ===== Screen 1: OI Movement ===== -->
+            <div class="oia-screen" id="oia-movement">
+              <div class="oia-card">
+                <div class="oia-chd"><span class="oia-num r">1</span><h3>Live Open Interest (1 Min)</h3>
+                  <span class="oia-lg"><span><i class="oia-dot" style="background:var(--green)"></i>Put OI</span><span><i class="oia-dot" style="background:var(--red)"></i>Call OI</span></span></div>
+                <canvas id="oia-c1" class="oia-cv tall"></canvas>
+                <div class="oia-empty" id="oia-c1-msg" hidden></div>
+              </div>
+              <div class="oia-card">
+                <div class="oia-chd"><span class="oia-num r">2</span><h3>OI Change (1 Min)</h3>
+                  <span class="oia-lg"><span><i class="oia-dot" style="background:var(--green)"></i>Put OI Change</span><span><i class="oia-dot" style="background:var(--red)"></i>Call OI Change</span></span></div>
+                <canvas id="oia-c2" class="oia-cv"></canvas>
+              </div>
+              <div class="oia-tbl2">
+                <div class="oia-card">
+                  <div class="oia-chd"><span class="oia-num g">3</span><h3>Top Put OI Activity (1 Min)</h3></div>
+                  <table class="oia-t"><thead><tr><th>Strike</th><th>OI (K)</th><th>ΔOI (K)</th><th>OI Change %</th><th>LTP</th><th>Type</th></tr></thead><tbody id="oia-tput"></tbody></table>
+                </div>
+                <div class="oia-card">
+                  <div class="oia-chd"><span class="oia-num r">4</span><h3>Top Call OI Activity (1 Min)</h3></div>
+                  <table class="oia-t"><thead><tr><th>Strike</th><th>OI (K)</th><th>ΔOI (K)</th><th>OI Change %</th><th>LTP</th><th>Type</th></tr></thead><tbody id="oia-tcall"></tbody></table>
+                </div>
+              </div>
+              <div class="oia-card">
+                <div class="oia-chd"><span class="oia-num g">5</span><h3>OI Movement at Selected Strike (1 Min)</h3>
+                  <span class="oia-strike-in">Strike
+                    <select id="oia-strike-sel"></select>
+                    <select id="oia-strike-side"><option value="CALL">Call</option><option value="PUT">Put</option></select>
+                  </span>
+                  <span class="oia-lg"><span><i class="oia-dot" style="background:var(--green)"></i>OI Change (K)</span><span><i class="oia-dot rnd" style="background:var(--blue)"></i>OI Value (K)</span><span><i class="oia-dot" style="background:var(--text)"></i>LTP</span></span></div>
+                <canvas id="oia-c5" class="oia-cv tall"></canvas>
+                <div class="oia-empty" id="oia-c5-msg" hidden></div>
+              </div>
+            </div>
+
+            <!-- ===== Screen 2: OI Summary ===== -->
             <div class="oia-screen" id="oia-summary" hidden><div class="oia-empty">Loading OI summary…</div></div>
 
             <div class="oia-foot">CALL = <b style="color:var(--red,#f6465d)">red</b> · PUT = <b style="color:var(--grn,#16c784)">green</b>. Read-only OI analysis from live Dhan option chain — never a trade order. Missing inputs show DATA UNAVAILABLE.</div>

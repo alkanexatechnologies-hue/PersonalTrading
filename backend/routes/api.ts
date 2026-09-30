@@ -88,6 +88,7 @@ import { recordOiSample, computeOiMovement, OiMoveResult } from "../oi/oiMovemen
 import { buildOiMovement } from "../oi/analysisModule/movement";
 import { buildOiSummary } from "../oi/analysisModule/summary";
 import { logOiAnalysis, getOiAnalysisAuditLog } from "../oi/analysisModule/audit";
+import { strikeHistory } from "../oi/analysisModule/intradayStore";
 import { recommendOiTrades, correlateOiModels, buildOiWalls, buildOiLesson } from "../oi/oiTrade";
 import { buildMoveBulletin } from "../oi/bulletin";
 import { tickPaperAlerts, sendAlertsTest, alertsStatus } from "../alerts/paperPing";
@@ -5377,7 +5378,9 @@ router.get("/oi-analysis/summary", requirePermission("oiAnalysis"), async (req: 
     if (!def.fno) return res.json({ available: false, message: `OI Analysis needs an F&O instrument (got ${def.symbol}).`, testMode: !CONFIG.oiAnalysis.enabled });
     const oi = await getOiCached(def);
     const move = computeOiMovement(def.symbol);
-    const view = buildOiSummary(def.symbol, oi, move);
+    let spotChg: number | null = null, spotChgPct: number | null = null, spot: number | null = oi?.underlying ?? null;
+    try { const q = await getProvider().getQuote(def.symbol); if (q) { spot = q.price ?? spot; spotChg = q.change ?? null; spotChgPct = q.changePercent ?? null; } } catch { /* quote best-effort */ }
+    const view = buildOiSummary(def.symbol, oi, move, { spot, spotChg, spotChgPct });
     try {
       logOiAnalysis({
         timestamp: Date.now(), asOf: view.asOf, symbol: def.symbol, screen: "summary",
@@ -5391,6 +5394,19 @@ router.get("/oi-analysis/summary", requirePermission("oiAnalysis"), async (req: 
   } catch (e: any) {
     res.json({ available: false, error: e?.message || "oi-analysis summary failed", testMode: !CONFIG.oiAnalysis.enabled });
   }
+});
+
+// Per-strike intraday series for the "OI Movement at Selected Strike" chart.
+// Returns the 1-min OI value + LTP series and the per-step OI change. No look-ahead.
+router.get("/oi-analysis/strike-history", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
+  const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
+  if (!def) return res.status(400).json({ available: false, error: "Valid F&O symbol required" });
+  const strike = Number(req.query.strike);
+  const side = String(req.query.side || "CALL").toUpperCase() === "PUT" ? "PUT" : "CALL";
+  if (!Number.isFinite(strike)) return res.status(400).json({ available: false, error: "strike required" });
+  const raw = strikeHistory(def.symbol, strike, side as "CALL" | "PUT");
+  const points = raw.map((p, i) => ({ t: p.t, oi: p.oi, ltp: p.ltp, oiChg: i > 0 ? p.oi - raw[i - 1].oi : 0 }));
+  res.json({ available: points.length > 0, symbol: def.symbol, strike, side, points });
 });
 
 router.get("/oi-analysis/audit", requirePermission("oiAnalysis"), (req: Request, res: Response) => {

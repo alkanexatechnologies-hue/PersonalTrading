@@ -6212,20 +6212,23 @@ function syncTEFromMC() {
 // ==================== OI ANALYSIS (additive, read-only) ====================
 // Two screens: OI Movement ("what is changing now?") and OI Summary ("what does
 // it indicate?"). Reads /api/oi-analysis/*; never mutates MC/TE or any strategy.
-const OIA = { sym: "^NSEI", screen: "movement", timer: null, loading: false, inited: false, status: null };
+const OIA = { sym: "^NSEI", screen: "movement", timer: null, loading: false, inited: false, status: null, selStrike: null, selSide: "CALL", lastMv: null };
 function oiaEl(id) { return document.getElementById(id); }
 
 function initOiAnalysis() {
   if (OIA.inited) return;
   OIA.inited = true;
   oiaEl("oia-idx-btns")?.querySelectorAll(".te-idxbtn").forEach((b) => {
-    b.addEventListener("click", () => { OIA.sym = b.getAttribute("data-sym"); syncOIAFromMC(true); loadOiAnalysis(); });
+    b.addEventListener("click", () => { OIA.sym = b.getAttribute("data-sym"); OIA.selStrike = null; syncOIAFromMC(true); loadOiAnalysis(); });
   });
   oiaEl("oia-subtabs")?.querySelectorAll(".oia-subtab").forEach((b) => {
     b.addEventListener("click", () => { OIA.screen = b.getAttribute("data-oia"); applyOiaScreen(); loadOiAnalysis(); });
   });
   oiaEl("oia-refresh")?.addEventListener("click", () => loadOiAnalysis());
+  oiaEl("oia-strike-sel")?.addEventListener("change", (e) => { OIA.selStrike = Number(e.target.value); loadOiaStrikeHistory(); });
+  oiaEl("oia-strike-side")?.addEventListener("change", (e) => { OIA.selSide = e.target.value; loadOiaStrikeHistory(); });
   fetchJSON("/api/oi-analysis/status", 12000).then((s) => { OIA.status = s; renderOiaBanner(); }).catch(() => {});
+  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (oiaEl("panel-oianalysis")?.classList.contains("active") && OIA.screen === "movement" && OIA.lastMv) oiaRedraw(); }, 150); });
 }
 
 function renderOiaBanner() {
@@ -6260,14 +6263,16 @@ async function loadOiAnalysis() {
     } else {
       const d = await fetchJSON(`/api/oi-analysis/movement?symbol=${encodeURIComponent(OIA.sym)}&window=5`, 20000);
       if (d && typeof d.enabled === "boolean") { OIA.status = OIA.status || {}; OIA.status.enabled = d.enabled; renderOiaBanner(); }
+      OIA.lastMv = d;
       renderOiaMovement(d);
+      loadOiaStrikeHistory();
     }
     const dt = oiaEl("oia-date"); if (dt) dt.textContent = new Date().toLocaleTimeString();
     if (live) live.textContent = "LIVE";
   } catch (e) {
     if (live) live.textContent = "—";
-    const host = OIA.screen === "summary" ? oiaEl("oia-summary") : oiaEl("oia-movement");
-    if (host) host.innerHTML = `<div class="oia-empty">DATA UNAVAILABLE — ${(e && e.message) || "failed to load OI"}.</div>`;
+    if (OIA.screen === "summary") { const hs = oiaEl("oia-summary"); if (hs) hs.innerHTML = `<div class="oia-empty">DATA UNAVAILABLE — ${(e && e.message) || "failed to load OI"}.</div>`; }
+    else { const m = oiaEl("oia-c1-msg"); if (m) { m.hidden = false; m.textContent = `DATA UNAVAILABLE — ${(e && e.message) || "failed to load OI"}.`; } }
   } finally { OIA.loading = false; }
 }
 
@@ -6278,7 +6283,25 @@ function startOiAnalysisLive() {
   OIA.timer = setInterval(() => { if (oiaEl("panel-oianalysis")?.classList.contains("active")) loadOiAnalysis(); }, 30000);
 }
 
-// ---- formatting helpers ----
+async function loadOiaStrikeHistory() {
+  if (OIA.selStrike == null) return;
+  const c5 = oiaEl("oia-c5"), msg = oiaEl("oia-c5-msg");
+  try {
+    const d = await fetchJSON(`/api/oi-analysis/strike-history?symbol=${encodeURIComponent(OIA.sym)}&strike=${OIA.selStrike}&side=${OIA.selSide}`, 15000);
+    if (!d || !d.available || !d.points || d.points.length < 2) {
+      if (c5) { const cx = c5.getContext("2d"); if (cx) cx.clearRect(0, 0, c5.width, c5.height); }
+      if (msg) { msg.hidden = false; msg.textContent = "Building 1-min history for this strike… (fills as the session runs)"; }
+      return;
+    }
+    if (msg) msg.hidden = true;
+    oiaDrawCombo(c5, d.points);
+  } catch { if (msg) { msg.hidden = false; msg.textContent = "DATA UNAVAILABLE for this strike."; } }
+}
+
+function oiaRedraw() { if (!OIA.lastMv) return; renderOiaMovement(OIA.lastMv); loadOiaStrikeHistory(); }
+
+// ---- formatting + canvas helpers ----
+const OIA_C = { green: "#16c784", red: "#ea3943", blue: "#3b82f6", grid: "#18223a", text: "#e6ebf2", mut: "#8a97ad" };
 function oiaFmt(n) {
   if (n == null || !isFinite(n)) return "—";
   const a = Math.abs(n);
@@ -6287,104 +6310,145 @@ function oiaFmt(n) {
   if (a >= 1e3) return (n / 1e3).toFixed(1) + "K";
   return String(Math.round(n));
 }
-function oiaSigned(n) { if (n == null || !isFinite(n) || n === 0) return "0"; return (n > 0 ? "+" : "") + oiaFmt(n); }
-function oiaLeanCls(l) { return l === "bullish" ? "oia-bull" : l === "bearish" ? "oia-bear" : "oia-neut"; }
-function oiaLeanColor(l) { return l === "bullish" ? "var(--green)" : l === "bearish" ? "var(--red)" : "var(--muted)"; }
-function oiaBuildTag(b) { return `<span class="oia-btag">${b || "—"}</span>`; }
+function oiaFmtK(v) { return (v / 1000).toFixed(0) + "K"; }
+function oiaNice(v) { if (v <= 0) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))); const n = v / p; const m = n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10; return m * p; }
+function oiaFit(cv) { const r = cv.getBoundingClientRect(); const dpr = window.devicePixelRatio || 1; cv.width = Math.max(1, r.width * dpr); cv.height = Math.max(1, r.height * dpr); const x = cv.getContext("2d"); x.setTransform(dpr, 0, 0, dpr, 0, 0); return { x, w: r.width, h: r.height }; }
+
+function oiaDrawGrouped(cv, items, opts) {
+  if (!cv || !items || !items.length) return;
+  const { x, w, h } = oiaFit(cv); const padL = 44, padR = 8, padT = 12, padB = 22;
+  const iw = w - padL - padR, ih = h - padT - padB; const { min, max, ticks, zero, spot } = opts;
+  const Y = (v) => padT + (max - v) / (max - min) * ih;
+  x.clearRect(0, 0, w, h); x.strokeStyle = OIA_C.grid; x.fillStyle = OIA_C.mut; x.font = "10px sans-serif"; x.lineWidth = 1;
+  for (let t = 0; t <= ticks; t++) { const val = min + (max - min) * t / ticks; const yy = Y(val); x.beginPath(); x.moveTo(padL, yy); x.lineTo(w - padR, yy); x.stroke(); x.textAlign = "right"; x.fillText(oiaFmtK(val), padL - 5, yy + 3); }
+  const n = items.length, gw = iw / n, bw = Math.min(9, gw * 0.34), z = Y(zero ? 0 : min);
+  items.forEach((d, i) => {
+    const cx = padL + gw * i + gw / 2;
+    x.fillStyle = OIA_C.green; const yp = Y(d.put); x.fillRect(cx - bw - 1, Math.min(yp, z), bw, Math.abs(yp - z) || 1);
+    x.fillStyle = OIA_C.red; const yc = Y(d.call); x.fillRect(cx + 1, Math.min(yc, z), bw, Math.abs(yc - z) || 1);
+  });
+  x.fillStyle = OIA_C.mut; x.textAlign = "center";
+  const labelStep = w < 560 ? 200 : 100; // thin strike labels on narrow screens
+  items.forEach((d, i) => { if (d.s % labelStep === 0) { const cx = padL + gw * i + gw / 2; x.fillText(String(d.s), cx, h - 6); } });
+  if (spot != null && items.length > 1) {
+    const step = items[1].s - items[0].s; const idx = (spot - items[0].s) / step;
+    if (idx >= -1 && idx <= items.length) {
+      const sx = padL + gw * idx + gw / 2;
+      x.strokeStyle = OIA_C.text; x.setLineDash([4, 4]); x.beginPath(); x.moveTo(sx, padT); x.lineTo(sx, h - padB); x.stroke(); x.setLineDash([]);
+      x.fillStyle = OIA_C.text; x.font = "bold 10px sans-serif"; x.textAlign = "center"; x.fillText("Spot " + Math.round(spot).toLocaleString("en-IN"), Math.max(44, Math.min(w - 44, sx)), padT + 2);
+    }
+  }
+}
+
+function oiaDrawCombo(cv, pts) {
+  if (!cv || !pts || !pts.length) return;
+  const { x, w, h } = oiaFit(cv); const padL = 42, padR = 46, padT = 12, padB = 24;
+  const iw = w - padL - padR, ih = h - padT - padB;
+  const chgs = pts.map((p) => p.oiChg || 0), vals = pts.map((p) => p.oi || 0), ltps = pts.map((p) => p.ltp || 0).filter((v) => v > 0);
+  const cAbs = oiaNice(Math.max(1, ...chgs.map((v) => Math.abs(v)))); const cMin = -cAbs, cMax = cAbs;
+  const vMax = oiaNice(Math.max(1, ...vals)), vMin = 0, maxLtp = Math.max(1, ...ltps);
+  const YL = (v) => padT + (cMax - v) / (cMax - cMin) * ih;
+  const YR = (v) => padT + (vMax - v) / (vMax - vMin) * ih;
+  x.clearRect(0, 0, w, h); x.font = "10px sans-serif"; x.strokeStyle = OIA_C.grid; x.fillStyle = OIA_C.mut;
+  for (let t = 0; t <= 4; t++) { const val = cMin + (cMax - cMin) * t / 4; const yy = YL(val); x.beginPath(); x.moveTo(padL, yy); x.lineTo(w - padR, yy); x.stroke(); x.textAlign = "right"; x.fillText(oiaFmtK(val), padL - 4, yy + 3); }
+  x.textAlign = "left"; x.fillStyle = OIA_C.blue;
+  for (let t = 0; t <= 4; t++) { const val = vMin + (vMax - vMin) * t / 4; x.fillText(oiaFmtK(val), w - padR + 4, YR(val) + 3); }
+  const n = pts.length, gw = iw / n, bw = Math.min(6, gw * 0.5), z = YL(0);
+  pts.forEach((p, i) => { const cx = padL + gw * i + gw / 2; const yy = YL(p.oiChg || 0); x.fillStyle = (p.oiChg || 0) >= 0 ? OIA_C.red : OIA_C.green; x.fillRect(cx - bw / 2, Math.min(yy, z), bw, Math.abs(yy - z) || 1); });
+  x.strokeStyle = OIA_C.blue; x.lineWidth = 1.6; x.beginPath();
+  pts.forEach((p, i) => { const cx = padL + gw * i + gw / 2; const yy = YR(p.oi || 0); i ? x.lineTo(cx, yy) : x.moveTo(cx, yy); }); x.stroke();
+  x.strokeStyle = "rgba(230,235,242,.55)"; x.lineWidth = 1; x.beginPath();
+  pts.forEach((p, i) => { const cx = padL + gw * i + gw / 2; const yy = YR(((p.ltp || 0) / maxLtp) * vMax); i ? x.lineTo(cx, yy) : x.moveTo(cx, yy); }); x.stroke();
+  x.fillStyle = OIA_C.mut; x.textAlign = "center"; x.font = "9px sans-serif";
+  const every = Math.max(1, Math.round(n / 8));
+  pts.forEach((p, i) => { if (i % every === 0) { const cx = padL + gw * i + gw / 2; const dt = new Date((p.t || 0) * 1000); const hh = String(dt.getHours()).padStart(2, "0"), mm = String(dt.getMinutes()).padStart(2, "0"); x.fillText(hh + ":" + mm, cx, h - 7); } });
+}
+
+function oiaFillTop(tb, arr, side) {
+  if (!tb) return;
+  const typeCls = side === "PUT" ? "oia-pos" : "oia-neg";
+  tb.innerHTML = (arr || []).map((a) => {
+    const chgCls = a.oiChg >= 0 ? "oia-pos" : "oia-neg";
+    return `<tr><td>${a.strike.toLocaleString("en-IN")}</td><td>${Math.round(a.oi / 1000)}</td><td class="${chgCls}">${a.oiChg >= 0 ? "+" : ""}${Math.round(a.oiChg / 1000)}</td><td class="${chgCls}">${a.oiChgPct >= 0 ? "+" : ""}${a.oiChgPct}%</td><td>${a.ltp != null ? a.ltp : "—"}</td><td class="${typeCls}">${a.buildup}</td></tr>`;
+  }).join("") || `<tr><td colspan="6" class="oia-gmut">—</td></tr>`;
+}
 
 function renderOiaMovement(d) {
-  const host = oiaEl("oia-movement"); if (!host) return;
-  if (!d || !d.available) {
-    host.innerHTML = `<div class="oia-empty">DATA UNAVAILABLE — ${(d && d.message) || "no live OI chain yet"}.</div>`;
+  const msg1 = oiaEl("oia-c1-msg");
+  if (!d || !d.available || !d.rows || !d.rows.length) {
+    if (msg1) { msg1.hidden = false; msg1.textContent = "DATA UNAVAILABLE — " + ((d && d.message) || "no live OI chain yet") + "."; }
     return;
   }
-  const ag = d.aggregate || {};
-  const t = ag.trade, dir = ag.direction;
-  const sigCls = (s) => s === "BULLISH" ? "oia-bull" : s === "BEARISH" ? "oia-bear" : s === "CAUTION" ? "oia-neut" : "oia-neut";
-  const cards = `
-    <div class="oia-cards">
-      <div class="oia-card"><div class="k">Trade flow (5M)</div><div class="v ${sigCls(t && t.signal)}">${t && t.available ? t.signal : (t && t.building ? "building…" : "—")}</div><div class="s">${t && t.available ? t.guidance : "collecting 1-min OI…"}</div></div>
-      <div class="oia-card"><div class="k">Direction (15M)</div><div class="v ${sigCls(dir && dir.signal)}">${dir && dir.available ? dir.signal : (dir && dir.building ? "building…" : "—")}</div><div class="s">${dir && dir.available ? dir.dominant : "collecting 1-min OI…"}</div></div>
-      <div class="oia-card"><div class="k">Underlying</div><div class="v">${d.underlying != null ? d.underlying : "—"}</div><div class="s">${d.expiry ? "exp " + d.expiry : ""} · ${d.samples} snap</div></div>
-    </div>`;
-
-  let surges = "";
-  if (d.surges && d.surges.length) {
-    surges = `<div class="oia-surges">` + d.surges.map((s) => `
-      <div class="oia-surge sev-${s.severity}"><span class="oia-sev sev-${s.severity}">${s.severity}</span><span class="${s.side === "CALL" ? "oia-ce" : "oia-pe"}">${s.message}</span></div>`).join("") + `</div>`;
+  if (msg1) msg1.hidden = true;
+  const rows = d.rows, spot = d.underlying;
+  // 1) Live OI
+  const oiItems = rows.map((r) => ({ s: r.strike, put: r.peOi, call: r.ceOi }));
+  const maxOi = Math.max(1, ...oiItems.map((i) => Math.max(i.put, i.call)));
+  oiaDrawGrouped(oiaEl("oia-c1"), oiItems, { min: 0, max: oiaNice(maxOi), ticks: 6, zero: false, spot });
+  // 2) OI Change
+  const chgItems = rows.map((r) => ({ s: r.strike, put: (r.peIntraChg || r.peDayChg || 0), call: (r.ceIntraChg || r.ceDayChg || 0) }));
+  const maxChg = Math.max(1, ...chgItems.map((i) => Math.max(Math.abs(i.put), Math.abs(i.call))));
+  const m = oiaNice(maxChg);
+  oiaDrawGrouped(oiaEl("oia-c2"), chgItems, { min: -m, max: m, ticks: 4, zero: true, spot });
+  // 3,4) activity tables
+  oiaFillTop(oiaEl("oia-tput"), d.topPuts, "PUT");
+  oiaFillTop(oiaEl("oia-tcall"), d.topCalls, "CALL");
+  // 5) strike selector
+  const sel = oiaEl("oia-strike-sel");
+  if (sel) {
+    const want = rows.map((r) => r.strike);
+    const cur = Array.from(sel.options).map((o) => Number(o.value));
+    if (cur.length !== want.length || cur.some((v, i) => v !== want[i])) {
+      sel.innerHTML = want.map((s) => `<option value="${s}">${s.toLocaleString("en-IN")}</option>`).join("");
+    }
+    if (OIA.selStrike == null || !want.includes(OIA.selStrike)) {
+      const atm = rows.find((r) => r.atm) || rows[Math.floor(rows.length / 2)];
+      OIA.selStrike = atm.strike;
+    }
+    sel.value = String(OIA.selStrike);
   }
-
-  const rowsHtml = (d.rows || []).map((r) => `
-    <tr class="${r.atm ? "atm" : ""}">
-      <td class="oia-ce">${oiaFmt(r.ceOi)}</td>
-      <td class="oia-ce">${oiaSigned(r.ceIntraChg || r.ceDayChg)}</td>
-      <td>${r.ceLtp != null ? r.ceLtp : "—"}</td>
-      <td>${oiaBuildTag(r.ceBuildup)}</td>
-      <td class="strike">${r.strike}${r.atm ? " ·ATM" : ""}</td>
-      <td>${oiaBuildTag(r.peBuildup)}</td>
-      <td>${r.peLtp != null ? r.peLtp : "—"}</td>
-      <td class="oia-pe">${oiaSigned(r.peIntraChg || r.peDayChg)}</td>
-      <td class="oia-pe">${oiaFmt(r.peOi)}</td>
-    </tr>`).join("");
-
-  const table = `
-    <div class="oia-tablewrap"><table class="oia-tbl">
-      <thead><tr>
-        <th class="oia-hd-ce">Call OI</th><th class="oia-hd-ce">Call ΔOI</th><th class="oia-hd-ce">Call LTP</th><th class="oia-hd-ce">Call Buildup</th>
-        <th>Strike</th>
-        <th class="oia-hd-pe">Put Buildup</th><th class="oia-hd-pe">Put LTP</th><th class="oia-hd-pe">Put ΔOI</th><th class="oia-hd-pe">Put OI</th>
-      </tr></thead><tbody>${rowsHtml}</tbody>
-    </table></div>`;
-
-  const actRow = (a) => `<div class="oia-act"><span class="${a.side === "CALL" ? "oia-ce" : "oia-pe"}">${a.strike} ${a.side}</span><span>${oiaSigned(a.oiChg)} (${a.oiChgPct >= 0 ? "+" : ""}${a.oiChgPct}%)</span><span>${oiaBuildTag(a.buildup)}</span></div>`;
-  const activity = `
-    <div class="oia-2col">
-      <div class="oia-panel"><h4 class="oia-hd-ce">Top Call activity</h4>${(d.topCalls || []).map(actRow).join("") || '<div class="oia-empty">—</div>'}</div>
-      <div class="oia-panel"><h4 class="oia-hd-pe">Top Put activity</h4>${(d.topPuts || []).map(actRow).join("") || '<div class="oia-empty">—</div>'}</div>
-    </div>`;
-
-  host.innerHTML = cards + surges + table + activity;
 }
 
 function renderOiaSummary(d) {
   const host = oiaEl("oia-summary"); if (!host) return;
-  if (!d || !d.available) {
-    host.innerHTML = `<div class="oia-empty">DATA UNAVAILABLE — ${(d && d.message) || "no live OI chain yet"}.</div>`;
-    return;
-  }
-  const biasCls = d.bias === "Bullish" ? "oia-bull" : d.bias === "Bearish" ? "oia-bear" : "oia-neut";
-  const barColor = oiaLeanColor(d.bias.toLowerCase());
-  const cards = `
-    <div class="oia-cards">
-      <div class="oia-card">
-        <div class="k">OI Bias</div><div class="v ${biasCls}">${d.bias}</div>
-        <div class="s">confidence ${d.confidencePct}%</div>
-        <div class="oia-conf"><i style="width:${Math.max(4, d.confidencePct)}%;background:${barColor}"></i></div>
-      </div>
-      <div class="oia-card"><div class="k">PCR</div><div class="v ${oiaLeanCls(d.pcrState)}">${d.pcr != null ? d.pcr.toFixed(2) : "—"}</div><div class="s">${d.pcrState}</div></div>
-      <div class="oia-card"><div class="k">Total OI (Call / Put)</div><div class="v"><span class="oia-ce">${oiaFmt(d.totalCeOi)}</span> / <span class="oia-pe">${oiaFmt(d.totalPeOi)}</span></div><div class="s">max pain ${d.maxPain != null ? d.maxPain : "—"}</div></div>
-    </div>`;
-
-  const walls = `
-    <div class="oia-cards">
-      <div class="oia-card"><div class="k oia-hd-ce">Call wall (resistance)</div><div class="v oia-ce">${d.callWall ? d.callWall.strike : "—"}</div><div class="s">${d.callWall ? oiaFmt(d.callWall.oi) + " OI" : ""}</div></div>
-      <div class="oia-card"><div class="k oia-hd-pe">Put wall (support)</div><div class="v oia-pe">${d.putWall ? d.putWall.strike : "—"}</div><div class="s">${d.putWall ? oiaFmt(d.putWall.oi) + " OI" : ""}</div></div>
-      <div class="oia-card"><div class="k">S/R zone</div><div class="v" style="font-size:15px"><span class="oia-pe">${d.supportZone != null ? d.supportZone : "—"}</span> ↔ <span class="oia-ce">${d.resistanceZone != null ? d.resistanceZone : "—"}</span></div><div class="s">support ↔ resistance</div></div>
-    </div>`;
-
-  const evidence = `
-    <div class="oia-panel"><h4>Evidence (numerical)</h4>${
-      (d.evidence || []).map((e) => `<div class="oia-ev"><span class="lbl"><span class="oia-dot" style="background:${oiaLeanColor(e.lean)}"></span>${e.label}</span><span class="${oiaLeanCls(e.lean)}">${e.value}</span></div>`).join("") || '<div class="oia-empty">—</div>'
-    }</div>`;
-
-  const guide = `<div class="oia-guide">🧭 ${d.directionGuide || "—"}</div>`;
-
-  const scn = `
-    <div class="oia-panel" style="margin-top:12px"><h4>Conditional scenarios</h4>${
-      (d.scenarios || []).map((s) => `<div class="oia-scn"><span class="badge ${s.kind === "bullish" ? "oia-bull" : "oia-bear"}" style="background:${s.kind === "bullish" ? "rgba(22,199,132,.16)" : "rgba(234,57,67,.16)"}">${s.kind === "bullish" ? "BULL" : "BEAR"}</span><span><b>If</b> ${s.trigger} → ${s.implication}</span></div>`).join("") || '<div class="oia-empty">—</div>'
-    }</div>`;
-
-  host.innerHTML = cards + walls + guide + `<div style="margin-top:12px">${evidence}</div>` + scn;
+  if (!d || !d.available) { host.innerHTML = `<div class="oia-empty">DATA UNAVAILABLE — ${(d && d.message) || "no live OI chain yet"}.</div>`; return; }
+  const biasColor = d.bias === "Bullish" ? "var(--green)" : d.bias === "Bearish" ? "var(--red)" : "var(--muted)";
+  const tint = d.bias === "Bullish" ? "rgba(22,199,132,.08)" : d.bias === "Bearish" ? "rgba(234,57,67,.08)" : "rgba(131,151,179,.08)";
+  const totOi = Math.max(1, d.totalCeOi + d.totalPeOi);
+  const cePctW = Math.round(d.totalCeOi / totOi * 100), pePctW = Math.round(d.totalPeOi / totOi * 100);
+  const pctTag = (v) => v == null ? "" : `<span class="${v >= 0 ? "oia-pos" : "oia-neg"}">${v >= 0 ? "+" : ""}${v}%</span>`;
+  const stateWord = (s) => s === "bullish" ? '<span class="oia-pos">Bullish</span>' : s === "bearish" ? '<span class="oia-neg">Bearish</span>' : '<span class="oia-gmut">Neutral</span>';
+  const spotChg = d.spotChg != null ? `<span class="${d.spotChg >= 0 ? "oia-pos" : "oia-neg"}">${d.spotChg >= 0 ? "+" : ""}${d.spotChg.toFixed(2)}${d.spotChgPct != null ? ` (${d.spotChgPct >= 0 ? "+" : ""}${d.spotChgPct}%)` : ""}</span>` : "";
+  const sec6 = `<div class="oia-card"><div class="oia-chd"><span class="oia-num r">6</span><h3>Market OI Summary (Live)</h3></div>
+    <div class="oia-sum6"><div>
+      <div class="oia-sumrow"><span class="k">Total Call OI</span><div class="oia-meter"><i style="width:${cePctW}%;background:var(--red)"></i><b>${oiaFmt(d.totalCeOi)}</b></div>${pctTag(d.totalCePct)}</div>
+      <div class="oia-sumrow"><span class="k">Total Put OI</span><div class="oia-meter"><i style="width:${pePctW}%;background:var(--green)"></i><b>${oiaFmt(d.totalPeOi)}</b></div>${pctTag(d.totalPePct)}</div>
+      <div class="oia-sumrow"><span class="k">PCR (OI)</span><span style="font-weight:800">${d.pcr != null ? d.pcr.toFixed(2) : "—"} ${stateWord(d.pcrState)}</span><span></span></div>
+      <div class="oia-sumrow"><span class="k">PCR (Volume)</span><span style="font-weight:800">${d.pcrVolume != null ? d.pcrVolume.toFixed(2) + " " + stateWord(d.pcrVolumeState) : '<span class="oia-gmut">DATA UNAVAILABLE</span>'}</span><span></span></div>
+      <div class="oia-sumrow"><span class="k">Spot</span><span style="font-weight:800">${d.spot != null ? Math.round(d.spot).toLocaleString("en-IN") : "—"}</span>${spotChg}</div>
+    </div>
+    <div class="oia-biasbox" style="border:1px solid ${biasColor};background:${tint}">
+      <span class="k">Current OI Bias</span><span class="v" style="color:${biasColor}">${d.biasEmoji} ${d.bias.toUpperCase()}</span><span class="c">(${d.confidenceLabel} Confidence)</span>
+    </div></div></div>`;
+  const sec7rows = (d.keyLevels || []).map((l) => {
+    const cls = l.side === "CALL" ? "oia-res" : "oia-sup";
+    const interpCls = l.side === "CALL" ? "oia-neg" : "oia-pos";
+    const chgCls = l.oiChg >= 0 ? "oia-pos" : "oia-neg";
+    return `<tr class="${cls}"><td>${l.role}</td><td>${l.strike.toLocaleString("en-IN")}</td><td>${Math.round(l.oi / 1000)}</td><td class="${chgCls}">${l.oiChg >= 0 ? "+" : ""}${Math.round(l.oiChg / 1000)}</td><td class="${chgCls}">${l.changePct != null ? (l.changePct >= 0 ? "+" : "") + l.changePct + "%" : "—"}</td><td class="${interpCls}">${l.interpretation}</td></tr>`;
+  }).join("");
+  const sec7 = `<div class="oia-card"><div class="oia-chd"><span class="oia-num r">7</span><h3>Key OI Levels &amp; Movement</h3></div>
+    <table class="oia-t"><thead><tr><th>Level</th><th>Strike</th><th>OI (K)</th><th>ΔOI (K)</th><th>Change %</th><th>Interpretation</th></tr></thead><tbody>${sec7rows || '<tr><td colspan="6" class="oia-gmut">—</td></tr>'}</tbody></table></div>`;
+  const arrow = d.bias === "Bullish" ? "↑" : d.bias === "Bearish" ? "↓" : "→";
+  const sec8 = `<div class="oia-card"><div class="oia-chd"><span class="oia-num b">8</span><h3>AI OI Interpretation &amp; Market Direction</h3>
+      <span class="oia-conf">Confidence <span class="track"><i style="width:${d.confidencePct}%"></i></span> ${d.confidencePct}%</span></div>
+    <div class="oia-dirbox" style="border:1px solid ${biasColor};background:${tint}"><div class="ic" style="background:${biasColor}">${arrow}</div><div><h4 style="color:${biasColor}">Market Direction: ${d.bias} Bias (${d.confidenceLabel})</h4><p>${d.directionGuide}</p></div></div>
+    <div class="oia-scn2">
+      <div class="oia-scnbox bull"><h4>↑ Bullish Scenario (Conditions)</h4><ul>${(d.bullishConditions || []).map((c) => `<li>${c}</li>`).join("") || "<li>—</li>"}</ul></div>
+      <div class="oia-scnbox bear"><h4>↓ Bearish Scenario (Conditions)</h4><ul>${(d.bearishConditions || []).map((c) => `<li>${c}</li>`).join("") || "<li>—</li>"}</ul></div>
+    </div></div>`;
+  const sec9 = `<div class="oia-card oia-guide"><div class="oia-chd"><span class="oia-num r">🎯</span><h3>Actionable Guidance (Based on OI)</h3></div>
+    <ul>${(d.guidance || []).map((g, i) => `<li><span class="oia-gn">${i + 1}</span><span>${g}</span></li>`).join("") || "<li>—</li>"}</ul></div>`;
+  host.innerHTML = sec6 + sec7 + sec8 + sec9;
 }
 
 async function loadTradeExec() {
