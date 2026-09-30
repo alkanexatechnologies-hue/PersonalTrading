@@ -6181,6 +6181,7 @@ function initTradeExec() {
   teEl("te-open-command")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("marketcommand"); });
   teEl("te-open-optionterminal")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("optionterminal"); });
   teEl("te-orb-activate")?.addEventListener("click", teRunOrb);
+  teEl("te-ve-run")?.addEventListener("click", teRunVwapEma);
   teEl("te-export-trades")?.addEventListener("click", () => {
     const url = `/api/trade-log/export${TE._day ? `?date=${TE._day}` : ""}`;
     const a = document.createElement("a"); a.href = url; a.download = ""; document.body.appendChild(a); a.click(); a.remove();
@@ -6218,6 +6219,7 @@ async function loadTradeExec() {
     renderTETrades();
     renderTEWeekly();
     loadTEOrb();
+    loadTEVwapEma();
     // Keep the open Trade Logic Details fresh if a trade is selected.
     if (TE._selTradeId) { const t = TE.trades.find((x) => x.id === TE._selTradeId); if (t) renderTELogicDetails(t); }
   } catch (e) { console.error("[TradeExec]", e); }
@@ -6277,6 +6279,49 @@ async function teRunOrb() {
     loadTradeExec();
   } catch (e) { alert("ORB run error: " + e.message); }
   finally { if (btn) { btn.disabled = false; btn.textContent = "▶ Run ORB"; } }
+}
+
+// Live VWAP + 20 EMA Trend Continuation card on the Trade Execution screen (follows
+// the selected index). Read-only/paper; ▶ Run logs a confirmed setup to the log.
+async function loadTEVwapEma() {
+  const body = teEl("te-ve-body"); if (!body) return;
+  try { renderTEVwapCard(await fetch(`/api/vwapema-strategy?symbol=${encodeURIComponent(TE.sym)}`).then((r) => r.json())); }
+  catch (e) { body.innerHTML = `<span class="te-muted">VWAP+EMA load error: ${e.message}</span>`; }
+}
+function renderTEVwapCard(d) {
+  const body = teEl("te-ve-body"); if (!body) return;
+  const fl = teEl("te-ve-flags");
+  if (fl) fl.innerHTML = `5-min · setup 10:00–13:00 · trend→pullback→reversal. Confirmed setup logs to the Daily Log. Paper only.`;
+  if (!d || !d.available || !d.evaluation) {
+    body.innerHTML = `<div class="te-orb-msg">${(d && (d.message || d.reason)) || "VWAP+EMA data unavailable"} — needs live 5-min candles (market hours).</div>`;
+    return;
+  }
+  const e = d.evaluation, a = d.audit || {}, lv = e.levels || {};
+  const item = (k, v, cls) => `<div class="te-logic-item"><span class="k">${k}</span><span class="v ${cls || ""}">${v == null || v === "" ? "—" : v}</span></div>`;
+  const g = (label, st) => { const c = st === "PASS" ? "orb-pass" : st === "FAIL" ? "orb-fail" : "orb-na"; return `<div class="orb-gate ${c}"><span>${label}</span><b>${st}</b></div>`; };
+  const dirCls = e.trend === "BULLISH" ? "te-up" : e.trend === "BEARISH" ? "te-down" : "";
+  const finalCls = e.final === "TAKE CE" ? "orb-ce" : e.final === "TAKE PE" ? "orb-pe" : e.final === "NO EDGE" ? "orb-noedge" : "orb-wait";
+  body.innerHTML =
+    `<div class="te-logic-grid">` +
+    item("Price", teNum(d.price, 2)) + item("VWAP", teNum(a.vwap, 2)) + item("EMA20", teNum(a.ema20, 2)) + item("ATR", teNum(a.atr, 2)) +
+    item("Trend", e.trend, dirCls) + item("Cluster Δ", teNum(lv.clusterDistance, 1)) + item("Status", e.status) +
+    item("Structure", a.marketStructure || "—") +
+    item("Entry", teNum(lv.entry, 2)) + item("SL / Target", `${teNum(lv.sl, 2)} / ${teNum(lv.target, 2)}`) +
+    item("R:R", lv.rr != null ? "1:" + lv.rr : "—") + item("Room", lv.roomPoints != null ? lv.roomPoints + " pts" : "—") +
+    `</div>` +
+    `<div class="orb-gates" style="margin-top:8px">${g("TREND", e.gates.trend)}${g("PULLBACK", e.gates.pullback)}${g("REVERSAL", e.gates.reversal)}${g("STRUCTURE", e.gates.structure)}${g("OI", e.gates.oi)}${g("ROOM", e.gates.room)}${g("R:R", e.gates.rr)}${g("MASTER", e.gates.master)}</div>` +
+    `<div class="orb-final ${finalCls}" style="margin-top:8px">${e.final}<span class="orb-reason">${e.reasonText || ""}</span></div>` +
+    (e.reasons && e.reasons.length ? `<div class="orb-codes" style="margin-top:6px">${e.reasons.map((c) => `<span class="orb-code">${c}</span>`).join("")}</div>` : "");
+}
+async function teRunVwapEma() {
+  const btn = teEl("te-ve-run");
+  if (btn) { btn.disabled = true; btn.textContent = "Running…"; }
+  try {
+    const r = await fetch("/api/vwapema-run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbol: TE.sym }) }).then((x) => x.json());
+    alert(r && r.message ? r.message : (r && r.ok ? (r.logged ? "Trade logged." : "No trade this run.") : "Run failed: " + ((r && r.error) || "unknown")));
+    loadTradeExec();
+  } catch (e) { alert("VWAP+EMA run error: " + e.message); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = "▶ Run"; } }
 }
 
 function startTradeExecLive() {

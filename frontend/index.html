@@ -1797,18 +1797,28 @@
               <div class="te-journey" id="te-journey"></div>
             </div>
 
-            <!-- ORB (Opening Range Breakout) — live strategy logic for the selected index -->
-            <div class="te-card te-orb-card">
-              <div class="te-card-hd">
-                <span class="te-card-title">📐 Opening Range Breakout (ORB) — live logic</span>
-                <span class="te-muted" id="te-orb-flags"></span>
-                <button class="te-orb-act" id="te-orb-activate" title="Run ORB once now — a confirmed breakout (TAKE) between 09:20–11:30 IST is logged into the Daily Log above (paper — no live order)">▶ Run ORB</button>
+            <!-- Live strategy logic (generic across indices): ORB + VWAP/EMA side by side -->
+            <div class="te-strat-row">
+              <div class="te-card te-orb-card">
+                <div class="te-card-hd">
+                  <span class="te-card-title">📐 Opening Range Breakout (ORB) — live logic</span>
+                  <span class="te-muted" id="te-orb-flags"></span>
+                  <button class="te-orb-act" id="te-orb-activate" title="Run ORB once now — a confirmed breakout (TAKE) between 09:20–11:30 IST is logged into the Daily Log above (paper — no live order)">▶ Run ORB</button>
+                </div>
+                <div id="te-orb-body"><span class="te-muted">Loading ORB…</span></div>
               </div>
-              <div id="te-orb-body"><span class="te-muted">Loading ORB…</span></div>
+              <div class="te-card te-orb-card te-ve-card">
+                <div class="te-card-hd">
+                  <span class="te-card-title">📈 VWAP + 20 EMA Trend Continuation — live logic</span>
+                  <span class="te-muted" id="te-ve-flags"></span>
+                  <button class="te-orb-act" id="te-ve-run" title="Run once — a confirmed VWAP+EMA continuation setup is logged into the Daily Log above (paper — no live order)">▶ Run</button>
+                </div>
+                <div id="te-ve-body"><span class="te-muted">Loading VWAP+EMA…</span></div>
+              </div>
             </div>
 
-            <div class="te-main">
-              <!-- LEFT: trade log + levels tables -->
+            <div class="te-main te-main-nochart">
+              <!-- Trade log + levels tables (Market Levels Chart removed) -->
               <div class="te-left">
                 <div class="te-card">
                   <div class="te-card-hd"><span class="te-card-title">🧾 Trade Details (Daily Log)</span>
@@ -1842,14 +1852,6 @@
                   <div class="te-table-wrap"><table class="te-table" id="te-week-table"><thead><tr>
                     <th>Date</th><th>Trades</th><th>Win</th><th>Loss</th><th>P/L</th>
                   </tr></thead><tbody id="te-week-body"></tbody></table></div>
-                </div>
-              </div>
-
-              <!-- RIGHT: levels chart -->
-              <div class="te-right">
-                <div class="te-card te-chart-card">
-                  <div class="te-card-hd"><span class="te-card-title">📈 Market Levels Chart</span><span class="te-muted" id="te-chart-note"></span></div>
-                  <div class="te-chart" id="te-chart"></div>
                 </div>
               </div>
             </div>
