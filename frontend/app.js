@@ -6255,16 +6255,21 @@ function syncOIAFromMC(skipMc) {
 }
 
 async function loadOiAnalysis() {
-  if (OIA.loading) return;
+  // Request token: rapid screen/index switches must not be blocked by an in-flight
+  // load, and a superseded (stale) response must not overwrite the current screen.
+  const token = (OIA.reqToken = (OIA.reqToken || 0) + 1);
+  const forScreen = OIA.screen;
   OIA.loading = true;
   const live = oiaEl("oia-live"); if (live) live.textContent = "…";
   try {
-    if (OIA.screen === "summary") {
+    if (forScreen === "summary") {
       const d = await fetchJSON(`/api/oi-analysis/summary?symbol=${encodeURIComponent(OIA.sym)}`, 20000);
+      if (token !== OIA.reqToken || OIA.screen !== "summary") return; // superseded
       if (d && typeof d.enabled === "boolean") { OIA.status = OIA.status || {}; OIA.status.enabled = d.enabled; renderOiaBanner(); }
       renderOiaSummary(d);
     } else {
       const d = await fetchJSON(`/api/oi-analysis/movement?symbol=${encodeURIComponent(OIA.sym)}&window=5`, 20000);
+      if (token !== OIA.reqToken || OIA.screen !== "movement") return; // superseded
       if (d && typeof d.enabled === "boolean") { OIA.status = OIA.status || {}; OIA.status.enabled = d.enabled; renderOiaBanner(); }
       OIA.lastMv = d;
       renderOiaMovement(d);
@@ -6273,10 +6278,11 @@ async function loadOiAnalysis() {
     const dt = oiaEl("oia-date"); if (dt) dt.textContent = new Date().toLocaleTimeString();
     if (live) live.textContent = "LIVE";
   } catch (e) {
+    if (token !== OIA.reqToken) return;
     if (live) live.textContent = "—";
-    if (OIA.screen === "summary") { const hs = oiaEl("oia-summary"); if (hs) hs.innerHTML = `<div class="oia-empty">DATA UNAVAILABLE — ${(e && e.message) || "failed to load OI"}.</div>`; }
+    if (forScreen === "summary") { const hs = oiaEl("oia-summary"); if (hs) hs.innerHTML = `<div class="oia-empty">DATA UNAVAILABLE — ${(e && e.message) || "failed to load OI"}.</div>`; }
     else { const m = oiaEl("oia-c1-msg"); if (m) { m.hidden = false; m.textContent = `DATA UNAVAILABLE — ${(e && e.message) || "failed to load OI"}.`; } }
-  } finally { OIA.loading = false; }
+  } finally { if (token === OIA.reqToken) OIA.loading = false; }
 }
 
 function startOiAnalysisLive() {
