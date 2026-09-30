@@ -5306,6 +5306,41 @@ router.get("/orb-status", requirePermission("oiAnalysis"), (_req: Request, res: 
   res.json({ orbActive: getOrbActive().active, flags: CONFIG.orb, todayOrbTrades: orbTrades.length, trades: orbTrades.slice(0, 10) });
 });
 
+// MANUAL "Run ORB" — the user presses this (e.g. in the morning). It evaluates ORB
+// once for the given index and, only if the breakout is a CONFIRMED TAKE inside the
+// 09:20–11:30 window, logs it into the Daily Log using the existing option
+// selection. Otherwise it returns the current status/reason and logs nothing.
+// Advisory/paper — never a live order.
+router.post("/orb-run", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  try {
+    const def = findSymbolDef(String((req.body && req.body.symbol) || req.query.symbol || "^NSEI"));
+    if (!def) return res.status(400).json({ error: "Valid index symbol required" });
+    const r = await computeOrbEvaluation(def);
+    if (!r?.available || !r.evaluation) return res.json({ ok: true, logged: false, available: false, message: r?.message || "ORB data unavailable (need 09:15–09:30 5-min candles).", flags: CONFIG.orb });
+    const e = r.evaluation;
+    if (e.final !== "TAKE CE" && e.final !== "TAKE PE") {
+      return res.json({ ok: true, logged: false, evaluation: e, message: `ORB is ${e.final}${e.reasonText ? " — " + e.reasonText : ""}. Nothing logged.`, flags: CONFIG.orb });
+    }
+    if (!isTradeEntryWindowIST() && !(req.body && req.body.force)) return res.json({ ok: true, logged: false, evaluation: e, message: "ORB is confirmed but it's outside the 09:20–11:30 IST entry window — nothing logged.", flags: CONFIG.orb });
+    if (getCooldownState(def.symbol).active) return res.json({ ok: true, logged: false, evaluation: e, message: "An ORB trade for this index is already active (cooldown) — not logged again.", flags: CONFIG.orb });
+    const side: "CE" | "PE" = e.final === "TAKE CE" ? "CE" : "PE";
+    let oiChain: any = null; try { oiChain = await getOiCached(def); } catch { oiChain = null; }
+    const sa = analyzeStrikes(oiChain, side === "CE" ? "BULLISH" : "BEARISH", { name: def.name });
+    const bs: any = sa?.bestSetup;
+    if (!(bs && bs.entryPremium > 0 && bs.stopPremium > 0 && bs.targetPremium > 0)) return res.json({ ok: true, logged: false, evaluation: e, message: "Confirmed, but no live option premium to log a resolvable trade (market closed / OI stale).", flags: CONFIG.orb });
+    const nowSec = Math.floor(Date.now() / 1000);
+    const trade = appendTrade({
+      execTs: nowSec, index: def.name, symbol: def.symbol, type: side, strike: bs.strike ?? null, expiry: oiChain?.expiry ?? null,
+      entry: bs.entryPremium, sl: bs.stopPremium, target: bs.targetPremium, rr: bs.rr != null ? `1:${bs.rr}` : null,
+      remarks: `ORB manual · ${e.direction} · ${side}`, snapshot: { strategy: "ORB", audit: r.audit, evaluation: e },
+    });
+    recordExecution({ symbol: def.symbol, execTs: nowSec, side, strike: bs.strike ?? null, entry: bs.entryPremium, source: "orb-manual" });
+    res.json({ ok: true, logged: true, trade, evaluation: e, message: `ORB ${side} logged to the Daily Log (entry ₹${bs.entryPremium}, SL ₹${bs.stopPremium}, target ₹${bs.targetPremium}).`, flags: CONFIG.orb });
+  } catch (e: any) {
+    res.json({ ok: false, error: e?.message || "orb-run failed" });
+  }
+});
+
 // ORB auto-logger: when active + inside the 09:30–11:30 entry window, log a
 // confirmed ORB TAKE into the daily log using the EXISTING option-selection
 // (analyzeStrikes → bestSetup premiums). Deduped by the same cooldown as the main

@@ -6180,7 +6180,7 @@ function initTradeExec() {
   });
   teEl("te-open-command")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("marketcommand"); });
   teEl("te-open-optionterminal")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("optionterminal"); });
-  teEl("te-orb-activate")?.addEventListener("click", teToggleOrbActivate);
+  teEl("te-orb-activate")?.addEventListener("click", teRunOrb);
   teEl("te-export-trades")?.addEventListener("click", () => {
     const url = `/api/trade-log/export${TE._day ? `?date=${TE._day}` : ""}`;
     const a = document.createElement("a"); a.href = url; a.download = ""; document.body.appendChild(a); a.click(); a.remove();
@@ -6238,9 +6238,8 @@ function renderTEOrbCard(d) {
   const body = teEl("te-orb-body"); if (!body) return;
   const fl = teEl("te-orb-flags");
   const act = teEl("te-orb-activate");
-  window.__orbActive = !!(d && d.orbActive);
-  if (act) { act.textContent = d && d.orbActive ? "● ACTIVE — Logging" : "Activate"; act.classList.toggle("on", !!(d && d.orbActive)); }
-  if (fl) fl.innerHTML = d && d.flags ? `TEST_MODE <b class="${d.flags.testMode ? "te-up" : "te-down"}">${d.flags.testMode ? "ON" : "OFF"}</b> · LIVE_EXEC <b class="${d.flags.liveExecution ? "te-down" : "te-up"}">${d.flags.liveExecution ? "ON" : "OFF"}</b> · Logs to Daily Log <b class="${d.orbActive ? "te-up" : ""}">${d.orbActive ? "ON" : "OFF"}</b>` : "";
+  if (act && act.textContent !== "Running…") act.textContent = "▶ Run ORB";
+  if (fl) fl.innerHTML = `Press <b>Run ORB</b> after the 09:30 range forms — a confirmed breakout is logged into the Daily Log below. Paper only, no live order.`;
   if (!d || !d.available || !d.evaluation) {
     body.innerHTML = `<div class="te-orb-msg">${(d && (d.message || d.reason)) || "ORB data unavailable"} — the ORB range needs 09:15–09:30 5-min candles (available during market hours).</div>`;
     return;
@@ -6266,17 +6265,18 @@ function renderTEOrbCard(d) {
     `<div class="orb-final ${finalCls}" style="margin-top:8px">${e.final}<span class="orb-reason">${e.reasonText || ""}</span></div>` +
     (e.reasons && e.reasons.length ? `<div class="orb-codes" style="margin-top:6px">${e.reasons.map((c) => `<span class="orb-code">${c}</span>`).join("")}</div>` : "");
 }
-async function teToggleOrbActivate() {
-  const active = !(window.__orbActive === true);
-  const msg = active
-    ? "Activate ORB?\n\nWhen ON, a CONFIRMED ORB breakout (TAKE) between 09:20–11:30 IST is logged into the Daily Log above as a paper trade. It never places a live order."
-    : "Deactivate ORB? No new ORB trades will be logged.";
-  if (!confirm(msg)) return;
+// Manual "Run ORB" — the user presses this (e.g. after 09:30). It evaluates ORB
+// once and, only on a CONFIRMED TAKE inside the 09:20–11:30 window, logs the trade
+// into the Daily Log. Otherwise it reports the current status. Paper, no live order.
+async function teRunOrb() {
+  const btn = teEl("te-orb-activate");
+  if (btn) { btn.disabled = true; btn.textContent = "Running…"; }
   try {
-    const r = await fetch("/api/orb-activate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ active }) }).then((x) => x.json());
-    window.__orbActive = !!r.orbActive;
-    loadTEOrb();
-  } catch (e) { alert("ORB activate error: " + e.message); }
+    const r = await fetch("/api/orb-run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbol: TE.sym }) }).then((x) => x.json());
+    alert(r && r.message ? r.message : (r && r.ok ? (r.logged ? "ORB trade logged." : "No ORB trade this run.") : "Run failed: " + ((r && r.error) || "unknown")));
+    loadTradeExec();
+  } catch (e) { alert("ORB run error: " + e.message); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = "▶ Run ORB"; } }
 }
 
 function startTradeExecLive() {
@@ -14122,26 +14122,24 @@ function initStrategyLab() {
   wire("msl-clear", mslClearResults);
   wire("msl-modal-close", () => el("msl-modal")?.classList.add("hidden"));
   wire("orb-refresh", loadOrbStrategy);
-  wire("orb-activate", orbToggleActivate);
+  wire("orb-activate", orbRunLab);
   const orbSym = el("orb-sym");
   if (orbSym && !orbSym.dataset.wired) { orbSym.dataset.wired = "1"; orbSym.addEventListener("change", loadOrbStrategy); }
   loadStrategyLab();
   loadOrbStrategy();
 }
 
-// Toggle ORB activation. When ON, the backend logs confirmed ORB TAKE signals into
-// the Trade Execution daily log (paper/advisory — never a live order).
-async function orbToggleActivate() {
-  const active = !(window.__orbActive === true);
-  const msg = active
-    ? "Activate ORB?\n\nWhen ON, a CONFIRMED ORB breakout (TAKE) between 09:20–11:30 IST will be logged into the Trade Execution daily log as a paper trade. It uses the existing option selection and never places a live order."
-    : "Deactivate ORB? No new ORB trades will be logged.";
-  if (!confirm(msg)) return;
+// Manual "Run ORB" from the Strategy Lab card — one-shot evaluate + log-if-confirmed.
+async function orbRunLab() {
+  const btn = el("orb-activate");
+  const sym = (el("orb-sym") && el("orb-sym").value) || "^NSEI";
+  if (btn) { btn.disabled = true; btn.textContent = "Running…"; }
   try {
-    const r = await fetch("/api/orb-activate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ active }) }).then((x) => x.json());
-    window.__orbActive = !!r.orbActive;
+    const r = await fetch("/api/orb-run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbol: sym }) }).then((x) => x.json());
+    alert(r && r.message ? r.message : (r && r.ok ? (r.logged ? "ORB trade logged." : "No ORB trade this run.") : "Run failed: " + ((r && r.error) || "unknown")));
     loadOrbStrategy();
-  } catch (e) { alert("ORB activate error: " + e.message); }
+  } catch (e) { alert("ORB run error: " + e.message); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = "▶ Run ORB"; } }
 }
 
 // ---- ORB (Opening Range Breakout) Test Zone card ----
@@ -14156,13 +14154,9 @@ async function loadOrbStrategy() {
 function renderOrbStrategy(d) {
   const grid = el("orb-grid"); if (!grid) return;
   const fl = el("orb-flags");
-  window.__orbActive = !!d.orbActive;
   const actBtn = el("orb-activate");
-  if (actBtn) {
-    actBtn.textContent = d.orbActive ? "● ACTIVE — Logging" : "Activate";
-    actBtn.classList.toggle("orb-on", !!d.orbActive);
-  }
-  if (fl && d.flags) fl.innerHTML = `TEST_MODE <b class="${d.flags.testMode ? "ok" : "blocked"}">${d.flags.testMode ? "ON" : "OFF"}</b> · LIVE_EXEC <b class="${d.flags.liveExecution ? "blocked" : "ok"}">${d.flags.liveExecution ? "ON" : "OFF"}</b> · Logs to Trade Execution: <b class="${d.orbActive ? "ok" : ""}">${d.orbActive ? "ON" : "OFF"}</b>`;
+  if (actBtn && actBtn.textContent !== "Running…") actBtn.textContent = "▶ Run ORB";
+  if (fl) fl.innerHTML = `Press <b>Run ORB</b> after 09:30 — a confirmed breakout is logged to the Trade Execution Daily Log. Paper only, no live order.`;
   if (!d || !d.available || !d.evaluation) {
     grid.innerHTML = `<div class="orb-final orb-wait">${(d && (d.message || d.reason)) || "ORB data unavailable"}</div>`;
     return;
