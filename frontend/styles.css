@@ -5242,3 +5242,21 @@ body.pm-fullwidth #tab-flow { display:none !important; }
 .ot-clegend { display:flex; flex-wrap:wrap; gap:4px 12px; align-items:center; }
 .ot-guide { font-size:9.5px; color:#5f6f8e; }
 .ot-guide b { font-weight:800; }
+
+/* ADDITIVE: Option Terminal "Solid Guidance" card */
+.ot-guidance-card { margin-top:10px; background:#0e1830; border:1px solid #24407a; border-radius:12px; padding:12px 14px; }
+.otg-hd { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:9px; }
+.otg-t { font-size:14px; font-weight:800; }
+.otg-badge { font-size:11px; font-weight:800; padding:3px 9px; border-radius:7px; }
+.otg-badge.ce { background:rgba(22,199,132,.18); color:#16c784; }
+.otg-badge.pe { background:rgba(246,70,93,.18); color:#f6465d; }
+.otg-badge.neu { background:rgba(131,149,179,.16); color:#8395b3; }
+.otg-exp { margin-left:auto; font-size:11px; color:#8395b3; }
+.otg-grid { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; }
+.otg-cell { background:#0a1120; border:1px solid #1b2540; border-radius:9px; padding:8px; text-align:center; }
+.otg-k { display:block; font-size:9px; color:#5f6f8e; text-transform:uppercase; letter-spacing:.3px; }
+.otg-v { font-size:15px; font-weight:800; margin-top:3px; font-variant-numeric:tabular-nums; }
+.otg-v.up { color:#16c784; } .otg-v.dn { color:#f6465d; }
+.otg-line { margin-top:9px; font-size:13px; font-weight:600; color:#dbe8ff; background:#0a1120; border:1px solid #24407a; border-radius:9px; padding:9px 11px; }
+.otg-disc { font-size:9.5px; color:#5f6f8e; margin-top:7px; }
+@media (max-width:820px){ .otg-grid { grid-template-columns:repeat(3,1fr); } }

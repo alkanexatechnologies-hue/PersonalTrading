@@ -6739,7 +6739,7 @@ async function otFetchOptionCandles(sym, strike, expiry, interval) {
     // and re-apply the displayed LTP + Option Data so they match the chart.
     if (OT.lastData) {
       const r = otSelectedRow(OT.lastData);
-      otRenderResponse(OT.lastData); otRenderLtpChange(); otRenderContext(OT.lastData, r);
+      otRenderResponse(OT.lastData); otRenderLtpChange(); otRenderContext(OT.lastData, r); renderOTGuidance(OT.lastData, r);
       otRefreshLtpDisplay(OT.lastData, r); otRenderOptionData(OT.lastData, r);
     }
     // When the snapshot is stale (e.g. market closed → last-good expired-contract
@@ -7025,6 +7025,7 @@ function renderOptionTerminal(d) {
   // ---- per-side Option Data panels + Market Context (replaces analytics/liq/intraday) ----
   otRenderOptionData(d, row);
   otRenderContext(d, row);
+  renderOTGuidance(d, row);
 
   // ---- footer freshness ----
   const s = d.snapshot || {};
@@ -7209,6 +7210,66 @@ function otRenderContext(d, row) {
     cell("India VIX", vixTxt) +
     cell("Updated", updated) +
     `</div>` + respLine;
+}
+
+// ADDITIVE: standard-normal CDF (erf approximation) for reach-probability.
+function otPhi(z) {
+  const t = 1 / (1 + 0.2316419 * Math.abs(z));
+  const d = 0.3989423 * Math.exp(-z * z / 2);
+  let pr = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+  return z > 0 ? 1 - pr : pr;
+}
+
+// ADDITIVE: one clean "Solid Guidance" card. Reads only what the OT already has
+// (VIX, greeks on the selected row, premium S/R from OT._struct, market direction)
+// — it computes nothing that changes existing behaviour and touches no other panel.
+function renderOTGuidance(d, row) {
+  const box = otEl("ot-guidance"); if (!box) return;
+  d = d || OT.lastData; row = row || (d && otSelectedRow(d));
+  const mv = (d && d.marketView) || {};
+  const dir = String(mv.direction || (d && d.tradePlan && d.tradePlan.direction) || "").toUpperCase();
+  const spot = d && d.spot != null ? d.spot : null;
+  const vix = d && d.vix && d.vix.available && d.vix.value != null ? d.vix.value : null;
+  const idxName = (d && d.name) || "Index";
+  const side = dir === "BULLISH" ? "CE" : dir === "BEARISH" ? "PE" : null;
+  if (!row || !side) {
+    box.innerHTML = `<div class="otg-hd"><span class="otg-t">🎯 Guidance</span><span class="otg-badge neu">No clear edge — wait for direction</span></div>` +
+      `<div class="otg-line">A trade is guided only when the underlying trend is clearly bullish or bearish. Right now it is neutral/conflicting.</div>`;
+    return;
+  }
+  const leg = row[side.toLowerCase()] || {};
+  const entry = otDisplayLtp(side, leg);
+  const delta = leg.delta != null ? Math.abs(leg.delta) : null;
+  const theta = leg.theta != null ? leg.theta : null;
+  const st = OT._struct && OT._struct[side.toLowerCase()];
+  const ups = st && entry != null ? [st.swp, st.r1, st.r2].filter((v) => v != null && v > entry).sort((a, b) => a - b) : [];
+  const dns = st && entry != null ? [st.swp, st.s1, st.s2].filter((v) => v != null && v < entry).sort((a, b) => b - a) : [];
+  const target = ups.length ? ups[0] : null;
+  const stop = dns.length ? dns[0] : null;
+  const sigmaPts = (spot != null && vix != null) ? spot * (vix / 100) / Math.sqrt(252) : null;
+  let reach = null;
+  if (target != null && entry != null && delta && sigmaPts) { const move = (target - entry) / delta; reach = Math.max(2, Math.min(95, Math.round(2 * (1 - otPhi(move / sigmaPts)) * 100))); }
+  const rr = (target != null && stop != null && entry != null && entry > stop) ? (target - entry) / (entry - stop) : null;
+  const expMove = sigmaPts != null ? Math.round(sigmaPts) : null;
+  const num = (v, dec) => v == null ? "—" : Number(v).toLocaleString("en-IN", { minimumFractionDigits: dec || 0, maximumFractionDigits: dec || 0 });
+  const cell = (k, v, cls) => `<div class="otg-cell"><span class="otg-k">${k}</span><span class="otg-v ${cls || ""}">${v}</span></div>`;
+  const moveNeeded = target != null && entry != null && delta ? Math.round(Math.abs((target - entry) / delta)) : null;
+  box.innerHTML =
+    `<div class="otg-hd"><span class="otg-t">🎯 Guidance — ${side} ${row.strike ?? ""}</span>` +
+    `<span class="otg-badge ${side === "CE" ? "ce" : "pe"}">BUY ${side} · ${side === "CE" ? "lean bullish" : "lean bearish"}</span>` +
+    `<span class="otg-exp">${idxName} expected today ± ${expMove != null ? num(expMove) : "—"} pts (1σ, from VIX)</span></div>` +
+    `<div class="otg-grid">` +
+    cell("Entry", entry != null ? "₹" + num(entry, 2) : "—") +
+    cell("Target", target != null ? "₹" + num(target, 2) : "—", "up") +
+    cell("Reach today", reach != null ? "~" + reach + "%" : "—") +
+    cell("Stop", stop != null ? "₹" + num(stop, 2) : "—", "dn") +
+    cell("R:R", rr != null ? "1:" + num(rr, 2) : "—") +
+    cell("Δ / θ", (delta != null ? num(delta, 2) : "—") + " / " + (theta != null ? num(theta, 2) : "—")) +
+    `</div>` +
+    `<div class="otg-line">${(target != null && reach != null && entry != null && moveNeeded != null && stop != null)
+      ? `If ${idxName} moves ${side === "CE" ? "+" : "−"}${moveNeeded} pts, this ${side} ≈ <b class="ot-up">₹${num(target, 2)}</b> (~${reach}% today). Exit below <b class="ot-down">₹${num(stop, 2)}</b>.`
+      : "DATA UNAVAILABLE — needs live VIX, greeks and premium levels (available in market hours)."}</div>` +
+    `<div class="otg-disc">Model estimate from real VIX + greeks + option structure — odds, not a guarantee.</div>`;
 }
 
 async function loadMarketCommand(chartOnly = false) {
