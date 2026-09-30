@@ -2137,13 +2137,14 @@ function applyMode(mode) {
   document.querySelectorAll("#tabs .tab").forEach((t) => {
     t.classList.toggle("hidden", !allowed.has(t.getAttribute("data-tab")));
   });
-  // If the active tab isn't part of this desk (or is no longer permitted), jump
-  // to the desk's first PERMITTED tab. A desk with zero permitted screens (admin
-  // gave the desk but no screens) falls back to the desk's nominal first tab.
-  const active = document.querySelector("#tabs .tab.active");
-  const activeTab = active ? active.getAttribute("data-tab") : null;
-  if (!activeTab || !allowed.has(activeTab)) switchTab(deskTabs[0] || MODE_FIRST[mode]);
-  else syncMobileNav(activeTab);
+  // An explicit desk choice always opens that desk's home (first permitted) tab.
+  // Previously this kept the current tab when it was also valid in the new desk —
+  // but the Market Sentiment desk shares Market Command / Option Terminal / OI
+  // Analysis / Trade Execution as tabs, so clicking it while on one of those left
+  // the user on that shared tab and the Sentiment screen never opened. Jumping to
+  // the first tab makes the desk open every time. (A desk with zero permitted
+  // screens falls back to its nominal first tab.)
+  switchTab(deskTabs[0] || MODE_FIRST[mode]);
 }
 
 // Called once login is confirmed: always land on Home ("Choose your desk"),
