@@ -561,6 +561,22 @@ function disconnectDhanFeedOnAuthFailure(e: unknown): void {
   try { setFeedFlags({ dhan: false }); } catch { /* ignore */ }
 }
 
+// ---- Live-feed self-heal (readiness) --------------------------------------------
+// If a VALID (present, non-expired) Dhan token is configured but the live feed flag
+// got left OFF — e.g. after this morning's token expiry that has since been replaced,
+// or a stuck auth-disconnect — turn it back ON automatically within 30s, so the app
+// recovers on its own without a manual re-save or restart. A genuinely EXPIRED token
+// is deliberately left OFF (the user must paste a fresh one). This is the fix for
+// "data not available every time" caused by the feed staying disconnected all day.
+const _dhanFeedHealTimer = setInterval(() => {
+  try {
+    if (getFeedFlags().dhan || !dhanConfigured()) return;
+    const tok = decodeDhanToken();
+    if (tok.present && !tok.expired) { setFeedFlags({ dhan: true }); console.log("[feed] self-heal: valid Dhan token present — live feed re-enabled"); }
+  } catch { /* best-effort */ }
+}, 30_000);
+if (typeof (_dhanFeedHealTimer as any).unref === "function") (_dhanFeedHealTimer as any).unref();
+
 // ---- Canonical Dhan health (SINGLE SOURCE OF TRUTH, §12) --------------------
 // Composes the pure health state machine (data/dhanHealth.ts) with the live
 // feed-flag + market-session context. Every screen/endpoint reads THIS.
