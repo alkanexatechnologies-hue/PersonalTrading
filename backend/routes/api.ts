@@ -6922,10 +6922,14 @@ router.get("/option-candles", async (req: Request, res: Response) => {
     const inst = await findOption(underlying, type, strike, expiry); // Groww symbol + lot/display
     const now = Math.floor(Date.now() / 1000);
     const start = now - 5 * 24 * 3600; // last ~5 days
+    // Groww covers NSE options only. For BSE indices (SENSEX/BANKEX) skip it entirely
+    // and go straight to Dhan — trying Groww there always returns nothing and just
+    // wastes an API call + adds rate-limit pressure.
+    const growwSupports = !/SENSEX|BANKEX/i.test(underlying);
     // OPTION TERMINAL: prefer Groww premium candles (real volume, friendlier rate
     // limits) when a Groww token is connected. Everything else stays on Dhan.
     const gp = growwProviderForOptionTerminal();
-    if (gp && inst) {
+    if (gp && inst && growwSupports) {
       try {
         const candles = await growwOptionCandles(gp, inst.tradingSymbol, start, now, interval);
         // Only return from Groww when it ACTUALLY has candles. If it returns none —
@@ -6986,7 +6990,8 @@ router.get("/option-structure", async (req: Request, res: Response) => {
       let candles: any[] | null = null;
       const gp = growwProviderForOptionTerminal();
       const inst = await findOption(underlying, type, strike, expiry);
-      if (gp && inst) {
+      const growwSupports = !/SENSEX|BANKEX/i.test(underlying); // BSE indices → Dhan only
+      if (gp && inst && growwSupports) {
         try { candles = await growwOptionCandles(gp, inst.tradingSymbol, start, now, interval); }
         catch { candles = null; }
       }
