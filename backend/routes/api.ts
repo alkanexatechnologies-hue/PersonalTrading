@@ -329,7 +329,9 @@ const TTL_OI = 90_000; // option chain: 90s (was 60s) - eases Groww rate-limit p
 // Market Command is a live trading screen: candles refresh fast (5s) via a
 // dedicated cache key so the global 30s candle cache used by heavier/background
 // consumers is untouched. OI/liquidity keep their own 15s caches (rate-limit heavy).
-const TTL_MC_CANDLES = 5_000;
+const TTL_MC_CANDLES = 20_000; // 20s (was 5s) — cut Dhan candle calls 4× to avoid
+// DH-904 rate limits that made non-NIFTY charts fall back to stale last-good. The
+// forming bar still updates every 20s; live spot/quote refreshes separately/faster.
 const getCandlesCached = (symbol: string, interval: Interval) =>
   cached(`c:${symbol}:${interval}`, interval === "1d" ? TTL_DAILY : TTL_INTRADAY, () => fetchCandles(symbol, interval));
 
@@ -5256,7 +5258,7 @@ const ORB_INDEX_SYMBOLS: string[] = ALL_SYMBOLS.filter((d) => d.type === "index"
 async function computeOrbEvaluation(def: any): Promise<any> {
   const isOrbIndex = def.type === "index" && def.fno === true;
   let candles5m: any[] = [];
-  try { candles5m = await fetchCandles(def.symbol, "5m" as Interval); } catch { candles5m = []; }
+  try { candles5m = await cached(`c:${def.symbol}:5m`, TTL_MC_CANDLES, () => fetchCandles(def.symbol, "5m" as Interval)); } catch { candles5m = []; }
   if (!candles5m.length) return { available: false, symbol: def.symbol, name: def.name, reason: "DATA_UNAVAILABLE", message: "5-min candles unavailable (market closed / feed off)." };
 
   const lastTime = candles5m[candles5m.length - 1].time;
@@ -5410,7 +5412,7 @@ function instrumentCtx(def: any): InstrumentContext {
 async function computeVwapEmaEvaluation(def: any): Promise<any> {
   const isIndex = def.type === "index" && def.fno === true;
   let candles5m: any[] = [];
-  try { candles5m = await fetchCandles(def.symbol, "5m" as Interval); } catch { candles5m = []; }
+  try { candles5m = await cached(`c:${def.symbol}:5m`, TTL_MC_CANDLES, () => fetchCandles(def.symbol, "5m" as Interval)); } catch { candles5m = []; }
   if (!candles5m.length) return { available: false, symbol: def.symbol, name: def.name, reason: "DATA_UNAVAILABLE", message: "5-min candles unavailable (market closed / feed off)." };
   const lastTime = candles5m[candles5m.length - 1].time;
   const sessionDay = new Date(lastTime * 1000 + 19800000).toISOString().slice(0, 10);
