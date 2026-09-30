@@ -5232,8 +5232,12 @@ router.get("/strategies/sessions", requirePermission("oiAnalysis"), (req: Reques
 // Shared ORB evaluation — used by the Test-Zone route AND the auto-logger, so both
 // see exactly the same deterministic signal. Reuses the OR/breakout engine, the
 // EMA/VWAP indicators and the market-structure engine; no look-ahead, no fabrication.
+// Every F&O INDEX instrument the app supports — ORB is generic across all of them
+// (NIFTY, BANK NIFTY, FIN NIFTY, MIDCAP, SENSEX, and any future index def).
+const ORB_INDEX_SYMBOLS: string[] = ALL_SYMBOLS.filter((d) => d.type === "index" && d.fno === true).map((d) => d.symbol);
+
 async function computeOrbEvaluation(def: any): Promise<any> {
-  const isOrbIndex = /NSEI|NSEBANK/.test(def.symbol) || /^NIFTY$|BANKNIFTY/i.test(def.nseSymbol || "");
+  const isOrbIndex = def.type === "index" && def.fno === true;
   let candles5m: any[] = [];
   try { candles5m = await fetchCandles(def.symbol, "5m" as Interval); } catch { candles5m = []; }
   if (!candles5m.length) return { available: false, symbol: def.symbol, name: def.name, reason: "DATA_UNAVAILABLE", message: "5-min candles unavailable (market closed / feed off)." };
@@ -5315,6 +5319,7 @@ router.post("/orb-run", requirePermission("oiAnalysis"), async (req: Request, re
   try {
     const def = findSymbolDef(String((req.body && req.body.symbol) || req.query.symbol || "^NSEI"));
     if (!def) return res.status(400).json({ error: "Valid index symbol required" });
+    if (!(def.type === "index" && def.fno === true)) return res.json({ ok: true, logged: false, message: `ORB runs on F&O index instruments only (${ORB_INDEX_SYMBOLS.join(", ")}).`, flags: CONFIG.orb });
     const r = await computeOrbEvaluation(def);
     if (!r?.available || !r.evaluation) return res.json({ ok: true, logged: false, available: false, message: r?.message || "ORB data unavailable (need 09:15–09:30 5-min candles).", flags: CONFIG.orb });
     const e = r.evaluation;
@@ -5350,7 +5355,7 @@ async function orbAutoLogTick(): Promise<void> {
   if (_orbAutoRunning || !getOrbActive().active || !isTradeEntryWindowIST()) return;
   _orbAutoRunning = true;
   try {
-    for (const sym of ["^NSEI", "^NSEBANK"]) {
+    for (const sym of ORB_INDEX_SYMBOLS) {
       const def = findSymbolDef(sym); if (!def) continue;
       if (getCooldownState(def.symbol).active) continue; // one ORB trade per cooldown window
       let r: any; try { r = await computeOrbEvaluation(def); } catch { continue; }
