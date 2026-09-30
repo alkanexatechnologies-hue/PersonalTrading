@@ -6926,11 +6926,16 @@ router.get("/option-candles", async (req: Request, res: Response) => {
     if (gp && inst) {
       try {
         const candles = await growwOptionCandles(gp, inst.tradingSymbol, start, now, interval);
-        return res.json({
-          available: candles.length > 0, source: "groww", tradingSymbol: inst.tradingSymbol,
-          underlying, name: def?.name || underlying, type, strike, expiry, interval, lotSize: inst.lotSize ?? null,
-          candles, message: candles.length ? undefined : "Groww ने इस option का candle नहीं दिया।",
-        });
+        // Only return from Groww when it ACTUALLY has candles. If it returns none —
+        // e.g. SENSEX / BSE options Groww doesn't cover — fall through to Dhan
+        // instead of dead-ending with an empty chart. (Fixes SENSEX OT chart.)
+        if (candles.length > 0) {
+          return res.json({
+            available: true, source: "groww", tradingSymbol: inst.tradingSymbol,
+            underlying, name: def?.name || underlying, type, strike, expiry, interval, lotSize: inst.lotSize ?? null,
+            candles,
+          });
+        }
       } catch (ge: any) {
         console.error("[option-candles] Groww failed, falling back to Dhan:", ge?.message || ge);
       }
