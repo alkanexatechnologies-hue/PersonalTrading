@@ -5980,9 +5980,14 @@ router.get("/dhan/status", requireAdmin, (_req: Request, res: Response) => {
 router.post("/dhan/config", requireAdmin, (req: Request, res: Response) => {
   const b = req.body || {};
   const next = saveDhanConfig({ accessToken: b.accessToken, clientId: b.clientId });
+  // Re-enable the Dhan live feed on a fresh token. When the previous token expired
+  // the feed flag was turned OFF (auth-failure disconnect); saving a new token must
+  // turn it back ON, otherwise `skipLive` stays true and no live data / candles flow
+  // even though the token is valid. (This was the "saved but still disconnected" bug.)
+  if (dhanConfigured(next)) { try { setFeedFlags({ dhan: true }); } catch { /* best-effort */ } }
   const admin = getSession(bearerToken(req));
   logAuditEvent({ type: "DHAN_CREDENTIAL_UPDATED", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "dhan", result: "success" });
-  res.json({ ok: true, configured: dhanConfigured(next), clientId: next.clientId || null });
+  res.json({ ok: true, configured: dhanConfigured(next), clientId: next.clientId || null, feedReenabled: dhanConfigured(next) });
 });
 router.post("/dhan/test", requireAdmin, async (req: Request, res: Response) => {
   const admin = getSession(bearerToken(req));
@@ -6041,6 +6046,10 @@ router.post("/groww/connect", requireAdmin, async (req: Request, res: Response) 
     return res.status(400).json({ ok: false, error: "Groww rejected the token: " + String(e?.message || e).slice(0, 180) });
   }
   saveGrowwConfig({ accessToken: token, apiKey: apiKey || undefined });
+  // Re-enable the shared live feed on a fresh Groww token too (same reason as Dhan:
+  // an earlier auth-failure disconnect leaves the feed OFF, so live data / premium
+  // candles stay blocked even though the new token is valid).
+  try { if (dhanConfigured()) setFeedFlags({ dhan: true }); } catch { /* best-effort */ }
   const admin = getSession(bearerToken(req));
   logAuditEvent({ type: "GROWW_CREDENTIAL_UPDATED", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "groww", result: "success" });
   res.json({ ok: true, ...growwStatusPayload() });
