@@ -5352,16 +5352,18 @@ router.get("/oi-analysis/movement", requirePermission("oiAnalysis"), async (req:
     const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
     if (!def) return res.status(400).json({ available: false, error: "Valid F&O symbol required" });
     if (!def.fno) return res.json({ available: false, message: `OI Analysis needs an F&O instrument (got ${def.symbol}).`, testMode: !CONFIG.oiAnalysis.enabled });
-    const windowMin = Math.max(1, Math.min(30, Number(req.query.window) || 5));
+    const windowMin = Math.max(1, Math.min(30, Number(req.query.window) || 1));
     const oi = await getOiCached(def);
-    const view = buildOiMovement(def.symbol, oi, windowMin);
+    let spotChg: number | null = null, spotChgPct: number | null = null, spot: number | null = oi?.underlying ?? null;
+    try { const q = await getProvider().getQuote(def.symbol); if (q) { spot = q.price ?? spot; spotChg = q.change ?? null; spotChgPct = q.changePercent ?? null; } } catch { /* quote best-effort */ }
+    const view = buildOiMovement(def.symbol, oi, windowMin, { spot, spotChg, spotChgPct });
     try {
       logOiAnalysis({
         timestamp: Date.now(), asOf: view.asOf, symbol: def.symbol, screen: "movement",
         underlying: view.underlying, pcr: oi?.pcr ?? null, totalCeOi: oi?.totalCeOi ?? null, totalPeOi: oi?.totalPeOi ?? null,
         callWall: oi?.resistance ?? null, putWall: oi?.support ?? null,
         bias: view.aggregate?.summary || "—", confidencePct: null, samples: view.samples,
-        evidence: [], surges: view.surges.map((s) => s.message),
+        evidence: [], surges: view.insights.map((s) => `${s.strike} ${s.side} ${s.oiChgPct >= 0 ? "+" : ""}${s.oiChgPct}% — ${s.note}`),
       });
     } catch { /* audit best-effort */ }
     res.json({ ...view, enabled: CONFIG.oiAnalysis.enabled, testMode: !CONFIG.oiAnalysis.enabled });

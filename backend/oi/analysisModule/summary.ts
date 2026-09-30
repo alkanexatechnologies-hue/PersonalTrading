@@ -206,7 +206,7 @@ function pcrVolumeFrom(oi: OiAnalysis): { pcrVolume: number | null; state: "bull
 // ---- Session baseline for total-OI % change (in-memory, per symbol+IST date) ----
 const _totalsBase = new Map<string, { date: string; ce: number; pe: number }>();
 function istDate(): string { return new Date(Date.now() + 19800000).toISOString().slice(0, 10); }
-function sessionPct(symbol: string, ce: number, pe: number): { cePct: number | null; pePct: number | null } {
+export function sessionPct(symbol: string, ce: number, pe: number): { cePct: number | null; pePct: number | null } {
   const date = istDate();
   const b = _totalsBase.get(symbol);
   if (!b || b.date !== date) {
@@ -219,7 +219,7 @@ function sessionPct(symbol: string, ce: number, pe: number): { cePct: number | n
 }
 
 // ---- Key OI levels: top-3 CALL-OI strikes (resistance) + top-3 PUT-OI (support) ----
-function buildKeyLevels(oi: OiAnalysis): KeyLevel[] {
+export function buildKeyLevels(oi: OiAnalysis): KeyLevel[] {
   const calls = [...oi.topStrikes].sort((a, b) => b.ceOi - a.ceOi).slice(0, 3);
   const puts = [...oi.topStrikes].sort((a, b) => b.peOi - a.peOi).slice(0, 3);
   const callRoles = ["Call Wall", "Resistance", "Important"];

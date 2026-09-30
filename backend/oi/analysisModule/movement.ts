@@ -1,52 +1,65 @@
 // ============================================================================
-//  OI ANALYSIS MODULE — OI Movement assembler  (ADDITIVE)
+//  OI ANALYSIS MODULE — OI Movement dashboard assembler  (ADDITIVE)
 // ----------------------------------------------------------------------------
-//  Answers "what is changing RIGHT NOW?" for the OI Movement screen. Combines
-//  the already-fetched OiAnalysis chain (getOiCached: per-strike ceOi/peOi/ceChg/
-//  peChg/ceLtp/peLtp) with this module's intraday 1-minute store to produce a
-//  strike-wise table (day ΔOI + intraday ΔOI/ΔOI%, LTP, buildup), Top Call /
-//  Top Put activity, and surge alerts. Reuses the existing computeOiMovement()
-//  for the 5M/15M aggregate header. Read-only; no orders. Colour: CALL red, PUT green.
+//  "What is changing RIGHT NOW?" — the full OI Movement dashboard. Built ONLY
+//  from the live Dhan option chain (getOiCached) plus this module's intraday
+//  1-minute store; nothing is fabricated. Feeds: the Open-Interest-by-strike
+//  chart (with major-move markers + callouts), Top Call/Put OI-change tables,
+//  auto-detected Key OI Levels, a multi-window ΔOI% heatmap (1/3/5/15/30-min,
+//  which shows "building" until enough history exists), Selected-Strike inputs,
+//  live Insights, and the top-bar stats (spot, PCR, totals with session %).
+//  Read-only; no orders. Colour: CALL red, PUT green; major increase amber,
+//  major decrease purple.
 // ============================================================================
 
 import { OiAnalysis } from "../../types";
 import { computeOiMovement, OiMoveResult } from "../oiMovement";
-import { classifyBuildup, detectSurge, Buildup } from "./classify";
+import { classifyBuildup, Buildup } from "./classify";
 import { recordStrikeSnapshot, strikeDeltas, sampleCount, StrikeDelta } from "./intradayStore";
+import { sessionPct, buildKeyLevels, KeyLevel } from "./summary";
+
+export type MoveStatus = "Strong Build" | "Build" | "Unwind" | "Flat";
 
 export interface MovementRow {
   strike: number;
-  ceOi: number;
-  peOi: number;
-  ceDayChg: number;    // Δ since prior close (from the chain)
-  peDayChg: number;
-  ceIntraChg: number;  // Δ over the intraday window (from our 1-min store)
-  peIntraChg: number;
-  ceIntraPct: number;
-  peIntraPct: number;
-  ceLtp: number | null;
-  peLtp: number | null;
-  ceBuildup: Buildup;
-  peBuildup: Buildup;
+  ceOi: number; peOi: number;
+  ceDayChg: number; peDayChg: number;
+  ceChg: number; peChg: number;         // Δ over the selected window (intraday if available, else day)
+  ceChgPct: number; peChgPct: number;
+  ceLtp: number | null; peLtp: number | null;
+  ceLtpChgPct: number | null; peLtpChgPct: number | null;
+  ceVol: number | null; peVol: number | null;
+  ceBuildup: Buildup; peBuildup: Buildup;
+  ceStatus: MoveStatus; peStatus: MoveStatus;
+  majorDir: "up" | "down" | null;        // major-move marker for this strike
   atm: boolean;
 }
 
 export interface ActivityRow {
   side: "CALL" | "PUT";
   strike: number;
-  oi: number;
-  oiChg: number;
-  oiChgPct: number;
-  ltp: number | null;
-  buildup: Buildup;
+  oi: number; oiChg: number; oiChgPct: number;
+  ltp: number | null; ltpChgPct: number | null;
+  buildup: Buildup; status: MoveStatus;
 }
 
-export interface SurgeAlert {
-  side: "CALL" | "PUT";
-  strike: number;
-  severity: "notable" | "strong" | "extreme";
-  message: string;
+export interface Callout {
+  strike: number; side: "CE" | "PE";
+  oi: number; oiChg: number; oiChgPct: number;
+  dir: "up" | "down";
 }
+
+export interface HeatCell { pct: number | null; building: boolean; }
+export interface HeatRow { strike: number; cells: HeatCell[]; }
+export interface Heatmap { windows: number[]; calls: HeatRow[]; puts: HeatRow[]; }
+
+export interface Insight {
+  strike: number; side: "CE" | "PE";
+  oiChg: number; oiChgPct: number; ltpChgPct: number | null;
+  buildup: Buildup; tone: "bullish" | "bearish" | "neutral"; note: string;
+}
+
+export interface MovementContext { spot?: number | null; spotChg?: number | null; spotChgPct?: number | null; }
 
 export interface OiMovementView {
   available: boolean;
@@ -54,23 +67,40 @@ export interface OiMovementView {
   symbol: string;
   underlying: number | null;
   expiry: string | null;
-  asOf: number;
+  asOf: number;                 // provider chain timestamp (seconds) — data freshness
+  ageSec: number;               // seconds since asOf (staleness)
+  source: string;               // "dhan"
   windowMin: number;
   samples: number;
-  aggregate: OiMoveResult;      // reused 5M/15M judge
+  // top-bar stats
+  spot: number | null; spotChg: number | null; spotChgPct: number | null;
+  pcr: number | null;
+  totalCeOi: number; totalPeOi: number;
+  totalCePct: number | null; totalPePct: number | null;
+  aggregate: OiMoveResult;
   rows: MovementRow[];
-  topCalls: ActivityRow[];      // biggest CALL OI adds
-  topPuts: ActivityRow[];       // biggest PUT OI adds
-  surges: SurgeAlert[];
+  callouts: Callout[];
+  topCalls: ActivityRow[];
+  topPuts: ActivityRow[];
+  keyLevels: KeyLevel[];
+  heatmap: Heatmap;
+  insights: Insight[];
 }
 
-// Record the current chain into the intraday store, then build the view.
-export function buildOiMovement(symbol: string, oi: OiAnalysis | null, windowMin = 5): OiMovementView {
+const MAJOR_PCT = 15;       // |ΔOI%| for a "major" marker
+const STRONG_PCT = 20;      // |ΔOI%| that upgrades a build to "Strong Build"
+const HEAT_WINDOWS = [1, 3, 5, 15, 30];
+
+export function buildOiMovement(symbol: string, oi: OiAnalysis | null, windowMin = 1, ctx: MovementContext = {}): OiMovementView {
+  const nowSec = Math.floor(Date.now() / 1000);
   if (!oi || !oi.available || !oi.topStrikes?.length) {
     return {
       available: false, message: oi?.message || "OI data unavailable.", symbol,
-      underlying: null, expiry: null, asOf: Date.now(), windowMin, samples: 0,
-      aggregate: computeOiMovement(symbol), rows: [], topCalls: [], topPuts: [], surges: [],
+      underlying: null, expiry: null, asOf: nowSec, ageSec: 0, source: "dhan", windowMin, samples: 0,
+      spot: ctx.spot ?? null, spotChg: ctx.spotChg ?? null, spotChgPct: ctx.spotChgPct ?? null,
+      pcr: null, totalCeOi: 0, totalPeOi: 0, totalCePct: null, totalPePct: null,
+      aggregate: computeOiMovement(symbol), rows: [], callouts: [], topCalls: [], topPuts: [],
+      keyLevels: [], heatmap: { windows: HEAT_WINDOWS, calls: [], puts: [] }, insights: [],
     };
   }
 
@@ -83,67 +113,141 @@ export function buildOiMovement(symbol: string, oi: OiAnalysis | null, windowMin
   const deltas = strikeDeltas(symbol, windowMin);
   const dBy = new Map<string, StrikeDelta>();
   deltas.forEach((d) => dBy.set(`${d.strike}:${d.side}`, d));
+  const haveIntra = deltas.some((d) => d.oiChg !== 0);
 
   const atmStrike = nearestStrike(oi);
 
   const rows: MovementRow[] = oi.topStrikes.map((s) => {
     const cd = dBy.get(`${s.strike}:CALL`);
     const pd = dBy.get(`${s.strike}:PUT`);
-    // Prefer intraday LTP change from the store; fall back to day change sign.
-    const ceLtpChg = cd?.ltpChg ?? 0;
-    const peLtpChg = pd?.ltpChg ?? 0;
-    const ceIntraChg = cd?.oiChg ?? 0;
-    const peIntraChg = pd?.oiChg ?? 0;
-    // Buildup: use intraday flow if we have any, else the chain's day change.
-    const ceB = classifyBuildup("CALL", s.ceOi, ceIntraChg !== 0 ? ceIntraChg : s.ceChg, ceLtpChg !== 0 ? ceLtpChg : signHint(s.ceChg)).buildup;
-    const peB = classifyBuildup("PUT", s.peOi, peIntraChg !== 0 ? peIntraChg : s.peChg, peLtpChg !== 0 ? peLtpChg : signHint(s.peChg)).buildup;
+    const ceChg = haveIntra ? (cd?.oiChg ?? 0) : s.ceChg;
+    const peChg = haveIntra ? (pd?.oiChg ?? 0) : s.peChg;
+    const ceChgPct = haveIntra ? (cd?.oiChgPct ?? 0) : pctOf(s.ceChg, s.ceOi);
+    const peChgPct = haveIntra ? (pd?.oiChgPct ?? 0) : pctOf(s.peChg, s.peOi);
+    const ceLtpChgPct = ltpPct(cd);
+    const peLtpChgPct = ltpPct(pd);
+    const ceB = classifyBuildup("CALL", s.ceOi, ceChg, cd?.ltpChg ?? signHint(s.ceChg)).buildup;
+    const peB = classifyBuildup("PUT", s.peOi, peChg, pd?.ltpChg ?? signHint(s.peChg)).buildup;
+    const majorDir = majorOf(ceChgPct, peChgPct);
     return {
       strike: s.strike, ceOi: s.ceOi, peOi: s.peOi,
-      ceDayChg: s.ceChg, peDayChg: s.peChg,
-      ceIntraChg, peIntraChg,
-      ceIntraPct: cd?.oiChgPct ?? 0, peIntraPct: pd?.oiChgPct ?? 0,
-      ceLtp: s.ceLtp ?? null, peLtp: s.peLtp ?? null,
+      ceDayChg: s.ceChg, peDayChg: s.peChg, ceChg, peChg, ceChgPct, peChgPct,
+      ceLtp: s.ceLtp ?? null, peLtp: s.peLtp ?? null, ceLtpChgPct, peLtpChgPct,
+      ceVol: s.ceVol ?? null, peVol: s.peVol ?? null,
       ceBuildup: ceB, peBuildup: peB,
-      atm: s.strike === atmStrike,
+      ceStatus: statusOf(ceB, ceChgPct), peStatus: statusOf(peB, peChgPct),
+      majorDir, atm: s.strike === atmStrike,
     };
   });
 
-  // Activity ranking — biggest OI adds this window (intraday if present, else day).
-  const useIntra = deltas.length > 0 && deltas.some((d) => d.oiChg !== 0);
+  // Activity tables — biggest OI moves this window.
   const calls: ActivityRow[] = rows.map((r) => ({
-    side: "CALL" as const, strike: r.strike, oi: r.ceOi,
-    oiChg: useIntra ? r.ceIntraChg : r.ceDayChg,
-    oiChgPct: useIntra ? r.ceIntraPct : pctOf(r.ceDayChg, r.ceOi),
-    ltp: r.ceLtp, buildup: r.ceBuildup,
+    side: "CALL", strike: r.strike, oi: r.ceOi, oiChg: r.ceChg, oiChgPct: r.ceChgPct,
+    ltp: r.ceLtp, ltpChgPct: r.ceLtpChgPct, buildup: r.ceBuildup, status: r.ceStatus,
   }));
   const puts: ActivityRow[] = rows.map((r) => ({
-    side: "PUT" as const, strike: r.strike, oi: r.peOi,
-    oiChg: useIntra ? r.peIntraChg : r.peDayChg,
-    oiChgPct: useIntra ? r.peIntraPct : pctOf(r.peDayChg, r.peOi),
-    ltp: r.peLtp, buildup: r.peBuildup,
+    side: "PUT", strike: r.strike, oi: r.peOi, oiChg: r.peChg, oiChgPct: r.peChgPct,
+    ltp: r.peLtp, ltpChgPct: r.peLtpChgPct, buildup: r.peBuildup, status: r.peStatus,
   }));
   const topCalls = [...calls].sort((a, b) => Math.abs(b.oiChg) - Math.abs(a.oiChg)).slice(0, 5);
   const topPuts = [...puts].sort((a, b) => Math.abs(b.oiChg) - Math.abs(a.oiChg)).slice(0, 5);
 
-  // Surge alerts — only from genuine intraday windows (avoid day-change noise).
-  const surges: SurgeAlert[] = [];
-  for (const d of deltas) {
-    if (d.oiChg === 0 || d.windowMin < 1) continue;
-    const r = detectSurge({ side: d.side, strike: d.strike, oiNow: d.oiNow, oiChg: d.oiChg, windowMin: d.windowMin, ltpChg: d.ltpChg });
-    if (r.surge && r.severity !== "none") {
-      surges.push({ side: d.side, strike: d.strike, severity: r.severity as SurgeAlert["severity"], message: r.message });
-    }
-  }
-  surges.sort((a, b) => sev(b.severity) - sev(a.severity));
+  // Callouts — the largest moves across both sides, for on-chart labels.
+  const allMoves: Callout[] = [];
+  rows.forEach((r) => {
+    allMoves.push({ strike: r.strike, side: "CE", oi: r.ceOi, oiChg: r.ceChg, oiChgPct: r.ceChgPct, dir: r.ceChg >= 0 ? "up" : "down" });
+    allMoves.push({ strike: r.strike, side: "PE", oi: r.peOi, oiChg: r.peChg, oiChgPct: r.peChgPct, dir: r.peChg >= 0 ? "up" : "down" });
+  });
+  const callouts = allMoves.filter((c) => Math.abs(c.oiChgPct) >= (haveIntra ? 8 : 5))
+    .sort((a, b) => Math.abs(b.oiChg) - Math.abs(a.oiChg)).slice(0, 6);
+
+  // Insights — top movers with buildup interpretation.
+  const insights: Insight[] = [...topCalls.map((a) => toInsight(a)), ...topPuts.map((a) => toInsight(a))]
+    .sort((a, b) => Math.abs(b.oiChg) - Math.abs(a.oiChg)).slice(0, 5);
 
   return {
-    available: true, symbol, underlying: oi.underlying, expiry: oi.expiry, asOf: oi.asOf,
-    windowMin, samples: sampleCount(symbol),
+    available: true, symbol, underlying: oi.underlying, expiry: oi.expiry,
+    asOf: oi.asOf, ageSec: Math.max(0, nowSec - oi.asOf), source: "dhan", windowMin, samples: sampleCount(symbol),
+    spot: ctx.spot ?? oi.underlying, spotChg: ctx.spotChg ?? null, spotChgPct: ctx.spotChgPct ?? null,
+    pcr: oi.pcr, totalCeOi: oi.totalCeOi, totalPeOi: oi.totalPeOi,
+    ...sessionTotals(symbol, oi),
     aggregate: computeOiMovement(symbol),
-    rows, topCalls, topPuts, surges: surges.slice(0, 8),
+    rows, callouts, topCalls, topPuts,
+    keyLevels: buildKeyLevels(oi),
+    heatmap: buildHeatmap(symbol),
+    insights,
   };
 }
 
+function sessionTotals(symbol: string, oi: OiAnalysis): { totalCePct: number | null; totalPePct: number | null } {
+  const p = sessionPct(symbol, oi.totalCeOi, oi.totalPeOi);
+  return { totalCePct: p.cePct, totalPePct: p.pePct };
+}
+
+// Multi-window ΔOI% heatmap. A cell is "building" until the window has enough
+// covered history; then it shows the real windowed ΔOI% (never fabricated).
+function buildHeatmap(symbol: string): Heatmap {
+  const perWindow = HEAT_WINDOWS.map((w) => ({ w, deltas: strikeDeltas(symbol, w) }));
+  const strikeSet = new Set<number>();
+  perWindow[0].deltas.forEach((d) => strikeSet.add(d.strike));
+  const strikes = Array.from(strikeSet).sort((a, b) => b - a); // high → low (as in the mockup)
+  const rowFor = (side: "CALL" | "PUT"): HeatRow[] => strikes.map((st) => ({
+    strike: st,
+    cells: perWindow.map(({ w, deltas }) => {
+      const d = deltas.find((x) => x.strike === st && x.side === side);
+      if (!d || d.oiChg === 0 && d.windowMin < 1) return { pct: null, building: true };
+      const building = d.windowMin < w * 0.6; // not enough coverage yet for this window
+      return { pct: d.oiChgPct, building };
+    }),
+  }));
+  return { windows: HEAT_WINDOWS, calls: rowFor("CALL"), puts: rowFor("PUT") };
+}
+
+function toInsight(a: ActivityRow): Insight {
+  const side: "CE" | "PE" = a.side === "CALL" ? "CE" : "PE";
+  const bullBear = insightTone(a.side, a.buildup);
+  return {
+    strike: a.strike, side, oiChg: a.oiChg, oiChgPct: a.oiChgPct, ltpChgPct: a.ltpChgPct,
+    buildup: a.buildup, tone: bullBear, note: insightNote(a.side, a.buildup),
+  };
+}
+function insightTone(side: "CALL" | "PUT", b: Buildup): "bullish" | "bearish" | "neutral" {
+  if (b === "Flat") return "neutral";
+  if (side === "CALL") return (b === "Short Buildup") ? "bearish" : (b === "Short Covering" || b === "Long Buildup") ? "bullish" : "bearish";
+  return (b === "Short Buildup") ? "bullish" : (b === "Long Buildup" || b === "Short Covering") ? "bearish" : "bullish";
+}
+function insightNote(side: "CALL" | "PUT", b: Buildup): string {
+  if (side === "CALL") {
+    if (b === "Short Buildup") return "Strong Call-side build-up → Resistance zone";
+    if (b === "Short Covering") return "Call OI unwinding → Resistance weakening";
+    if (b === "Long Buildup") return "Call buyers adding → upside bet";
+    if (b === "Long Unwinding") return "Call longs exiting";
+  } else {
+    if (b === "Short Buildup") return "Strong Put-side build-up → Support zone";
+    if (b === "Short Covering") return "Put OI unwinding → Support weakening";
+    if (b === "Long Buildup") return "Put buyers adding → downside bet";
+    if (b === "Long Unwinding") return "Put longs exiting → Support strengthening";
+  }
+  return "No decisive flow";
+}
+
+function statusOf(b: Buildup, oiChgPct: number): MoveStatus {
+  if (b === "Long Buildup" || b === "Short Buildup") return Math.abs(oiChgPct) >= STRONG_PCT ? "Strong Build" : "Build";
+  if (b === "Short Covering" || b === "Long Unwinding") return "Unwind";
+  return "Flat";
+}
+function majorOf(cePct: number, pePct: number): "up" | "down" | null {
+  const bigger = Math.abs(cePct) >= Math.abs(pePct) ? cePct : pePct;
+  if (bigger >= MAJOR_PCT) return "up";
+  if (bigger <= -MAJOR_PCT) return "down";
+  return null;
+}
+function ltpPct(d: StrikeDelta | undefined): number | null {
+  if (!d || d.ltpNow == null) return null;
+  const base = d.ltpNow - d.ltpChg;
+  if (base <= 0) return null;
+  return +((d.ltpChg / base) * 100).toFixed(1);
+}
 function nearestStrike(oi: OiAnalysis): number | null {
   if (oi.underlying == null || !oi.topStrikes.length) return null;
   return oi.topStrikes.reduce((best, s) =>
@@ -156,4 +260,3 @@ function pctOf(chg: number, now: number): number {
   return +((chg / base) * 100).toFixed(2);
 }
 function signHint(oiChg: number): number { return oiChg > 0 ? 1 : oiChg < 0 ? -1 : 0; }
-function sev(s: string): number { return s === "extreme" ? 3 : s === "strong" ? 2 : 1; }

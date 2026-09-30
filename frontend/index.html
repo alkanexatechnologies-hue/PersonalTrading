@@ -1786,38 +1786,64 @@
               <button class="oia-subtab" data-oia="summary">🧭 OI Summary<span class="oia-subtab-q">what does it indicate?</span></button>
             </div>
 
-            <!-- ===== Screen 1: OI Movement ===== -->
+            <!-- ===== Screen 1: OI Movement (dashboard) ===== -->
             <div class="oia-screen" id="oia-movement">
-              <div class="oia-card">
-                <div class="oia-chd"><span class="oia-num r">1</span><h3>Live Open Interest (1 Min)</h3>
-                  <span class="oia-lg"><span><i class="oia-dot" style="background:var(--green)"></i>Put OI</span><span><i class="oia-dot" style="background:var(--red)"></i>Call OI</span></span></div>
-                <canvas id="oia-c1" class="oia-cv tall"></canvas>
-                <div class="oia-empty" id="oia-c1-msg" hidden></div>
+              <!-- controls + stats strip -->
+              <div class="oiam-bar">
+                <div class="oiam-tf" id="oiam-tf">
+                  <button class="active" data-w="1">1m</button><button data-w="3">3m</button><button data-w="5">5m</button><button data-w="15">15m</button><button data-w="30">30m</button>
+                </div>
+                <div class="oiam-leg">
+                  <span><i class="oia-dot" style="background:var(--green)"></i>Put OI</span>
+                  <span><i class="oia-dot" style="background:var(--red)"></i>Call OI</span>
+                  <span><span style="color:var(--amber)">◆</span> Major ↑</span>
+                  <span><span style="color:var(--purple)">◆</span> Major ↓</span>
+                  <span class="oiam-src" id="oiam-src">source: dhan · —</span>
+                </div>
+                <div class="oiam-stats" id="oiam-stats"></div>
               </div>
+
+              <!-- main chart -->
               <div class="oia-card">
-                <div class="oia-chd"><span class="oia-num r">2</span><h3>OI Change (1 Min)</h3>
-                  <span class="oia-lg"><span><i class="oia-dot" style="background:var(--green)"></i>Put OI Change</span><span><i class="oia-dot" style="background:var(--red)"></i>Call OI Change</span></span></div>
-                <canvas id="oia-c2" class="oia-cv"></canvas>
+                <div class="oia-chd"><h3>Open Interest by Strike (Live)</h3>
+                  <div class="oiam-tog" id="oiam-viewtog"><button class="active" data-v="bar">Bar View</button><button data-v="net">Net OI View</button></div></div>
+                <canvas id="oiam-main" class="oiam-mainc"></canvas>
+                <div class="oia-empty" id="oiam-main-msg" hidden></div>
               </div>
-              <div class="oia-tbl2">
+
+              <!-- row: top call / top put / key levels -->
+              <div class="oiam-row3">
                 <div class="oia-card">
-                  <div class="oia-chd"><span class="oia-num g">3</span><h3>Top Put OI Activity (1 Min)</h3></div>
-                  <table class="oia-t"><thead><tr><th>Strike</th><th>OI (K)</th><th>ΔOI (K)</th><th>OI Change %</th><th>LTP</th><th>Type</th></tr></thead><tbody id="oia-tput"></tbody></table>
+                  <div class="oia-chd"><h3>🔥 Top 5 Call OI Changes</h3></div>
+                  <div style="overflow-x:auto"><table class="oiam-t"><thead><tr><th>#</th><th>Strike</th><th>OI</th><th>ΔOI</th><th>ΔOI%</th><th>LTP</th><th>LTP Δ%</th><th>Status</th></tr></thead><tbody id="oiam-tcall"></tbody></table></div>
                 </div>
                 <div class="oia-card">
-                  <div class="oia-chd"><span class="oia-num r">4</span><h3>Top Call OI Activity (1 Min)</h3></div>
-                  <table class="oia-t"><thead><tr><th>Strike</th><th>OI (K)</th><th>ΔOI (K)</th><th>OI Change %</th><th>LTP</th><th>Type</th></tr></thead><tbody id="oia-tcall"></tbody></table>
+                  <div class="oia-chd"><h3>🔥 Top 5 Put OI Changes</h3></div>
+                  <div style="overflow-x:auto"><table class="oiam-t"><thead><tr><th>#</th><th>Strike</th><th>OI</th><th>ΔOI</th><th>ΔOI%</th><th>LTP</th><th>LTP Δ%</th><th>Status</th></tr></thead><tbody id="oiam-tput"></tbody></table></div>
+                </div>
+                <div class="oia-card">
+                  <div class="oia-chd"><h3>🎯 Key OI Levels <span class="oiam-sub">(auto-detected)</span></h3></div>
+                  <div id="oiam-klv"></div>
                 </div>
               </div>
-              <div class="oia-card">
-                <div class="oia-chd"><span class="oia-num g">5</span><h3>OI Movement at Selected Strike (1 Min)</h3>
-                  <span class="oia-strike-in">Strike
-                    <select id="oia-strike-sel"></select>
-                    <select id="oia-strike-side"><option value="CALL">Call</option><option value="PUT">Put</option></select>
-                  </span>
-                  <span class="oia-lg"><span><i class="oia-dot" style="background:var(--green)"></i>OI Change (K)</span><span><i class="oia-dot rnd" style="background:var(--blue)"></i>OI Value (K)</span><span><i class="oia-dot" style="background:var(--text)"></i>LTP</span></span></div>
-                <canvas id="oia-c5" class="oia-cv tall"></canvas>
-                <div class="oia-empty" id="oia-c5-msg" hidden></div>
+
+              <!-- row: selected strike / heatmap / insights -->
+              <div class="oiam-row3">
+                <div class="oia-card">
+                  <div class="oia-chd"><h3>▦ Selected Strike Detail</h3>
+                    <span class="oia-strike-in"><select id="oia-strike-sel"></select><select id="oia-strike-side"><option value="CALL">CE</option><option value="PUT">PE</option></select></span></div>
+                  <div class="oiam-ssd"><div class="oiam-ssd-stats" id="oiam-ssd-stats"></div>
+                    <div><div class="oiam-ssd-leg"><span><i class="oia-dot rnd" style="background:var(--blue)"></i>OI</span><span><i class="oia-dot" style="background:var(--amber)"></i>LTP</span></div><canvas id="oia-c5" class="oiam-strikec"></canvas><div class="oia-empty" id="oia-c5-msg" hidden></div></div></div>
+                </div>
+                <div class="oia-card">
+                  <div class="oia-chd"><h3>🔳 OI Heatmap <span class="oiam-sub">ΔOI %</span></h3>
+                    <div class="oiam-tog rc" id="oiam-hmtog"><button class="active" data-h="calls">Calls</button><button data-h="puts">Puts</button></div></div>
+                  <div style="overflow-x:auto"><table class="oiam-hm"><thead><tr><th>Strike</th><th>1m</th><th>3m</th><th>5m</th><th>15m</th><th>30m</th></tr></thead><tbody id="oiam-hm"></tbody></table></div>
+                </div>
+                <div class="oia-card">
+                  <div class="oia-chd"><h3>💡 OI Movement Insights</h3></div>
+                  <div id="oiam-ins"></div>
+                </div>
               </div>
             </div>
 
