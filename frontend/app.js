@@ -6467,6 +6467,21 @@ function fillOiamInsights(ins) {
   }).join("") || `<div class="oia-empty">Building — insights appear as OI moves.</div>`;
 }
 
+function renderOiamPcr(d) {
+  const host = oiaEl("oiam-pcr"); if (!host) return;
+  const chip = (s) => `<span class="chip ${s === "bullish" ? "oiam-b-strongp" : s === "bearish" ? "oiam-b-strong" : "oiam-b-flat"}">${s ? s.charAt(0).toUpperCase() + s.slice(1) : "—"}</span>`;
+  // Gauge: map PCR 0.4 (call-heavy) … 1.8 (put-heavy) to 0–100%.
+  const gp = d.pcr != null ? Math.max(0, Math.min(100, ((d.pcr - 0.4) / 1.4) * 100)) : 50;
+  host.innerHTML = `
+    <div class="pv"><span class="k">PCR (OI)</span><span class="v">${d.pcr != null ? d.pcr.toFixed(2) : "—"}</span></div>${chip(d.pcrState)}
+    <div class="sep"></div>
+    <div class="pv"><span class="k">PCR (Vol)</span><span class="v">${d.pcrVolume != null ? d.pcrVolume.toFixed(2) : "—"}</span></div>${d.pcrVolume != null ? chip(d.pcrVolumeState) : '<span class="chip oiam-b-flat">N/A</span>'}
+    <div class="sep"></div>
+    <div class="pv"><span class="k">Max Pain</span><span class="v">${d.maxPain != null ? d.maxPain.toLocaleString("en-IN") : "—"}</span></div>
+    <div class="oiam-gauge"><div class="bar"><span class="mk" style="left:${gp}%"></span></div><div class="lbls"><span>0.4 call-heavy</span><span>1.0</span><span>put-heavy 1.8</span></div></div>
+    <div class="note">${d.pcrNote || ""}</div>`;
+}
+
 function renderOiaMovement(d) {
   const msg = oiaEl("oiam-main-msg");
   if (!d || !d.available || !d.rows || !d.rows.length) {
@@ -6478,6 +6493,7 @@ function renderOiaMovement(d) {
   // freshness
   const src = oiaEl("oiam-src");
   if (src) { const age = d.ageSec != null ? d.ageSec : 0; const stale = age > 90; src.innerHTML = `source: ${d.source || "dhan"} · <span class="${stale ? "oia-neg" : "oia-pos"}">${age}s ago</span>`; }
+  renderOiamPcr(d);
   // stats strip
   const stats = oiaEl("oiam-stats");
   if (stats) {

@@ -75,6 +75,12 @@ export interface OiMovementView {
   // top-bar stats
   spot: number | null; spotChg: number | null; spotChgPct: number | null;
   pcr: number | null;
+  pcrState: "bullish" | "bearish" | "neutral";
+  pcrVolume: number | null;
+  pcrVolumeState: "bullish" | "bearish" | "neutral";
+  pcrZone: "extreme-put" | "high" | "balanced" | "low" | "extreme-call";
+  pcrNote: string;
+  maxPain: number | null;
   totalCeOi: number; totalPeOi: number;
   totalCePct: number | null; totalPePct: number | null;
   aggregate: OiMoveResult;
@@ -98,7 +104,9 @@ export function buildOiMovement(symbol: string, oi: OiAnalysis | null, windowMin
       available: false, message: oi?.message || "OI data unavailable.", symbol,
       underlying: null, expiry: null, asOf: nowSec, ageSec: 0, source: "dhan", windowMin, samples: 0,
       spot: ctx.spot ?? null, spotChg: ctx.spotChg ?? null, spotChgPct: ctx.spotChgPct ?? null,
-      pcr: null, totalCeOi: 0, totalPeOi: 0, totalCePct: null, totalPePct: null,
+      pcr: null, pcrState: "neutral", pcrVolume: null, pcrVolumeState: "neutral",
+      pcrZone: "balanced", pcrNote: "DATA UNAVAILABLE", maxPain: null,
+      totalCeOi: 0, totalPeOi: 0, totalCePct: null, totalPePct: null,
       aggregate: computeOiMovement(symbol), rows: [], callouts: [], topCalls: [], topPuts: [],
       keyLevels: [], heatmap: { windows: HEAT_WINDOWS, calls: [], puts: [] }, insights: [],
     };
@@ -169,7 +177,9 @@ export function buildOiMovement(symbol: string, oi: OiAnalysis | null, windowMin
     available: true, symbol, underlying: oi.underlying, expiry: oi.expiry,
     asOf: oi.asOf, ageSec: Math.max(0, nowSec - oi.asOf), source: "dhan", windowMin, samples: sampleCount(symbol),
     spot: ctx.spot ?? oi.underlying, spotChg: ctx.spotChg ?? null, spotChgPct: ctx.spotChgPct ?? null,
-    pcr: oi.pcr, totalCeOi: oi.totalCeOi, totalPeOi: oi.totalPeOi,
+    pcr: oi.pcr, pcrState: oi.pcrState,
+    ...pcrDetail(oi.pcr), pcrVolume: pcrVol(oi).v, pcrVolumeState: pcrVol(oi).s,
+    maxPain: oi.maxPain, totalCeOi: oi.totalCeOi, totalPeOi: oi.totalPeOi,
     ...sessionTotals(symbol, oi),
     aggregate: computeOiMovement(symbol),
     rows, callouts, topCalls, topPuts,
@@ -236,6 +246,26 @@ function insightNote(side: "CALL" | "PUT", b: Buildup): string {
     if (b === "Long Unwinding") return "Put longs exiting → Support strengthening";
   }
   return "No decisive flow";
+}
+
+// PCR interpretation — zone + a plain-language note. Standard reading: a high
+// PCR means puts dominate (support/floor building → bullish bias; very high can
+// be an oversold reversal signal); a low PCR means calls dominate (resistance/
+// cap → bearish bias; very low can be overbought). ~1.0 = balanced, no edge.
+function pcrDetail(pcr: number | null): { pcrZone: OiMovementView["pcrZone"]; pcrNote: string } {
+  if (pcr == null) return { pcrZone: "balanced", pcrNote: "DATA UNAVAILABLE" };
+  if (pcr >= 1.6) return { pcrZone: "extreme-put", pcrNote: `PCR ${pcr.toFixed(2)} — very high: puts heavily outweigh calls. Strong support bias, but stretched — watch for an oversold bounce/reversal.` };
+  if (pcr >= 1.2) return { pcrZone: "high", pcrNote: `PCR ${pcr.toFixed(2)} — put writers dominant: support building below. Bias leans bullish while it holds.` };
+  if (pcr >= 0.8) return { pcrZone: "balanced", pcrNote: `PCR ${pcr.toFixed(2)} — balanced: puts and calls roughly matched. No clear directional edge from options positioning.` };
+  if (pcr >= 0.5) return { pcrZone: "low", pcrNote: `PCR ${pcr.toFixed(2)} — call writers dominant: resistance building above. Bias leans bearish while it holds.` };
+  return { pcrZone: "extreme-call", pcrNote: `PCR ${pcr.toFixed(2)} — very low: calls heavily outweigh puts. Strong resistance bias, but stretched — watch for an overbought fade/reversal.` };
+}
+function pcrVol(oi: OiAnalysis): { v: number | null; s: "bullish" | "bearish" | "neutral" } {
+  let ceV = 0, peV = 0, have = false;
+  for (const st of oi.topStrikes) { if (st.ceVol != null) { ceV += st.ceVol; have = true; } if (st.peVol != null) { peV += st.peVol; have = true; } }
+  if (!have || ceV <= 0) return { v: null, s: "neutral" };
+  const r = +(peV / ceV).toFixed(2);
+  return { v: r, s: r > 1.1 ? "bullish" : r < 0.9 ? "bearish" : "neutral" };
 }
 
 function statusOf(b: Buildup, oiChgPct: number): MoveStatus {

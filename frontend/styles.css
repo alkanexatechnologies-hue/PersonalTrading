@@ -5404,8 +5404,8 @@ tr.oia-sup td{background:rgba(22,199,132,.05)}
 .oiam-stat{background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:6px 12px;min-width:88px}
 .oiam-stat .k{font-size:9px;color:var(--muted2,#5f6f8e);text-transform:uppercase;letter-spacing:.3px}
 .oiam-stat .v{font-size:15px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:1px}
-.oiam-mainc{display:block;width:100%;height:238px}
-.oiam-strikec{display:block;width:100%;height:126px}
+.oiam-mainc{display:block;width:100%;height:200px}
+.oiam-strikec{display:block;width:100%;height:118px}
 .oiam-tog{display:flex;background:var(--panel-3,#0a1120);border:1px solid var(--border);border-radius:8px;padding:2px;margin-left:auto}
 .oiam-tog button{border:0;background:transparent;color:var(--muted);font-size:11px;font-weight:700;padding:4px 11px;border-radius:6px;cursor:pointer}
 .oiam-tog button.active{background:var(--blue);color:#fff}
@@ -5474,3 +5474,17 @@ table.oiam-hm td:first-child{text-align:left;font-weight:700;color:var(--text)}
 #oia-movement table.oiam-hm th{padding:3px 3px}
 #oia-movement .oiam-ssd{grid-template-columns:138px 1fr;gap:10px}
 #oia-movement .oiam-ssd-stats{gap:3px;font-size:11.5px}
+
+/* ===== OI Movement — PCR detail strip ===== */
+.oiam-pcr{display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--border);border-radius:11px;padding:7px 14px;margin-bottom:6px;flex-wrap:wrap}
+.oiam-pcr .pv{display:flex;align-items:baseline;gap:6px}
+.oiam-pcr .pv .k{font-size:9.5px;color:var(--muted2,#5f6f8e);text-transform:uppercase;letter-spacing:.3px}
+.oiam-pcr .pv .v{font-size:17px;font-weight:800;font-variant-numeric:tabular-nums}
+.oiam-pcr .chip{font-size:9.5px;font-weight:800;padding:2px 8px;border-radius:5px}
+.oiam-pcr .sep{width:1px;align-self:stretch;background:var(--border)}
+.oiam-gauge{flex:0 1 260px;min-width:180px}
+.oiam-gauge .bar{position:relative;height:8px;border-radius:5px;background:linear-gradient(90deg,rgba(246,70,93,.55),rgba(131,151,179,.35) 50%,rgba(22,199,132,.55))}
+.oiam-gauge .mk{position:absolute;top:-3px;width:2px;height:14px;background:var(--text);border-radius:2px}
+.oiam-gauge .lbls{display:flex;justify-content:space-between;font-size:8.5px;color:var(--muted2,#5f6f8e);margin-top:3px}
+.oiam-pcr .note{flex:1 1 240px;min-width:220px;font-size:11.5px;color:var(--text);line-height:1.35}
+@media (max-width:1080px){.oiam-pcr .note{flex-basis:100%}}
