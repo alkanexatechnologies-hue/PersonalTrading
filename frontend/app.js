@@ -14125,8 +14125,68 @@ function initStrategyLab() {
   wire("orb-activate", orbRunLab);
   const orbSym = el("orb-sym");
   if (orbSym && !orbSym.dataset.wired) { orbSym.dataset.wired = "1"; orbSym.addEventListener("change", loadOrbStrategy); }
+  wire("ve-refresh", loadVwapEma);
+  wire("ve-run", veRunLab);
+  const veSym = el("ve-sym");
+  if (veSym && !veSym.dataset.wired) { veSym.dataset.wired = "1"; veSym.addEventListener("change", loadVwapEma); }
   loadStrategyLab();
   loadOrbStrategy();
+  loadVwapEma();
+}
+
+// ---- VWAP + 20 EMA Trend Continuation Test Zone card (generic across indices) ----
+async function loadVwapEma() {
+  const grid = el("ve-grid"); if (!grid) return;
+  const sym = (el("ve-sym") && el("ve-sym").value) || "^NSEI";
+  try { renderVwapEma(await fetch(`/api/vwapema-strategy?symbol=${encodeURIComponent(sym)}`).then((r) => r.json())); }
+  catch (e) { grid.innerHTML = `<div class="wl-sub">VWAP+EMA load error: ${e.message}</div>`; }
+}
+async function veRunLab() {
+  const btn = el("ve-run"); const sym = (el("ve-sym") && el("ve-sym").value) || "^NSEI";
+  if (btn) { btn.disabled = true; btn.textContent = "Running…"; }
+  try {
+    const r = await fetch("/api/vwapema-run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbol: sym }) }).then((x) => x.json());
+    alert(r && r.message ? r.message : (r && r.ok ? (r.logged ? "Trade logged." : "No trade this run.") : "Run failed: " + ((r && r.error) || "unknown")));
+    loadVwapEma();
+  } catch (e) { alert("Run error: " + e.message); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = "▶ Run"; } }
+}
+function renderVwapEma(d) {
+  const grid = el("ve-grid"); if (!grid) return;
+  const fl = el("ve-flags");
+  if (fl) fl.innerHTML = d && d.flags ? `TEST_MODE <b class="${d.flags.testMode ? "ok" : "blocked"}">${d.flags.testMode ? "ON" : "OFF"}</b> · LIVE_EXEC <b class="${d.flags.liveExecution ? "blocked" : "ok"}">${d.flags.liveExecution ? "ON" : "OFF"}</b> · generic (all indices)` : "";
+  if (!d || !d.available || !d.evaluation) {
+    grid.innerHTML = `<div class="orb-final orb-wait">${(d && (d.message || d.reason)) || "VWAP+EMA data unavailable"} — needs live 5-min candles (market hours).</div>`;
+    return;
+  }
+  const e = d.evaluation, a = d.audit || {}, lv = e.levels || {};
+  const gate = (label, st) => { const c = st === "PASS" ? "orb-pass" : st === "FAIL" ? "orb-fail" : "orb-na"; return `<div class="orb-gate ${c}"><span>${label}</span><b>${st}</b></div>`; };
+  const finalCls = e.final === "TAKE CE" ? "orb-ce" : e.final === "TAKE PE" ? "orb-pe" : e.final === "NO EDGE" ? "orb-noedge" : "orb-wait";
+  const dirCls = e.trend === "BULLISH" ? "ok" : e.trend === "BEARISH" ? "blocked" : "";
+  const num = (v, dec) => v == null ? "—" : Number(v).toLocaleString("en-IN", { minimumFractionDigits: dec || 0, maximumFractionDigits: dec || 0 });
+  grid.innerHTML = `
+    <div class="orb-top">
+      <div class="orb-or"><span>PRICE</span><b>${num(d.price, 2)}</b></div>
+      <div class="orb-or"><span>VWAP</span><b>${num(a.vwap, 2)}</b></div>
+      <div class="orb-or"><span>EMA20</span><b>${num(a.ema20, 2)}</b></div>
+      <div class="orb-or"><span>ATR</span><b>${num(a.atr, 2)}</b></div>
+      <div class="orb-or"><span>TREND</span><b class="${dirCls}">${e.trend}</b></div>
+      <div class="orb-or"><span>CLUSTER Δ</span><b>${num(lv.clusterDistance, 1)}</b></div>
+      <div class="orb-or"><span>STATUS</span><b>${e.status}</b></div>
+    </div>
+    <div class="orb-gates">
+      ${gate("TREND", e.gates.trend)}${gate("PULLBACK", e.gates.pullback)}${gate("REVERSAL", e.gates.reversal)}${gate("STRUCTURE", e.gates.structure)}
+      ${gate("OI", e.gates.oi)}${gate("ROOM", e.gates.room)}${gate("R:R", e.gates.rr)}${gate("MASTER", e.gates.master)}
+    </div>
+    <div class="orb-levels">
+      <div><span>ENTRY</span><b>${num(lv.entry, 2)}</b></div>
+      <div><span>SL</span><b class="blocked">${num(lv.sl, 2)}</b></div>
+      <div><span>TARGET</span><b class="ok">${num(lv.target, 2)}</b></div>
+      <div><span>R:R</span><b>${lv.rr != null ? "1:" + num(lv.rr, 2) : "—"}</b></div>
+      <div><span>ROOM</span><b>${lv.roomPoints != null ? num(lv.roomPoints, 0) + " pts" : "—"}</b></div>
+    </div>
+    <div class="orb-final ${finalCls}">${e.final}<span class="orb-reason">${e.reasonText || ""}</span></div>
+    ${e.reasons && e.reasons.length ? `<div class="orb-codes">${e.reasons.map((c) => `<span class="orb-code">${c}</span>`).join("")}</div>` : ""}`;
 }
 
 // Manual "Run ORB" from the Strategy Lab card — one-shot evaluate + log-if-confirmed.

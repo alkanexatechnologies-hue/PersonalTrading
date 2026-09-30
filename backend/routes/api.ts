@@ -164,6 +164,7 @@ import { runStrategyReplay } from "../strategies/replay";
 import { computeOpeningRange, detectOrbBreakout } from "../orb/OpeningRangeBreakoutEngine";
 import { evaluateOrb, DEFAULT_ORB_CONFIG, OrbInputs, OrbDirection } from "../strategies/orbStrategy";
 import { getOrbActive, setOrbActive } from "../strategies/orbActive";
+import { evaluateVwapEma, vwapEmaConfigFor, VwapEmaInputs, VeDirection, InstrumentContext } from "../strategies/vwapEmaStrategy";
 import { LIQUIDITY_CONFIG, NOT_DEFINED } from "../liquidity/liquidityConfig";
 import { buildLiquidityLevels, nearestLevel } from "../liquidity/liquidityLevels";
 import { detectLiquidity, atr14Of, entryAfterSweepConcept } from "../liquidity/sweepDetector";
@@ -5381,6 +5382,112 @@ async function orbAutoLogTick(): Promise<void> {
 }
 const _orbAutoTimer = setInterval(() => { orbAutoLogTick().catch(() => {}); }, 60_000);
 if (typeof (_orbAutoTimer as any).unref === "function") (_orbAutoTimer as any).unref();
+
+// ===================== VWAP + 20 EMA Trend Continuation — GENERIC (all indices) =====================
+// One implementation for every F&O index. Instrument context comes from the app's
+// existing config (findSymbolDef); the strategy code holds no index list. Reuses
+// the existing EMA/VWAP/ATR indicators + market-structure engine (no duplication),
+// no look-ahead, no fabrication. Read-only/paper — hands off to Master/Risk.
+function instrumentCtx(def: any): InstrumentContext {
+  return { instrument: def.symbol, name: def.name, instrumentType: def.type, exchange: null, securityId: null, tickSize: null, lotSize: def.lotSize ?? null, strikeStep: def.strikeStep ?? null, expiry: null, optionAvailability: def.fno === true };
+}
+async function computeVwapEmaEvaluation(def: any): Promise<any> {
+  const isIndex = def.type === "index" && def.fno === true;
+  let candles5m: any[] = [];
+  try { candles5m = await fetchCandles(def.symbol, "5m" as Interval); } catch { candles5m = []; }
+  if (!candles5m.length) return { available: false, symbol: def.symbol, name: def.name, reason: "DATA_UNAVAILABLE", message: "5-min candles unavailable (market closed / feed off)." };
+  const lastTime = candles5m[candles5m.length - 1].time;
+  const sessionDay = new Date(lastTime * 1000 + 19800000).toISOString().slice(0, 10);
+  const dayBars = candles5m.filter((c) => new Date(c.time * 1000 + 19800000).toISOString().slice(0, 10) === sessionDay);
+  const closes = dayBars.map((c) => c.close);
+  const vwapArr = vwap(dayBars);
+  const ema20Arr = ema(closes, 20);
+  const atrArr = atr(dayBars, 14);
+  const vwapNow = (last(vwapArr) as number) ?? null;
+  const ema20Now = (last(ema20Arr) as number) ?? null;
+  const ema20Prev = ema20Arr.length >= 2 ? (ema20Arr[ema20Arr.length - 2] as number) ?? null : null;
+  const atrNow = (last(atrArr) as number) ?? null;
+  const price = closes.length ? closes[closes.length - 1] : null;
+  const ms = dayBars.length >= 20 ? detectMarketStructure(dayBars, 3, vwapArr) : null;
+  const structureDirection: VeDirection | null = ms ? (ms.currentStructure === "Bullish" ? "BULLISH" : ms.currentStructure === "Bearish" ? "BEARISH" : "NEUTRAL") : null;
+  const trendBull = price != null && vwapNow != null && ema20Now != null && price > vwapNow && price > ema20Now;
+  const lastBar = dayBars[dayBars.length - 1];
+  const reversalConfirmed = lastBar ? (trendBull ? lastBar.close > lastBar.open : lastBar.close < lastBar.open) : null;
+  const sessionHigh = dayBars.length ? Math.max(...dayBars.map((c) => c.high)) : null;
+  const sessionLow = dayBars.length ? Math.min(...dayBars.map((c) => c.low)) : null;
+  let swingSL: number | null = null, opposingLevel: number | null = null;
+  if (price != null && ms?.swingPoints?.length) {
+    if (trendBull) {
+      const lows = ms.swingPoints.filter((p) => (p.type === "HL" || p.type === "LL") && p.price < price).map((p) => p.price);
+      if (lows.length) swingSL = Math.max(...lows);
+      const highs = ms.swingPoints.filter((p) => (p.type === "HH" || p.type === "LH") && p.price > price).map((p) => p.price);
+      if (highs.length) opposingLevel = Math.min(...highs);
+    } else {
+      const highs = ms.swingPoints.filter((p) => (p.type === "HH" || p.type === "LH") && p.price > price).map((p) => p.price);
+      if (highs.length) swingSL = Math.min(...highs);
+      const lows = ms.swingPoints.filter((p) => (p.type === "HL" || p.type === "LL") && p.price < price).map((p) => p.price);
+      if (lows.length) opposingLevel = Math.max(...lows);
+    }
+  }
+  const istMin = (() => { const d = new Date(lastTime * 1000 + 19800000); return d.getUTCHours() * 60 + d.getUTCMinutes(); })();
+  const ctx = instrumentCtx(def);
+  const inputs: VwapEmaInputs = {
+    ctx, nowMin: istMin, price, vwap: vwapNow, ema20: ema20Now, ema20Prev, atr: atrNow,
+    structureDirection, reversalConfirmed, oiSupportsDirection: null,
+    sessionHigh, sessionLow, swingSL, opposingLevel, optionLiquidityOk: null,
+    masterMinRR: 2, riskOk: true, existingPosition: false,
+  };
+  const evaluation = evaluateVwapEma(inputs);
+  const cfg = vwapEmaConfigFor(def.symbol);
+  const audit = {
+    date: sessionDay, time: new Date(lastTime * 1000 + 19800000).toISOString().slice(11, 19), instrument: def.name,
+    trend: evaluation.trend, price, vwap: vwapNow, ema20: ema20Now, atr: atrNow, clusterDistance: evaluation.levels.clusterDistance,
+    reversal: reversalConfirmed, marketStructure: structureDirection, oi: "UNAVAILABLE",
+    sessionHigh, sessionLow, opposingLevel, room: evaluation.levels.roomPoints,
+    entry: evaluation.levels.entry, sl: evaluation.levels.sl, target: evaluation.levels.target, rr: evaluation.levels.rr,
+    signalState: evaluation.status, reasonCodes: evaluation.reasons, config: cfg,
+  };
+  return { available: true, isIndex, symbol: def.symbol, name: def.name, asOf: lastTime, price, evaluation, audit,
+    candles: dayBars.slice(-90).map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume ?? 0 })) };
+}
+
+router.get("/vwapema-strategy", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  try {
+    const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
+    if (!def) return res.status(400).json({ error: "Valid index symbol required" });
+    const r = await computeVwapEmaEvaluation(def);
+    res.json({ ...r, flags: CONFIG.orb });
+  } catch (e: any) { res.json({ available: false, error: e?.message || "vwapema-strategy failed", flags: CONFIG.orb }); }
+});
+
+// MANUAL run — evaluate once for the given index and log a CONFIRMED TAKE into the
+// Daily Log via the existing option selection. Generic across all F&O indices.
+router.post("/vwapema-run", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  try {
+    const def = findSymbolDef(String((req.body && req.body.symbol) || req.query.symbol || "^NSEI"));
+    if (!def) return res.status(400).json({ error: "Valid index symbol required" });
+    if (!(def.type === "index" && def.fno === true)) return res.json({ ok: true, logged: false, message: `Strategy runs on F&O index instruments only (${ORB_INDEX_SYMBOLS.join(", ")}).`, flags: CONFIG.orb });
+    const r = await computeVwapEmaEvaluation(def);
+    if (!r?.available || !r.evaluation) return res.json({ ok: true, logged: false, available: false, message: r?.message || "Data unavailable.", flags: CONFIG.orb });
+    const e = r.evaluation;
+    if (e.final !== "TAKE CE" && e.final !== "TAKE PE") return res.json({ ok: true, logged: false, evaluation: e, message: `VWAP+EMA is ${e.final}${e.reasonText ? " — " + e.reasonText : ""}. Nothing logged.`, flags: CONFIG.orb });
+    if (!isTradeEntryWindowIST() && !(req.body && req.body.force)) return res.json({ ok: true, logged: false, evaluation: e, message: "Confirmed but outside the trade-entry window — nothing logged.", flags: CONFIG.orb });
+    if (getCooldownState(def.symbol).active) return res.json({ ok: true, logged: false, evaluation: e, message: "A trade for this index is already active (cooldown) — not logged again.", flags: CONFIG.orb });
+    const side: "CE" | "PE" = e.final === "TAKE CE" ? "CE" : "PE";
+    let oiChain: any = null; try { oiChain = await getOiCached(def); } catch { oiChain = null; }
+    const sa = analyzeStrikes(oiChain, side === "CE" ? "BULLISH" : "BEARISH", { name: def.name });
+    const bs: any = sa?.bestSetup;
+    if (!(bs && bs.entryPremium > 0 && bs.stopPremium > 0 && bs.targetPremium > 0)) return res.json({ ok: true, logged: false, evaluation: e, message: "Confirmed, but no live option premium to log a resolvable trade.", flags: CONFIG.orb });
+    const nowSec = Math.floor(Date.now() / 1000);
+    const trade = appendTrade({
+      execTs: nowSec, index: def.name, symbol: def.symbol, type: side, strike: bs.strike ?? null, expiry: oiChain?.expiry ?? null,
+      entry: bs.entryPremium, sl: bs.stopPremium, target: bs.targetPremium, rr: bs.rr != null ? `1:${bs.rr}` : null,
+      remarks: `VWAP+EMA manual · ${e.direction} · ${side}`, snapshot: { strategy: "VWAPEMA", audit: r.audit, evaluation: e },
+    });
+    recordExecution({ symbol: def.symbol, execTs: nowSec, side, strike: bs.strike ?? null, entry: bs.entryPremium, source: "vwapema-manual" });
+    res.json({ ok: true, logged: true, trade, evaluation: e, message: `VWAP+EMA ${side} logged to the Daily Log (entry ₹${bs.entryPremium}, SL ₹${bs.stopPremium}, target ₹${bs.targetPremium}).`, flags: CONFIG.orb });
+  } catch (e: any) { res.json({ ok: false, error: e?.message || "vwapema-run failed" }); }
+});
 
 // Strategy Replay — runs the EXISTING engines + selector + gated path over one
 // session's REAL candles (Dhan historical, no-look-ahead) and returns the staged

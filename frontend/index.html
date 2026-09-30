@@ -632,6 +632,25 @@
               <div class="orb-grid" id="orb-grid"><div class="wl-sub">Loading ORB…</div></div>
             </div>
 
+            <!-- ---------- VWAP + 20 EMA Trend Continuation — Test Zone strategy (generic) ---------- -->
+            <div class="mtg-card orb-card">
+              <div class="orb-hd">
+                <h5>📈 VWAP + 20 EMA Trend Continuation — Test Zone</h5>
+                <span class="orb-flags" id="ve-flags">—</span>
+                <select id="ve-sym" class="orb-sym">
+                  <option value="^NSEI">NIFTY 50</option>
+                  <option value="^NSEBANK">BANK NIFTY</option>
+                  <option value="^CNXFIN">FIN NIFTY</option>
+                  <option value="^NSEMDCP50">MIDCAP NIFTY</option>
+                  <option value="^BSESN">SENSEX</option>
+                </select>
+                <button id="ve-refresh" class="gc-test">↻ Refresh</button>
+                <button id="ve-run" class="gc-primary" title="Run once — a confirmed trend-continuation setup is logged into the Trade Execution daily log (paper — no live order)">▶ Run</button>
+              </div>
+              <div class="wl-sub msl-note">Generic across every F&amp;O index (config-driven). 5-min, setup 10:00–13:00: trend (price vs VWAP + EMA20 slope) → pullback to the VWAP/EMA cluster → reversal candle → structure → R:R → Master/Risk. Reuses the existing VWAP/EMA/ATR/structure engines. Paper only, no live order.</div>
+              <div class="orb-grid" id="ve-grid"><div class="wl-sub">Loading VWAP+EMA…</div></div>
+            </div>
+
             <!-- ---------- 3. TEST CONTROL ---------- -->
             <div class="mtg-card">
               <h5>Test control</h5>
