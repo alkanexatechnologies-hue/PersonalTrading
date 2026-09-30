@@ -7246,7 +7246,13 @@ function renderOTGuidance(d, row) {
   const dns = st && entry != null ? [st.swp, st.s1, st.s2].filter((v) => v != null && v < entry).sort((a, b) => b - a) : [];
   const target = ups.length ? ups[0] : null;
   const stop = dns.length ? dns[0] : null;
-  const sigmaPts = (spot != null && vix != null) ? spot * (vix / 100) / Math.sqrt(252) : null;
+  // Expected move is INDEX-SPECIFIC: use this option's own implied vol (which reflects
+  // each index's volatility — BANKNIFTY/SENSEX run hotter than NIFTY), falling back to
+  // India VIX only when the option IV is missing. Works correctly for every index.
+  const optIv = leg.iv != null && leg.iv > 0 ? leg.iv : null;
+  const volPct = optIv != null ? optIv : vix;
+  const volSrc = optIv != null ? "option IV" : "VIX";
+  const sigmaPts = (spot != null && volPct != null) ? spot * (volPct / 100) / Math.sqrt(252) : null;
   let reach = null;
   if (target != null && entry != null && delta && sigmaPts) { const move = (target - entry) / delta; reach = Math.max(2, Math.min(95, Math.round(2 * (1 - otPhi(move / sigmaPts)) * 100))); }
   const rr = (target != null && stop != null && entry != null && entry > stop) ? (target - entry) / (entry - stop) : null;
@@ -7257,7 +7263,7 @@ function renderOTGuidance(d, row) {
   box.innerHTML =
     `<div class="otg-hd"><span class="otg-t">🎯 Guidance — ${side} ${row.strike ?? ""}</span>` +
     `<span class="otg-badge ${side === "CE" ? "ce" : "pe"}">BUY ${side} · ${side === "CE" ? "lean bullish" : "lean bearish"}</span>` +
-    `<span class="otg-exp">${idxName} expected today ± ${expMove != null ? num(expMove) : "—"} pts (1σ, from VIX)</span></div>` +
+    `<span class="otg-exp">${idxName} expected today ± ${expMove != null ? num(expMove) : "—"} pts (1σ, from ${volSrc})</span></div>` +
     `<div class="otg-grid">` +
     cell("Entry", entry != null ? "₹" + num(entry, 2) : "—") +
     cell("Target", target != null ? "₹" + num(target, 2) : "—", "up") +
