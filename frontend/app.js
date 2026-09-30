@@ -6905,11 +6905,13 @@ function otDrawStructure(side) {
     if (price == null || !isFinite(price)) return;
     try { OT[ref].push(cs.createPriceLine({ price, color, lineWidth: 1, lineStyle: style == null ? 2 : style, axisLabelVisible: true, title })); } catch {}
   };
-  add(s.r2, "R2", "#f6465d", 2);
-  add(s.r1, "R1", "#f6465d", 2);
-  add(s.swp, "SWP", "#a855f7", 1);
-  add(s.s1, "S1", "#16c784", 2);
-  add(s.s2, "S2", "#16c784", 2);
+  // Labels carry the price + role so the chart is self-explanatory guidance:
+  // R = resistance (book / exit), SWP = pivot, S = support (add / hold).
+  add(s.r2, `R2 ${otNum(s.r2, 1)} · resistance`, "#f6465d", 2);
+  add(s.r1, `R1 ${otNum(s.r1, 1)} · resistance`, "#f6465d", 2);
+  add(s.swp, `SWP ${otNum(s.swp, 1)} · pivot`, "#a855f7", 1);
+  add(s.s1, `S1 ${otNum(s.s1, 1)} · support`, "#16c784", 2);
+  add(s.s2, `S2 ${otNum(s.s2, 1)} · support`, "#16c784", 2);
   try { cs.setMarkers(markers); } catch {}
 }
 

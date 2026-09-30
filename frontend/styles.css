@@ -5238,3 +5238,7 @@ body.pm-fullwidth #tab-flow { display:none !important; }
 .te-strat-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px; }
 .te-main.te-main-nochart { grid-template-columns:1fr; }
 @media (max-width:1000px){ .te-strat-row { grid-template-columns:1fr; } }
+
+.ot-clegend { display:flex; flex-wrap:wrap; gap:4px 12px; align-items:center; }
+.ot-guide { font-size:9.5px; color:#5f6f8e; }
+.ot-guide b { font-weight:800; }
