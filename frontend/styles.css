@@ -5271,6 +5271,9 @@ body.pm-fullwidth #tab-flow { display:none !important; }
 .oia-subtab.active { background:var(--panel-2); border-color:var(--blue); color:var(--text); }
 .oia-subtab-q { font-size:10px; font-weight:500; color:var(--muted); text-transform:none; }
 .oia-screen { display:block; }
+/* the hidden attribute must win over the display rule above, or the inactive
+   screen (e.g. OI Summary) stays visible/stacked and the sub-tab toggle no-ops */
+.oia-screen[hidden] { display:none !important; }
 .oia-empty { color:var(--muted); padding:26px; text-align:center; font-size:13px; }
 .oia-foot { margin-top:14px; font-size:10.5px; color:var(--muted); }
 
