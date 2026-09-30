@@ -6364,10 +6364,12 @@ function drawOiamMain(cv, d) {
     const bw = Math.min(9, gw * 0.34);
     rows.forEach((r, i) => { const cx = padL + gw * i + gw / 2; x.fillStyle = OIA_C.green; const yp = Y(r.peOi); x.fillRect(cx - bw - 1, yp, bw, z - yp); x.fillStyle = OIA_C.red; const yc = Y(r.ceOi); x.fillRect(cx + 1, yc, bw, z - yc); });
   }
-  // x labels
-  const step = w < 900 ? 200 : 100;
+  // x labels — index-agnostic: label every Nth bar so any strike step (NIFTY 50,
+  // BANKNIFTY/SENSEX 100, MIDCAP 25 …) shows ~8–14 evenly spaced labels.
+  const targetLabels = w < 900 ? 8 : 14;
+  const every = Math.max(1, Math.round(rows.length / targetLabels));
   x.fillStyle = OIA_C.mut; x.textAlign = "center";
-  rows.forEach((r, i) => { if (r.strike % step === 0) { const cx = padL + gw * i + gw / 2; x.fillText(String(r.strike), cx, h - 7); } });
+  rows.forEach((r, i) => { if (i % every === 0) { const cx = padL + gw * i + gw / 2; x.fillText(String(r.strike), cx, h - 7); } });
   // spot line + tooltip
   if (spot != null && rows.length > 1) {
     const stepS = rows[1].strike - rows[0].strike; const idx = (spot - rows[0].strike) / stepS;
