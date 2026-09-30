@@ -184,7 +184,7 @@ export function buildOiMovement(symbol: string, oi: OiAnalysis | null, windowMin
     aggregate: computeOiMovement(symbol),
     rows, callouts, topCalls, topPuts,
     keyLevels: buildKeyLevels(oi),
-    heatmap: buildHeatmap(symbol, oi.underlying),
+    heatmap: buildHeatmap(symbol, oi),
     insights,
   };
 }
@@ -196,10 +196,16 @@ function sessionTotals(symbol: string, oi: OiAnalysis): { totalCePct: number | n
 
 // Multi-window ΔOI% heatmap. A cell is "building" until the window has enough
 // covered history; then it shows the real windowed ΔOI% (never fabricated).
-function buildHeatmap(symbol: string, underlying: number | null): Heatmap {
+function buildHeatmap(symbol: string, oi: OiAnalysis): Heatmap {
+  const underlying = oi.underlying;
   const perWindow = HEAT_WINDOWS.map((w) => ({ w, deltas: strikeDeltas(symbol, w) }));
+  // Day OI-change (since prev close) per strike — the honest fallback for any
+  // intraday window that hasn't accumulated enough 1-min history yet.
+  const dayBy = new Map<number, { ceOi: number; peOi: number; ceChg: number; peChg: number }>();
+  oi.topStrikes.forEach((s) => dayBy.set(s.strike, { ceOi: s.ceOi, peOi: s.peOi, ceChg: s.ceChg, peChg: s.peChg }));
   const strikeSet = new Set<number>();
   perWindow[0].deltas.forEach((d) => strikeSet.add(d.strike));
+  if (strikeSet.size === 0) oi.topStrikes.forEach((s) => strikeSet.add(s.strike)); // before any sample
   let strikes = Array.from(strikeSet).sort((a, b) => b - a); // high → low (as in the mockup)
   // Keep the ~9 strikes nearest ATM so the heatmap fits one laptop screen.
   const HEAT_ROWS = 9;
@@ -208,15 +214,20 @@ function buildHeatmap(symbol: string, underlying: number | null): Heatmap {
   } else if (strikes.length > HEAT_ROWS) {
     strikes = strikes.slice(0, HEAT_ROWS);
   }
-  const rowFor = (side: "CALL" | "PUT"): HeatRow[] => strikes.map((st) => ({
-    strike: st,
-    cells: perWindow.map(({ w, deltas }) => {
-      const d = deltas.find((x) => x.strike === st && x.side === side);
-      if (!d || d.oiChg === 0 && d.windowMin < 1) return { pct: null, building: true };
-      const building = d.windowMin < w * 0.6; // not enough coverage yet for this window
-      return { pct: d.oiChgPct, building };
-    }),
-  }));
+  const rowFor = (side: "CALL" | "PUT"): HeatRow[] => strikes.map((st) => {
+    const day = dayBy.get(st);
+    const dayPct = day ? pctOf(side === "CALL" ? day.ceChg : day.peChg, side === "CALL" ? day.ceOi : day.peOi) : null;
+    return {
+      strike: st,
+      cells: perWindow.map(({ w, deltas }) => {
+        const d = deltas.find((x) => x.strike === st && x.side === side);
+        // Intraday window with enough coverage → real windowed ΔOI%.
+        if (d && d.windowMin >= w * 0.5) return { pct: d.oiChgPct, building: false };
+        // Otherwise show the day ΔOI% (since prev close), marked building/dimmed.
+        return { pct: dayPct, building: true };
+      }),
+    };
+  });
   return { windows: HEAT_WINDOWS, calls: rowFor("CALL"), puts: rowFor("PUT") };
 }
 

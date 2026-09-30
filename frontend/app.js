@@ -6447,14 +6447,22 @@ function fillOiamHeat(hm) {
   const tb = oiaEl("oiam-hm"); if (!tb || !hm) return;
   const rows = OIA.hmSide === "puts" ? hm.puts : hm.calls;
   if (!rows || !rows.length) { tb.innerHTML = `<tr><td colspan="6" class="oia-gmut">Building 1-min history…</td></tr>`; return; }
+  let anyBuilding = false;
   const cell = (c) => {
-    if (!c || c.pct == null || c.building) return `<td style="color:var(--muted2,#5f6f8e)">…</td>`;
+    if (!c || c.pct == null) return `<td style="color:var(--muted2,#5f6f8e)">…</td>`;
     const n = c.pct, a = Math.min(1, Math.abs(n) / 70);
-    const bg = n >= 0 ? `rgba(22,199,132,${0.10 + a * 0.5})` : `rgba(234,57,67,${0.10 + a * 0.5})`;
+    if (c.building) { // day change (since prev close) — dimmed until the intraday window fills
+      anyBuilding = true;
+      const bg = n >= 0 ? `rgba(22,199,132,${0.05 + a * 0.16})` : `rgba(234,57,67,${0.05 + a * 0.16})`;
+      return `<td style="background:${bg};color:var(--muted)" title="since prev close — intraday window still building">${n >= 0 ? "+" : ""}${Math.round(n)}%<span style="opacity:.6">·</span></td>`;
+    }
+    const bg = n >= 0 ? `rgba(22,199,132,${0.12 + a * 0.5})` : `rgba(234,57,67,${0.12 + a * 0.5})`;
     const col = n >= 0 ? "#eafff5" : "#ffe6ea";
     return `<td style="background:${bg};color:${col}">${n >= 0 ? "+" : ""}${Math.round(n)}%</td>`;
   };
   tb.innerHTML = rows.map((r) => `<tr><td>${r.strike.toLocaleString("en-IN")}</td>${r.cells.map(cell).join("")}</tr>`).join("");
+  const note = oiaEl("oiam-hm-note");
+  if (note) note.textContent = anyBuilding ? "Dimmed · = since prev close (intraday window still filling this session)" : "";
 }
 function fillOiamInsights(ins) {
   const host = oiaEl("oiam-ins"); if (!host) return;

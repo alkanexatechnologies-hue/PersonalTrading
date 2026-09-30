@@ -5470,8 +5470,8 @@ table.oiam-hm td:first-child{text-align:left;font-weight:700;color:var(--text)}
 #oia-movement .oiam-ins .ic{width:26px;height:26px;font-size:13px}
 #oia-movement .oiam-ins .t1{font-size:11px}
 #oia-movement .oiam-ins .t2{font-size:10.5px}
-#oia-movement table.oiam-hm td{padding:4px 3px}
-#oia-movement table.oiam-hm th{padding:3px 3px}
+#oia-movement table.oiam-hm td{padding:2.5px 3px}
+#oia-movement table.oiam-hm th{padding:2px 3px}
 #oia-movement .oiam-ssd{grid-template-columns:138px 1fr;gap:10px}
 #oia-movement .oiam-ssd-stats{gap:3px;font-size:11.5px}
 
