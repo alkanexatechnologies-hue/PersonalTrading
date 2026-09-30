@@ -54,15 +54,62 @@ function quoteFreshness(marketTime: number | null, marketOpen: boolean): Freshne
 }
 const dir = (pct: number | null): Direction => pct == null ? "NEUTRAL" : pct > 0.05 ? "UP" : pct < -0.05 ? "DOWN" : "NEUTRAL";
 
+// ---- Throttled + cached quote with a last-daily-close fallback ----
+// The overview fans out ~12 symbols at once; firing them all in parallel trips
+// Dhan's rate limit (DH-904) and everything falls back to UNAVAILABLE. So quotes
+// go through a small concurrency gate, a short per-symbol cache, and — when the
+// live quote is missing or rate-limited — a last-daily-close fallback so the
+// segment shows a real CLOSED value instead of nothing. Never fabricated.
+const _qCache = new Map<string, { ts: number; q: Quote }>();
+const Q_TTL_OPEN = 60_000;           // live sentiment strip — refresh ~1/min
+const Q_TTL_CLOSED = 30 * 60_000;    // daily close is static — cache long
+let _qActive = 0; const _qWaiters: Array<() => void> = [];
+let _qLast = 0; const Q_GAP_MS = 400; // serial + ~400ms spacing → ≈2.5 req/s, under Dhan's limit
+async function qGate<T>(fn: () => Promise<T>): Promise<T> {
+  if (_qActive >= 1) await new Promise<void>((r) => _qWaiters.push(r));
+  _qActive++;
+  const wait = Q_GAP_MS - (Date.now() - _qLast);
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  _qLast = Date.now();
+  try { return await fn(); } finally { _qActive--; const n = _qWaiters.shift(); if (n) n(); }
+}
+function mkQuote(key: string, label: string, price: number, chg: number | null, chgPct: number | null, mt: number | null, marketOpen: boolean): Quote {
+  return { key, label, value: price, change: chg, changePct: chgPct, ts: mt, freshness: quoteFreshness(mt, marketOpen), source: "DHAN" };
+}
 async function quoteReal(sym: string, label: string, key: string, marketOpen: boolean): Promise<Quote> {
-  try {
-    const q: any = await getProvider().getQuote(sym);
-    if (q && q.price != null) {
-      const mt = q.marketTime && q.marketTime > 0 ? q.marketTime : null;
-      return { key, label, value: q.price, change: q.change ?? null, changePct: q.changePercent ?? q.changePct ?? null, ts: mt, freshness: quoteFreshness(mt, marketOpen), source: "DHAN" };
+  const ttl = marketOpen ? Q_TTL_OPEN : Q_TTL_CLOSED;
+  const hit = _qCache.get(sym);
+  if (hit && Date.now() - hit.ts < ttl) return { ...hit.q, key, label };
+  const built = await qGate(async (): Promise<Quote> => {
+    // Live quote only during market hours (when closed it returns nothing anyway,
+    // so skipping it halves the Dhan calls). Daily close covers both closed and
+    // any live-quote miss → a real CLOSED value instead of UNAVAILABLE.
+    if (marketOpen) {
+      try {
+        const q: any = await getProvider().getQuote(sym);
+        if (q && q.price != null) {
+          const mt = q.marketTime && q.marketTime > 0 ? q.marketTime : null;
+          return mkQuote(key, label, q.price, q.change ?? null, q.changePercent ?? q.changePct ?? null, mt, marketOpen);
+        }
+      } catch { /* rate-limited / unsupported — fall through to daily close */ }
     }
-  } catch { /* fall through */ }
-  return { key, label, value: null, change: null, changePct: null, ts: null, freshness: "UNAVAILABLE", source: null };
+    try {
+      const c: any[] = await getProvider().getCandles(sym, "1d", 3);
+      if (Array.isArray(c) && c.length) {
+        const last = c[c.length - 1], prev = c.length > 1 ? c[c.length - 2] : null;
+        const price = last.close;
+        if (price != null) {
+          const chg = prev && prev.close != null ? round2(price - prev.close) : null;
+          const chgPct = prev && prev.close ? round2((price - prev.close) / prev.close * 100) : null;
+          return mkQuote(key, label, price, chg, chgPct, last.time ?? null, marketOpen);
+        }
+      }
+    } catch { /* nothing available */ }
+    return { key, label, value: null, change: null, changePct: null, ts: null, freshness: "UNAVAILABLE", source: null };
+  });
+  // Only cache real values long; keep retrying an UNAVAILABLE sooner.
+  _qCache.set(sym, { ts: built.value != null ? Date.now() : Date.now() - (ttl - 15_000), q: built });
+  return built;
 }
 
 export interface PremarketOverview {

@@ -7687,7 +7687,10 @@ router.get("/news", async (req: Request, res: Response) => {
 // real-or-DATA-UNAVAILABLE; the API key is never returned to the browser.
 router.get("/premarket/overview", async (_req: Request, res: Response) => {
   try {
-    const data = await buildPremarketOverview();
+    // Cache + coalesce: buildPremarketOverview fans out ~12 provider quotes; the
+    // 30s frontend poll (and multiple viewers) must not re-run it every time or
+    // Dhan rate-limits (DH-904) and segments fall back to UNAVAILABLE.
+    const data = await cached("premarket:overview", 30_000, () => buildPremarketOverview());
     res.json(data);
   } catch (e: any) {
     res.json({ available: false, error: e?.message || "overview failed" });
