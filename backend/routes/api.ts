@@ -89,6 +89,8 @@ import { buildOiMovement } from "../oi/analysisModule/movement";
 import { buildOiSummary } from "../oi/analysisModule/summary";
 import { logOiAnalysis, getOiAnalysisAuditLog } from "../oi/analysisModule/audit";
 import { strikeHistory } from "../oi/analysisModule/intradayStore";
+// AUDIT MODE (feature-flagged runtime telemetry; off by default)
+import { AUDIT_ENABLED, recordCache, auditSummary, runWithAuditCtx, newReqId } from "../audit/auditMode";
 import { recommendOiTrades, correlateOiModels, buildOiWalls, buildOiLesson } from "../oi/oiTrade";
 import { buildMoveBulletin } from "../oi/bulletin";
 import { tickPaperAlerts, sendAlertsTest, alertsStatus } from "../alerts/paperPing";
@@ -217,6 +219,15 @@ import { Interval, NextDayPick, Opportunity, TradeAlert, OiAnalysis } from "../t
 
 const router = Router();
 
+// AUDIT MODE: tag every request with a screen (referer) + request id so the
+// Dhan/Groww fetch chokepoints can attribute their calls. No-op when disabled.
+if (AUDIT_ENABLED) {
+  router.use((req: Request, _res: Response, next: NextFunction) => {
+    const screen = (req.get("referer") || req.get("x-screen") || req.path || "unknown").replace(/^https?:\/\/[^/]+/, "") || req.path;
+    runWithAuditCtx({ screen, reqId: newReqId() }, () => next());
+  });
+}
+
 // ---- Access gate: require a valid session on every route except the login
 // flow itself. A login UI existed on the frontend (backend/auth/session.ts)
 // but nothing server-side ever checked it, so the entire trading/paper/OI API
@@ -278,9 +289,10 @@ const _inflight = new Map<string, Promise<any>>();
 let _swingTop: { ts: number; v: any[] } | null = null;
 async function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
   const hit = _cache.get(key);
-  if (hit && Date.now() - hit.ts < ttlMs) return hit.v as T;
+  if (hit && Date.now() - hit.ts < ttlMs) { if (AUDIT_ENABLED) recordCache(key, true); return hit.v as T; }
   const flying = _inflight.get(key);
-  if (flying) return flying as Promise<T>; // coalesce concurrent callers into one fetch
+  if (flying) { if (AUDIT_ENABLED) recordCache(key, true); return flying as Promise<T>; } // coalesce concurrent callers into one fetch
+  if (AUDIT_ENABLED) recordCache(key, false);
   const p = (async () => {
     try {
       const v = await withTimeout(fn(), 18_000, key);
@@ -330,6 +342,7 @@ const MC_ANALYSIS_VERSION = "mc/v2";
 // Cache TTLs: intraday candles refresh fast; daily bars barely change intraday; OI ~1 min.
 const TTL_INTRADAY = 30_000;
 const TTL_DAILY = 10 * 60_000;
+const TTL_QUOTE = 4_000; // live single-symbol quote: 4s — coalesces 5s pollers, keeps provider marketTime freshness honest
 const TTL_OI = 90_000; // option chain: 90s (was 60s) - eases Groww rate-limit pressure
 // Market Command is a live trading screen: candles refresh fast (5s) via a
 // dedicated cache key so the global 30s candle cache used by heavier/background
@@ -1000,9 +1013,17 @@ router.get("/quote/:symbol", async (req: Request, res: Response) => {
   try {
     const feed = syncSessionProvider();
     if (feed.skipLive) return res.status(503).json({ error: "Dhan feed off / not configured" });
-    const t0 = Date.now();
-    const quote = await getProvider().getQuote(req.params.symbol);
-    if (quote?.marketTime && quote.marketTime > 0) recordGrowwOk(Date.now() - t0);
+    // Short-TTL cache + in-flight coalescing: many consumers (index strip, cards,
+    // OI Analysis) poll the same symbol; this serves one shared quote instead of
+    // an independent Dhan call each. Same provider, same response shape, and the
+    // quote's own marketTime keeps the freshness calc honest.
+    const symbol = req.params.symbol;
+    const quote = await cached(`quote:${symbol}`, TTL_QUOTE, async () => {
+      const t0 = Date.now();
+      const q = await getProvider().getQuote(symbol);
+      if (q?.marketTime && q.marketTime > 0) recordGrowwOk(Date.now() - t0);
+      return q;
+    });
     res.json(quote);
   } catch (e: any) {
     recordGrowwFail();
@@ -5354,8 +5375,12 @@ router.get("/oi-analysis/movement", requirePermission("oiAnalysis"), async (req:
     if (!def.fno) return res.json({ available: false, message: `OI Analysis needs an F&O instrument (got ${def.symbol}).`, testMode: !CONFIG.oiAnalysis.enabled });
     const windowMin = Math.max(1, Math.min(30, Number(req.query.window) || 1));
     const oi = await getOiCached(def);
+    // Spot value = the OI chain's own underlying (already fetched — no extra call).
+    // Day-change comes from the SHARED cached quote (coalesced, not a per-load
+    // uncached duplicate); the quote's price is only a fallback when the chain
+    // underlying is missing. No OI calc / strike / signal logic changes here.
     let spotChg: number | null = null, spotChgPct: number | null = null, spot: number | null = oi?.underlying ?? null;
-    try { const q = await getProvider().getQuote(def.symbol); if (q) { spot = q.price ?? spot; spotChg = q.change ?? null; spotChgPct = q.changePercent ?? null; } } catch { /* quote best-effort */ }
+    try { const q: any = await cached(`quote:${def.symbol}`, TTL_QUOTE, () => getProvider().getQuote(def.symbol)); if (q) { if (spot == null) spot = q.price ?? null; spotChg = q.change ?? null; spotChgPct = q.changePercent ?? null; } } catch { /* change best-effort; spot stays = chain underlying */ }
     const view = buildOiMovement(def.symbol, oi, windowMin, { spot, spotChg, spotChgPct });
     try {
       logOiAnalysis({
@@ -5380,8 +5405,12 @@ router.get("/oi-analysis/summary", requirePermission("oiAnalysis"), async (req: 
     if (!def.fno) return res.json({ available: false, message: `OI Analysis needs an F&O instrument (got ${def.symbol}).`, testMode: !CONFIG.oiAnalysis.enabled });
     const oi = await getOiCached(def);
     const move = computeOiMovement(def.symbol);
+    // Spot value = the OI chain's own underlying (already fetched — no extra call).
+    // Day-change comes from the SHARED cached quote (coalesced, not a per-load
+    // uncached duplicate); the quote's price is only a fallback when the chain
+    // underlying is missing. No OI calc / strike / signal logic changes here.
     let spotChg: number | null = null, spotChgPct: number | null = null, spot: number | null = oi?.underlying ?? null;
-    try { const q = await getProvider().getQuote(def.symbol); if (q) { spot = q.price ?? spot; spotChg = q.change ?? null; spotChgPct = q.changePercent ?? null; } } catch { /* quote best-effort */ }
+    try { const q: any = await cached(`quote:${def.symbol}`, TTL_QUOTE, () => getProvider().getQuote(def.symbol)); if (q) { if (spot == null) spot = q.price ?? null; spotChg = q.change ?? null; spotChgPct = q.changePercent ?? null; } } catch { /* change best-effort; spot stays = chain underlying */ }
     const view = buildOiSummary(def.symbol, oi, move, { spot, spotChg, spotChgPct });
     try {
       logOiAnalysis({
@@ -5416,6 +5445,66 @@ router.get("/oi-analysis/audit", requirePermission("oiAnalysis"), (req: Request,
   const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 50));
   res.json({ entries: getOiAnalysisAuditLog({ symbol, limit }) });
 });
+
+// ==========================================================================
+//  AUDIT MODE (read-only). /api/audit/summary rolls up the in-memory telemetry
+//  collected at the Dhan/Groww fetch chokepoints while AUDIT_MODE=true. It
+//  changes no data behaviour. /api/audit/compare-option is an on-demand, manual
+//  Dhan-vs-Groww comparison for ONE option contract (does not change what the
+//  Option Terminal serves — it simply fetches both providers for the same
+//  contract and diffs the last candle's timestamp/OHLC/volume).
+// ==========================================================================
+router.get("/audit/summary", requireAdmin, (req: Request, res: Response) => {
+  const windowMin = Math.max(1, Math.min(60, Number(req.query.window) || 10));
+  res.json({ auditMode: CONFIG.audit.enabled, ...auditSummary(windowMin) });
+});
+
+router.get("/audit/compare-option", requireAdmin, async (req: Request, res: Response) => {
+  if (!CONFIG.audit.enabled) return res.json({ available: false, message: "AUDIT_MODE is off — set AUDIT_MODE=true to compare providers." });
+  try {
+    const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
+    const underlying = (def?.nseSymbol || String(req.query.symbol || "").replace(/\.NS$/i, "")).toUpperCase();
+    const type = String(req.query.type || "CE").toUpperCase() === "PE" ? "PE" : "CE";
+    const strike = Number(req.query.strike);
+    const expiry = String(req.query.expiry || "");
+    const interval = String(req.query.interval || "5");
+    if (!underlying || !expiry || !Number.isFinite(strike)) return res.status(400).json({ error: "symbol, type, strike, expiry required" });
+    const now = Math.floor(Date.now() / 1000), start = now - 2 * 24 * 3600;
+    const last = (arr: any[]) => (Array.isArray(arr) && arr.length ? arr[arr.length - 1] : null);
+    // Dhan
+    let dhan: any = null, dhanErr: string | null = null;
+    try {
+      const dopt = await lookupDhanOption(underlying, type as any, strike, expiry);
+      if (dopt) { const c = await dhanOptionCandles(dopt.securityId, start, now, Number(interval), dopt.exchangeSegment); dhan = { count: c.length, last: last(c) }; }
+      else dhanErr = "Dhan contract not found";
+    } catch (e: any) { dhanErr = e?.message || "dhan error"; }
+    // Groww (NSE only)
+    let groww: any = null, growwErr: string | null = null;
+    try {
+      if (/SENSEX|BANKEX|BANKNIFTY/i.test(underlying)) growwErr = "Groww not used for BSE indices / BANK NIFTY";
+      else {
+        const gp = growwProviderForOptionTerminal();
+        const inst = await findOption(underlying, type as any, strike, expiry);
+        if (gp && inst) { const c = await growwOptionCandles(gp, inst.tradingSymbol, start, now, Number(interval)); groww = { count: c.length, last: last(c), tradingSymbol: inst.tradingSymbol }; }
+        else growwErr = "Groww not connected / contract not found";
+      }
+    } catch (e: any) { growwErr = e?.message || "groww error"; }
+    // Diff the last candle
+    const diff = (dhan?.last && groww?.last) ? {
+      timeDeltaSec: (dhan.last.time ?? 0) - (groww.last.time ?? 0),
+      openDelta: round2safe((dhan.last.open ?? 0) - (groww.last.open ?? 0)),
+      highDelta: round2safe((dhan.last.high ?? 0) - (groww.last.high ?? 0)),
+      lowDelta: round2safe((dhan.last.low ?? 0) - (groww.last.low ?? 0)),
+      closeDelta: round2safe((dhan.last.close ?? 0) - (groww.last.close ?? 0)),
+      volumeDelta: (dhan.last.volume ?? 0) - (groww.last.volume ?? 0),
+    } : null;
+    res.json({ available: true, symbol: underlying, type, strike, expiry, interval, dhan, dhanErr, groww, growwErr, diff,
+      note: "On-demand comparison only. Does not change what Option Terminal serves. Run during market hours for meaningful values." });
+  } catch (e: any) {
+    res.json({ available: false, error: e?.message || "compare failed" });
+  }
+});
+function round2safe(n: number): number { return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0; }
 
 // MANUAL "Run ORB" — the user presses this (e.g. in the morning). It evaluates ORB
 // once for the given index and, only if the breakout is a CONFIRMED TAKE inside the

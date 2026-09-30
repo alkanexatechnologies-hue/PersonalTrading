@@ -14,6 +14,8 @@
 
 export const DHAN_BACKTEST_MODE = process.env.DHAN_BACKTEST_MODE !== "false";
 
+import { AUDIT_ENABLED, recordCall, dhanBodyMeta } from "../audit/auditMode";
+
 const BASE = "https://api.dhan.co/v2";
 
 const ALLOWED_PATHS = new Set<string>([
@@ -50,9 +52,21 @@ export async function dhanFetch(path: string, opts: DhanFetchOptions): Promise<R
     "access-token": opts.accessToken,
   };
   if (opts.clientId) headers["client-id"] = opts.clientId;
-  return fetch(`${BASE}${path}`, {
-    method: opts.method || "GET",
-    headers,
-    body: opts.body != null ? JSON.stringify(opts.body) : undefined,
-  });
+  // AUDIT MODE (off by default): time + record this call. Never alters behaviour.
+  const t0 = Date.now();
+  try {
+    const res = await fetch(`${BASE}${path}`, {
+      method: opts.method || "GET",
+      headers,
+      body: opts.body != null ? JSON.stringify(opts.body) : undefined,
+    });
+    if (AUDIT_ENABLED) {
+      const cl = Number(res.headers.get("content-length"));
+      recordCall({ provider: "dhan", endpoint: basePath, ...dhanBodyMeta(opts.body), latencyMs: Date.now() - t0, httpStatus: res.status, respBytes: Number.isFinite(cl) ? cl : null, error: res.ok ? null : `http_${res.status}`, retry: 0, rateLimit: res.status === 429 });
+    }
+    return res;
+  } catch (e: any) {
+    if (AUDIT_ENABLED) recordCall({ provider: "dhan", endpoint: basePath, ...dhanBodyMeta(opts.body), latencyMs: Date.now() - t0, httpStatus: 0, respBytes: null, error: String(e?.message || e), retry: 0, rateLimit: false });
+    throw e;
+  }
 }

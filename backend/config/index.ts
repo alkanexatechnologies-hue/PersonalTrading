@@ -243,6 +243,11 @@ export const CONFIG = {
   oiAnalysis: {
     enabled: String(process.env.OI_ANALYSIS_ENABLED ?? "false").trim().toLowerCase() === "true",
   },
+  // Runtime market-data telemetry (read-only observation). Off by default; never
+  // changes what any endpoint fetches or returns.
+  audit: {
+    enabled: String(process.env.AUDIT_MODE ?? "false").trim().toLowerCase() === "true",
+  },
 };
 
 /**

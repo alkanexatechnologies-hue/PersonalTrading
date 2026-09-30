@@ -70,6 +70,13 @@ export function sampleCount(symbol: string): number {
   return (_history.get(symbol) || []).length;
 }
 
+// The last two snapshot wall-clock timestamps (epoch seconds), newest first.
+// Used to show the true snapshot cadence on the OI Movement screen.
+export function lastTwoSnapshotTimes(symbol: string): { last: number | null; prev: number | null } {
+  const arr = _history.get(symbol) || [];
+  return { last: arr.length ? arr[arr.length - 1].t : null, prev: arr.length > 1 ? arr[arr.length - 2].t : null };
+}
+
 // The most recent sample at/older than (now - windowMin). No look-ahead: only
 // samples already recorded are considered.
 function pastSnapshot(arr: StrikeSnapshot[], windowMin: number): StrikeSnapshot | null {

@@ -15,7 +15,7 @@
 import { OiAnalysis } from "../../types";
 import { computeOiMovement, OiMoveResult } from "../oiMovement";
 import { classifyBuildup, Buildup } from "./classify";
-import { recordStrikeSnapshot, strikeDeltas, sampleCount, StrikeDelta } from "./intradayStore";
+import { recordStrikeSnapshot, strikeDeltas, sampleCount, lastTwoSnapshotTimes, StrikeDelta } from "./intradayStore";
 import { sessionPct, buildKeyLevels, KeyLevel } from "./summary";
 
 export type MoveStatus = "Strong Build" | "Build" | "Unwind" | "Flat";
@@ -72,6 +72,10 @@ export interface OiMovementView {
   source: string;               // "dhan"
   windowMin: number;
   samples: number;
+  // Snapshot cadence (honest labelling — the chain refresh, not a true 1-min feed):
+  lastSnapshotAt: number | null;   // epoch seconds of the latest 1-min-store snapshot
+  prevSnapshotAt: number | null;   // epoch seconds of the previous snapshot
+  snapshotGapSec: number | null;   // seconds between the last two snapshots
   // top-bar stats
   spot: number | null; spotChg: number | null; spotChgPct: number | null;
   pcr: number | null;
@@ -103,6 +107,7 @@ export function buildOiMovement(symbol: string, oi: OiAnalysis | null, windowMin
     return {
       available: false, message: oi?.message || "OI data unavailable.", symbol,
       underlying: null, expiry: null, asOf: nowSec, ageSec: 0, source: "dhan", windowMin, samples: 0,
+      lastSnapshotAt: null, prevSnapshotAt: null, snapshotGapSec: null,
       spot: ctx.spot ?? null, spotChg: ctx.spotChg ?? null, spotChgPct: ctx.spotChgPct ?? null,
       pcr: null, pcrState: "neutral", pcrVolume: null, pcrVolumeState: "neutral",
       pcrZone: "balanced", pcrNote: "DATA UNAVAILABLE", maxPain: null,
@@ -176,6 +181,7 @@ export function buildOiMovement(symbol: string, oi: OiAnalysis | null, windowMin
   return {
     available: true, symbol, underlying: oi.underlying, expiry: oi.expiry,
     asOf: oi.asOf, ageSec: Math.max(0, nowSec - oi.asOf), source: "dhan", windowMin, samples: sampleCount(symbol),
+    ...snapSnap(symbol),
     spot: ctx.spot ?? oi.underlying, spotChg: ctx.spotChg ?? null, spotChgPct: ctx.spotChgPct ?? null,
     pcr: oi.pcr, pcrState: oi.pcrState,
     ...pcrDetail(oi.pcr), pcrVolume: pcrVol(oi).v, pcrVolumeState: pcrVol(oi).s,
@@ -187,6 +193,11 @@ export function buildOiMovement(symbol: string, oi: OiAnalysis | null, windowMin
     heatmap: buildHeatmap(symbol, oi),
     insights,
   };
+}
+
+function snapSnap(symbol: string): { lastSnapshotAt: number | null; prevSnapshotAt: number | null; snapshotGapSec: number | null } {
+  const t = lastTwoSnapshotTimes(symbol);
+  return { lastSnapshotAt: t.last, prevSnapshotAt: t.prev, snapshotGapSec: t.last != null && t.prev != null ? t.last - t.prev : null };
 }
 
 function sessionTotals(symbol: string, oi: OiAnalysis): { totalCePct: number | null; totalPePct: number | null } {

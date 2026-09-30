@@ -85,6 +85,10 @@ services:
       # live labeling. ---
       - key: OI_ANALYSIS_ENABLED
         value: "true"
+      # Runtime telemetry (read-only). Keep false in production; flip to "true"
+      # temporarily to measure Dhan/Groww load via /api/audit/summary.
+      - key: AUDIT_MODE
+        value: "false"
       # --- Safety switches: must stay off in production per project rules ---
       - key: LIVE_ORDER_EXECUTION
         value: "false"

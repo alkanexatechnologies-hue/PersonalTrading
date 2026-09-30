@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "async_hooks";
+import { AUDIT_ENABLED, recordCall } from "../audit/auditMode";
 import { MarketDataProvider } from "./provider";
 import { Candle, Interval, Quote, OiAnalysis, OiStrike } from "../types";
 import { findSymbolDef, SymbolDef } from "../config";
@@ -173,6 +174,11 @@ async function growwFetch(url: string, init?: any, _tries = 0, _queuedAt = Date.
     res = await nativeFetch(url, { ...init, signal });
   } finally {
     _growwActive--;
+  }
+  // AUDIT MODE (off by default): record this Groww attempt. Never alters behaviour.
+  if (AUDIT_ENABLED) {
+    const cl = Number(res.headers.get("content-length"));
+    recordCall({ provider: "groww", endpoint: key, securityId: null, interval: null, latencyMs: Date.now() - dispatchStart, httpStatus: res.status, respBytes: Number.isFinite(cl) ? cl : null, error: res.ok ? null : `http_${res.status}`, retry: _tries, rateLimit: res.status === 429 || res.status === 503 });
   }
   // DEV-ONLY diagnostic (STEP 5): priority, queue wait (enqueue -> this attempt's
   // dispatch), and this attempt's own request duration. No credentials/tokens -

@@ -6499,9 +6499,15 @@ function renderOiaMovement(d) {
     return;
   }
   if (msg) msg.hidden = true;
-  // freshness
+  // freshness + honest snapshot cadence (chain refresh, not a true 1-min feed)
   const src = oiaEl("oiam-src");
-  if (src) { const age = d.ageSec != null ? d.ageSec : 0; const stale = age > 90; src.innerHTML = `source: ${d.source || "dhan"} · <span class="${stale ? "oia-neg" : "oia-pos"}">${age}s ago</span>`; }
+  if (src) {
+    const age = d.ageSec != null ? d.ageSec : 0; const stale = age > 90;
+    const ft = (t) => t ? new Date(t * 1000).toLocaleTimeString() : "—";
+    const gap = d.snapshotGapSec != null ? ` · gap ${d.snapshotGapSec}s` : "";
+    const snap = d.lastSnapshotAt ? ` · snapshot ${ft(d.lastSnapshotAt)}${d.prevSnapshotAt ? ` (prev ${ft(d.prevSnapshotAt)}${gap})` : ""}` : "";
+    src.innerHTML = `source: ${d.source || "dhan"} · chain age <span class="${stale ? "oia-neg" : "oia-pos"}">${age}s</span>${snap}`;
+  }
   renderOiamPcr(d);
   // stats strip
   const stats = oiaEl("oiam-stats");
