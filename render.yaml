@@ -80,6 +80,11 @@ services:
       # --- AI narration (optional) ---
       - key: ANTHROPIC_API_KEY
         sync: false
+      # --- OI Analysis module (Market Command → OI Analysis). Read-only OI
+      # intelligence; never places orders. "true" promotes it from Test Zone to
+      # live labeling. ---
+      - key: OI_ANALYSIS_ENABLED
+        value: "true"
       # --- Safety switches: must stay off in production per project rules ---
       - key: LIVE_ORDER_EXECUTION
         value: "false"
