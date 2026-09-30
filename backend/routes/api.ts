@@ -6925,7 +6925,7 @@ router.get("/option-candles", async (req: Request, res: Response) => {
     // Groww covers NSE options only. For BSE indices (SENSEX/BANKEX) skip it entirely
     // and go straight to Dhan — trying Groww there always returns nothing and just
     // wastes an API call + adds rate-limit pressure.
-    const growwSupports = !/SENSEX|BANKEX/i.test(underlying);
+    const growwSupports = !/SENSEX|BANKEX|BANKNIFTY/i.test(underlying); // SENSEX/BANKEX (BSE) + BANK NIFTY → Dhan directly (user request)
     // OPTION TERMINAL: prefer Groww premium candles (real volume, friendlier rate
     // limits) when a Groww token is connected. Everything else stays on Dhan.
     const gp = growwProviderForOptionTerminal();
@@ -6990,7 +6990,7 @@ router.get("/option-structure", async (req: Request, res: Response) => {
       let candles: any[] | null = null;
       const gp = growwProviderForOptionTerminal();
       const inst = await findOption(underlying, type, strike, expiry);
-      const growwSupports = !/SENSEX|BANKEX/i.test(underlying); // BSE indices → Dhan only
+      const growwSupports = !/SENSEX|BANKEX|BANKNIFTY/i.test(underlying); // SENSEX/BANKEX (BSE) + BANK NIFTY → Dhan directly (user request)
       if (gp && inst && growwSupports) {
         try { candles = await growwOptionCandles(gp, inst.tradingSymbol, start, now, interval); }
         catch { candles = null; }
