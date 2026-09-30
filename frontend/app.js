@@ -2046,7 +2046,7 @@ const MODE_TABS = {
   // Market Sentiment desk: opens on the read-only sentiment screen, with the
   // Market Command / Option Terminal / Trade Execution siblings reachable from it.
   premarket: ["premarket", "marketcommand", "optionterminal", "oianalysis", "tradeexec"],
-  marketcommand: ["marketcommand"],
+  marketcommand: ["marketcommand", "oianalysis"],
   // Index Option Trading: Option Top Pick + Early Moves now live on the Stock
   // Option desk, and AI Paper Trading moved to its own AI Paper Desk, so all
   // three are dropped here.
@@ -5669,6 +5669,7 @@ function initMarketCommand() {
   // Jump to the Option Terminal (CE/PE) for the same index — Market Command runs
   // full-screen with its tab bar hidden, so this button is the way across.
   el("mc-open-optionterminal")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("optionterminal"); });
+  el("mc-open-oianalysis")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("oianalysis"); });
   el("mc-open-tradeexec")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("tradeexec"); });
 
   // Wire fullscreen
@@ -6225,6 +6226,8 @@ function initOiAnalysis() {
     b.addEventListener("click", () => { OIA.screen = b.getAttribute("data-oia"); applyOiaScreen(); loadOiAnalysis(); });
   });
   oiaEl("oia-refresh")?.addEventListener("click", () => loadOiAnalysis());
+  oiaEl("oia-open-command")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("marketcommand"); });
+  oiaEl("oia-open-tradeexec")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("tradeexec"); });
   oiaEl("oia-strike-sel")?.addEventListener("change", (e) => { OIA.selStrike = Number(e.target.value); loadOiaStrikeHistory(); });
   oiaEl("oia-strike-side")?.addEventListener("change", (e) => { OIA.selSide = e.target.value; loadOiaStrikeHistory(); });
   fetchJSON("/api/oi-analysis/status", 12000).then((s) => { OIA.status = s; renderOiaBanner(); }).catch(() => {});
