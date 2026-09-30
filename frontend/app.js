@@ -6346,7 +6346,7 @@ function oiaRR(x, rx, ry, rw, rh, r) { x.beginPath(); x.moveTo(rx + r, ry); x.ar
 function drawOiamMain(cv, d) {
   if (!cv || !d || !d.rows || !d.rows.length) return;
   const { x, w, h } = oiaFit(cv);
-  const padL = 46, padR = 10, padT = 108, padB = 24, iw = w - padL - padR, ih = h - padT - padB;
+  const padL = 46, padR = 10, padT = 94, padB = 22, iw = w - padL - padR, ih = h - padT - padB;
   const rows = d.rows, spot = d.spot != null ? d.spot : d.underlying;
   const net = OIA.mainView === "net";
   const maxOi = Math.max(1, ...rows.map((r) => Math.max(r.ceOi, r.peOi)));

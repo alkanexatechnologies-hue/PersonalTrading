@@ -174,7 +174,7 @@ export function buildOiMovement(symbol: string, oi: OiAnalysis | null, windowMin
     aggregate: computeOiMovement(symbol),
     rows, callouts, topCalls, topPuts,
     keyLevels: buildKeyLevels(oi),
-    heatmap: buildHeatmap(symbol),
+    heatmap: buildHeatmap(symbol, oi.underlying),
     insights,
   };
 }
@@ -186,11 +186,18 @@ function sessionTotals(symbol: string, oi: OiAnalysis): { totalCePct: number | n
 
 // Multi-window ΔOI% heatmap. A cell is "building" until the window has enough
 // covered history; then it shows the real windowed ΔOI% (never fabricated).
-function buildHeatmap(symbol: string): Heatmap {
+function buildHeatmap(symbol: string, underlying: number | null): Heatmap {
   const perWindow = HEAT_WINDOWS.map((w) => ({ w, deltas: strikeDeltas(symbol, w) }));
   const strikeSet = new Set<number>();
   perWindow[0].deltas.forEach((d) => strikeSet.add(d.strike));
-  const strikes = Array.from(strikeSet).sort((a, b) => b - a); // high → low (as in the mockup)
+  let strikes = Array.from(strikeSet).sort((a, b) => b - a); // high → low (as in the mockup)
+  // Keep the ~9 strikes nearest ATM so the heatmap fits one laptop screen.
+  const HEAT_ROWS = 9;
+  if (underlying != null && strikes.length > HEAT_ROWS) {
+    strikes = [...strikes].sort((a, b) => Math.abs(a - underlying) - Math.abs(b - underlying)).slice(0, HEAT_ROWS).sort((a, b) => b - a);
+  } else if (strikes.length > HEAT_ROWS) {
+    strikes = strikes.slice(0, HEAT_ROWS);
+  }
   const rowFor = (side: "CALL" | "PUT"): HeatRow[] => strikes.map((st) => ({
     strike: st,
     cells: perWindow.map(({ w, deltas }) => {
