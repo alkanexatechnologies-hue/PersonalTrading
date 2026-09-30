@@ -61,7 +61,7 @@ const dir = (pct: number | null): Direction => pct == null ? "NEUTRAL" : pct > 0
 // live quote is missing or rate-limited — a last-daily-close fallback so the
 // segment shows a real CLOSED value instead of nothing. Never fabricated.
 const _qCache = new Map<string, { ts: number; q: Quote }>();
-const Q_TTL_OPEN = 60_000;           // live sentiment strip — refresh ~1/min
+const Q_TTL_OPEN = 25_000;           // < route cache (30s) so each rebuild refetches live quotes
 const Q_TTL_CLOSED = 30 * 60_000;    // daily close is static — cache long
 let _qActive = 0; const _qWaiters: Array<() => void> = [];
 let _qLast = 0; const Q_GAP_MS = 400; // serial + ~400ms spacing → ≈2.5 req/s, under Dhan's limit
@@ -79,26 +79,35 @@ function mkQuote(key: string, label: string, price: number, chg: number | null, 
 async function quoteReal(sym: string, label: string, key: string, marketOpen: boolean): Promise<Quote> {
   const ttl = marketOpen ? Q_TTL_OPEN : Q_TTL_CLOSED;
   const hit = _qCache.get(sym);
-  if (hit && Date.now() - hit.ts < ttl) return { ...hit.q, key, label };
+  if (hit && Date.now() - hit.ts < ttl) {
+    // Recompute freshness from the quote's own provider timestamp so a cached
+    // value never under-reports how stale it is.
+    const fresh = hit.q.value == null ? "UNAVAILABLE" : quoteFreshness(hit.q.ts, marketOpen);
+    return { ...hit.q, key, label, freshness: fresh };
+  }
   const built = await qGate(async (): Promise<Quote> => {
-    // Live quote only during market hours (when closed it returns nothing anyway,
-    // so skipping it halves the Dhan calls). Daily close covers both closed and
-    // any live-quote miss → a real CLOSED value instead of UNAVAILABLE.
     if (marketOpen) {
+      // MARKET OPEN → only a LIVE quote (today's move). NEVER fall back to the
+      // daily close here: a prior session's direction shown as "today" is
+      // dangerous to trade on. If the live quote is missing, report UNAVAILABLE.
       try {
         const q: any = await getProvider().getQuote(sym);
         if (q && q.price != null) {
           const mt = q.marketTime && q.marketTime > 0 ? q.marketTime : null;
           return mkQuote(key, label, q.price, q.change ?? null, q.changePercent ?? q.changePct ?? null, mt, marketOpen);
         }
-      } catch { /* rate-limited / unsupported — fall through to daily close */ }
+      } catch { /* live quote unavailable → report UNAVAILABLE, do not show stale */ }
+      return { key, label, value: null, change: null, changePct: null, ts: null, freshness: "UNAVAILABLE", source: null };
     }
+    // MARKET CLOSED → the previous session's close, clearly CLOSED, and only when
+    // the candle is genuinely from the most recent session (not an old stale bar).
     try {
       const c: any[] = await getProvider().getCandles(sym, "1d", 3);
       if (Array.isArray(c) && c.length) {
         const last = c[c.length - 1], prev = c.length > 1 ? c[c.length - 2] : null;
         const price = last.close;
-        if (price != null) {
+        const ageDays = last.time ? (Date.now() / 1000 - last.time) / 86400 : 999;
+        if (price != null && ageDays <= 5) { // within the last few calendar days (covers weekends)
           const chg = prev && prev.close != null ? round2(price - prev.close) : null;
           const chgPct = prev && prev.close ? round2((price - prev.close) / prev.close * 100) : null;
           return mkQuote(key, label, price, chg, chgPct, last.time ?? null, marketOpen);
