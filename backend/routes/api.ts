@@ -84,6 +84,10 @@ import { computeTradeMinder } from "../signals/tradeMinder";
 import { saveOiSnapshot, priorDaySnapshot, latestSnapshot } from "../oi/snapshotStore";
 import { recordOiBaseline, computeOiChange, oiBaselineStrike } from "../oi/oiChange";
 import { recordOiSample, computeOiMovement, OiMoveResult } from "../oi/oiMovement";
+// OI Analysis module (additive, read-only, feature-flagged via CONFIG.oiAnalysis)
+import { buildOiMovement } from "../oi/analysisModule/movement";
+import { buildOiSummary } from "../oi/analysisModule/summary";
+import { logOiAnalysis, getOiAnalysisAuditLog } from "../oi/analysisModule/audit";
 import { recommendOiTrades, correlateOiModels, buildOiWalls, buildOiLesson } from "../oi/oiTrade";
 import { buildMoveBulletin } from "../oi/bulletin";
 import { tickPaperAlerts, sendAlertsTest, alertsStatus } from "../alerts/paperPing";
@@ -5327,6 +5331,72 @@ router.get("/orb-status", requirePermission("oiAnalysis"), (_req: Request, res: 
   const today = new Date(Date.now() + 19800000).toISOString().slice(0, 10);
   const orbTrades = listTrades(today).filter((t) => /ORB/i.test(t.remarks || ""));
   res.json({ orbActive: getOrbActive().active, flags: CONFIG.orb, todayOrbTrades: orbTrades.length, trades: orbTrades.slice(0, 10) });
+});
+
+// ==========================================================================
+//  OI ANALYSIS MODULE (ADDITIVE, read-only) — two screens: Movement + Summary.
+//  Generic across every F&O instrument via findSymbolDef; Dhan-only OI through
+//  the existing getOiCached chain. Feature-flagged (CONFIG.oiAnalysis.enabled):
+//  when the flag is off the payload is tagged testMode:true so the UI shows a
+//  Test-Zone banner. NO order execution, NO change to any existing strategy.
+// ==========================================================================
+router.get("/oi-analysis/status", requirePermission("oiAnalysis"), (_req: Request, res: Response) => {
+  const symbols = ALL_SYMBOLS.filter((d) => d.fno === true).map((d) => ({ symbol: d.symbol, name: d.name, type: d.type }));
+  res.json({ enabled: CONFIG.oiAnalysis.enabled, testMode: !CONFIG.oiAnalysis.enabled, symbols });
+});
+
+// "What is changing right now?" — strike-wise OI/ΔOI, top activity, surges.
+router.get("/oi-analysis/movement", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  try {
+    const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
+    if (!def) return res.status(400).json({ available: false, error: "Valid F&O symbol required" });
+    if (!def.fno) return res.json({ available: false, message: `OI Analysis needs an F&O instrument (got ${def.symbol}).`, testMode: !CONFIG.oiAnalysis.enabled });
+    const windowMin = Math.max(1, Math.min(30, Number(req.query.window) || 5));
+    const oi = await getOiCached(def);
+    const view = buildOiMovement(def.symbol, oi, windowMin);
+    try {
+      logOiAnalysis({
+        timestamp: Date.now(), asOf: view.asOf, symbol: def.symbol, screen: "movement",
+        underlying: view.underlying, pcr: oi?.pcr ?? null, totalCeOi: oi?.totalCeOi ?? null, totalPeOi: oi?.totalPeOi ?? null,
+        callWall: oi?.resistance ?? null, putWall: oi?.support ?? null,
+        bias: view.aggregate?.summary || "—", confidencePct: null, samples: view.samples,
+        evidence: [], surges: view.surges.map((s) => s.message),
+      });
+    } catch { /* audit best-effort */ }
+    res.json({ ...view, enabled: CONFIG.oiAnalysis.enabled, testMode: !CONFIG.oiAnalysis.enabled });
+  } catch (e: any) {
+    res.json({ available: false, error: e?.message || "oi-analysis movement failed", testMode: !CONFIG.oiAnalysis.enabled });
+  }
+});
+
+// "What does the OI movement indicate?" — bias + confidence + evidence + walls.
+router.get("/oi-analysis/summary", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  try {
+    const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
+    if (!def) return res.status(400).json({ available: false, error: "Valid F&O symbol required" });
+    if (!def.fno) return res.json({ available: false, message: `OI Analysis needs an F&O instrument (got ${def.symbol}).`, testMode: !CONFIG.oiAnalysis.enabled });
+    const oi = await getOiCached(def);
+    const move = computeOiMovement(def.symbol);
+    const view = buildOiSummary(def.symbol, oi, move);
+    try {
+      logOiAnalysis({
+        timestamp: Date.now(), asOf: view.asOf, symbol: def.symbol, screen: "summary",
+        underlying: view.underlying, pcr: view.pcr, totalCeOi: view.totalCeOi, totalPeOi: view.totalPeOi,
+        callWall: view.callWall?.strike ?? null, putWall: view.putWall?.strike ?? null,
+        bias: view.bias, confidencePct: view.confidencePct, samples: null,
+        evidence: view.evidence, surges: [],
+      });
+    } catch { /* audit best-effort */ }
+    res.json({ ...view, enabled: CONFIG.oiAnalysis.enabled, testMode: !CONFIG.oiAnalysis.enabled });
+  } catch (e: any) {
+    res.json({ available: false, error: e?.message || "oi-analysis summary failed", testMode: !CONFIG.oiAnalysis.enabled });
+  }
+});
+
+router.get("/oi-analysis/audit", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
+  const symbol = req.query.symbol ? String(req.query.symbol) : undefined;
+  const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 50));
+  res.json({ entries: getOiAnalysisAuditLog({ symbol, limit }) });
 });
 
 // MANUAL "Run ORB" — the user presses this (e.g. in the morning). It evaluates ORB

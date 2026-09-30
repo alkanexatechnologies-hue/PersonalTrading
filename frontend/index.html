@@ -490,6 +490,7 @@
           <button class="tab tab-primary" data-tab="premarket" data-group="marketcommand">📊 Market Sentiment</button>
           <button class="tab tab-primary" data-tab="marketcommand" data-group="marketcommand">⚡ Market Command</button>
           <button class="tab tab-primary" data-tab="optionterminal" data-group="marketcommand">📈 Option Terminal</button>
+          <button class="tab tab-primary" data-tab="oianalysis" data-group="marketcommand">🔬 OI Analysis</button>
           <button class="tab tab-primary" data-tab="tradeexec" data-group="marketcommand">🧾 Trade Execution</button>
           <!-- AI Paper Desk screens (own desk; each tab is permission-gated server-side) -->
           <button class="tab tab-primary" data-tab="aipdash" data-group="aipaper">🤖 Dashboard</button>
@@ -1757,6 +1758,38 @@
         <!-- ============================ TRADE EXECUTION ============================ -->
         <!-- Trade & Levels: Daily Log + Important Market Levels + Levels chart. Uses
              the same authoritative snapshot + the new confirmation flow / cooldown. -->
+        <!-- ==================== OI ANALYSIS (additive, read-only) ==================== -->
+        <div class="tab-panel" id="panel-oianalysis">
+          <div class="oia-wrap">
+            <div class="oia-top">
+              <div class="te-brand"><span class="te-logo">🔬</span><div><div class="te-title">OI Analysis</div><div class="te-sub">Open Interest — what's changing &amp; what it indicates</div></div></div>
+              <div class="te-idx" id="oia-idx-btns">
+                <button class="te-idxbtn active" data-sym="^NSEI">NIFTY 50</button>
+                <button class="te-idxbtn" data-sym="^NSEBANK">BANKNIFTY</button>
+                <button class="te-idxbtn" data-sym="^CNXFIN">FINNIFTY</button>
+                <button class="te-idxbtn" data-sym="^NSEMDCP50">MIDCAP</button>
+                <button class="te-idxbtn" data-sym="^BSESN">SENSEX</button>
+              </div>
+              <span class="te-date" id="oia-date">—</span>
+              <span class="te-live" id="oia-live">LIVE</span>
+              <button class="te-refresh" id="oia-refresh">↻ Refresh</button>
+            </div>
+
+            <div class="oia-banner" id="oia-banner" hidden></div>
+
+            <!-- sub-screen toggle: Movement (default) | Summary -->
+            <div class="oia-subtabs" id="oia-subtabs">
+              <button class="oia-subtab active" data-oia="movement">📊 OI Movement<span class="oia-subtab-q">what is changing right now?</span></button>
+              <button class="oia-subtab" data-oia="summary">🧭 OI Summary<span class="oia-subtab-q">what does it indicate?</span></button>
+            </div>
+
+            <div class="oia-screen" id="oia-movement"><div class="oia-empty">Loading OI movement…</div></div>
+            <div class="oia-screen" id="oia-summary" hidden><div class="oia-empty">Loading OI summary…</div></div>
+
+            <div class="oia-foot">CALL = <b style="color:var(--red,#f6465d)">red</b> · PUT = <b style="color:var(--grn,#16c784)">green</b>. Read-only OI analysis from live Dhan option chain — never a trade order. Missing inputs show DATA UNAVAILABLE.</div>
+          </div>
+        </div><!-- /panel-oianalysis -->
+
         <div class="tab-panel" id="panel-tradeexec">
           <div class="te-wrap">
             <div class="te-top">

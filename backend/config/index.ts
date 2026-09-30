@@ -238,6 +238,11 @@ export const CONFIG = {
     testMode: String(process.env.ORB_TEST_MODE ?? "on").trim().toLowerCase() !== "off",
     liveExecution: String(process.env.ORB_LIVE_EXECUTION ?? "off").trim().toLowerCase() === "on",
   },
+  // OI Analysis module (additive, read-only). Disabled by default; when off the
+  // Market Command "OI Analysis" screen shows a Test-Zone banner and no live pull.
+  oiAnalysis: {
+    enabled: String(process.env.OI_ANALYSIS_ENABLED ?? "false").trim().toLowerCase() === "true",
+  },
 };
 
 /**
