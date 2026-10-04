@@ -55,6 +55,14 @@ import { analyzeVolume } from "../volume/analyze";
 import { getOiAnalysis } from "../oi/oi";
 import { dhanOiAnalysis, dhanHasOptions, dhanZeroHero, dhanRateLimitStats, DhanProvider, dhanChainForExpiry, dhanOptionCandles, dhanSpotCandles, recordDhanOk, recordDhanFail, getDhanHealth } from "../data/dhanProvider";
 import { loadDhanConfig, saveDhanConfig, dhanConfigured, disconnectDhan, testDhanConnection } from "../data/dhanConfig";
+import { withDhanPriority } from "../data/dhanClient";
+// Universal Market Indicator — Test Lab V1 (research/audit only, fully isolated).
+import { runTest as runTestLab, availableHistory as testLabAvailableHistory } from "../testlab/runner";
+import { writeReviewPackage as writeTestLabPackage } from "../testlab/exporter";
+import { defaultConfig as testLabDefaultConfig } from "../testlab/config";
+import { runHtf as runTestLabHtf } from "../testlab/htfRunner";
+import { abcComparison as htfAbc, timingDiagnostic as htfTiming, perCandleAudit as htfPerCandle } from "../testlab/htfAudit";
+import type { IndexKey as TLIndexKey, TfKey as TLTfKey, RunResult as TLRunResult, AuditRow as TLAuditRow } from "../testlab/types";
 import {
   getDhanHealth as computeDhanHealth, decodeDhanToken, setDhanConnecting, recordDhanAuthSuccess,
   noteDhanErrorCode, resetDhanHealth, classifyFreshness, dhanHealthLogRecord, DhanErrorCode, DhanHealth,
@@ -84,6 +92,8 @@ import { computeTradeMinder } from "../signals/tradeMinder";
 import { saveOiSnapshot, priorDaySnapshot, latestSnapshot } from "../oi/snapshotStore";
 import { recordOiBaseline, computeOiChange, oiBaselineStrike } from "../oi/oiChange";
 import { recordOiSample, computeOiMovement, OiMoveResult } from "../oi/oiMovement";
+import { getBaseline } from "../oi/baselineStore";
+import { buildMarketAnalysis } from "../analysis/marketAnalysis";
 // OI Analysis module (additive, read-only, feature-flagged via CONFIG.oiAnalysis)
 import { buildOiMovement } from "../oi/analysisModule/movement";
 import { buildOiSummary } from "../oi/analysisModule/summary";
@@ -215,7 +225,7 @@ import { getLiquidityStatusAuditLog } from "../liquidityStatus/auditLog";
 import { LiquidityStatusDeps } from "../liquidityStatus/types";
 import { dayHighLow } from "../indicators/dayRange";
 import { detectMarketStructure, nearestValidOB, priceRelativeToOB, OrderBlock } from "../liquidity/orderBlock";
-import { Interval, NextDayPick, Opportunity, TradeAlert, OiAnalysis } from "../types";
+import { Interval, NextDayPick, Opportunity, TradeAlert, OiAnalysis, Candle } from "../types";
 
 const router = Router();
 
@@ -227,6 +237,18 @@ if (AUDIT_ENABLED) {
     runWithAuditCtx({ screen, reqId: newReqId() }, () => next());
   });
 }
+
+// FOREGROUND PRIORITY: the live screens a trader actively watches (Option
+// Terminal + Market Command) must jump ahead of background multi-symbol scans
+// in the Dhan rate-limit queue. Running their handlers inside a HIGH priority
+// context makes the gate in dhanClient.ts dispatch their option-chain/quote/
+// candle calls before the LOW-priority scanner backlog, so the terminal stays
+// live even while scanners churn. Everything else stays LOW (the default).
+const HIGH_PRIORITY_API = /^\/(market-command|market-analysis|option-candles|option-structure)\b/;
+router.use((req: Request, _res: Response, next: NextFunction) => {
+  if (HIGH_PRIORITY_API.test(req.path)) withDhanPriority("high", async () => next());
+  else next();
+});
 
 // ---- Access gate: require a valid session on every route except the login
 // flow itself. A login UI existed on the frontend (backend/auth/session.ts)
@@ -1047,7 +1069,6 @@ function quoteLastGoodFresh(sym: string): any | null {
 router.get("/quotes", async (req: Request, res: Response) => {
   const symbols = String(req.query.symbols || "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 60);
   const quotes: Record<string, any> = {};
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const feed = syncSessionProvider();
   const marketOpen = isTradingTimeIST();
   // Attach truthful freshness metadata to each quote (§6) WITHOUT changing the
@@ -1066,28 +1087,51 @@ router.get("/quotes", async (req: Request, res: Response) => {
     }
     return res.json({ ts: Math.floor(Date.now() / 1000), marketOpen, quotes, feed: dhanHealthNow() });
   }
-  for (let i = 0; i < symbols.length; i += 5) {
-    const chunk = symbols.slice(i, i + 5);
-    await Promise.all(chunk.map(async (sym) => {
-      try {
-        const v = await cached(`liveq:${sym}`, 3000, async () => {
-          const q = await getProvider().getQuote(sym);
-          return { price: q?.price ?? null, changePercent: q?.changePercent ?? null, marketTime: q?.marketTime && q.marketTime > 0 ? q.marketTime : null };
-        });
-        if (v && v.price != null) {
+  // Serve each symbol from its 3s per-symbol cache (`liveq:<sym>`) where fresh;
+  // batch-fetch ONLY the misses in a SINGLE multi-instrument Dhan quote call. This
+  // replaces the old loop that made one /marketfeed/ohlc call PER symbol — ~20
+  // calls that could never drain under Dhan's ~1 req/sec Quote cap (DH-904).
+  const LIVEQ_TTL = 3000;
+  const misses: string[] = [];
+  for (const sym of symbols) {
+    const hit = _cache.get(`liveq:${sym}`);
+    if (hit && Date.now() - hit.ts < LIVEQ_TTL) {
+      const v = hit.v;
+      if (v && v.price != null) { lastGoodQuote[sym] = { v, ts: hit.ts }; quotes[sym] = decorate(v, Date.now(), false); }
+      else quotes[sym] = quoteLastGoodFresh(sym) ? lgMeta(sym) : (v ? decorate(v, Date.now(), false) : v);
+    } else {
+      misses.push(sym);
+    }
+  }
+  if (misses.length) {
+    const prov = getProvider();
+    try {
+      const batch: Record<string, any> = typeof prov.getQuotes === "function"
+        ? await prov.getQuotes(misses)
+        : await (async () => {
+            const o: Record<string, any> = {};
+            for (const s of misses) { try { o[s] = await prov.getQuote(s); } catch { o[s] = null; } }
+            return o;
+          })();
+      let anyOk = false;
+      for (const sym of misses) {
+        const q = batch[sym];
+        const v = { price: q?.price ?? null, changePercent: q?.changePercent ?? null, marketTime: q?.marketTime && q.marketTime > 0 ? q.marketTime : null };
+        _cache.set(`liveq:${sym}`, { ts: Date.now(), v }); // feed the 3s cache the same shape as before
+        if (v.price != null) {
           lastGoodQuote[sym] = { v, ts: Date.now() };
           quotes[sym] = decorate(v, Date.now(), false);
-          if (v.marketTime) recordGrowwOk(0);
+          if (v.marketTime) anyOk = true;
         } else {
-          quotes[sym] = quoteLastGoodFresh(sym) ? lgMeta(sym) : (v ? decorate(v, Date.now(), false) : v);
+          quotes[sym] = quoteLastGoodFresh(sym) ? lgMeta(sym) : decorate(v, Date.now(), false);
         }
-      } catch (e) {
-        recordGrowwFail();
-        disconnectDhanFeedOnAuthFailure(e);
-        quotes[sym] = quoteLastGoodFresh(sym) ? lgMeta(sym) : null;
       }
-    }));
-    if (i + 5 < symbols.length) await sleep(40);
+      if (anyOk) recordGrowwOk(0);
+    } catch (e) {
+      recordGrowwFail();
+      disconnectDhanFeedOnAuthFailure(e);
+      for (const sym of misses) quotes[sym] = quoteLastGoodFresh(sym) ? lgMeta(sym) : null;
+    }
   }
   res.json({ ts: Math.floor(Date.now() / 1000), marketOpen, quotes, feed: dhanHealthNow() });
 });
@@ -1383,7 +1427,10 @@ function deskTf(sig: any) {
 /** Right-rail NIFTY desk: 15m + 1h, immediate & major S/R, CE+PE OI buildup. Cached ~55s. */
 router.get("/index-desk", requirePermission("tradingDashboard"), async (_req: Request, res: Response) => {
   try {
-    const data = await cached("index-desk", 55_000, async () => {
+    // Jittered TTL (55–70s) so this multi-index scan doesn't expire in lockstep
+    // with the other 60s scanners (hourly-scan, early-moves) and burst their Dhan
+    // calls into the same second — the spread keeps outbound rate flatter.
+    const data = await cached("index-desk", 55_000 + Math.floor(Math.random() * 15_000), async () => {
       const today = istDateStr();
       const idxs = DEFAULT_SYMBOLS.filter((d) => d.type === "index" && d.fno);
       // Each index is independent (no shared state, no ordering dependency
@@ -4093,6 +4140,93 @@ async function extForOiPayload(payload: any): Promise<any> {
     };
   } catch { return null; }
 }
+
+// ===== MARKET ANALYSIS (composite screen) =====
+// One endpoint that assembles the whole MarketAnalysisState: all index levels,
+// VIX movement envelope, OI heatmap, CE/PE OI-based support-resistance tables,
+// model-derived Gamma-Blast / Spike Trigger / movement bands, dynamic no-trade
+// zone, PRICE-FIRST breakout/breakdown (independent of OI delay), the 9:15
+// baseline and per-feed freshness. It REUSES the exact same cached Dhan fetches
+// as /market-command (oi:<sym>, c:<sym>:<iv>, india-vix, quote:<sym>) so it adds
+// no extra option-chain load, and it runs on the HIGH-priority Dhan queue. The
+// heavy composition lives in the pure engine backend/analysis/marketAnalysis.ts.
+router.get("/market-analysis", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  const symbol = String(req.query.symbol || "^NSEI");
+  const interval = parseInterval(req.query.interval) as Interval;
+  const def = findSymbolDef(symbol);
+  if (!def || !def.fno) return res.status(400).json({ available: false, error: "Valid F&O symbol required" });
+  const strikeRange = Math.max(4, Math.min(20, Number(req.query.strikeRange) || 10));
+  const nowMs = Date.now();
+  const marketOpen = isMarketOpenIST();
+  try {
+    // HANG-PROOF data acquisition. The screen polls every ~5s and must NEVER
+    // block on a slow Dhan call: after hours the feed can be mid rate-limit
+    // storm, and the 1/sec quote endpoint in particular can queue for many
+    // seconds. So we (a) NEVER trigger a live quote here (peek the cache only),
+    // and (b) race every cached fetch against a short deadline, falling back to
+    // the most recent cached value. Worst case the endpoint still returns in
+    // ~MA_FAST_MS with last-good data instead of timing out the browser.
+    const MA_FAST_MS = 8000;
+    const fast = <T>(p: Promise<T>, fb: T): Promise<T> =>
+      Promise.race([p.catch(() => fb), new Promise<T>((r) => setTimeout(() => r(fb), MA_FAST_MS))]);
+    const [oi, c5, c15, daily, vix] = await Promise.all([
+      fast<OiAnalysis | null>(getOiCached(def), (peekFresh<OiAnalysis>(`oi:${symbol}`, 180_000) as OiAnalysis) ?? null),
+      fast<Candle[]>(getCandlesCached(symbol, "5m"), peekFresh<Candle[]>(`c:${symbol}:5m`, 300_000) || []),
+      fast<Candle[]>(getCandlesCached(symbol, "15m"), peekFresh<Candle[]>(`c:${symbol}:15m`, 300_000) || []),
+      fast<Candle[]>(getDailyCached(symbol, 40), peekFresh<Candle[]>(`d:${symbol}:40`, 86_400_000) || []),
+      fast<any>(cached(`india-vix`, 15_000, () => getIndiaVix()), peekFresh<any>(`india-vix`, 180_000)),
+    ]);
+    // Quote is best-effort metadata (open/high/low/prevClose/change). Use ONLY a
+    // fresh cached quote (market-command populates it) — never a live call from
+    // here. Spot itself comes from the chain/candles below, so this never blocks.
+    const quote = peekFresh<any>(`quote:${symbol}`, 20_000);
+
+    const lastClose = c5.length ? c5[c5.length - 1].close : (c15.length ? c15[c15.length - 1].close : null);
+    const spot = (oi?.underlying && oi.underlying > 0 ? oi.underlying : null) ?? quote?.price ?? lastClose ?? null;
+
+    // Feed the OI-movement/shock engine (deduped by asOf; safe every request).
+    let oiMovement: OiMoveResult | null = null;
+    if (oi && oi.available && oi.topStrikes?.length && spot != null) {
+      const sorted = oi.topStrikes.filter((s) => s.strike > 0).sort((a, b) => a.strike - b.strike);
+      let atmIdx = -1, bestD = Infinity;
+      sorted.forEach((s, i) => { const d = Math.abs(s.strike - spot); if (d < bestD) { bestD = d; atmIdx = i; } });
+      const w = atmIdx < 0 ? [] : sorted.slice(Math.max(0, atmIdx - 5), atmIdx + 6);
+      const ceSum = w.reduce((s, x) => s + (x.ceOi || 0), 0);
+      const peSum = w.reduce((s, x) => s + (x.peOi || 0), 0);
+      try { recordOiSample(symbol, { asOf: oi.asOf || Math.floor(nowMs / 1000), ceOi: ceSum, peOi: peSum, pcr: oi.pcr || 0, spot }); } catch { /* best-effort */ }
+      oiMovement = computeOiMovement(symbol);
+    }
+
+    const health = dhanHealthNow();
+    const dhanLive = !!health && (health as any).feedStatus === "LIVE";
+    const baseline = getBaseline(symbol);
+    const oiAgeMs = cacheAgeMs(`oi:${symbol}`);
+    const vixAgeMs = cacheAgeMs(`india-vix`);
+
+    const state = buildMarketAnalysis({
+      def, interval, nowMs, marketOpen, dhanLive,
+      spot,
+      quote: quote ? { price: quote.price ?? null, change: quote.change ?? null, changePercent: quote.changePercent ?? null, high: quote.dayHigh ?? null, low: quote.dayLow ?? null, previousClose: quote.previousClose ?? null } : null,
+      oi,
+      oiAgeSec: oiAgeMs != null ? Math.round(oiAgeMs / 1000) : null,
+      vix: vix ? { available: !!vix.available, value: vix.value ?? null, prevClose: vix.prevClose ?? null, change: vix.change ?? null, changePct: vix.changePct ?? null, dayHigh: vix.dayHigh ?? null, dayLow: vix.dayLow ?? null, ts: vix.ts ?? null } : null,
+      vixAgeSec: vixAgeMs != null ? Math.round(vixAgeMs / 1000) : null,
+      candles5m: c5, candles15m: c15, daily, baseline,
+      oiMovement: oiMovement
+        ? {
+            trade: oiMovement.trade ? { signal: oiMovement.trade.signal, strength: oiMovement.trade.strength, confirmed: oiMovement.trade.confirmed } : null,
+            direction: oiMovement.direction ? { signal: oiMovement.direction.signal, strength: oiMovement.direction.strength, confirmed: oiMovement.direction.confirmed } : null,
+          }
+        : null,
+      strikeRange,
+    });
+
+    res.json({ ...state, feed: health });
+  } catch (e: any) {
+    let feed: any = null; try { feed = dhanHealthNow(); } catch { /* ignore */ }
+    res.json({ available: false, error: e?.message || "market-analysis failed", feed });
+  }
+});
 
 // OI Command route (cached 15s). The same builder feeds the 15-min signal logger.
 router.get("/oi-command", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
@@ -8791,10 +8925,12 @@ router.get("/scalp/:symbol", async (req: Request, res: Response) => {
 // EARLY-MOVE alert: indices + F&O stocks whose move is in its INITIAL stage
 // (fresh momentum + volume, not yet extended, potential still to run). Cached 45s.
 router.get("/early-moves", async (_req: Request, res: Response) => {
-  // 5s cache: the heavy Groww fetches are gated by the independent 30s candle
-  // cache (getCandlesCached/getDailyCached), so a 5s recompute just re-reads cached
-  // candles + re-runs the detector — fresh UX without extra API load / 429 risk.
-  const data = await cached("early-moves", 5_000, async () => {
+  // Cache ~20s (+jitter): recomputing the ENTIRE F&O universe every 5s was the
+  // source of the recurring "early-moves timed out (18s)" rejections whenever the
+  // underlying candle caches were cold — it fanned a universe-wide Dhan fetch 12×
+  // a minute. An early-move detector is fine refreshing ~3×/min, and the jitter
+  // keeps it off the other scanners' 60s expiry boundary.
+  const data = await cached("early-moves", 20_000 + Math.floor(Math.random() * 8_000), async () => {
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     const universe = DEFAULT_SYMBOLS.filter((d) => d.fno);
     const out: any[] = [];
@@ -9452,6 +9588,269 @@ router.get("/analyst/direction-changes", requirePermission("oiAnalysis"), (req: 
     const symbol = req.query.symbol ? String(req.query.symbol) : undefined;
     res.json({ changes: readDirectionChanges(symbol, 50) });
   } catch (e: any) { res.status(500).json({ error: e?.message || "direction-changes failed" }); }
+});
+
+// ======================= Universal Market Indicator — Test Lab V1 =======================
+// RESEARCH / AUDIT ONLY. This subsystem never touches the live trading engine,
+// never places or simulates an order into any live path, never optimizes
+// parameters, and never fabricates data. It only READS Dhan historical candles
+// (reusing the existing dhanClient/token — the token is never printed or
+// returned) and writes a review package under data/test-zone/. Gated on the
+// "backtesting" permission (admin passes implicitly). Runs execute as a
+// background job so long "full history" fetches don't time out the browser.
+
+const TL_INDEXES = new Set(["NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX"]);
+const TL_TFS = new Set(["1m", "3m", "5m", "15m", "25m", "60m"]);
+
+interface TLJob {
+  runId: string;
+  status: "running" | "done" | "error";
+  startedAt: number;
+  finishedAt: number | null;
+  config: any;
+  error: string | null;
+  result: TLRunResult | null;
+  exportDir: string | null;
+}
+const _tlJobs = new Map<string, TLJob>();
+// Keep the memory bounded — only the most recent runs are retained in-process
+// (the full artifacts always live on disk in the export package).
+function _tlEvict() {
+  if (_tlJobs.size <= 12) return;
+  const old = [..._tlJobs.values()].sort((a, b) => a.startedAt - b.startedAt);
+  for (const j of old.slice(0, _tlJobs.size - 12)) _tlJobs.delete(j.runId);
+}
+
+// Shape a RunResult into a compact, UI-friendly payload for the 9-tab screen.
+// Signals/trades are capped so a multi-month run stays responsive; the full,
+// uncapped artifacts are always available in the export package on disk.
+function tlShape(j: TLJob) {
+  const base = {
+    runId: j.runId, status: j.status, startedAt: j.startedAt, finishedAt: j.finishedAt,
+    error: j.error, config: j.config, exportDir: j.exportDir,
+    elapsedMs: j.finishedAt ? j.finishedAt - j.startedAt : Date.now() - j.startedAt,
+  };
+  const r = j.result;
+  if (!r) return base;
+
+  const SIG_CAP = 3000;
+  const compactRow = (x: TLAuditRow) => ({
+    iso: x.iso, spotPrice: x.spotPrice, signal: x.signal,
+    buyScore: x.buyScore, sellScore: x.sellScore,
+    entry: x.entry, stopLoss: x.stopLoss, target1: x.target1, target2: x.target2, rr: x.rr,
+    internalState: x.internalState, regime: x.regime,
+    volumeState: x.volumeState, oiStatus: x.oiStatus, futuresOI: x.futuresOI,
+    expiryRisk: x.expiryRisk, isExpiryDay: x.isExpiryDay,
+    primaryReason: x.primaryReason, hardGateReason: x.hardGateReason,
+    outcome: x.outcome, rMultiple: x.rMultiple, mfe: x.mfe, mae: x.mae,
+    holdBars: x.holdBars, timingClassification: x.timingClassification, fillAmbiguity: x.fillAmbiguity,
+  });
+  const signals = r.rows.filter((x) => x.signal !== "WAIT");
+  const avgComponents = (() => {
+    const keys = ["trend", "structure", "participation", "momentum", "volatility"] as const;
+    const out: Record<string, number> = {};
+    keys.forEach((k) => { out[k] = +(r.rows.reduce((a, x) => a + ((x.components as any)[k] || 0), 0) / Math.max(1, r.rows.length)).toFixed(1); });
+    return out;
+  })();
+  const regimes: Record<string, number> = {};
+  r.rows.forEach((x) => { regimes[x.regime] = (regimes[x.regime] || 0) + 1; });
+
+  // Chart series (cap to the most recent CHART_CAP candles so a long run stays
+  // responsive in the browser; the export package keeps the full series).
+  const CHART_CAP = 2500;
+  const chart = r.chart.length > CHART_CAP ? r.chart.slice(r.chart.length - CHART_CAP) : r.chart;
+
+  // The final evaluated candle drives the right-rail "Final Signal", the
+  // "Indicator Status" strip and the "Current Candle" panel.
+  const lr = r.rows.length ? r.rows[r.rows.length - 1] : null;
+  const lastRow = lr ? {
+    iso: lr.iso, timestamp: lr.timestamp, spotPrice: lr.spotPrice,
+    signal: lr.signal, buyScore: lr.buyScore, sellScore: lr.sellScore,
+    entry: lr.entry, stopLoss: lr.stopLoss, target1: lr.target1, target2: lr.target2, rr: lr.rr,
+    primaryReason: lr.primaryReason, hardGate: lr.hardGate, hardGateReason: lr.hardGateReason,
+    internalState: lr.internalState, regime: lr.regime,
+    utState: lr.utState, emaDirection: lr.emaDirection, ema9: lr.ema9, ema21: lr.ema21,
+    priceVsEMA: lr.priceVsEMA, vwap: lr.vwap, vwapSource: lr.vwapSource,
+    structureState: lr.structureState, bos: lr.bos, volumeState: lr.volumeState,
+    atr: lr.atr, atrPercent: lr.atrPercent,
+    regressionDirection: lr.regressionDirection, regressionR2: lr.regressionR2,
+    support: lr.support, resistance: lr.resistance,
+    distanceToSupportATR: lr.distanceToSupportATR, distanceToResistanceATR: lr.distanceToResistanceATR,
+    fakeMove: lr.fakeMove, extendedMove: lr.extendedMove,
+    expiryRisk: lr.expiryRisk, isExpiryDay: lr.isExpiryDay, expiryDate: lr.expiryDate, daysToExpiry: lr.daysToExpiry,
+    dataQuality: lr.dataQuality, dataQualityReasons: lr.dataQualityReasons,
+    futuresOI: lr.futuresOI, oiStatus: lr.oiStatus,
+  } : null;
+  const currentCandle = chart.length ? chart[chart.length - 1] : null;
+
+  return {
+    ...base,
+    binding: r.binding,
+    dataMode: r.dataMode,
+    perDateBinding: r.perDateBinding,
+    contractChanges: r.contractChanges,
+    unavailableDateCount: r.unavailableDateCount,
+    researchBlockedSignals: r.researchBlockedSignals,
+    dataRange: r.dataRange,
+    oiStatus: r.oiStatus,
+    dataQuality: r.dataQuality,
+    metrics: r.metrics,
+    daily: r.daily,
+    gateBlocks: r.gateBlocks,
+    vwapSource: r.rows[0]?.vwapSource ?? null,
+    chart,
+    chartTruncated: r.chart.length > CHART_CAP,
+    totalCandles: r.chart.length,
+    lastRow,
+    currentCandle,
+    signals: signals.slice(0, SIG_CAP).map(compactRow),
+    signalsTruncated: signals.length > SIG_CAP,
+    signalCount: signals.length,
+    trades: r.trades.map(compactRow),
+    indicators: { avgComponents, regimes },
+    deviations: [
+      { requirement: "1m & 3m timeframes", status: "PARTIAL", note: "Dhan native minutes are 1,5,15,25,60; 3m is resampled from 1m (standard OHLC aggregation)." },
+      { requirement: "Historical per-candle OI (§5)", status: r.oiStatus === "AVAILABLE" ? "AVAILABLE" : "UNAVAILABLE (this run)", note: "Probed Dhan derivative /charts/intraday with oi:true. Live option-chain OI is NEVER substituted for historical OI." },
+      { requirement: "Expired-contract futures binding (§6)", status: r.binding.status === "RESOLVED" ? "RESOLVED (this run)" : "PARTIAL", note: "Scrip master lists only currently-tradeable contracts; binding resolves at the window-end date. strict => WAIT on invalid binding, spot-fallback => index SPOT series. Reported, not faked." },
+      { requirement: "Multi-expiry stitching", status: "NOT IMPLEMENTED (V1)", note: "One contiguous futures series per run; no cross-expiry continuous contract." },
+      { requirement: "Candle chart + replay UI (§38,42)", status: "PARTIAL", note: "Interactive candlestick chart with EMA9/EMA21/VWAP overlays and BUY/SELL markers is shipped; step-through Candle Replay is a lightweight scrubber over the same causal series. The engine itself is replay-exact (candle-by-candle, no lookahead)." },
+      { requirement: "MISSED-signal tally (§timing)", status: "HEURISTIC", note: "Timing uses EARLY/TIMELY/LATE/FALSE from realized outcomes; over-strict filtering is audited via gate-block counts rather than a MISSED count." },
+    ],
+  };
+}
+
+// Full available Dhan history for the index/timeframe (spot probe, ~2y back).
+router.get("/testlab/available-history", requirePermission("backtesting"), async (req: Request, res: Response) => {
+  const index = String(req.query.index || "NIFTY").toUpperCase();
+  const timeframe = String(req.query.timeframe || "5m");
+  if (!TL_INDEXES.has(index)) return res.status(400).json({ error: "index must be NIFTY|BANKNIFTY|FINNIFTY|SENSEX" });
+  if (!TL_TFS.has(timeframe)) return res.status(400).json({ error: "timeframe must be 1m|3m|5m|15m|25m|60m" });
+  try {
+    const r = await testLabAvailableHistory({ index: index as TLIndexKey, timeframe: timeframe as TLTfKey });
+    res.json({ index, timeframe, ...r });
+  } catch (e: any) {
+    res.status(502).json({ error: e?.message || "available-history failed" });
+  }
+});
+
+// Start a Test Lab run (background job). Body:
+//   { index, timeframe, scope:{mode:'custom'|'full', fromDate?, toDate?},
+//     futuresBinding?:'strict'|'spot-fallback', overrides?:{ rrMin?, buyThreshold?, ... } }
+router.post("/testlab/run", requirePermission("backtesting"), (req: Request, res: Response) => {
+  const b = req.body || {};
+  const index = String(b.index || "NIFTY").toUpperCase();
+  const timeframe = String(b.timeframe || "5m");
+  if (!TL_INDEXES.has(index)) return res.status(400).json({ error: "index must be NIFTY|BANKNIFTY|FINNIFTY|SENSEX" });
+  if (!TL_TFS.has(timeframe)) return res.status(400).json({ error: "timeframe must be 1m|3m|5m|15m|25m|60m" });
+
+  const cfg = testLabDefaultConfig(index as TLIndexKey, timeframe as TLTfKey);
+  const scope = b.scope || {};
+  if (scope.mode === "full") {
+    cfg.scope = { mode: "full" };
+  } else {
+    const fromDate = String(scope.fromDate || "");
+    const toDate = String(scope.toDate || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate) || !/^\d{4}-\d{2}-\d{2}$/.test(toDate)) {
+      return res.status(400).json({ error: "custom scope needs fromDate & toDate as YYYY-MM-DD" });
+    }
+    if (Date.parse(fromDate) > Date.parse(toDate)) return res.status(400).json({ error: "fromDate must be <= toDate" });
+    cfg.scope = { mode: "custom", fromDate, toDate };
+  }
+  if (b.futuresBinding === "strict" || b.futuresBinding === "spot-fallback") cfg.futuresBinding = b.futuresBinding;
+  if (b.dataMode === "FUTURES_INTERNAL" || b.dataMode === "SPOT_DIRECTION") cfg.dataMode = b.dataMode;
+  if (b.rrGateMode === "ON" || b.rrGateMode === "OFF") cfg.rrGateMode = b.rrGateMode;
+  // Config-driven overrides are allowed (research), but changing a V1 baseline is
+  // a FINDING, not an optimization. We only accept a small, safe numeric set.
+  const ov = b.overrides || {};
+  const NUM = ["rrMin", "buyThreshold", "sellThreshold", "minHistory", "cooldownCandles", "timeExitBars", "lateCutoffMinIST", "extendedAtrMult", "volExpansionMult", "volWeakMult"] as const;
+  for (const k of NUM) { if (typeof ov[k] === "number" && isFinite(ov[k])) (cfg as any)[k] = ov[k]; }
+  if (Array.isArray(ov.ablationDisable)) cfg.ablationDisable = ov.ablationDisable.filter((s: any) => typeof s === "string").slice(0, 10);
+
+  const runId = `tl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const job: TLJob = { runId, status: "running", startedAt: Date.now(), finishedAt: null, config: cfg, error: null, result: null, exportDir: null };
+  _tlJobs.set(runId, job);
+  _tlEvict();
+
+  // Fire-and-forget. Dhan fetches are async I/O (event loop stays free); the
+  // engine compute is causal and bounded. Errors are captured on the job.
+  (async () => {
+    try {
+      const result = await runTestLab(cfg);
+      let dir: string | null = null;
+      try { dir = writeTestLabPackage(result); } catch (e: any) { /* export best-effort */ }
+      job.result = result; job.exportDir = dir; job.status = "done"; job.finishedAt = Date.now();
+    } catch (e: any) {
+      job.error = e?.message || "run failed"; job.status = "error"; job.finishedAt = Date.now();
+    }
+  })();
+
+  res.json({ runId, status: job.status });
+});
+
+// Poll a run (shaped payload for the 9-tab UI).
+router.get("/testlab/run/:runId", requirePermission("backtesting"), (req: Request, res: Response) => {
+  const job = _tlJobs.get(req.params.runId);
+  if (!job) return res.status(404).json({ error: "run not found (it may have been evicted — artifacts are on disk)" });
+  res.json(tlShape(job));
+});
+
+// ---- V1.2 HTF (15M direction -> 5M timing -> risk) run job ----
+interface HtfJob { runId: string; status: "running" | "done" | "error"; startedAt: number; finishedAt: number | null; error: string | null; payload: any | null; }
+const _htfJobs = new Map<string, HtfJob>();
+function _htfEvict() { if (_htfJobs.size <= 8) return; const old = [..._htfJobs.values()].sort((a, b) => a.startedAt - b.startedAt); for (const j of old.slice(0, _htfJobs.size - 8)) _htfJobs.delete(j.runId); }
+
+// Start a 15M->5M HTF run (background). Body: { index, scope:{fromDate,toDate}, dataMode? }
+router.post("/testlab/htf-run", requirePermission("backtesting"), (req: Request, res: Response) => {
+  const b = req.body || {};
+  const index = String(b.index || "NIFTY").toUpperCase();
+  if (!TL_INDEXES.has(index)) return res.status(400).json({ error: "index must be NIFTY|BANKNIFTY|FINNIFTY|SENSEX" });
+  const from = String((b.scope && b.scope.fromDate) || ""), to = String((b.scope && b.scope.toDate) || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return res.status(400).json({ error: "scope needs fromDate & toDate (YYYY-MM-DD)" });
+  const dataMode = (b.dataMode === "SPOT_DIRECTION" ? "SPOT_DIRECTION" : "FUTURES_INTERNAL");
+  const cfg = testLabDefaultConfig(index as TLIndexKey, "5m");
+  cfg.scope = { mode: "custom", fromDate: from, toDate: to };
+  cfg.dataMode = dataMode as any;
+  cfg.futuresBinding = dataMode === "FUTURES_INTERNAL" ? "strict" : "spot-fallback";
+
+  const runId = `htf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const job: HtfJob = { runId, status: "running", startedAt: Date.now(), finishedAt: null, error: null, payload: null };
+  _htfJobs.set(runId, job); _htfEvict();
+  (async () => {
+    try {
+      const bundle = await runTestLabHtf(cfg);
+      // Latest actionable 5M candle for the Market Signal card (last row with a
+      // directional master, else the final row).
+      const rowsC = bundle.testC.rows;
+      const latest = [...rowsC].reverse().find((r) => r.masterDirection && r.masterDirection !== "NEUTRAL" && r.masterDirection !== "CONFLICT") || rowsC[rowsC.length - 1] || null;
+      job.payload = {
+        config: bundle.config, dataMode: bundle.dataMode, binding: bundle.binding, dataRange: bundle.dataRange,
+        oiStatus: bundle.oiStatus, unavailableDateCount: bundle.unavailableDateCount,
+        comparison: htfAbc(bundle), timing: htfTiming(bundle),
+        latest: latest ? htfPerCandle(latest) : null,
+        steps: rowsC.map(htfPerCandle),           // full per-5M-candle step-by-step
+        signals: bundle.testC.rows.filter((r) => r.signal !== "WAIT").map(htfPerCandle),
+      };
+      job.status = "done"; job.finishedAt = Date.now();
+    } catch (e: any) { job.error = e?.message || "htf run failed"; job.status = "error"; job.finishedAt = Date.now(); }
+  })();
+  res.json({ runId, status: job.status });
+});
+
+router.get("/testlab/htf-run/:runId", requirePermission("backtesting"), (req: Request, res: Response) => {
+  const job = _htfJobs.get(req.params.runId);
+  if (!job) return res.status(404).json({ error: "htf run not found" });
+  res.json({ runId: job.runId, status: job.status, error: job.error, elapsedMs: (job.finishedAt || Date.now()) - job.startedAt, ...(job.payload || {}) });
+});
+
+// Recent in-process runs (compact list for the UI history).
+router.get("/testlab/runs", requirePermission("backtesting"), (_req: Request, res: Response) => {
+  const runs = [..._tlJobs.values()].sort((a, b) => b.startedAt - a.startedAt).map((j) => ({
+    runId: j.runId, status: j.status, startedAt: j.startedAt, finishedAt: j.finishedAt,
+    index: j.config?.index, timeframe: j.config?.timeframe, scope: j.config?.scope,
+    exportDir: j.exportDir,
+    win: j.result?.metrics?.winRate ?? null, trades: j.result?.metrics?.totalTrades ?? null,
+  }));
+  res.json({ runs });
 });
 
 export default router;

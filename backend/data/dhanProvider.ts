@@ -130,39 +130,88 @@ export class DhanProvider implements MarketDataProvider {
     const body: Record<string, unknown> = { [segKey]: [Number(sec.securityId)] };
 
     const json = await dhanJson("/marketfeed/ohlc", body);
-    const data = json?.data?.[segKey]?.[sec.securityId];
+    const data = json?.data?.[segKey]?.[sec.securityId] ?? json?.data?.[segKey]?.[String(sec.securityId)];
     if (!data) throw new Error(`No Dhan quote data for ${nse}`);
 
-    const ohlc = data.ohlc || {};
-    const price = round2(num(data.last_price ?? data.LTP ?? data.ltp));
-    const open = num(ohlc.open ?? data.open ?? 0);
-    const high = num(ohlc.high ?? data.high ?? price);
-    const low = num(ohlc.low ?? data.low ?? price);
-    const close = num(ohlc.close ?? data.close ?? data.prev_close ?? 0);
-    const volume = num(data.volume ?? data.Volume ?? 0);
-    const change = round2(price - close);
-    const changePct = close > 0 ? round2((change / close) * 100) : 0;
-
-    // Dhan market feed may include last_traded_time as epoch
-    let marketTime = 0;
-    const t = Number(data.last_traded_time ?? data.exchange_time ?? 0);
-    if (Number.isFinite(t) && t > 0) marketTime = t > 1e12 ? Math.floor(t / 1000) : Math.floor(t);
-
     recordDhanOk("quote");
-    return {
-      symbol,
-      name: def.name,
-      currency: "INR",
-      price,
-      previousClose: round2(close),
-      change,
-      changePercent: changePct,
-      dayHigh: round2(high || price),
-      dayLow: round2(low || price),
-      volume,
-      marketTime,
-    };
+    return buildQuoteFromOhlc(symbol, def, data);
   }
+
+  // Batched quotes: ONE multi-instrument /marketfeed/ohlc call for many symbols,
+  // instead of one HTTP call per symbol. Dhan's Quote APIs are capped at ~1 req/sec,
+  // so fetching ~20 dashboard symbols individually can never drain under the limit
+  // and triggers DH-904. Grouping all securityIds by exchange segment into a single
+  // request keeps the whole batch to ONE quote call. Instrument lookups are locally
+  // cached (no Dhan HTTP), so resolving them in parallel is cheap.
+  async getQuotes(symbols: string[]): Promise<Record<string, Quote | null>> {
+    const out: Record<string, Quote | null> = {};
+    const uniq = Array.from(new Set(symbols.filter(Boolean)));
+    if (!uniq.length) return out;
+
+    const resolved = await Promise.all(uniq.map(async (symbol) => {
+      try {
+        const def = this.def(symbol);
+        const sec = await lookupDhanSecurity(def.nseSymbol!);
+        return sec ? { symbol, def, sec } : null;
+      } catch { return null; }
+    }));
+
+    // Group unique securityIds per exchange segment → one request body.
+    const bySeg: Record<string, Set<number>> = {};
+    for (const r of resolved) {
+      if (!r) continue;
+      (bySeg[r.sec.exchangeSegment] ||= new Set<number>()).add(Number(r.sec.securityId));
+    }
+    const body: Record<string, number[]> = {};
+    for (const [seg, ids] of Object.entries(bySeg)) body[seg] = Array.from(ids);
+    if (!Object.keys(body).length) { for (const s of uniq) out[s] = null; return out; }
+
+    const json = await dhanJson("/marketfeed/ohlc", body);
+    let anyOk = false;
+    for (const r of resolved) {
+      if (!r) continue;
+      const seg = r.sec.exchangeSegment;
+      const sid = r.sec.securityId;
+      const data = json?.data?.[seg]?.[sid] ?? json?.data?.[seg]?.[String(sid)] ?? json?.data?.[seg]?.[Number(sid)];
+      if (!data) { out[r.symbol] = null; continue; }
+      out[r.symbol] = buildQuoteFromOhlc(r.symbol, r.def, data);
+      anyOk = true;
+    }
+    for (const s of uniq) if (!(s in out)) out[s] = null; // unresolved symbols
+    if (anyOk) recordDhanOk("quote");
+    return out;
+  }
+}
+
+// Shared parser: turn one Dhan /marketfeed/ohlc instrument record into a Quote.
+// Used by both the single getQuote and the batched getQuotes so their output is
+// byte-for-byte identical regardless of how many instruments were requested.
+function buildQuoteFromOhlc(symbol: string, def: SymbolDef, data: any): Quote {
+  const ohlc = data.ohlc || {};
+  const price = round2(num(data.last_price ?? data.LTP ?? data.ltp));
+  const high = num(ohlc.high ?? data.high ?? price);
+  const low = num(ohlc.low ?? data.low ?? price);
+  const close = num(ohlc.close ?? data.close ?? data.prev_close ?? 0);
+  const volume = num(data.volume ?? data.Volume ?? 0);
+  const change = round2(price - close);
+  const changePct = close > 0 ? round2((change / close) * 100) : 0;
+  // Dhan market feed may include last_traded_time as epoch (sec or ms).
+  let marketTime = 0;
+  const t = Number(data.last_traded_time ?? data.exchange_time ?? 0);
+  if (Number.isFinite(t) && t > 0) marketTime = t > 1e12 ? Math.floor(t / 1000) : Math.floor(t);
+  return {
+    symbol,
+    name: def.name,
+    currency: "INR",
+    price,
+    previousClose: round2(close),
+    change,
+    changePercent: changePct,
+    dayHigh: round2(high || price),
+    dayLow: round2(low || price),
+    volume,
+    marketTime,
+  };
 }
 
 // ---- India VIX (live) ----

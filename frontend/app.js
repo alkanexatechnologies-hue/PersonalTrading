@@ -1927,6 +1927,11 @@ function switchTab(name) {
   // OI Analysis — read-only OI desk (full-width), follows Market Command's index.
   document.body.classList.toggle("oia-fullwidth", name === "oianalysis");
   if (name === "oianalysis") { initOiAnalysis(); syncOIAFromMC(); startOiAnalysisLive(); }
+  // Market Analysis — composite read-only analysis desk (full-width).
+  document.body.classList.toggle("ma-fullwidth", name === "marketanalysis");
+  if (name === "marketanalysis") { initMarketAnalysis(); startMarketAnalysisLive(); }
+  // Keep a shareable URL for the Market Analysis deep link (/market-analysis).
+  try { const _p = name === "marketanalysis" ? "/market-analysis" : "/"; if (location.pathname !== _p) history.replaceState(null, "", _p); } catch (_) {}
   // 09:10 Market & Global Sentiment — read-only intelligence desk (full-width).
   document.body.classList.toggle("pm-fullwidth", name === "premarket");
   if (name === "premarket") { if (typeof initPremarket === "function") initPremarket(); if (typeof startPremarketLive === "function") startPremarketLive(); }
@@ -1941,6 +1946,10 @@ function switchTab(name) {
   if (name === "earlymoves") { loadEarlyMoves(); startEarlyMovesTab(); }
   if (name === "tradermind") { initTraderMindTab(); startTraderMindLive(); }
   if (name === "strategylab") initStrategyLab();
+  document.body.classList.toggle("uil-fullwidth", name === "testlab");
+  if (name === "testlab") initTestLab();
+  // Keep a shareable URL for the Test Lab deep link (/test/universal-indicator).
+  try { if (name === "testlab" && location.pathname !== "/test/universal-indicator") history.replaceState(null, "", "/test/universal-indicator"); } catch (_) {}
   if (name === "stratreplay") initStrategyReplay();
 
   if (name === "paper") { loadPaper(); startPaperLive(); }
@@ -2045,8 +2054,8 @@ const MODE_FIRST = { premarket: "premarket", marketcommand: "marketcommand", opt
 const MODE_TABS = {
   // Market Sentiment desk: opens on the read-only sentiment screen, with the
   // Market Command / Option Terminal / Trade Execution siblings reachable from it.
-  premarket: ["premarket", "marketcommand", "optionterminal", "oianalysis", "tradeexec"],
-  marketcommand: ["marketcommand", "oianalysis"],
+  premarket: ["premarket", "marketcommand", "marketanalysis", "optionterminal", "oianalysis", "tradeexec"],
+  marketcommand: ["marketcommand", "marketanalysis", "oianalysis"],
   // Index Option Trading: Option Top Pick + Early Moves now live on the Stock
   // Option desk, and AI Paper Trading moved to its own AI Paper Desk, so all
   // three are dropped here.
@@ -2054,7 +2063,7 @@ const MODE_TABS = {
   // Stock Option Trading sequence: Option Top Pick -> Early Moves -> Stock Options.
   stockOption: ["toppicks", "earlymoves", "stockoptions"],
   swing: ["news", "bullrank", "todaymovers", "stock", "bigmove", "movetiming"],
-  dhanbacktest: ["dhanbacktest"],
+  dhanbacktest: ["dhanbacktest", "testlab"],
   // AI Paper Desk: its own top-level desk. "paper" is the AI Paper Trading
   // screen (reuses #panel-paper). Each tab is additionally permission-gated per
   // screen via SCREEN_PERMISSION_MAP + applyMode (server-enforced too).
@@ -2153,8 +2162,49 @@ function applyMode(mode) {
 // landing screen every time; picking a card (chooseMode()) still remembers
 // the choice for the "switch desk" convenience elsewhere in the app.
 function enterApp() {
+  if (applyMarketAnalysisDeepLink()) return;
   showModeGate(false);
 }
+
+// Deep link: /market-analysis (or #market-analysis) opens the Market Analysis
+// screen directly, bypassing the desk-chooser, once the user is authenticated.
+function marketAnalysisRouteRequested() {
+  const path = (location.pathname || "").replace(/\/+$/, "");
+  const hash = (location.hash || "").replace(/^#/, "");
+  return /(^|\/)market-analysis$/i.test(path) || /^market-analysis$/i.test(hash);
+}
+function applyMarketAnalysisDeepLink() {
+  try {
+    if (!marketAnalysisRouteRequested()) return false;
+    if (!localStorage.getItem(LG_TOKEN_KEY)) return false; // wait until logged in
+    if (!document.getElementById("panel-marketanalysis")) return false;
+    showModeGate(false);
+    chooseMode("marketcommand");
+    switchTab("marketanalysis");
+    return true;
+  } catch (_) { return false; }
+}
+try { window.addEventListener("load", () => setTimeout(applyMarketAnalysisDeepLink, 400)); } catch (_) {}
+
+// Deep link: /test/universal-indicator (or #test/universal-indicator) opens the
+// Universal Indicator Test Lab directly, once the user is authenticated.
+function testLabRouteRequested() {
+  const path = (location.pathname || "").replace(/\/+$/, "");
+  const hash = (location.hash || "").replace(/^#/, "");
+  return /(^|\/)test\/universal-indicator$/i.test(path) || /^test\/universal-indicator$/i.test(hash);
+}
+function applyTestLabDeepLink() {
+  try {
+    if (!testLabRouteRequested()) return false;
+    if (!localStorage.getItem(LG_TOKEN_KEY)) return false; // wait until logged in
+    if (!document.getElementById("panel-testlab")) return false;
+    showModeGate(false);
+    chooseMode("dhanbacktest");
+    switchTab("testlab");
+    return true;
+  } catch (_) { return false; }
+}
+try { window.addEventListener("load", () => setTimeout(applyTestLabDeepLink, 450)); } catch (_) {}
 
 // Highlight the bottom-nav item matching the active tab; fall back to "More".
 function syncMobileNav(tab) {
@@ -5669,6 +5719,7 @@ function initMarketCommand() {
 
   // Jump to the Option Terminal (CE/PE) for the same index — Market Command runs
   // full-screen with its tab bar hidden, so this button is the way across.
+  el("mc-open-marketanalysis")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("marketanalysis"); });
   el("mc-open-optionterminal")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("optionterminal"); });
   el("mc-open-oianalysis")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("oianalysis"); });
   el("mc-open-tradeexec")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("tradeexec"); });
@@ -6184,6 +6235,7 @@ function initTradeExec() {
     finally { if (btn) btn.disabled = false; }
   });
   teEl("te-open-command")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("marketcommand"); });
+  teEl("te-open-marketanalysis")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("marketanalysis"); });
   teEl("te-open-optionterminal")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("optionterminal"); });
   teEl("te-orb-activate")?.addEventListener("click", teRunOrb);
   teEl("te-ve-run")?.addEventListener("click", teRunVwapEma);
@@ -6228,6 +6280,7 @@ function initOiAnalysis() {
   });
   oiaEl("oia-refresh")?.addEventListener("click", () => loadOiAnalysis());
   oiaEl("oia-open-command")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("marketcommand"); });
+  oiaEl("oia-open-marketanalysis")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("marketanalysis"); });
   oiaEl("oia-open-tradeexec")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("tradeexec"); });
   oiaEl("oia-strike-sel")?.addEventListener("change", (e) => { OIA.selStrike = Number(e.target.value); if (OIA.lastMv) renderOiamSelStats(OIA.lastMv); loadOiaStrikeHistory(); });
   oiaEl("oia-strike-side")?.addEventListener("change", (e) => { OIA.selSide = e.target.value; if (OIA.lastMv) renderOiamSelStats(OIA.lastMv); loadOiaStrikeHistory(); });
@@ -11800,6 +11853,1001 @@ function fmtOptIST(t, withDate) {
 }
 // Fetch JSON with a hard timeout so a slow/queued Dhan call (market hours) never
 // freezes the UI — it aborts and surfaces a message instead of hanging forever.
+// ============================================================================
+// UNIVERSAL MARKET INDICATOR — TEST LAB V1  (research/audit UI, read-only)
+// Backend: /api/testlab/* runs the isolated no-lookahead engine over Dhan
+// historical data. This screen only configures a run, polls it, and renders a
+// 9-tab review. It never touches the live engine and never places/simulates an
+// order. The Dhan token is never requested or displayed here.
+// ============================================================================
+// NOTE: superseded by the uil2 dashboard module below (initTestLab is redefined
+// there). This earlier draft is kept inert — nothing calls initTestLab_v1.
+const UIL = { data: null, runId: null, pollTimer: null, tab: "setup", _init: false, _busy: false };
+
+function uilNum(v, d = 2) { return (v == null || !isFinite(Number(v))) ? "—" : Number(v).toFixed(d); }
+function uilInt(v) { return (v == null || v === "") ? "—" : String(v); }
+function uilEsc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function uilIST(sec) { try { return new Date(Number(sec) * 1000).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); } catch (_) { return "—"; } }
+
+function initTestLab_v1() {
+  if (UIL._init) { uilApplyScope(); return; }
+  UIL._init = true;
+  const wire = (id, ev, fn) => { const b = el(id); if (b && !b.dataset.wired) { b.dataset.wired = "1"; b.addEventListener(ev, fn); } };
+  wire("uil-scope", "change", uilApplyScope);
+  wire("uil-run", "click", uilRun);
+  wire("uil-history-probe", "click", uilProbeHistory);
+  // 9-tab strip
+  document.querySelectorAll("#uil-tabs .uil-tab").forEach((b) => {
+    if (b.dataset.wired) return; b.dataset.wired = "1";
+    b.addEventListener("click", () => uilSwitch(b.getAttribute("data-uil")));
+  });
+  uilApplyScope();
+}
+
+function uilApplyScope() {
+  const full = el("uil-scope") && el("uil-scope").value === "full";
+  document.querySelectorAll("#panel-testlab .uil-when").forEach((n) => n.classList.toggle("hidden", !!full));
+}
+
+function uilSwitch(tab) {
+  UIL.tab = tab;
+  document.querySelectorAll("#uil-tabs .uil-tab").forEach((b) => b.classList.toggle("active", b.getAttribute("data-uil") === tab));
+  document.querySelectorAll("#panel-testlab .uil-pane").forEach((p) => p.classList.toggle("active", p.id === "uil-pane-" + tab));
+}
+
+function uilLog(msg, kind) {
+  const box = el("uil-runlog"); if (!box) return;
+  box.classList.remove("hidden");
+  const cls = kind === "error" ? "blocked" : kind === "ok" ? "ok" : "wl-sub";
+  box.innerHTML = `<div class="${cls}">${uilEsc(msg)}</div>`;
+}
+
+async function uilProbeHistory() {
+  const index = el("uil-index").value, tf = el("uil-tf").value;
+  const avail = el("uil-avail");
+  if (avail) avail.textContent = `Probing Dhan availability for ${index} ${tf}…`;
+  try {
+    const d = await fetchJSON(`/api/testlab/available-history?index=${encodeURIComponent(index)}&timeframe=${encodeURIComponent(tf)}`, 30000);
+    if (d.error) { if (avail) avail.textContent = `Availability: ${d.error}`; return; }
+    if (avail) avail.textContent = `Dhan historical availability (${index} ${tf}): ${d.from} → ${d.to} · ${d.totalCandles} candles (spot probe, ~2y back).`;
+  } catch (e) { if (avail) avail.textContent = `Availability probe failed: ${e.message}`; }
+}
+
+async function uilRun() {
+  if (UIL._busy) return;
+  const scope = el("uil-scope").value;
+  const body = {
+    index: el("uil-index").value,
+    timeframe: el("uil-tf").value,
+    futuresBinding: el("uil-binding").value,
+    overrides: {},
+  };
+  const rr = Number(el("uil-rr").value); if (isFinite(rr) && rr >= 1) body.overrides.rrMin = rr;
+  if (scope === "full") body.scope = { mode: "full" };
+  else {
+    const from = el("uil-from").value, to = el("uil-to").value;
+    if (!from || !to) { uilLog("Pick a From and To date (or choose Full available history).", "error"); return; }
+    body.scope = { mode: "custom", fromDate: from, toDate: to };
+  }
+
+  UIL._busy = true;
+  const btn = el("uil-run"); if (btn) btn.disabled = true;
+  if (UIL.pollTimer) { clearInterval(UIL.pollTimer); UIL.pollTimer = null; }
+  uilLog(`Starting ${body.index} ${body.timeframe} (${scope === "full" ? "full history" : body.scope.fromDate + " → " + body.scope.toDate})… reusing the live Dhan historical feed.`);
+  try {
+    const start = await fetch("/api/testlab/run", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).then((r) => r.json());
+    if (start.error || !start.runId) { uilLog(`Run failed: ${start.error || "no runId"}`, "error"); uilDone(); return; }
+    UIL.runId = start.runId;
+    uilLog(`Run ${start.runId} is executing on the server (no-lookahead replay)… polling for results.`);
+    UIL.pollTimer = setInterval(uilPoll, 1300);
+    uilPoll();
+  } catch (e) { uilLog(`Run failed: ${e.message}`, "error"); uilDone(); }
+}
+
+function uilDone() { UIL._busy = false; const b = el("uil-run"); if (b) b.disabled = false; if (UIL.pollTimer) { clearInterval(UIL.pollTimer); UIL.pollTimer = null; } }
+
+async function uilPoll() {
+  if (!UIL.runId) return;
+  try {
+    const d = await fetchJSON(`/api/testlab/run/${encodeURIComponent(UIL.runId)}`, 30000);
+    if (d.error && !d.status) { uilLog(`Poll error: ${d.error}`, "error"); uilDone(); return; }
+    if (d.status === "running") { uilLog(`Running… ${((d.elapsedMs || 0) / 1000).toFixed(0)}s elapsed.`); return; }
+    if (d.status === "error") { uilLog(`Run failed: ${d.error || "unknown error"}`, "error"); uilDone(); return; }
+    // done
+    UIL.data = d;
+    uilDone();
+    uilLog(`Completed in ${((d.elapsedMs || 0) / 1000).toFixed(1)}s · ${d.signalCount} signals · ${d.metrics ? d.metrics.totalTrades : 0} trades. Export package written on the server.`, "ok");
+    uilRenderAll(d);
+  } catch (e) { uilLog(`Poll error: ${e.message}`, "error"); }
+}
+
+function uilRenderAll(d) {
+  uilRenderHeader(d);
+  uilRenderSetup(d);
+  uilRenderValidation(d);
+  uilRenderSummary(d);
+  uilRenderSignals(d);
+  uilRenderTrades(d);
+  uilRenderDaily(d);
+  uilRenderGates(d);
+  uilRenderIndicators(d);
+  uilRenderDeviations(d);
+}
+
+function uilDot(status) {
+  const s = String(status || "").toUpperCase();
+  if (s === "PASS" || s === "RESOLVED" || s === "AVAILABLE") return "🟢";
+  if (s === "WARNING" || s === "SPOT" || s === "PARTIAL") return "🟡";
+  if (s === "BLOCKED" || s === "INVALID" || s === "UNAVAILABLE" || s === "UNAVAILABLE_HISTORICAL") return "🔴";
+  return "⚪";
+}
+
+function uilRenderHeader(d) {
+  const b = d.binding || {};
+  el("uil-st-binding").innerHTML = `${uilDot(b.status)} ${uilEsc(b.status || "—")}`;
+  el("uil-st-vwap").textContent = d.vwapSource || "—";
+  el("uil-st-oi").innerHTML = `${uilDot(d.oiStatus)} ${uilEsc(d.oiStatus || "—")}`;
+  el("uil-st-dq").innerHTML = `${uilDot(d.dataQuality)} ${uilEsc(d.dataQuality || "—")}`;
+  const dr = d.dataRange || {};
+  el("uil-st-candles").textContent = dr.totalCandles != null ? `${dr.totalCandles} (${dr.rejected || 0} rej)` : "—";
+  el("uil-st-range").textContent = dr.from ? `${dr.from} → ${dr.to}` : "—";
+  el("uil-st-run").textContent = `${d.config ? d.config.index + " " + d.config.timeframe : "—"}`;
+}
+
+function uilKV(pairs) {
+  return `<div class="uil-kv">${pairs.map(([k, v]) => `<div class="uil-kv-row"><span>${uilEsc(k)}</span><b>${v}</b></div>`).join("")}</div>`;
+}
+
+function uilRenderSetup(d) {
+  const c = d.config || {};
+  const scope = c.scope || {};
+  const pane = el("uil-pane-setup");
+  pane.innerHTML = `
+    <h5>Run configuration (V1 baseline — fixed; any change is a FINDING)</h5>
+    ${uilKV([
+      ["Index", uilEsc(c.index)],
+      ["Timeframe", uilEsc(c.timeframe) + (c.timeframe === "3m" ? " (resampled from 1m)" : " (Dhan native)")],
+      ["Scope", scope.mode === "full" ? "Full available history" : `${uilEsc(scope.fromDate)} → ${uilEsc(scope.toDate)}`],
+      ["Futures binding", uilEsc(c.futuresBinding)],
+      ["EMA fast / slow", `${c.emaFast} / ${c.emaSlow}`],
+      ["ATR period", uilInt(c.atrPeriod)],
+      ["UT Bot (key / ATR)", `${c.utKeyValue} / ${c.utAtrPeriod}`],
+      ["Regression / S-R / Vol lookback", `${c.regLookback} / ${c.srLookback} / ${c.volLookback}`],
+      ["Vol expansion / weak mult", `${c.volExpansionMult} / ${c.volWeakMult}`],
+      ["Extended ATR mult", uilInt(c.extendedAtrMult)],
+      ["R:R min", uilNum(c.rrMin, 1)],
+      ["SL ATR buffer / Target ATR mult", `${c.slAtrBuffer} / ${c.targetAtrMult}`],
+      ["Min history / Cooldown / Time-exit bars", `${c.minHistory} / ${c.cooldownCandles} / ${c.timeExitBars}`],
+      ["Late entry cutoff (IST min)", `${Math.floor((c.lateCutoffMinIST || 0) / 60)}:${String((c.lateCutoffMinIST || 0) % 60).padStart(2, "0")}`],
+      ["Buy / Sell threshold", `${c.buyThreshold} / ${c.sellThreshold}`],
+      ["One open trade", c.oneOpenTrade ? "yes" : "no"],
+      ["Ablation disabled", (c.ablationDisable && c.ablationDisable.length) ? uilEsc(c.ablationDisable.join(", ")) : "none"],
+    ])}
+    <div class="wl-sub msl-note">Strict no-lookahead: each signal is evaluated on its own closed candle only; entry is the next candle's open; outcomes are a forward walk and are never fed back into the signal.</div>`;
+}
+
+function uilRenderValidation(d) {
+  const b = d.binding || {}, dr = d.dataRange || {};
+  const pane = el("uil-pane-validation");
+  pane.innerHTML = `
+    <h5>Data validation</h5>
+    ${uilKV([
+      ["Futures binding status", `${uilDot(b.status)} ${uilEsc(b.status)}`],
+      ["Futures symbol", uilEsc(b.futuresSymbol) || "—"],
+      ["Security ID", uilEsc(b.securityId) || "—"],
+      ["Expiry", uilEsc(b.expiry) || "—"],
+      ["Exchange segment", uilEsc(b.exchangeSegment) || "—"],
+      ["Lot size", uilInt(b.lotSize)],
+      ["Binding reason", uilEsc(b.bindingReason)],
+      ["VWAP source", `${uilDot(d.vwapSource)} ${uilEsc(d.vwapSource)}`],
+      ["OI status", `${uilDot(d.oiStatus)} ${uilEsc(d.oiStatus)}`],
+      ["Data quality", `${uilDot(d.dataQuality)} ${uilEsc(d.dataQuality)}`],
+      ["Data range", `${uilEsc(dr.from)} → ${uilEsc(dr.to)}`],
+      ["Candles / rejected", `${uilInt(dr.totalCandles)} / ${uilInt(dr.rejected)}`],
+    ])}
+    <div class="wl-sub msl-note">OI is tested empirically against the Dhan derivative feed (never assumed absent, never substituted with live option-chain OI). An unresolved/expired futures contract is reported — never faked onto a different month.</div>`;
+}
+
+function uilRenderSummary(d) {
+  const m = d.metrics; const pane = el("uil-pane-summary");
+  if (!m) { pane.innerHTML = `<div class="wl-sub">No metrics.</div>`; return; }
+  const stat = (label, val, cls) => `<div class="ac-stat"><span>${label}</span><b class="${cls || ""}">${val}</b></div>`;
+  const wrCls = m.winRate >= 50 ? "ok" : "";
+  const pfCls = m.profitFactor >= 1 ? "ok" : "blocked";
+  const erCls = m.expectancy >= 0 ? "ok" : "blocked";
+  const t = m.timing || {};
+  pane.innerHTML = `
+    <h5>Performance summary</h5>
+    <div class="msl-counts uil-counts">
+      ${stat("BUY", uilInt(m.buy))}
+      ${stat("SELL", uilInt(m.sell))}
+      ${stat("WAIT", uilInt(m.wait))}
+      ${stat("TRADES", uilInt(m.totalTrades))}
+      ${stat("WINS", uilInt(m.wins), "ok")}
+      ${stat("LOSSES", uilInt(m.losses), "blocked")}
+      ${stat("BREAKEVEN", uilInt(m.breakeven))}
+      ${stat("WIN %", uilNum(m.winRate, 1), wrCls)}
+      ${stat("AVG R", uilNum(m.avgR, 3), m.avgR >= 0 ? "ok" : "blocked")}
+      ${stat("MEDIAN R", uilNum(m.medianR, 3))}
+      ${stat("EXPECTANCY", uilNum(m.expectancy, 3), erCls)}
+      ${stat("PROFIT FACTOR", uilNum(m.profitFactor, 2), pfCls)}
+      ${stat("MAX DD (R)", uilNum(m.maxDrawdownR, 2), "blocked")}
+      ${stat("AVG MFE (R)", uilNum(m.avgMFE, 2))}
+      ${stat("AVG MAE (R)", uilNum(m.avgMAE, 2))}
+      ${stat("AVG HOLD (bars)", uilNum(m.avgHoldBars, 1))}
+      ${stat("NORMAL DAYS", uilInt(m.normalDays))}
+      ${stat("EXPIRY DAYS", uilInt(m.expiryDays))}
+    </div>
+    <div class="uil-split">
+      <div><h5>Signal timing</h5>${uilKV([
+        ["EARLY", uilInt(t.EARLY)], ["TIMELY", uilInt(t.TIMELY)], ["LATE", uilInt(t.LATE)],
+        ["FALSE", uilInt(t.FALSE)], ["MISSED", uilInt(t.MISSED)], ["NA", uilInt(t.NA)],
+      ])}</div>
+      <div><h5>Outcomes</h5>${uilKV(Object.entries(m.outcomes || {}).map(([k, v]) => [k, uilInt(v)]))}</div>
+    </div>
+    <div class="wl-sub msl-note">Win rate alone is not a verdict — read it with expectancy, average R, profit factor, drawdown, MFE/MAE and signal timing together.</div>`;
+}
+
+function uilTable(cols, rows, rowFn, note) {
+  return `<div class="ac-table-wrap"><table class="ac-table uil-table"><thead><tr>${cols.map((c) => `<th>${uilEsc(c)}</th>`).join("")}</tr></thead>` +
+    `<tbody>${rows.length ? rows.map(rowFn).join("") : `<tr><td colspan="${cols.length}" class="wl-sub">none</td></tr>`}</tbody></table></div>` +
+    (note ? `<div class="wl-sub msl-note">${note}</div>` : "");
+}
+
+function uilSigClass(sig) { return sig === "BUY" ? "ok" : sig === "SELL" ? "blocked" : ""; }
+function uilOutClass(o) { return (o === "T1" || o === "T2") ? "ok" : o === "SL" ? "blocked" : ""; }
+
+function uilRenderSignals(d) {
+  const pane = el("uil-pane-signals");
+  const rows = d.signals || [];
+  const cols = ["Time (IST)", "Sig", "Spot", "Buy", "Sell", "Entry", "SL", "T1", "T2", "R:R", "State", "Regime", "Vol", "OI", "Outcome", "R", "Timing", "Primary reason"];
+  const body = uilTable(cols, rows, (r) => `<tr>
+    <td>${uilEsc(uilIST(r.iso && typeof r.iso === "string" ? Date.parse(r.iso) / 1000 : r.iso))}</td>
+    <td class="${uilSigClass(r.signal)}">${uilEsc(r.signal)}</td>
+    <td>${uilNum(r.spotPrice)}</td><td>${uilInt(r.buyScore)}</td><td>${uilInt(r.sellScore)}</td>
+    <td>${uilNum(r.entry)}</td><td>${uilNum(r.stopLoss)}</td><td>${uilNum(r.target1)}</td><td>${uilNum(r.target2)}</td>
+    <td>${uilNum(r.rr, 2)}</td><td>${uilEsc(r.internalState)}</td><td>${uilEsc(r.regime)}</td>
+    <td>${uilEsc(r.volumeState)}</td><td>${uilEsc(r.oiStatus)}</td>
+    <td class="${uilOutClass(r.outcome)}">${uilEsc(r.outcome)}</td><td>${uilNum(r.rMultiple, 2)}</td><td>${uilEsc(r.timingClassification)}</td>
+    <td class="uil-reason">${uilEsc(r.primaryReason)}</td></tr>`,
+    `${d.signalCount || rows.length} BUY/SELL signals${d.signalsTruncated ? ` (showing first ${rows.length})` : ""}. Full uncapped rows are in the export package (signals.csv / audit.jsonl).`);
+  pane.innerHTML = `<h5>Signals (non-WAIT)</h5>${body}`;
+}
+
+function uilRenderTrades(d) {
+  const pane = el("uil-pane-trades");
+  const rows = d.trades || [];
+  const cols = ["Time (IST)", "Sig", "Entry", "SL", "T1", "T2", "R:R", "Outcome", "R", "MFE", "MAE", "Hold", "Timing", "Fill?"];
+  const body = uilTable(cols, rows, (r) => `<tr>
+    <td>${uilEsc(uilIST(r.iso && typeof r.iso === "string" ? Date.parse(r.iso) / 1000 : r.iso))}</td>
+    <td class="${uilSigClass(r.signal)}">${uilEsc(r.signal)}</td>
+    <td>${uilNum(r.entry)}</td><td>${uilNum(r.stopLoss)}</td><td>${uilNum(r.target1)}</td><td>${uilNum(r.target2)}</td>
+    <td>${uilNum(r.rr, 2)}</td><td class="${uilOutClass(r.outcome)}">${uilEsc(r.outcome)}</td>
+    <td>${uilNum(r.rMultiple, 2)}</td><td>${uilNum(r.mfe, 2)}</td><td>${uilNum(r.mae, 2)}</td>
+    <td>${uilInt(r.holdBars)}</td><td>${uilEsc(r.timingClassification)}</td><td>${r.fillAmbiguity ? "⚠" : "—"}</td></tr>`,
+    `Each trade enters at the next candle open after the signal and exits by SL / target / time-exit on a forward walk. Fill? ⚠ flags a candle where SL and target were both touchable (ambiguous intrabar order).`);
+  pane.innerHTML = `<h5>Trades (forward-walked outcomes)</h5>${body}`;
+}
+
+function uilRenderDaily(d) {
+  const pane = el("uil-pane-daily");
+  const rows = d.daily || [];
+  const cols = ["Date", "Regime", "Buy", "Sell", "Wait", "Trades", "W", "L", "Avg R", "Daily R", "Max DD R", "Early", "Timely", "Late", "False", "Expiry", "DQ"];
+  const body = uilTable(cols, rows, (r) => `<tr>
+    <td>${uilEsc(r.date)}</td><td>${uilEsc(r.regime)}</td>
+    <td>${uilInt(r.buy)}</td><td>${uilInt(r.sell)}</td><td>${uilInt(r.wait)}</td>
+    <td>${uilInt(r.trades)}</td><td class="ok">${uilInt(r.wins)}</td><td class="blocked">${uilInt(r.losses)}</td>
+    <td>${uilNum(r.avgR, 2)}</td><td class="${r.dailyR >= 0 ? "ok" : "blocked"}">${uilNum(r.dailyR, 2)}</td><td>${uilNum(r.maxIntradayDDR, 2)}</td>
+    <td>${uilInt(r.timing && r.timing.EARLY)}</td><td>${uilInt(r.timing && r.timing.TIMELY)}</td><td>${uilInt(r.timing && r.timing.LATE)}</td><td>${uilInt(r.timing && r.timing.FALSE)}</td>
+    <td>${r.expiryDay ? "✓" : ""}</td><td>${uilInt(r.dataQualityIssues)}</td></tr>`);
+  pane.innerHTML = `<h5>Daily results</h5>${body}`;
+}
+
+function uilRenderGates(d) {
+  const pane = el("uil-pane-gates");
+  const entries = Object.entries(d.gateBlocks || {}).sort((a, b) => b[1] - a[1]);
+  const max = entries.length ? entries[0][1] : 0;
+  const body = entries.length ? entries.map(([k, v]) => `
+    <div class="uil-gate-row"><span class="uil-gate-name">${uilEsc(k)}</span>
+      <span class="uil-gate-bar"><span style="width:${max ? Math.round((v / max) * 100) : 0}%"></span></span>
+      <b>${uilInt(v)}</b></div>`).join("") : `<div class="wl-sub">No gate blocks recorded.</div>`;
+  pane.innerHTML = `<h5>Hard-gate block analysis</h5>
+    <div class="wl-sub msl-note">Why candidate signals were rejected (WAIT total: ${uilInt(d.metrics && d.metrics.wait)}). Over-strict filtering is auditable here rather than hidden as a MISSED tally.</div>
+    <div class="uil-gates">${body}</div>`;
+}
+
+function uilRenderIndicators(d) {
+  const pane = el("uil-pane-indicators");
+  const ind = d.indicators || {};
+  const comp = ind.avgComponents || {};
+  const reg = ind.regimes || {};
+  pane.innerHTML = `
+    <h5>Indicator / component analysis</h5>
+    <div class="uil-split">
+      <div><h5>Average component scores</h5>${uilKV([
+        ["Trend", uilNum(comp.trend, 1)], ["Structure", uilNum(comp.structure, 1)],
+        ["Participation", uilNum(comp.participation, 1)], ["Momentum", uilNum(comp.momentum, 1)],
+        ["Volatility", uilNum(comp.volatility, 1)],
+      ])}</div>
+      <div><h5>Regime distribution (candles)</h5>${uilKV(Object.entries(reg).sort((a, b) => b[1] - a[1]).map(([k, v]) => [k, uilInt(v)]))}</div>
+    </div>
+    <div class="wl-sub msl-note">Component scores are the five universal evidence pillars (trend, structure, participation/volume+OI, momentum, volatility) combined into the directional BUY/SELL score. Values are averaged across all evaluated candles.</div>`;
+}
+
+function uilRenderDeviations(d) {
+  const pane = el("uil-pane-deviations");
+  const devs = d.deviations || [];
+  const list = devs.map((x) => `<div class="uil-dev">
+    <div class="uil-dev-head">${uilDot(x.status)} <b>${uilEsc(x.requirement)}</b> <span class="uil-dev-status">${uilEsc(x.status)}</span></div>
+    <div class="wl-sub">${uilEsc(x.note)}</div></div>`).join("");
+  pane.innerHTML = `
+    <h5>Implementation deviations &amp; export package</h5>
+    ${uilKV([["Export package (server path)", `<code>${uilEsc(d.exportDir || "—")}</code>`]])}
+    <div class="wl-sub msl-note">The export package contains the full, uncapped artifacts: test-config.json, data-validation.json, summary.json, indicator-analysis.json, gate-analysis.json, daily-results.csv, signals.csv/jsonl, trades.csv, audit.jsonl, implementation-diff.md and README.md.</div>
+    <h5 style="margin-top:12px">Deviations (nothing silently replaced)</h5>
+    <div class="uil-devs">${list || '<div class="wl-sub">none</div>'}</div>`;
+}
+
+// ============================================================================
+// UNIVERSAL INDICATOR TEST LAB — DASHBOARD (v2)  (research/audit UI, read-only)
+// 3-column dashboard matching the approved design: config rail, candlestick
+// chart + indicator-status strip + signal tables + summary, current-candle /
+// final-signal panel, and export bar. Backend: /api/testlab/*. Never touches the
+// live engine, never places or simulates an order; the Dhan token is never shown.
+// ============================================================================
+const UIL2 = {
+  data: null, runId: null, pollTimer: null, tab: "config", sub: "timeline",
+  index: "NIFTY", tf: "5m", scope: "custom", _init: false, _busy: false,
+  chart: null, series: {}, ablation: {}, replay: false, _ro: null,
+};
+
+const t2el = (id) => document.getElementById(id);
+const t2num = (v, d = 2) => (v == null || !isFinite(Number(v))) ? "—" : Number(v).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d });
+const t2int = (v) => (v == null || v === "") ? "—" : Number(v).toLocaleString("en-IN");
+const t2esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const t2time = (iso) => String(iso || "").replace(/ IST$/, "").replace(/:\d\d$/, "");
+
+function initTestLab() {
+  // (Re)size the chart whenever we land on the tab; wire controls once.
+  if (UIL2._init) { setTimeout(uil2ResizeChart, 60); setTimeout(uil2ResizeChart, 300); return; }
+  UIL2._init = true;
+  const wire = (id, ev, fn) => { const b = t2el(id); if (b && !b.dataset.w) { b.dataset.w = "1"; b.addEventListener(ev, fn); } };
+
+  // index: select + chips stay in sync
+  wire("uil2-index", "change", () => uil2SetIndex(t2el("uil2-index").value));
+  document.querySelectorAll("#uil2-index-chips .uil2-chip").forEach((b) => { if (!b.dataset.w) { b.dataset.w = "1"; b.addEventListener("click", () => uil2SetIndex(b.getAttribute("data-idx"))); } });
+  document.querySelectorAll("#uil2-tf-chips .uil2-chip").forEach((b) => { if (!b.dataset.w) { b.dataset.w = "1"; b.addEventListener("click", () => uil2SetTf(b.getAttribute("data-tf"))); } });
+  document.querySelectorAll('input[name="uil2-scope"]').forEach((r) => { if (!r.dataset.w) { r.dataset.w = "1"; r.addEventListener("change", () => uil2SetScope(r.value)); } });
+  document.querySelectorAll("#uil2-ranges .uil2-chip").forEach((b) => { if (!b.dataset.w) { b.dataset.w = "1"; b.addEventListener("click", () => uil2QuickRange(b.getAttribute("data-range"))); } });
+  document.querySelectorAll("#uil2-tabs .uil2-tab").forEach((b) => { if (!b.dataset.w) { b.dataset.w = "1"; b.addEventListener("click", () => uil2SetTab(b.getAttribute("data-uil"))); } });
+
+  wire("uil2-fetch", "click", uil2FetchData);
+  wire("uil2-run", "click", uil2Run);
+  wire("uil2-reset", "click", uil2Reset);
+  wire("uil2-replay-start", "click", () => uil2SetTab("replay"));
+  wire("uil2-replay-range", "input", (e) => uil2ReplayTo(Number(e.target.value)));
+  wire("uil2-replay-step", "click", () => { const r = t2el("uil2-replay-range"); if (r) { r.value = String(Math.min(Number(r.max), Number(r.value) + 1)); uil2ReplayTo(Number(r.value)); } });
+  wire("uil2-exp-json", "click", uil2ExportJson);
+  wire("uil2-exp-csv", "click", uil2ExportCsv);
+  wire("uil2-exp-pkg", "click", uil2ExportPackage);
+  wire("uil2-view-logs", "click", () => uil2SetTab("export"));
+
+  if (!UIL2._ro && window.ResizeObserver) { try { UIL2._ro = new ResizeObserver(() => uil2ResizeChart()); const c = t2el("uil2-chart"); if (c) UIL2._ro.observe(c); } catch (_) {} }
+  uil2SetScope("custom");
+  uil2RenderView();
+}
+
+function uil2SetIndex(idx) {
+  UIL2.index = idx;
+  if (t2el("uil2-index")) t2el("uil2-index").value = idx;
+  document.querySelectorAll("#uil2-index-chips .uil2-chip").forEach((b) => b.classList.toggle("active", b.getAttribute("data-idx") === idx));
+  if (t2el("uil2-chart-sym")) t2el("uil2-chart-sym").textContent = idx;
+}
+function uil2SetTf(tf) {
+  UIL2.tf = tf;
+  document.querySelectorAll("#uil2-tf-chips .uil2-chip").forEach((b) => b.classList.toggle("active", b.getAttribute("data-tf") === tf));
+  if (t2el("uil2-chart-tf")) t2el("uil2-chart-tf").textContent = tf;
+}
+function uil2SetScope(mode) {
+  UIL2.scope = mode;
+  const r = document.querySelector(`input[name="uil2-scope"][value="${mode}"]`); if (r) r.checked = true;
+  const row = t2el("uil2-daterow"), ranges = t2el("uil2-ranges");
+  if (row) row.style.opacity = mode === "full" ? ".4" : "1";
+  if (ranges) ranges.style.opacity = mode === "full" ? ".4" : "1";
+}
+function uil2QuickRange(code) {
+  uil2SetScope("custom");
+  const to = t2el("uil2-to").value ? new Date(t2el("uil2-to").value) : new Date();
+  const from = new Date(to);
+  const map = { "1M": () => from.setMonth(from.getMonth() - 1), "3M": () => from.setMonth(from.getMonth() - 3), "6M": () => from.setMonth(from.getMonth() - 6), "1Y": () => from.setFullYear(from.getFullYear() - 1), "2Y": () => from.setFullYear(from.getFullYear() - 2), "3Y": () => from.setFullYear(from.getFullYear() - 3), "5Y": () => from.setFullYear(from.getFullYear() - 5) };
+  (map[code] || map["1M"])();
+  const iso = (d) => d.toISOString().slice(0, 10);
+  if (t2el("uil2-from")) t2el("uil2-from").value = iso(from);
+  if (t2el("uil2-to")) t2el("uil2-to").value = iso(to);
+  document.querySelectorAll("#uil2-ranges .uil2-chip").forEach((b) => b.classList.toggle("active", b.getAttribute("data-range") === code));
+}
+function uil2SetTab(tab) {
+  UIL2.tab = tab;
+  document.querySelectorAll("#uil2-tabs .uil2-tab").forEach((b) => b.classList.toggle("active", b.getAttribute("data-uil") === tab));
+  const rb = t2el("uil2-replaybar"); if (rb) rb.classList.toggle("on", tab === "replay");
+  uil2RenderView();
+  setTimeout(uil2ResizeChart, 50);
+}
+
+function uil2Log(msg, kind) {
+  const box = t2el("uil2-runlog"); if (!box) return;
+  box.innerHTML = `<span class="${kind === "error" ? "bad" : kind === "ok" ? "ok" : ""}">${t2esc(msg)}</span>`;
+}
+
+async function uil2FetchData() {
+  uil2Log(`Probing Dhan availability for ${UIL2.index} ${UIL2.tf}…`);
+  try {
+    const d = await fetchJSON(`/api/testlab/available-history?index=${encodeURIComponent(UIL2.index)}&timeframe=${encodeURIComponent(UIL2.tf)}`, 60000);
+    if (d.error) { uil2Log(`Availability: ${d.error}`, "error"); return; }
+    if (t2el("uil2-avail-sym")) t2el("uil2-avail-sym").textContent = `${UIL2.index} ${UIL2.tf}`;
+    if (t2el("uil2-avail-from")) t2el("uil2-avail-from").textContent = d.from;
+    if (t2el("uil2-avail-to")) t2el("uil2-avail-to").textContent = d.to;
+    if (t2el("uil2-avail-total")) t2el("uil2-avail-total").textContent = t2int(d.totalCandles);
+    uil2Log(`Dhan data available: ${d.from} → ${d.to} (${t2int(d.totalCandles)} candles).`, "ok");
+  } catch (e) { uil2Log(`Availability probe failed: ${e.message}`, "error"); }
+}
+
+function uil2Config() {
+  // "Use Futures VWAP" ON => FUTURES_INTERNAL (date-correct futures, strict binding);
+  // OFF => SPOT_DIRECTION (price-only research on index spot).
+  const useFut = t2el("uil2-opt-fvwap") ? t2el("uil2-opt-fvwap").checked : true;
+  const body = { index: UIL2.index, timeframe: UIL2.tf, dataMode: useFut ? "FUTURES_INTERNAL" : "SPOT_DIRECTION", futuresBinding: useFut ? "strict" : "spot-fallback", overrides: {} };
+  if (UIL2.scope === "full") body.scope = { mode: "full" };
+  else body.scope = { mode: "custom", fromDate: t2el("uil2-from").value, toDate: t2el("uil2-to").value };
+  const ab = [];
+  if (t2el("uil2-opt-vol") && !t2el("uil2-opt-vol").checked) ab.push("VOLUME");
+  Object.keys(UIL2.ablation).forEach((k) => { if (UIL2.ablation[k]) ab.push(k); });
+  if (ab.length) body.overrides.ablationDisable = ab;
+  return body;
+}
+
+async function uil2Run() {
+  if (UIL2._busy) return;
+  const body = uil2Config();
+  if (body.scope.mode === "custom" && (!body.scope.fromDate || !body.scope.toDate)) { uil2Log("Pick a From and To date (or choose Full Available History).", "error"); return; }
+  UIL2._busy = true;
+  const btn = t2el("uil2-run"); if (btn) { btn.disabled = true; btn.textContent = "⏳ Running…"; }
+  if (UIL2.pollTimer) { clearInterval(UIL2.pollTimer); UIL2.pollTimer = null; }
+  uil2Log(`Running ${body.index} ${body.timeframe} on the Dhan historical feed…`);
+  try {
+    const start = await fetch("/api/testlab/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
+    if (start.error || !start.runId) { uil2Log(`Run failed: ${start.error || "no runId"}`, "error"); uil2RunDone(); return; }
+    UIL2.runId = start.runId;
+    UIL2.pollTimer = setInterval(uil2Poll, 1300); uil2Poll();
+  } catch (e) { uil2Log(`Run failed: ${e.message}`, "error"); uil2RunDone(); }
+}
+function uil2RunDone() { UIL2._busy = false; const b = t2el("uil2-run"); if (b) { b.disabled = false; b.textContent = "▶ Run Indicator Test"; } if (UIL2.pollTimer) { clearInterval(UIL2.pollTimer); UIL2.pollTimer = null; } }
+
+async function uil2Poll() {
+  if (!UIL2.runId) return;
+  try {
+    const d = await fetchJSON(`/api/testlab/run/${encodeURIComponent(UIL2.runId)}`, 30000);
+    if (d.error && !d.status) { uil2Log(`Poll error: ${d.error}`, "error"); uil2RunDone(); return; }
+    if (d.status === "running") { uil2Log(`Running… ${((d.elapsedMs || 0) / 1000).toFixed(0)}s`); return; }
+    if (d.status === "error") { uil2Log(`Run failed: ${d.error || "unknown"}`, "error"); uil2RunDone(); return; }
+    UIL2.data = d; uil2RunDone();
+    uil2Log(`Done in ${((d.elapsedMs || 0) / 1000).toFixed(1)}s · ${d.signalCount} signals · ${d.metrics ? d.metrics.totalTrades : 0} trades.`, "ok");
+    uil2RenderAll(d);
+  } catch (e) { uil2Log(`Poll error: ${e.message}`, "error"); }
+}
+
+function uil2Reset() {
+  UIL2.data = null; UIL2.runId = null;
+  if (UIL2.chart) { try { UIL2.chart.remove(); } catch (_) {} UIL2.chart = null; UIL2.series = {}; }
+  ["uil2-indstrip", "uil2-cc", "uil2-final-levels"].forEach((id) => { if (t2el(id)) t2el(id).innerHTML = ""; });
+  ["uil2-avail-sym", "uil2-avail-from", "uil2-avail-to", "uil2-avail-total", "uil2-bind-under", "uil2-bind-exp", "uil2-bind-sec", "uil2-bind-instr", "uil2-bind-exch", "uil2-cc-time"].forEach((id) => { if (t2el(id)) t2el(id).textContent = "—"; });
+  if (t2el("uil2-final-badge")) { t2el("uil2-final-badge").textContent = "—"; t2el("uil2-final-badge").className = "uil2-finalbig"; }
+  if (t2el("uil2-final-buy")) t2el("uil2-final-buy").textContent = "—";
+  if (t2el("uil2-final-sell")) t2el("uil2-final-sell").textContent = "—";
+  if (t2el("uil2-final-reason")) t2el("uil2-final-reason").textContent = "—";
+  if (t2el("uil2-final-blockers")) t2el("uil2-final-blockers").textContent = "—";
+  if (t2el("uil2-view")) t2el("uil2-view").innerHTML = '<div class="uil2-empty">Configure a test on the left and press <b>Run Indicator Test</b>.</div>';
+  if (t2el("uil2-datastatus")) t2el("uil2-datastatus").innerHTML = "Data Status: <b>—</b> &nbsp;·&nbsp; No run yet";
+  uil2Log("");
+}
+
+// ---- status helpers ----
+function uil2Cls(status) {
+  const s = String(status || "").toUpperCase();
+  if (["PASS", "RESOLVED", "AVAILABLE", "BULLISH", "UP"].includes(s)) return "pass";
+  if (["WARNING", "SPOT", "MEDIUM", "FLAT", "NORMAL", "RANGING"].includes(s)) return "warn";
+  if (["BLOCKED", "INVALID", "UNAVAILABLE", "UNAVAILABLE_HISTORICAL", "BEARISH", "DOWN", "HIGH", "EXTENDED"].includes(s)) return "fail";
+  return "neutral";
+}
+function uil2Dot(status) { const c = uil2Cls(status); return c === "pass" ? "🟢" : c === "warn" ? "🟡" : c === "fail" ? "🔴" : "⚪"; }
+
+function uil2RenderAll(d) {
+  // top conn pill
+  const conn = t2el("uil2-conn");
+  const live = d.dataRange && d.dataRange.totalCandles > 0;
+  if (conn) { conn.textContent = live ? "● Dhan Connected" : "● Dhan — no data"; conn.className = "uil2-pill " + (live ? "ok" : "warn"); }
+
+  uil2RenderChart(d);
+  uil2RenderIndStrip(d.lastRow, d.config);
+  uil2RenderCurrentCandle(d.currentCandle, d.lastRow);
+  uil2RenderFinalSignal(d.lastRow, d.config);
+  uil2RenderBinding(d);
+  uil2RenderStatusBar(d);
+  uil2RenderView();
+}
+
+// ---- chart ----
+function uil2BuildChart() {
+  const cont = t2el("uil2-chart");
+  if (!cont || !window.LightweightCharts) return false;
+  if (UIL2.chart) { try { UIL2.chart.remove(); } catch (_) {} UIL2.chart = null; }
+  const chart = LightweightCharts.createChart(cont, {
+    width: cont.clientWidth, height: cont.clientHeight || 340,
+    layout: { background: { type: "solid", color: "transparent" }, textColor: "#8595b0", fontSize: 10 },
+    grid: { vertLines: { color: "rgba(255,255,255,.04)" }, horzLines: { color: "rgba(255,255,255,.04)" } },
+    rightPriceScale: { borderColor: "#1d2a42" },
+    timeScale: { borderColor: "#1d2a42", timeVisible: true, secondsVisible: false },
+    crosshair: { mode: 1 },
+  });
+  UIL2.chart = chart;
+  UIL2.series.candle = chart.addCandlestickSeries({ upColor: "#22c55e", downColor: "#ef4444", borderUpColor: "#22c55e", borderDownColor: "#ef4444", wickUpColor: "#22c55e", wickDownColor: "#ef4444" });
+  UIL2.series.ema9 = chart.addLineSeries({ color: "#f59e0b", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+  UIL2.series.ema21 = chart.addLineSeries({ color: "#22d3ee", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+  UIL2.series.vwap = chart.addLineSeries({ color: "#a371f7", lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
+  UIL2.series.vol = chart.addHistogramSeries({ priceScaleId: "vol", priceFormat: { type: "volume" } });
+  chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
+  chart.subscribeCrosshairMove((p) => uil2CrosshairOhlc(p));
+  return true;
+}
+const uil2T = (sec) => Number(sec) + 19800; // show IST wall-clock on the axis
+function uil2RenderChart(d, upto) {
+  if (!uil2BuildChart()) return;
+  const all = d.chart || [];
+  const arr = (upto != null) ? all.slice(0, upto + 1) : all;
+  UIL2.series.candle.setData(arr.map((c) => ({ time: uil2T(c.t), open: c.o, high: c.h, low: c.l, close: c.c })));
+  UIL2.series.ema9.setData(arr.filter((c) => c.ema9 != null).map((c) => ({ time: uil2T(c.t), value: c.ema9 })));
+  UIL2.series.ema21.setData(arr.filter((c) => c.ema21 != null).map((c) => ({ time: uil2T(c.t), value: c.ema21 })));
+  UIL2.series.vwap.setData(arr.filter((c) => c.vwap != null).map((c) => ({ time: uil2T(c.t), value: c.vwap })));
+  UIL2.series.vol.setData(arr.map((c) => ({ time: uil2T(c.t), value: c.v, color: c.c >= c.o ? "rgba(34,197,94,.4)" : "rgba(239,68,68,.4)" })));
+  UIL2.series.candle.setMarkers(arr.filter((c) => c.signal !== "WAIT").map((c) => ({ time: uil2T(c.t), position: c.signal === "BUY" ? "belowBar" : "aboveBar", color: c.signal === "BUY" ? "#22c55e" : "#ef4444", shape: c.signal === "BUY" ? "arrowUp" : "arrowDown", text: c.signal })));
+  UIL2.chart.timeScale().fitContent();
+  const meta = t2el("uil2-chart-meta");
+  if (meta) meta.textContent = d.config ? `${d.config.timeframe} · ${d.dataRange.from} → ${d.dataRange.to}` : "";
+  if (t2el("uil2-chart-sym")) t2el("uil2-chart-sym").textContent = d.config ? d.config.index : UIL2.index;
+  uil2CrosshairOhlc(null, arr[arr.length - 1]);
+}
+function uil2CrosshairOhlc(param, fallback) {
+  const box = t2el("uil2-chart-ohlc"); if (!box) return;
+  let c = fallback;
+  if (param && param.seriesData && UIL2.series.candle) { const v = param.seriesData.get(UIL2.series.candle); if (v) c = { o: v.open, h: v.high, l: v.low, c: v.close }; }
+  if (!c) { box.innerHTML = ""; return; }
+  const up = c.c >= c.o;
+  box.innerHTML = `O <b>${t2num(c.o)}</b> H <b>${t2num(c.h)}</b> L <b>${t2num(c.l)}</b> C <b class="${up ? "up" : "down"}">${t2num(c.c)}</b>`;
+}
+function uil2ResizeChart() { const cont = t2el("uil2-chart"); if (UIL2.chart && cont) { try { UIL2.chart.applyOptions({ width: cont.clientWidth, height: cont.clientHeight || 340 }); } catch (_) {} } }
+function uil2ReplayTo(k) {
+  if (!UIL2.data) return;
+  const all = UIL2.data.chart || [];
+  uil2RenderChart(UIL2.data, Math.max(0, Math.min(all.length - 1, k)));
+  const c = all[Math.max(0, Math.min(all.length - 1, k))];
+  if (c && t2el("uil2-replay-pos")) t2el("uil2-replay-pos").textContent = `${k + 1} / ${all.length} · ${t2time(new Date((c.t) * 1000).toISOString())}`;
+  if (c) uil2RenderCurrentCandle(c, UIL2.data.lastRow);
+}
+
+// ---- indicator status strip ----
+function uil2IndList(r, cfg) {
+  if (!r) return [];
+  const priceVsVwap = (r.vwap != null && r.spotPrice != null) ? (r.spotPrice > r.vwap ? "ABOVE" : r.spotPrice < r.vwap ? "BELOW" : "AT") : "—";
+  const rrMin = cfg ? cfg.rrMin : 2;
+  const atrOk = r.atrPercent != null && r.atrPercent > 0.03 && r.atrPercent < 3;
+  return [
+    { nm: "UT Alert", st: r.utState, sub: "", cls: uil2Cls(r.utState) },
+    { nm: "EMA 9/21", st: r.emaDirection, sub: r.priceVsEMA || "", cls: uil2Cls(r.emaDirection) },
+    { nm: "VWAP", st: priceVsVwap, sub: r.vwapSource || "", cls: uil2Cls(priceVsVwap === "ABOVE" ? "UP" : priceVsVwap === "BELOW" ? "DOWN" : "FLAT") },
+    { nm: "Market Structure", st: (r.structureState || "").split(" ")[0] || "—", sub: r.bos && r.bos !== "NONE" ? r.bos : "", cls: uil2Cls((r.structureState || "").startsWith("Bullish") ? "UP" : (r.structureState || "").startsWith("Bearish") ? "DOWN" : "RANGING") },
+    { nm: "Volume", st: r.volumeState, sub: "", cls: r.volumeState === "EXPANSION" ? "pass" : r.volumeState === "WEAK" ? "fail" : r.volumeState === "UNKNOWN" ? "neutral" : "warn" },
+    { nm: "ATR 14", st: r.atrPercent != null ? r.atrPercent + "%" : "—", sub: "", cls: atrOk ? "pass" : "warn" },
+    { nm: "Lin. Reg.", st: r.regressionDirection, sub: r.regressionR2 != null ? "R²" + r.regressionR2 : "", cls: uil2Cls(r.regressionDirection) },
+    { nm: "Support/Res", st: (r.support != null || r.resistance != null) ? "SET" : "—", sub: r.support != null ? "S " + t2num(r.support, 0) : "", cls: (r.support != null || r.resistance != null) ? "pass" : "neutral" },
+    { nm: "Fake Move", st: r.fakeMove ? "RISK" : "NO RISK", sub: "", cls: r.fakeMove ? "fail" : "pass" },
+    { nm: "Extended", st: r.extendedMove, sub: "", cls: r.extendedMove === "EXTENDED" ? "fail" : "pass" },
+    { nm: "R:R Gate", st: r.rr != null ? "1:" + t2num(r.rr, 2) : "—", sub: "min " + rrMin, cls: r.rr != null ? (r.rr >= rrMin ? "pass" : "fail") : "neutral" },
+    { nm: "Expiry", st: r.expiryRisk, sub: r.daysToExpiry != null ? r.daysToExpiry + "d" : "", cls: r.expiryRisk === "HIGH" ? "fail" : r.expiryRisk === "MEDIUM" ? "warn" : "pass" },
+    { nm: "Data Quality", st: r.dataQuality, sub: "", cls: uil2Cls(r.dataQuality) },
+  ];
+}
+function uil2RenderIndStrip(r, cfg) {
+  const box = t2el("uil2-indstrip"); if (!box) return;
+  const list = uil2IndList(r, cfg);
+  if (!list.length) { box.innerHTML = '<div class="uil2-empty">No indicator snapshot — run a test.</div>'; return; }
+  box.innerHTML = list.map((x) => `<div class="uil2-ind ${x.cls}"><span class="nm">${t2esc(x.nm)}</span><span class="st">${t2esc(x.st)}</span>${x.sub ? `<span class="sub">${t2esc(x.sub)}</span>` : ""}</div>`).join("");
+}
+
+// ---- current candle ----
+function uil2RenderCurrentCandle(c, r) {
+  const box = t2el("uil2-cc"); if (!box) return;
+  if (!c) { box.innerHTML = '<div class="u-muted">—</div>'; return; }
+  if (t2el("uil2-cc-time")) t2el("uil2-cc-time").textContent = r ? t2time(r.iso) : "";
+  const up = c.c >= c.o;
+  box.innerHTML = `
+    <div class="uil2-kv"><span>Open</span><b>${t2num(c.o)}</b></div>
+    <div class="uil2-kv"><span>High</span><b>${t2num(c.h)}</b></div>
+    <div class="uil2-kv"><span>Low</span><b>${t2num(c.l)}</b></div>
+    <div class="uil2-kv"><span>Close</span><b class="${up ? "u-green" : "u-red"}">${t2num(c.c)}</b></div>
+    <div class="uil2-kv"><span>Volume</span><b>${t2int(c.v)}</b></div>
+    <div class="uil2-kv"><span>Open Interest</span><b>${c.oi != null ? t2int(c.oi) : "—"}</b></div>`;
+}
+
+// ---- final signal ----
+function uil2RenderFinalSignal(r, cfg) {
+  const badge = t2el("uil2-final-badge");
+  if (!r) { if (badge) { badge.textContent = "—"; badge.className = "uil2-finalbig"; } return; }
+  if (badge) { badge.textContent = r.signal; badge.className = "uil2-finalbig " + (r.signal === "BUY" ? "buy" : r.signal === "SELL" ? "sell" : "wait"); }
+  if (t2el("uil2-final-buy")) t2el("uil2-final-buy").textContent = t2int(r.buyScore);
+  if (t2el("uil2-final-sell")) t2el("uil2-final-sell").textContent = t2int(r.sellScore);
+  const lv = t2el("uil2-final-levels");
+  if (lv) lv.innerHTML = `
+    <div class="uil2-kv"><span>Entry (Next Candle)</span><b>${t2num(r.entry)}</b></div>
+    <div class="uil2-kv"><span>Stop Loss</span><b class="u-red">${t2num(r.stopLoss)}</b></div>
+    <div class="uil2-kv"><span>Target 1</span><b class="u-green">${t2num(r.target1)}</b></div>
+    <div class="uil2-kv"><span>Target 2</span><b class="u-green">${t2num(r.target2)}</b></div>
+    <div class="uil2-kv"><span>R : R</span><b class="u-amber">${r.rr != null ? "1 : " + t2num(r.rr, 2) : "—"}</b></div>`;
+  if (t2el("uil2-final-reason")) t2el("uil2-final-reason").textContent = r.primaryReason || "—";
+  if (t2el("uil2-final-blockers")) { const b = t2el("uil2-final-blockers"); if (r.hardGate && r.hardGateReason) { b.textContent = r.hardGateReason; b.className = "uil2-reasonbox u-red"; } else { b.textContent = "None"; b.className = "uil2-reasonbox"; } }
+}
+
+// ---- left-rail futures binding ----
+function uil2RenderBinding(d) {
+  const b = d.binding || {};
+  const badge = t2el("uil2-bind-badge");
+  if (badge) { badge.textContent = b.status === "RESOLVED" ? "✓ Resolved" : b.status || "—"; badge.className = "uil2-badge " + (b.status === "RESOLVED" ? "ok" : b.status === "INVALID" ? "bad" : "warn"); }
+  const set = (id, v) => { if (t2el(id)) t2el(id).textContent = v == null || v === "" ? "—" : v; };
+  set("uil2-bind-under", b.underlying); set("uil2-bind-exp", b.expiry); set("uil2-bind-sec", b.securityId);
+  set("uil2-bind-instr", b.futuresSymbol); set("uil2-bind-exch", b.exchangeSegment);
+  const flag = (id, ok, onTxt, offTxt) => { const n = t2el(id); if (!n) return; n.className = "uil2-flag " + (ok ? "ok" : "bad"); n.textContent = (ok ? "● " : "○ ") + (ok ? onTxt : offTxt); };
+  const r = d.lastRow;
+  flag("uil2-flag-vol", r && r.volumeState !== "UNKNOWN", "Volume Available", "Volume Missing");
+  flag("uil2-flag-vwap", r && r.vwap != null, "VWAP Ready", "VWAP Unavailable");
+  flag("uil2-flag-oi", d.oiStatus === "AVAILABLE", "Open Interest Available", "OI Unavailable");
+  flag("uil2-flag-valid", d.dataQuality !== "BLOCKED", "Data Valid", "Data Blocked");
+}
+
+// ---- bottom status bar ----
+function uil2RenderStatusBar(d) {
+  const el2 = t2el("uil2-datastatus"); if (!el2) return;
+  const dr = d.dataRange || {};
+  el2.innerHTML = `Mode: <b>${t2esc(d.dataMode || "—")}</b>` +
+    ` &nbsp;·&nbsp; Data Status: <b class="${d.dataQuality === "PASS" ? "u-green" : d.dataQuality === "BLOCKED" ? "u-red" : "u-amber"}">${t2esc(d.dataQuality)}</b>` +
+    ` &nbsp;·&nbsp; Candles: <b>${t2int(dr.totalCandles)}</b> (${t2int(dr.rejected)} rejected)` +
+    ` &nbsp;·&nbsp; ${t2esc(dr.from)} → ${t2esc(dr.to)}` +
+    ` &nbsp;·&nbsp; OI: <b>${t2esc(d.oiStatus)}</b>` +
+    ` &nbsp;·&nbsp; Futures: <b>${t2esc(d.binding && d.binding.futuresSymbol || "—")}</b>` +
+    (d.unavailableDateCount ? ` &nbsp;·&nbsp; <b class="u-amber">${t2int(d.unavailableDateCount)}</b> date(s) UNAVAILABLE_HISTORICAL` : "") +
+    ` &nbsp;·&nbsp; VWAP: <b>${t2esc(d.vwapSource || "—")}</b>`;
+}
+
+// ---- the view region (switched by the 9 top tabs) ----
+function uil2RenderView() {
+  const v = t2el("uil2-view"); if (!v) return;
+  const d = UIL2.data;
+  if (!d && !["config", "ablation"].includes(UIL2.tab)) { v.innerHTML = '<div class="uil2-empty">Run a test to populate this tab.</div>'; return; }
+  switch (UIL2.tab) {
+    case "config": case "chart": v.innerHTML = uil2ViewSignals(d) + (d ? uil2ViewSummary(d) : ""); uil2WireSubtabs(); break;
+    case "indicators": v.innerHTML = uil2ViewIndicators(d); break;
+    case "results": v.innerHTML = uil2ViewSummary(d); break;
+    case "trades": v.innerHTML = uil2ViewTrades(d); break;
+    case "replay": v.innerHTML = uil2ViewReplay(d); break;
+    case "ablation": v.innerHTML = uil2ViewAblation(); uil2WireAblation(); break;
+    case "validation": v.innerHTML = uil2ViewValidation(d); break;
+    case "export": v.innerHTML = uil2ViewExport(d); break;
+    case "signal": v.innerHTML = uil2ViewSignal(); uil2WireSignal(); break;
+    default: v.innerHTML = "";
+  }
+}
+
+function uil2SubBtn(id, label) { return `<button class="uil2-subtab ${UIL2.sub === id ? "active" : ""}" data-sub="${id}">${label}</button>`; }
+function uil2ViewSignals(d) {
+  if (!d) return '<div class="uil2-empty">Run a test to see signals.</div>';
+  const tabs = `<div class="uil2-subtabs">${uil2SubBtn("timeline", "Signal Timeline")}${uil2SubBtn("trades", "Trades")}${uil2SubBtn("daily", "Daily Results")}${uil2SubBtn("audit", "Audit / Gates")}</div>`;
+  let body = "";
+  if (UIL2.sub === "timeline") body = uil2SignalsTable(d);
+  else if (UIL2.sub === "trades") body = uil2TradesTable(d);
+  else if (UIL2.sub === "daily") body = uil2DailyTable(d);
+  else body = uil2GatesBlock(d);
+  return `<div>${tabs}${body}</div>`;
+}
+function uil2WireSubtabs() {
+  document.querySelectorAll("#uil2-view .uil2-subtab").forEach((b) => b.addEventListener("click", () => { UIL2.sub = b.getAttribute("data-sub"); uil2RenderView(); }));
+}
+
+function uil2SigPill(s) { return `<span class="uil2-pillcell ${String(s).toLowerCase()}">${t2esc(s)}</span>`; }
+function uil2OutPill(o) { return o && o !== "NONE" ? `<span class="uil2-pillcell ${String(o).toLowerCase()}">${t2esc(o)}</span>` : "—"; }
+
+function uil2SignalsTable(d) {
+  const rows = d.signals || [];
+  const head = ["#", "Date & Time", "Price", "Signal", "Buy", "Sell", "Entry", "SL", "T1", "T2", "R:R", "Reason", "Outcome", "R"];
+  const body = rows.length ? rows.map((r, i) => `<tr>
+    <td>${i + 1}</td><td>${t2esc(t2time(r.iso))}</td><td>${t2num(r.spotPrice)}</td>
+    <td>${uil2SigPill(r.signal)}</td><td>${t2int(r.buyScore)}</td><td>${t2int(r.sellScore)}</td>
+    <td>${t2num(r.entry)}</td><td>${t2num(r.stopLoss)}</td><td>${t2num(r.target1)}</td><td>${t2num(r.target2)}</td>
+    <td>${r.rr != null ? "1:" + t2num(r.rr, 2) : "—"}</td><td class="reason">${t2esc(r.primaryReason)}</td>
+    <td>${uil2OutPill(r.outcome)}</td><td class="${(r.rMultiple || 0) >= 0 ? "u-green" : "u-red"}">${t2num(r.rMultiple, 2)}</td></tr>`).join("") : `<tr><td colspan="${head.length}" class="u-muted">No BUY/SELL signals in this window.</td></tr>`;
+  const note = d.signalsTruncated ? `<div class="u-muted" style="margin-top:6px;font-size:11px">Showing first ${rows.length} of ${d.signalCount} signals — full set in the export package.</div>` : "";
+  return `<div class="uil2-tbl-wrap"><table class="uil2-tbl"><thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>${note}`;
+}
+function uil2TradesTable(d) {
+  const rows = d.trades || [];
+  const head = ["#", "Date & Time", "Signal", "Entry", "SL", "T1", "T2", "R:R", "Outcome", "R", "MFE", "MAE", "Hold", "Timing"];
+  const body = rows.length ? rows.map((r, i) => `<tr>
+    <td>${i + 1}</td><td>${t2esc(t2time(r.iso))}</td><td>${uil2SigPill(r.signal)}</td>
+    <td>${t2num(r.entry)}</td><td>${t2num(r.stopLoss)}</td><td>${t2num(r.target1)}</td><td>${t2num(r.target2)}</td>
+    <td>${r.rr != null ? "1:" + t2num(r.rr, 2) : "—"}</td><td>${uil2OutPill(r.outcome)}</td>
+    <td class="${(r.rMultiple || 0) >= 0 ? "u-green" : "u-red"}">${t2num(r.rMultiple, 2)}</td>
+    <td>${t2num(r.mfe, 2)}</td><td>${t2num(r.mae, 2)}</td><td>${t2int(r.holdBars)}</td><td>${t2esc(r.timingClassification)}</td></tr>`).join("") : `<tr><td colspan="${head.length}" class="u-muted">No trades.</td></tr>`;
+  return `<div class="uil2-tbl-wrap"><table class="uil2-tbl"><thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+function uil2DailyTable(d) {
+  const rows = d.daily || [];
+  const head = ["Date", "Regime", "Buy", "Sell", "Wait", "Trades", "W", "L", "Avg R", "Daily R", "Max DD R", "Expiry"];
+  const body = rows.length ? rows.map((r) => `<tr>
+    <td>${t2esc(r.date)}</td><td>${t2esc(r.regime)}</td><td>${t2int(r.buy)}</td><td>${t2int(r.sell)}</td><td>${t2int(r.wait)}</td>
+    <td>${t2int(r.trades)}</td><td class="u-green">${t2int(r.wins)}</td><td class="u-red">${t2int(r.losses)}</td>
+    <td>${t2num(r.avgR, 2)}</td><td class="${(r.dailyR || 0) >= 0 ? "u-green" : "u-red"}">${t2num(r.dailyR, 2)}</td><td>${t2num(r.maxIntradayDDR, 2)}</td><td>${r.expiryDay ? "✓" : ""}</td></tr>`).join("") : `<tr><td colspan="${head.length}" class="u-muted">No daily rows.</td></tr>`;
+  return `<div class="uil2-tbl-wrap"><table class="uil2-tbl"><thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+function uil2GatesBlock(d) {
+  const entries = Object.entries(d.gateBlocks || {}).sort((a, b) => b[1] - a[1]);
+  const max = entries.length ? entries[0][1] : 1;
+  const bars = entries.length ? entries.map(([k, v]) => `<div class="uil2-bar"><span>${t2esc(k)}</span><span class="track"><span class="fill a" style="width:${Math.round(v / max * 100)}%"></span></span><b>${t2int(v)}</b></div>`).join("") : '<div class="u-muted">No gate blocks.</div>';
+  return `<div class="u-muted" style="font-size:11px;margin-bottom:8px">Why candidate signals were rejected (WAIT total ${t2int(d.metrics && d.metrics.wait)}). Over-strict filtering is auditable here instead of a hidden MISSED tally.</div>${bars}`;
+}
+
+function uil2ViewSummary(d) {
+  if (!d || !d.metrics) return '<div class="uil2-empty">Run a test to see results.</div>';
+  const m = d.metrics, o = m.outcomes || {}, t = m.timing || {}, tt = m.totalTrades || 0;
+  const pct = (x) => tt ? Math.round(x / tt * 100) : 0;
+  const stat = (lbl, val, cls) => `<div class="uil2-stat"><span class="lbl">${lbl}</span><span class="val ${cls || ""}">${val}</span></div>`;
+  const qrow = (nm, val, color) => `<div class="uil2-kv"><span><span class="uil2-dot" style="background:${color}"></span>${nm}</span><b>${t2int(val)} (${pct(val)}%)</b></div>`;
+  const obar = (nm, val, cls) => `<div class="uil2-bar"><span>${nm}</span><span class="track"><span class="fill ${cls}" style="width:${pct(val)}%"></span></span><b>${pct(val)}%</b></div>`;
+  const gates = Object.entries(d.gateBlocks || {}).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  const gmax = gates.length ? gates[0][1] : 1;
+  return `<div class="uil2-sumrow">
+    <div class="uil2-sumcard"><h6>Test Summary</h6><div class="uil2-statgrid">
+      ${stat("Total Candles", t2int(d.totalCandles || m.totalCandles))}
+      ${stat("Buy Signals", t2int(m.buy), "u-green")}
+      ${stat("SELL Signals", t2int(m.sell), "u-red")}
+      ${stat("WAIT Signals", t2int(m.wait), "u-muted")}
+    </div></div>
+    <div class="uil2-sumcard"><h6>Performance (Closed Trades)</h6><div class="uil2-statgrid">
+      ${stat("Win Rate", t2num(m.winRate, 1) + "%", m.winRate >= 50 ? "u-green" : "")}
+      ${stat("Profit Factor", t2num(m.profitFactor, 2), m.profitFactor >= 1 ? "u-green" : "u-red")}
+      ${stat("Average R", t2num(m.avgR, 2), m.avgR >= 0 ? "u-green" : "u-red")}
+      ${stat("Max Drawdown", t2num(m.maxDrawdownR, 2) + "R", "u-red")}
+      ${stat("Median R", t2num(m.medianR, 2))}
+      ${stat("Expectancy", t2num(m.expectancy, 2), m.expectancy >= 0 ? "u-green" : "u-red")}
+      ${stat("Average MFE", t2num(m.avgMFE, 2))}
+      ${stat("Average MAE", t2num(m.avgMAE, 2))}
+    </div></div>
+    <div class="uil2-sumcard"><h6>Signal Quality Analysis</h6><div class="uil2-kvs">
+      ${qrow("EARLY", t.EARLY || 0, "#22d3ee")}${qrow("TIMELY", t.TIMELY || 0, "#22c55e")}${qrow("LATE", t.LATE || 0, "#f59e0b")}${qrow("FALSE", t.FALSE || 0, "#ef4444")}${qrow("MISSED", t.MISSED || 0, "#8595b0")}
+    </div></div>
+    <div class="uil2-sumcard"><h6>Hard Gate Blocks</h6>${gates.length ? gates.map(([k, v]) => `<div class="uil2-bar"><span>${t2esc(k)}</span><span class="track"><span class="fill a" style="width:${Math.round(v / gmax * 100)}%"></span></span><b>${t2int(v)}</b></div>`).join("") : '<div class="u-muted">none</div>'}</div>
+    <div class="uil2-sumcard"><h6>Trade Outcome (R Multiple)</h6>
+      ${obar("T2 Hit", o.T2 || 0, "g")}${obar("T1 Hit", o.T1 || 0, "g")}${obar("SL Hit", o.SL || 0, "r")}${obar("Time Exit", (o.TIME_EXIT || 0) + (o.EOD_EXIT || 0), "a")}${obar("Breakeven", m.breakeven || 0, "b")}
+    </div>
+  </div>`;
+}
+
+function uil2ViewIndicators(d) {
+  const list = uil2IndList(d && d.lastRow, d && d.config);
+  if (!list.length) return '<div class="uil2-empty">Run a test to see the indicator snapshot.</div>';
+  return `<div class="u-muted" style="font-size:11px;margin-bottom:8px">Per-indicator status on the final closed candle (${d.lastRow ? t2esc(t2time(d.lastRow.iso)) : "—"}). Each is one of the universal evidence pillars feeding the BUY/SELL score.</div>
+    <div class="uil2-indstrip" style="border:none;padding:0">${list.map((x) => `<div class="uil2-ind ${x.cls}"><span class="nm">${t2esc(x.nm)}</span><span class="st">${t2esc(x.st)}</span>${x.sub ? `<span class="sub">${t2esc(x.sub)}</span>` : ""}</div>`).join("")}</div>`;
+}
+
+function uil2ViewTrades(d) { return d ? uil2TradesTable(d) : '<div class="uil2-empty">Run a test.</div>'; }
+
+function uil2ViewReplay(d) {
+  if (!d) return '<div class="uil2-empty">Run a test, then use the slider under the chart to step through candles.</div>';
+  const r = t2el("uil2-replay-range"); if (r) { r.max = String((d.chart || []).length - 1); r.value = r.max; }
+  return `<div class="u-muted" style="font-size:12px">Use the <b>slider under the chart</b> (or ⏭ Step) to replay candle-by-candle. The engine is causal — each candle was evaluated using only data up to itself, so the chart you scrub is exactly what the indicator saw in real time. Candle readout updates on the right.</div>`;
+}
+
+function uil2ViewAblation() {
+  const comps = [["EMA", "EMA 9/21"], ["UT", "UT Bot"], ["VWAP", "VWAP"], ["LINEAR_REGRESSION", "Linear Regression"], ["BOS", "Market Structure / BOS"], ["VOLUME", "Volume"], ["FAKE_MOVE", "Fake-Move filter"], ["EXTENDED_MOVE", "Extended-Move filter"]];
+  return `<div class="u-muted" style="font-size:12px;margin-bottom:10px">Disable a component and re-run to measure its contribution (research only). Disabling a filter removes its veto; disabling a scorer removes its weight. Results are a FINDING, not an optimization.</div>
+    <div class="uil2-indstrip" style="border:none;padding:0;grid-template-columns:repeat(auto-fill,minmax(170px,1fr))">
+    ${comps.map(([k, label]) => `<label class="uil2-toggle" style="background:var(--u-panel2);border:1px solid var(--u-border2);border-radius:8px;padding:8px 10px"><span>${label}</span><input type="checkbox" data-ab="${k}" ${UIL2.ablation[k] ? "checked" : ""}/><i></i></label>`).join("")}
+    </div>
+    <div style="margin-top:12px"><button class="uil2-btn primary" id="uil2-ab-run">▶ Re-run with ablation</button></div>`;
+}
+function uil2WireAblation() {
+  document.querySelectorAll('#uil2-view input[data-ab]').forEach((c) => c.addEventListener("change", () => { UIL2.ablation[c.getAttribute("data-ab")] = c.checked; }));
+  const b = t2el("uil2-ab-run"); if (b) b.addEventListener("click", uil2Run);
+}
+
+function uil2ViewValidation(d) {
+  if (!d) return '<div class="uil2-empty">Run a test.</div>';
+  const b = d.binding || {}, dr = d.dataRange || {};
+  const kv = (k, v, cls) => `<div class="uil2-kv"><span>${k}</span><b class="${cls || ""}">${v}</b></div>`;
+  return `<div class="uil2-sumrow">
+    <div class="uil2-sumcard"><h6>Futures Binding</h6><div class="uil2-kvs">
+      ${kv("Status", uil2Dot(b.status) + " " + t2esc(b.status), "")}
+      ${kv("Underlying", t2esc(b.underlying))}
+      ${kv("Futures", t2esc(b.futuresSymbol || "—"))}
+      ${kv("Security ID", t2esc(b.securityId || "—"))}
+      ${kv("Expiry", t2esc(b.expiry || "—"))}
+      ${kv("Exchange", t2esc(b.exchangeSegment || "—"))}
+      ${kv("Lot Size", t2int(b.lotSize))}
+      ${kv("Reason", t2esc(b.bindingReason))}
+    </div></div>
+    <div class="uil2-sumcard"><h6>Data Quality</h6><div class="uil2-kvs">
+      ${kv("Overall", uil2Dot(d.dataQuality) + " " + t2esc(d.dataQuality))}
+      ${kv("VWAP source", uil2Dot(d.vwapSource) + " " + t2esc(d.vwapSource))}
+      ${kv("OI status", uil2Dot(d.oiStatus) + " " + t2esc(d.oiStatus))}
+      ${kv("Data range", t2esc(dr.from) + " → " + t2esc(dr.to))}
+      ${kv("Candles", t2int(dr.totalCandles) + " (" + t2int(dr.rejected) + " rejected)")}
+    </div></div>
+    <div class="uil2-sumcard"><h6>Notes</h6><div class="u-muted" style="font-size:11.5px;line-height:1.5">OI is tested empirically against the Dhan derivative feed — never assumed absent, never substituted with live option-chain OI. An unresolved/expired futures contract is reported, never faked onto a different month.</div></div>
+  </div>`;
+}
+
+function uil2ViewExport(d) {
+  const devs = (d && d.deviations) || [];
+  const devList = devs.map((x) => `<div class="uil2-kv"><span>${uil2Dot(x.status)} ${t2esc(x.requirement)}</span><b>${t2esc(x.status)}</b></div><div class="u-muted" style="font-size:11px;margin:-2px 0 6px 16px">${t2esc(x.note)}</div>`).join("");
+  return `<div class="uil2-sumrow">
+    <div class="uil2-sumcard"><h6>Export</h6>
+      <div class="u-muted" style="font-size:11.5px;margin-bottom:8px">Every run also auto-writes the full, uncapped review package on the server:</div>
+      <div class="uil2-kv"><span>Package path</span></div>
+      <div class="uil2-reasonbox" style="margin:4px 0 10px"><code style="font-size:11px;word-break:break-all">${t2esc(d && d.exportDir || "— run a test —")}</code></div>
+      <div class="uil2-exportbtns">
+        <button class="uil2-btn sm" onclick="uil2ExportPackage()">⬇ Review Package (JSON)</button>
+        <button class="uil2-btn sm" onclick="uil2ExportCsv()">⬇ Signals CSV</button>
+        <button class="uil2-btn sm" onclick="uil2ExportJson()">⬇ Full JSON</button>
+      </div>
+      <div class="u-muted" style="font-size:11px;margin-top:8px">Package files: test-config.json, data-validation.json, summary.json, indicator-analysis.json, gate-analysis.json, daily-results.csv, signals.csv/jsonl, trades.csv, audit.jsonl, implementation-diff.md, README.md.</div>
+    </div>
+    <div class="uil2-sumcard"><h6>Implementation Deviations (nothing silently replaced)</h6><div class="uil2-kvs">${devList || '<div class="u-muted">—</div>'}</div></div>
+  </div>`;
+}
+
+// ---- V1.2 Market Signal (15M direction -> 5M timing -> risk) ----
+UIL2.htf = { data: null, runId: null, timer: null, busy: false };
+function uil2ViewSignal() {
+  const h = UIL2.htf.data;
+  const ctrls = `<div class="u-muted" style="font-size:12px;margin-bottom:10px">15M establishes direction → 5M establishes timing → risk gates decide. Production uses 15M+5M only (never 1m/3m). Uses the From/To window + index on the left.</div>
+    <button class="uil2-btn primary" id="uil2-htf-run" ${UIL2.htf.busy ? "disabled" : ""}>${UIL2.htf.busy ? "⏳ Running…" : "▶ Run 15M→5M Signal"}</button>
+    <span id="uil2-htf-log" class="u-muted" style="margin-left:10px;font-size:12px"></span>`;
+  if (!h) return ctrls + '<div class="uil2-empty">Run to compute the 15M→5M market signal.</div>';
+  const L = h.latest; const dec = L ? L.final : null; const risk = L ? L.risk : null; const m15 = L ? L["15M"] : null; const m5 = L ? L["5M"] : null;
+  const sig = dec ? dec.finalSignal : "WAIT";
+  const dirCls = m15 && (m15.direction || "").includes("BULL") ? "buy" : m15 && (m15.direction || "").includes("BEAR") ? "sell" : "wait";
+  const sigCls = sig === "BUY" ? "buy" : sig === "SELL" ? "sell" : "wait";
+  const why = [];
+  if (m15) why.push(`15M ${m15.direction} (${m15.confidence})`);
+  if (m5) why.push(`5M VWAP ${m5.vwapEvent}`);
+  if (m5) why.push(`EMA ${m5.ema9 != null && m5.ema21 != null ? (m5.ema9 >= m5.ema21 ? "bullish" : "bearish") : "—"}`);
+  if (m5) why.push(`structure ${(m5.structure || "").split(" ")[0]}`);
+  if (m5) why.push(`UT ${m5.ut}`);
+  if (dec && sig === "WAIT") why.push(`BLOCKED: ${dec.primaryBlocker}`);
+  const abc = h.comparison;
+  const card = `
+    <div class="uil2-sumrow" style="grid-template-columns: 1fr 1fr;">
+      <div class="uil2-sumcard">
+        <div class="uil2-rhead">${t2esc(h.config.index)} — MASTER DIRECTION <span class="uil2-sub">${L ? t2esc(L.timestamp) : ""}</span></div>
+        <div class="uil2-finalbig ${dirCls}">${m15 ? t2esc(m15.direction) : "—"}</div>
+        <div class="uil2-kvs">
+          <div class="uil2-kv"><span>15M confidence</span><b>${m15 ? t2esc(m15.confidence) : "—"}</b></div>
+          <div class="uil2-kv"><span>15M EMA</span><b>${m15 ? t2esc(m15.ema) : "—"}</b></div>
+          <div class="uil2-kv"><span>15M VWAP side</span><b>${m15 ? t2esc(m15.vwapSide) : "—"}</b></div>
+          <div class="uil2-kv"><span>15M structure</span><b>${m15 ? t2esc((m15.structure || "").split(" ")[0]) : "—"}</b></div>
+          <div class="uil2-kv"><span>Direction accuracy (next-15M, post-hoc)</span><b>${h.timing && h.timing.directionAccuracyNext15m != null ? h.timing.directionAccuracyNext15m + "%" : "—"}</b></div>
+        </div>
+      </div>
+      <div class="uil2-sumcard">
+        <div class="uil2-rhead">5M TIMING</div>
+        <div class="uil2-kvs">
+          <div class="uil2-kv"><span>VWAP event</span><b>${m5 ? t2esc(m5.vwapEvent) : "—"}</b></div>
+          <div class="uil2-kv"><span>EMA</span><b>${m5 && m5.ema9 != null && m5.ema21 != null ? (m5.ema9 >= m5.ema21 ? "BULLISH" : "BEARISH") : "—"}</b></div>
+          <div class="uil2-kv"><span>Structure</span><b>${m5 ? t2esc((m5.structure || "").split(" ")[0]) : "—"}</b></div>
+          <div class="uil2-kv"><span>UT</span><b>${m5 ? t2esc(m5.ut) : "—"}</b></div>
+          <div class="uil2-kv"><span>Timing score</span><b>${m5 ? t2int(m5.timingScore) : "—"}</b></div>
+        </div>
+      </div>
+    </div>
+    <div class="uil2-sumrow" style="grid-template-columns: 1fr 1fr;">
+      <div class="uil2-sumcard">
+        <div class="uil2-rhead">TRADE DECISION</div>
+        <div class="uil2-finalbig ${sigCls}">${t2esc(sig)}</div>
+        <div class="uil2-kvs">
+          <div class="uil2-kv"><span>Entry</span><b>${risk ? t2num(risk.entry) : "—"}</b></div>
+          <div class="uil2-kv"><span>SL</span><b class="u-red">${risk ? t2num(risk.sl) : "—"}</b></div>
+          <div class="uil2-kv"><span>T1</span><b class="u-green">${risk ? t2num(risk.target1) : "—"}</b></div>
+          <div class="uil2-kv"><span>R:R</span><b class="u-amber">${risk && risk.rr != null ? "1:" + t2num(risk.rr, 2) : "—"}</b></div>
+        </div>
+      </div>
+      <div class="uil2-sumcard">
+        <div class="uil2-rhead">WHY</div>
+        <div class="uil2-kvs">${why.map((x) => `<div class="uil2-kv"><span>•</span><b style="font-weight:500">${t2esc(x)}</b></div>`).join("")}</div>
+      </div>
+    </div>
+    <div class="uil2-sumcard" style="margin-top:10px">
+      <div class="uil2-rhead">A / B / C comparison (no tuning)</div>
+      <div class="uil2-tbl-wrap"><table class="uil2-tbl"><thead><tr><th>Test</th><th>BUY</th><th>SELL</th><th>WAIT</th><th>Trades</th><th>Win%</th><th>PF</th><th>AvgR</th></tr></thead><tbody>
+        ${["testA", "testB", "testC"].map((k) => { const t = abc[k]; return `<tr><td>${t2esc(t.test)}</td><td>${t2int(t.BUY)}</td><td>${t2int(t.SELL)}</td><td>${t2int(t.WAIT)}</td><td>${t2int(t.trades)}</td><td>${t2num(t.winRate, 1)}</td><td>${t2num(t.profitFactor, 2)}</td><td>${t2num(t.avgR, 2)}</td></tr>`; }).join("")}
+      </tbody></table></div>
+      <div class="u-muted" style="font-size:11px;margin-top:6px">A = current engine · B = 15M+5M (no risk) · C = 15M+5M+risk (production path). VWAP events: ${t2esc(JSON.stringify(h.comparison.vwapEvents))}</div>
+    </div>
+    <div class="uil2-sumcard" style="margin-top:10px">
+      <div class="uil2-rhead">Step-by-step (per 5M candle)</div>
+      <div class="uil2-tbl-wrap"><table class="uil2-tbl"><thead><tr><th>Time</th><th>15M dir</th><th>5M VWAP</th><th>EMA</th><th>UT</th><th>Cand</th><th>R:R</th><th>Final</th><th>Blocker</th></tr></thead><tbody>
+        ${(h.steps || []).slice(-80).map((s) => `<tr>
+          <td>${t2esc(t2time(s.timestamp))}</td>
+          <td class="${(s["15M"].direction || "").includes("BULL") ? "u-green" : (s["15M"].direction || "").includes("BEAR") ? "u-red" : "u-muted"}">${t2esc(s["15M"].direction)}</td>
+          <td>${t2esc(s["5M"].vwapEvent)}</td><td>${t2esc(s["5M"].ema9 != null && s["5M"].ema21 != null ? (s["5M"].ema9 >= s["5M"].ema21 ? "UP" : "DOWN") : "—")}</td>
+          <td>${t2esc(s["5M"].ut)}</td><td>${t2esc(s.final.entryCandidate)}</td><td>${s.risk.rr != null ? "1:" + t2num(s.risk.rr, 2) : "—"}</td>
+          <td class="${s.final.finalSignal === "BUY" ? "u-green" : s.final.finalSignal === "SELL" ? "u-red" : "u-muted"}">${t2esc(s.final.finalSignal)}</td>
+          <td class="reason">${t2esc(s.final.primaryBlocker)}</td></tr>`).join("")}
+      </tbody></table></div>
+      <div class="u-muted" style="font-size:11px;margin-top:6px">Showing last 80 of ${(h.steps || []).length} candles. Full per-candle audit is in the server package (per-candle-audit.jsonl).</div>
+    </div>`;
+  return ctrls + card;
+}
+function uil2WireSignal() { const b = t2el("uil2-htf-run"); if (b && !b.dataset.w) { b.dataset.w = "1"; b.addEventListener("click", uil2HtfRun); } }
+async function uil2HtfRun() {
+  if (UIL2.htf.busy) return;
+  const scope = UIL2.scope === "full" ? null : { fromDate: t2el("uil2-from").value, toDate: t2el("uil2-to").value };
+  if (!scope || !scope.fromDate || !scope.toDate) { const l = t2el("uil2-htf-log"); if (l) l.textContent = "Pick a custom From/To window on the left (full-history not supported for HTF)."; return; }
+  const useFut = t2el("uil2-opt-fvwap") ? t2el("uil2-opt-fvwap").checked : true;
+  UIL2.htf.busy = true; uil2RenderView();
+  const log = (m) => { const l = t2el("uil2-htf-log"); if (l) l.textContent = m; };
+  log("Starting 15M→5M run…");
+  try {
+    const start = await fetch("/api/testlab/htf-run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ index: UIL2.index, scope, dataMode: useFut ? "FUTURES_INTERNAL" : "SPOT_DIRECTION" }) }).then((r) => r.json());
+    if (start.error || !start.runId) { UIL2.htf.busy = false; log("Failed: " + (start.error || "no runId")); uil2RenderView(); return; }
+    UIL2.htf.runId = start.runId;
+    if (UIL2.htf.timer) clearInterval(UIL2.htf.timer);
+    UIL2.htf.timer = setInterval(uil2HtfPoll, 1300); uil2HtfPoll();
+  } catch (e) { UIL2.htf.busy = false; log("Failed: " + e.message); uil2RenderView(); }
+}
+async function uil2HtfPoll() {
+  if (!UIL2.htf.runId) return;
+  try {
+    const d = await fetchJSON(`/api/testlab/htf-run/${encodeURIComponent(UIL2.htf.runId)}`, 30000);
+    if (d.error && !d.status) { UIL2.htf.busy = false; if (UIL2.htf.timer) clearInterval(UIL2.htf.timer); uil2RenderView(); return; }
+    if (d.status === "running") { const l = t2el("uil2-htf-log"); if (l) l.textContent = `Running… ${((d.elapsedMs || 0) / 1000).toFixed(0)}s`; return; }
+    if (UIL2.htf.timer) { clearInterval(UIL2.htf.timer); UIL2.htf.timer = null; }
+    UIL2.htf.busy = false;
+    if (d.status === "error") { const l = t2el("uil2-htf-log"); if (l) l.textContent = "Failed: " + (d.error || "unknown"); uil2RenderView(); return; }
+    UIL2.htf.data = d; if (UIL2.tab === "signal") uil2RenderView();
+  } catch (e) { /* keep polling */ }
+}
+
+// ---- client-side exports (full artifacts always remain on disk) ----
+function uil2Download(name, text, mime) {
+  try { const blob = new Blob([text], { type: mime || "text/plain;charset=utf-8" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000); } catch (e) { uil2Log("Download failed: " + e.message, "error"); }
+}
+function uil2Stamp(d) { return `${(d && d.config && d.config.index) || UIL2.index}-${(d && d.config && d.config.timeframe) || UIL2.tf}-${new Date().toISOString().slice(0, 10)}`; }
+function uil2ExportJson() { const d = UIL2.data; if (!d) { uil2Log("Run a test first.", "error"); return; } uil2Download(`testlab-${uil2Stamp(d)}.json`, JSON.stringify(d, null, 2), "application/json"); }
+function uil2ExportPackage() {
+  const d = UIL2.data; if (!d) { uil2Log("Run a test first.", "error"); return; }
+  const pkg = { config: d.config, binding: d.binding, dataRange: d.dataRange, oiStatus: d.oiStatus, dataQuality: d.dataQuality, metrics: d.metrics, daily: d.daily, gateBlocks: d.gateBlocks, indicators: d.indicators, deviations: d.deviations, signals: d.signals, trades: d.trades, serverExportDir: d.exportDir };
+  uil2Download(`testlab-review-${uil2Stamp(d)}.json`, JSON.stringify(pkg, null, 2), "application/json");
+}
+function uil2ExportCsv() {
+  const d = UIL2.data; if (!d || !(d.signals || []).length) { uil2Log("No signals to export.", "error"); return; }
+  const cols = ["iso", "spotPrice", "signal", "buyScore", "sellScore", "entry", "stopLoss", "target1", "target2", "rr", "primaryReason", "outcome", "rMultiple", "mfe", "mae", "holdBars", "timingClassification"];
+  const esc = (v) => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const csv = [cols.join(","), ...d.signals.map((r) => cols.map((c) => esc(r[c])).join(","))].join("\n");
+  uil2Download(`testlab-signals-${uil2Stamp(d)}.csv`, csv, "text/csv");
+}
+
+try { window.uil2ExportPackage = uil2ExportPackage; window.uil2ExportCsv = uil2ExportCsv; window.uil2ExportJson = uil2ExportJson; } catch (_) {}
+
+// Fetch JSON with a hard timeout so a slow/queued Dhan call (market hours) never
+// freezes the UI — it aborts and surfaces a message instead of hanging forever.
 async function fetchJSON(url, ms = 20000) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), ms);
@@ -15277,3 +16325,406 @@ setupModeGate();
 // "Unauthorized" errors that only cleared on a full page reload. setupLoginGate()
 // calls init() itself, from enterByRole(), once a session is actually valid.
 setupLoginGate();
+
+// ============================================================================
+// MARKET ANALYSIS  (composite read-only desk — CE left / PE right, no charts)
+// Backend engine (/api/market-analysis) computes everything; this only renders.
+// ============================================================================
+const MA = { sym: "^NSEI", tf: "15m", range: 7, timer: null, loading: false, lastData: null, _tick: 0, _init: false, selCE: null, selPE: null, _centerPending: true };
+function maEl(id) { return document.getElementById(id); }
+function maN(v, d = 2) { return (v == null || !isFinite(v)) ? "—" : Number(v).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d }); }
+function maN0(v) { return (v == null || !isFinite(v)) ? "—" : Math.round(v).toLocaleString("en-IN"); }
+function maSign(v, d = 1) { if (v == null || !isFinite(v)) return "—"; return (v >= 0 ? "+" : "") + Number(v).toFixed(d); }
+function maPctCls(v) { return v == null ? "" : (v > 0 ? "up" : v < 0 ? "down" : ""); }
+function maOi(n) { if (n == null || !isFinite(n)) return "—"; const a = Math.abs(n); if (a >= 1e7) return (n / 1e7).toFixed(2) + "Cr"; if (a >= 1e5) return (n / 1e5).toFixed(1) + "L"; if (a >= 1e3) return (n / 1e3).toFixed(1) + "K"; return String(Math.round(n)); }
+function maEsc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+function initMarketAnalysis() {
+  if (MA._init) return;
+  MA._init = true;
+  maEl("ma-idx-btns")?.querySelectorAll(".ma-idxbtn").forEach((b) => b.addEventListener("click", () => {
+    maEl("ma-idx-btns").querySelectorAll(".ma-idxbtn").forEach((x) => x.classList.remove("active"));
+    b.classList.add("active"); MA.sym = b.getAttribute("data-sym"); MA.selCE = null; MA.selPE = null; MA._centerPending = true; loadMarketAnalysis();
+  }));
+  maEl("ma-tf-btns")?.querySelectorAll(".ma-tfbtn").forEach((b) => b.addEventListener("click", () => {
+    maEl("ma-tf-btns").querySelectorAll(".ma-tfbtn").forEach((x) => x.classList.remove("active"));
+    b.classList.add("active"); MA.tf = b.getAttribute("data-tf"); loadMarketAnalysis();
+  }));
+  const rng = maEl("ma-range");
+  if (rng) { rng.value = MA.range; rng.addEventListener("change", () => { MA.range = Math.max(4, Math.min(20, Number(rng.value) || 7)); rng.value = MA.range; loadMarketAnalysis(); }); }
+  // Click-to-select a row in the CE / PE tables (toggle). Delegated on the
+  // persistent card so it survives the 5s innerHTML rebuilds; selection persists
+  // via MA.selCE/selPE and is re-applied on every render.
+  [["ma-ce", "CE"], ["ma-pe", "PE"]].forEach(([id, side]) => {
+    maEl(id)?.addEventListener("click", (e) => {
+      const tr = e.target.closest && e.target.closest("tr[data-strike]");
+      if (!tr) return;
+      const strike = Number(tr.getAttribute("data-strike"));
+      if (side === "CE") MA.selCE = (MA.selCE === strike ? null : strike);
+      else MA.selPE = (MA.selPE === strike ? null : strike);
+      if (MA.lastData) maWithScrollPreserved(() => renderMATable(MA.lastData, side));
+    });
+  });
+}
+
+async function loadMarketAnalysis() {
+  if (MA.loading) return;
+  MA.loading = true;
+  if (!MA.lastData && !MA._shownLoading) { MA._shownLoading = true; maShowMAError("Loading market analysis…"); }
+  try {
+    const url = `/api/market-analysis?symbol=${encodeURIComponent(MA.sym)}&interval=${MA.tf}&strikeRange=${MA.range}`;
+    const d = await fetchJSON(url, 12000);
+    if (d && d.available) {
+      MA.lastData = d; MA._errStreak = 0; renderMarketAnalysis(d);
+      // On first load / index change, centre every table on the ATM strike.
+      if (MA._centerPending) { MA._centerPending = false; requestAnimationFrame(() => { try { maCenterATM(); } catch (_) {} }); }
+    }
+    else if (d && (d.reason || d.error) && !MA.lastData) { maShowMAError(d.reason || d.error); }
+    else if (MA.lastData) { renderMALivePills(MA.lastData.dataFreshness, d); } // keep last good; refresh pills
+  } catch (e) {
+    // Soft-fail: keep the last good screen and keep polling. Only show a gentle
+    // reconnecting note on the very first loads (never a hard "network error").
+    MA._errStreak = (MA._errStreak || 0) + 1;
+    console.warn("[MarketAnalysis] retry", MA._errStreak, e && e.name);
+    if (!MA.lastData) maShowMAError("Loading market analysis… (reconnecting " + MA._errStreak + ")");
+  }
+  MA.loading = false;
+}
+
+function startMarketAnalysisLive() {
+  initMarketAnalysis();
+  MA._centerPending = true; // re-centre on the ATM each time the screen is opened
+  loadMarketAnalysis();
+  if (MA.timer) return;
+  MA._tick = 0;
+  MA.timer = setInterval(() => {
+    const pn = document.getElementById("panel-marketanalysis");
+    if (!pn || !pn.classList.contains("active") || MA.loading) return;
+    const open = (typeof isMarketOpen === "function" && isMarketOpen()) || (typeof isFeedWindow === "function" && isFeedWindow());
+    MA._tick++;
+    if (open || MA._tick % 6 === 0) loadMarketAnalysis();
+  }, 5000);
+}
+
+function maShowMAError(msg) {
+  const s = maEl("ma-summary"); if (s) s.innerHTML = `<h4>MARKET ANALYSIS</h4><div class="ma-empty">${maEsc(msg)}</div>`;
+}
+
+// Scrollable containers get their innerHTML rebuilt every refresh, which resets
+// their scroll to the top. Snapshot each one's scrollTop (plus the page/panel
+// scroll) before re-render and restore it after, so the user's scroll position
+// is preserved across the 5s live updates.
+const MA_SCROLLERS = [["ma-ce", ".ma-otbl-wrap"], ["ma-pe", ".ma-otbl-wrap"], ["ma-levels", ".ma-lvwrap"], ["ma-heat", ".ma-heatwrap"]];
+// Preserve the user's view across the 5s refreshes. For the strike tables we
+// anchor to the STRIKE currently at the top of the view (not a raw pixel), so
+// that even if the ATM window shifts as spot moves, the SAME strike stays put —
+// the view never drifts on refresh; it only moves when the user scrolls. Tables
+// without data-strike rows (levels) fall back to pixel preservation.
+function maWithScrollPreserved(fn) {
+  const snaps = MA_SCROLLERS.map(([id, sel]) => {
+    const wrap = document.querySelector("#" + id + " " + sel);
+    if (!wrap) return null;
+    const wr = wrap.getBoundingClientRect();
+    let anchor = null;
+    const rows = wrap.querySelectorAll("tr[data-strike]");
+    for (let i = 0; i < rows.length; i++) {
+      const rr = rows[i].getBoundingClientRect();
+      if (rr.bottom > wr.top + 1) { anchor = { strike: rows[i].getAttribute("data-strike"), delta: rr.top - wr.top }; break; }
+    }
+    return { id, sel, scrollTop: wrap.scrollTop, anchor };
+  });
+  const winY = window.scrollY || window.pageYOffset || 0;
+  fn();
+  snaps.forEach((s) => {
+    if (!s) return;
+    const wrap = document.querySelector("#" + s.id + " " + s.sel);
+    if (!wrap) return;
+    if (s.anchor) {
+      const row = wrap.querySelector('tr[data-strike="' + s.anchor.strike + '"]');
+      if (row) {
+        const wr = wrap.getBoundingClientRect();
+        const rr = row.getBoundingClientRect();
+        wrap.scrollTop += (rr.top - wr.top) - s.anchor.delta;
+        return;
+      }
+    }
+    wrap.scrollTop = s.scrollTop; // fallback: levels table / strike no longer present
+  });
+  if (winY) window.scrollTo(0, winY);
+}
+
+// Auto-scroll each table so the current (ATM) strike / current-price row sits in
+// the middle of its scroll area, and briefly flag it. Called once per screen
+// open / index change (not every tick) so it never fights the user's scroll.
+function maCenterATM() {
+  const center = (wrapSel, rowSel) => {
+    const wrap = document.querySelector(wrapSel); if (!wrap) return;
+    const row = wrap.querySelector(rowSel); if (!row) return;
+    const wrapRect = wrap.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    wrap.scrollTop += (rowRect.top - wrapRect.top) - (wrap.clientHeight / 2) + (rowRect.height / 2);
+    row.classList.add("ma-atm-flash");
+    setTimeout(() => row.classList.remove("ma-atm-flash"), 1600);
+  };
+  center("#ma-ce .ma-otbl-wrap", "tr.ma-atm");
+  center("#ma-pe .ma-otbl-wrap", "tr.ma-atm");
+  center("#ma-heat .ma-heatwrap", "tr.ma-heat-atm");
+  center("#ma-levels .ma-lvwrap", "tr.ma-lv-current");
+}
+
+function renderMarketAnalysis(d) {
+  maWithScrollPreserved(() => {
+    renderMALivePills(d.dataFreshness, d);
+    const exp = maEl("ma-expiry"); if (exp) exp.textContent = "Expiry " + (d.expiry || "—");
+    renderMASummary(d); renderMANearestCR(d); renderMAVix(d); renderMAMovement(d); renderMALevels(d); renderMAHeat(d);
+    renderMANoTrade(d); renderMATable(d, "CE"); renderMATable(d, "PE");
+    renderMAGamma(d); renderMATilt(d); renderMAExpLevels(d); renderMABaseline(d); renderMAData(d);
+    const foot = maEl("ma-foot"); if (foot) foot.textContent = d.disclaimer || "";
+  });
+}
+
+function renderMALivePills(f, d) {
+  const host = maEl("ma-livepills"); if (!host || !f) return;
+  const pill = (label, o) => {
+    const st = (o && o.status ? o.status : "NONE").toLowerCase();
+    const cls = st === "live" ? "live" : st === "fresh" ? "fresh" : st === "delayed" ? "delayed" : (st === "stale" || st === "off" || st === "unavailable" ? "stale" : "");
+    const age = o && o.ageSec != null ? ` ${o.ageSec}s` : "";
+    return `<span class="ma-pill ${cls}">${label} ${o && o.status ? o.status : "—"}${age}</span>`;
+  };
+  host.innerHTML =
+    pill("Price", f.price) + pill("Vol", f.volume) + pill("OI", f.oi) + pill("VIX", f.vix) + pill("Chain", f.chain) +
+    (f.breakoutDetection ? `<span class="ma-pill ${f.breakoutDetection.indexOf("ACTIVE") >= 0 ? "live" : "stale"}">Breakout ${maEsc(f.breakoutDetection)}</span>` : "");
+}
+
+function renderMASummary(d) {
+  const s = d.summary || {}; const host = maEl("ma-summary"); if (!host) return;
+  const cls = maPctCls(s.change);
+  host.innerHTML =
+    `<h4>${maEsc(d.name)} <span>${d.marketOpen ? "LIVE" : "CLOSED"}</span></h4>` +
+    `<div class="ma-price ${cls}">${maN(s.price, 2)}</div>` +
+    `<div class="ma-chg ${cls}">${maSign(s.change, 2)} (${maSign(s.changePct, 2)}%)</div>` +
+    `<div class="ma-ohlc">` +
+      `<div><span>Open</span> <b>${maN(s.open, 2)}</b></div><div><span>High</span> <b>${maN(s.high, 2)}</b></div>` +
+      `<div><span>Low</span> <b>${maN(s.low, 2)}</b></div><div><span>Prev Close</span> <b>${maN(s.prevClose, 2)}</b></div>` +
+    `</div>`;
+}
+
+function renderMANearestCR(d) {
+  const host = maEl("ma-ncr"); if (!host) return;
+  const blk = (c, label, color) => c
+    ? `<div class="ma-nz-h" style="color:${color}">${label} <b>${c.strike}</b></div>` +
+      `<div class="ma-kv"><span>Dist · OI</span><b>${maN(c.distancePts, 0)}pt · ${maOi(c.oi)}</b></div>` +
+      `<div class="ma-kv"><span>Str · Gamma</span><b>${maEsc(c.strength)} · <span class="ma-gs ${maGsCls(c.gammaState)}">${maEsc(c.gammaState)}</span></b></div>`
+    : `<div class="ma-empty">${label}: —</div>`;
+  host.innerHTML =
+    `<h4>Nearest Levels <span>CE resistance · PE support</span></h4>` +
+    blk(d.nearestCallResistance, "CALL RESISTANCE", "#FF5A5F") +
+    `<div class="ma-ncr-sep"></div>` +
+    blk(d.nearestPutSupport, "PUT SUPPORT", "#00D6A3");
+}
+
+function renderMAVix(d) {
+  const v = d.indiaVix || {}; const host = maEl("ma-vix"); if (!host) return;
+  if (!v.available) { host.innerHTML = `<h4>India VIX</h4><div class="ma-empty">VIX ${maEsc(v.regime || "UNAVAILABLE")}</div>`; return; }
+  const rg = String(v.regime || "").toLowerCase(), tr = String(v.trend || "").toLowerCase();
+  host.innerHTML =
+    `<h4>India VIX <span>volatility only · not direction</span></h4>` +
+    `<div class="ma-vixval ${maPctCls(v.change)}">${maN(v.value, 2)}</div>` +
+    `<div class="ma-kv"><span>Change</span><b class="${maPctCls(v.change)}">${maSign(v.change, 2)} (${maSign(v.changePct, 2)}%)</b></div>` +
+    `<div class="ma-kv"><span>Regime</span><b class="ma-tag ${rg}">${maEsc(v.regime)}</b></div>` +
+    `<div class="ma-kv"><span>Trend</span><b class="ma-tag ${tr}">${maEsc(v.trend)}</b></div>` +
+    `<div class="ma-kv"><span>Percentile</span><b>${v.percentile == null ? "—" : v.percentile + "%"}</b></div>` +
+    (v.percentileBasis ? `<div class="ma-kv" style="opacity:.7"><span></span><b style="font-size:9px">${maEsc(v.percentileBasis)}</b></div>` : "");
+}
+
+function renderMAMovement(d) {
+  const m = d.movement || {}; const host = maEl("ma-move"); if (!host) return;
+  const cap = String(m.capacity || "").toLowerCase();
+  const band = (b, label) => b ? `<div class="ma-mband"><div class="ma-mlabel">${label} · ±${maN(b.pts, 1)} pts</div><div class="ma-mrange">${maN(b.low, 2)} → ${maN(b.high, 2)}</div></div>` : `<div class="ma-mband"><div class="ma-mlabel">${label}</div><div class="ma-mrange">—</div></div>`;
+  host.innerHTML =
+    `<h4>Movement Forecast <span>VIX-based</span></h4>` +
+    band(m.expectedMove5m, "5-MIN RANGE") + band(m.expectedMove15m, "15-MIN RANGE") +
+    `<div class="ma-kv"><span>Capacity</span><b class="ma-cap ${cap}">${maEsc(m.capacity || "—")}</b></div>` +
+    `<div class="ma-kv"><span>Vol regime</span><b>${maEsc(m.regime || "—")}</b></div>` +
+    `<div style="font-size:9px;color:var(--ma-muted);margin-top:6px">${maEsc(m.basis || "")} · not guaranteed</div>`;
+}
+
+function renderMALevels(d) {
+  const host = maEl("ma-levels"); if (!host) return;
+  const rows = (d.allLevels || []).map((l) =>
+    `<tr class="ma-lv-${l.kind}"><td>${maEsc(l.type)}</td><td>${maN(l.price, 2)}</td><td>${maSign(l.distancePts, 1)}</td><td>${maEsc(l.strength)}</td><td style="color:var(--ma-muted)">${maEsc(l.source)}</td></tr>`
+  ).join("");
+  host.innerHTML =
+    `<h4>NIFTY — All Levels (High → Low)</h4>` +
+    `<div class="ma-lvwrap"><table class="ma-ltbl"><thead><tr><th>Level</th><th>Price</th><th>Dist</th><th>Strength</th><th>Source</th></tr></thead><tbody>${rows || `<tr><td colspan="5" class="ma-empty">No levels</td></tr>`}</tbody></table></div>`;
+}
+
+function renderMAHeat(d) {
+  const host = maEl("ma-heat"); if (!host) return;
+  const sortedHeat = (d.oiHeatmap || []).slice().sort((a, b) => b.strike - a.strike);
+  // ATM = strike nearest the live spot (used to auto-centre + highlight).
+  let heatAtm = null, bestD = Infinity;
+  sortedHeat.forEach((h) => { const dd = Math.abs(h.strike - (d.spot ?? h.strike)); if (dd < bestD) { bestD = dd; heatAtm = h.strike; } });
+  const rows = sortedHeat.map((h) =>
+    `<tr data-strike="${h.strike}" class="${h.strike === heatAtm ? "ma-heat-atm" : ""}"><td class="hc-${h.callBucket}">${maOi(h.callOi)}</td><td class="ma-hstrike">${h.strike}</td><td class="hp-${h.putBucket}">${maOi(h.putOi)}</td></tr>`
+  ).join("");
+  host.innerHTML =
+    `<h4>OI Heat Map <span>${maEsc(d.name || "")}</span></h4>` +
+    `<div class="ma-heatwrap"><table><colgroup><col class="c-oi"><col class="c-k"><col class="c-oi"></colgroup><thead><tr><th>CALL OI</th><th>Strike</th><th>PUT OI</th></tr></thead><tbody>${rows || `<tr><td colspan="3" class="ma-empty">Chain unavailable</td></tr>`}</tbody></table></div>` +
+    `<div class="ma-heat-legend"><span><i style="background:rgba(239,68,68,.72)"></i>CALL OI</span><span><i style="background:rgba(0,200,139,.74)"></i>PUT OI</span><span><i style="background:rgba(245,200,66,.6)"></i>Strike</span><span style="color:var(--ma-muted)">darker = higher OI</span></div>`;
+}
+
+function renderMANoTrade(d) {
+  const z = d.noTradeZone || {}; const host = maEl("ma-ntz"); if (!host) return;
+  if (z.active) {
+    // Only shown when an actual no-trade zone is active (reclaims the row otherwise).
+    host.className = "ma-ntz active"; host.style.display = "";
+    host.innerHTML = `<span class="ma-ntz-ttl">⚠ NO TRADE ZONE (DYNAMIC)</span><span class="ma-ntz-band">${maN(z.low, 2)} — ${maN(z.high, 2)}</span><span class="ma-ntz-why">${maEsc((z.reasons || []).join(" · "))}. ${maEsc(z.note || "")}</span>`;
+  } else {
+    host.className = "ma-ntz"; host.style.display = "none"; host.innerHTML = "";
+  }
+}
+
+function maFlowCls(f) { f = String(f || "").toUpperCase(); if (f.indexOf("SHOCK") >= 0 || f.indexOf("REVIEW") >= 0) return "shock"; if (f.indexOf("STRONG BUILD") >= 0) return "strongbuild"; if (f.indexOf("BUILD") >= 0) return "build"; if (f.indexOf("UNWIND") >= 0) return "unwind"; return "normal"; }
+function maGsCls(g) { g = String(g || "").toUpperCase(); if (g === "BLAST") return "blast"; if (g === "PRE-BLAST") return "preblast"; if (g === "BUILDING") return "building"; return "normal"; }
+function maStCls(s) { s = String(s || "").toLowerCase(); if (s.indexOf("very") >= 0) return "verystrong"; if (s.indexOf("strong") >= 0) return "strong"; if (s.indexOf("medium") >= 0) return "medium"; return "weak"; }
+// S/R premium cell. Highlights when LTP is within ±10 pts of this level (LTP is
+// sitting ON the level): green for a support column, red for a resistance column.
+const MA_SR_HIT_PTS = 10;
+function maSrCell(ltp, lvl, isRes) {
+  const hit = (ltp != null && lvl != null && isFinite(ltp) && isFinite(lvl) && Math.abs(ltp - lvl) <= MA_SR_HIT_PTS);
+  const cls = hit ? (isRes ? "ma-hit-res" : "ma-hit-sup") : "";
+  return `<td class="${cls}">${maN(lvl, 1)}</td>`;
+}
+
+function renderMATable(d, side) {
+  const host = maEl(side === "CE" ? "ma-ce" : "ma-pe"); if (!host) return;
+  const rows = (side === "CE" ? d.callOptions : d.putOptions) || [];
+  const spot = d.spot;
+  const walls = new Set();
+  if (d.nearestCallResistance) walls.add(d.nearestCallResistance.strike);
+  if (d.nearestPutSupport) walls.add(d.nearestPutSupport.strike);
+  const dir = d.marketDirection ? d.marketDirection.bias : "SIDEWAYS";
+  const title = side === "CE" ? "◀ CALL (CE) — OI RESISTANCE" : "PUT (PE) — OI SUPPORT ▶";
+  const body = rows.map((r) => {
+    const atm = r.moneyness === "ATM";
+    const spike = r.spikeTrigger || {};
+    const spikeState = (spike.state || "NORMAL");
+    const pulse = (r.gammaState === "BLAST" || r.gammaState === "PRE-BLAST" || spikeState === "SPIKE STARTING") ? (side === "CE" ? "ma-pulse-up" : "ma-pulse-dn") : "";
+    // Highlight rows that align with the current market direction (favoured side).
+    const dirCls = r.dirAlign === "FAVORED" ? (side === "CE" ? "ma-dir-fav-ce" : "ma-dir-fav-pe") : (r.dirAlign === "AGAINST" ? "ma-dir-against" : "");
+    const dirIcon = r.dirAlign === "FAVORED" ? (side === "CE" ? "▲" : "▼") : (r.dirAlign === "AGAINST" ? "✕" : "•");
+    const dirCell = `<td class="ma-dir ${dirCls}">${dirIcon}</td>`;
+    const spkCls = spikeState === "SPIKE STARTING" ? "ma-spk-go" : spikeState === "PRE-SPIKE" ? "ma-spk-pre" : "";
+    const spikeCell = `${spike.trigger != null ? maN(spike.trigger, 1) : "—"}${spikeState !== "NORMAL" ? `<br><b class="ma-spk ${spkCls}" style="font-size:9px">${maEsc(spikeState)}</b>` : ""}`;
+    const selected = (side === "CE" ? MA.selCE : MA.selPE) === r.strike ? "ma-selected " : "";
+    const mover = r.topMover ? "ma-mover " : "";
+    return `<tr data-strike="${r.strike}" class="${selected}${mover}${atm ? "ma-atm " : ""}${walls.has(r.strike) ? "ma-wall " : ""}${dirCls} ${pulse}">` +
+      `<td class="ma-k">${r.strike}${atm ? " ·ATM" : ""}</td>` +
+      `<td>${maN(r.ltp, 2)}</td>` +
+      // S/R premium columns — highlight the cell when the LTP is AT that level
+      // (within ±10 pts): green for a support column, red for a resistance column.
+      maSrCell(r.ltp, r.s1, false) + maSrCell(r.ltp, r.s2, false) + maSrCell(r.ltp, r.swl, false) + maSrCell(r.ltp, r.pdl, false) +
+      maSrCell(r.ltp, r.r1, true) + maSrCell(r.ltp, r.r2, true) + maSrCell(r.ltp, r.swh, true) + maSrCell(r.ltp, r.pdh, true) +
+      `<td class="ma-move-band">${r.move5m ? maEsc(r.move5m) : "—"}</td>` +
+      `<td class="ma-move-band${r.topMover ? " ma-mover-cell" : ""}">${r.topMover ? "⚡" : ""}${r.move15m ? maEsc(r.move15m) : "—"}</td>` +
+      `<td>${maOi(r.volume)}</td>` +
+      `<td>${maOi(r.oi)}</td>` +
+      `<td><span class="ma-gs ${maGsCls(r.gammaState)}">${maEsc(r.gammaState)}</span></td>` +
+      `<td>${spikeCell}</td>` +
+      `<td><span class="ma-st ${maStCls(r.strength)}">${maEsc(r.strength)}</span></td>` +
+      dirCell +
+      `</tr>`;
+  }).join("");
+  const dirBadge = dir === "BULLISH" ? `<b class="up">▲ BULLISH</b>` : dir === "BEARISH" ? `<b class="down">▼ BEARISH</b>` : `<b style="color:var(--ma-amber)">• SIDEWAYS</b>`;
+  host.innerHTML =
+    `<h4>${title} <span>Dir: ${dirBadge} · ${maEsc(d.oiFlow ? d.oiFlow.state : "")}</span></h4>` +
+    `<div class="ma-otbl-wrap"><table class="ma-otbl"><thead><tr>` +
+    `<th>Strike</th><th>LTP</th><th>S1</th><th>S2</th><th>SWL</th><th>PDL</th><th>R1</th><th>R2</th><th>SWH</th><th>PDH</th><th>5M</th><th>15M</th><th>Vol</th><th>OI</th><th>Gamma</th><th>Spike</th><th>Str</th><th>Dir</th>` +
+    `</tr></thead><tbody>${body || `<tr><td colspan="18" class="ma-empty">Chain unavailable</td></tr>`}</tbody></table></div>`;
+}
+
+function renderMACenter(d) {
+  const host = maEl("ma-center"); if (!host) return;
+  const up = d.indexMove ? d.indexMove.upside : null;
+  const dn = d.indexMove ? d.indexMove.downside : null;
+  const upActive = d.breakout && d.breakout.upside && d.breakout.upside.active;
+  const dnActive = d.breakout && d.breakout.downside && d.breakout.downside.active;
+  host.innerHTML =
+    `<div class="ma-side ma-up">UP ${up && up.distancePts != null ? maN(up.distancePts, 0) + "pt" : ""}</div>` +
+    `<div class="ma-arrows ma-up ${upActive ? "ma-pulse-up" : ""}">▲▲▲</div>` +
+    `<div class="ma-dist">R ${up && up.breakoutLevel != null ? maN(up.breakoutLevel, 0) : "—"} · ${maEsc(up ? up.stage : "")}</div>` +
+    `<div class="ma-ltp">${maN(d.spot, 2)}</div>` +
+    `<div class="ma-dist">S ${dn && dn.breakdownLevel != null ? maN(dn.breakdownLevel, 0) : "—"} · ${maEsc(dn ? dn.stage : "")}</div>` +
+    `<div class="ma-arrows ma-dn ${dnActive ? "ma-pulse-dn" : ""}">▼▼▼</div>` +
+    `<div class="ma-side ma-dn">DOWN ${dn && dn.distancePts != null ? maN(dn.distancePts, 0) + "pt" : ""}</div>`;
+}
+
+function renderMAGamma(d) {
+  const host = maEl("ma-gamma"); if (!host) return;
+  const list = (d.gammaBlast || []);
+  const rows = list.length ? list.map((g) =>
+    `<div class="ma-grow"><span><span class="ma-dot ${maGsCls(g.state)}"></span> ${g.strike} ${g.side}</span><span><b class="ma-gs ${maGsCls(g.state)}">${maEsc(g.state)}</b> · spike ₹${g.spikePremium != null ? maN(g.spikePremium, 1) : "—"}</span></div>`
+  ).join("") : `<div class="ma-empty">No gamma build near ATM right now.</div>`;
+  host.innerHTML =
+    `<h4>Gamma Blast Status <span>model-derived · early-move</span></h4>` + rows +
+    `<div style="font-size:9px;color:var(--ma-muted);margin-top:6px">NORMAL · BUILDING · PRE-BLAST · BLAST. Not a prediction.</div>`;
+}
+
+function renderMABaseline(d) {
+  const b = d.baseline915 || {}; const host = maEl("ma-baseline"); if (!host) return;
+  if (!b.captured) { host.innerHTML = `<b>9:15 BASELINE</b> <span class="ma-muted">${maEsc(b.note || "not captured yet")}</span>`; return; }
+  host.innerHTML =
+    `<b>9:15 BASELINE</b>` +
+    `<span>Price <b>${maN(b.niftyPrice, 0)}</b></span>` +
+    `<span>vs 9:15 <b class="${maPctCls(b.priceVsPts)}">${maSign(b.priceVsPts, 0)} (${maSign(b.priceVsPct, 2)}%)</b></span>` +
+    `<span>CE OI <b class="${maPctCls(b.ceOiVsPct)}">${maSign(b.ceOiVsPct, 1)}%</b></span>` +
+    `<span>PE OI <b class="${maPctCls(b.peOiVsPct)}">${maSign(b.peOiVsPct, 1)}%</b></span>` +
+    `<span>Support <b>${maEsc(b.supportTrend)}</b></span>` +
+    `<span>Resistance <b>${maEsc(b.resistanceTrend)}</b></span>`;
+}
+
+function renderMATilt(d) {
+  const t = d.movementTilt || {}; const host = maEl("ma-tilt"); if (!host) return;
+  const bar = (o) => {
+    o = o || { down: 0, sideways: 0, up: 0 };
+    return `<div class="ma-tilt-row">` +
+      `<span class="ma-tilt-c dn" style="flex:${Math.max(o.down, 4)}">${o.down}%<small>DOWN</small></span>` +
+      `<span class="ma-tilt-c sw" style="flex:${Math.max(o.sideways, 4)}">${o.sideways}%<small>SIDE</small></span>` +
+      `<span class="ma-tilt-c up" style="flex:${Math.max(o.up, 4)}">${o.up}%<small>UP</small></span>` +
+      `</div>`;
+  };
+  host.innerHTML =
+    `<h4>Index Movement Tilt <span>${maEsc(t.lean || "")}</span></h4>` +
+    `<div class="ma-tilt-lab">Next 5 min</div>` + bar(t.next5m) +
+    `<div class="ma-tilt-lab">Next 15 min</div>` + bar(t.next15m) +
+    `<div style="font-size:9px;color:var(--ma-muted);margin-top:5px">${maEsc(t.basis || "model tilt — not a win rate")}</div>`;
+}
+
+function renderMAExpLevels(d) {
+  const e = d.expectedLevels || {}; const host = maEl("ma-explevels"); if (!host) return;
+  const row = (label, o) => o
+    ? `<div class="ma-el-row"><span class="ma-el-h">${label}</span><b class="down">${maN(o.low, 0)}</b><b class="ma-el-cur">${maN(o.current, 0)}</b><b class="up">${maN(o.high, 0)}</b></div>`
+    : `<div class="ma-el-row"><span class="ma-el-h">${label}</span><b>—</b></div>`;
+  host.innerHTML =
+    `<h4>Expected Index Levels <span>VIX band</span></h4>` +
+    `<div class="ma-el-row ma-el-head"><span></span><b>Low</b><b>Current</b><b>High</b></div>` +
+    row("5 MIN", e.m5) + row("15 MIN", e.m15) +
+    `<div style="font-size:9px;color:var(--ma-muted);margin-top:5px">${maEsc(e.basis || "")}</div>`;
+}
+
+function renderMAData(d) {
+  const f = d.dataFreshness || {}; const host = maEl("ma-datastatus"); if (!host) return;
+  const row = (label, o) => {
+    const st = o && o.status ? o.status : "—";
+    const cls = String(st).toLowerCase();
+    const age = o && o.ageSec != null ? ` ${o.ageSec}s` : "";
+    const cmap = cls === "live" || cls === "fresh" ? "up" : (cls === "delayed" ? "" : "down");
+    return `<div class="ma-ds-row"><span>${label}</span><b class="${cmap}">${maEsc(st)}${age}</b></div>`;
+  };
+  host.innerHTML =
+    `<h4>Data Status</h4>` +
+    row("Price Feed", f.price) + row("Volume Feed", f.volume) + row("OI Feed", f.oi) + row("VIX Feed", f.vix) + row("Option Chain", f.chain) +
+    `<div class="ma-ds-row"><span>Last Update</span><b>${maEsc(f.lastUpdate || "—")}</b></div>` +
+    `<div class="ma-ds-row"><span>Breakout detect</span><b class="${(f.breakoutDetection || "").indexOf("ACTIVE") >= 0 ? "up" : "down"}">${maEsc(f.breakoutDetection || "—")}</b></div>`;
+}

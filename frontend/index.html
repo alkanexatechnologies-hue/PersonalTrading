@@ -7,7 +7,7 @@
          under the home indicator. Android ignores it harmlessly. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>BC Data Status</title>
-    <link rel="stylesheet" href="styles.css?v=20260925-grwconn" />
+    <link rel="stylesheet" href="styles.css?v=20261004-testlab5" />
     <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   </head>
   <body class="oi-focus">
@@ -487,8 +487,10 @@
 
           <button class="tab grp-swing" data-tab="movetiming" data-group="swing">Move Timing</button>
           <button class="tab" data-tab="dhanbacktest" data-group="dhanbacktest">🧪 Backtest (Dhan)</button>
+          <button class="tab" data-tab="testlab" data-group="dhanbacktest">🧪 Universal Indicator Lab</button>
           <button class="tab tab-primary" data-tab="premarket" data-group="marketcommand">📊 Market Sentiment</button>
           <button class="tab tab-primary" data-tab="marketcommand" data-group="marketcommand">⚡ Market Command</button>
+          <button class="tab tab-primary" data-tab="marketanalysis" data-group="marketcommand">📊 Market Analysis</button>
           <button class="tab tab-primary" data-tab="optionterminal" data-group="marketcommand">📈 Option Terminal</button>
           <button class="tab tab-primary" data-tab="oianalysis" data-group="marketcommand">🔬 OI Analysis</button>
           <button class="tab tab-primary" data-tab="tradeexec" data-group="marketcommand">🧾 Trade Execution</button>
@@ -714,6 +716,217 @@
 
           </div>
         </div><!-- /panel-strategylab -->
+
+        <!-- ============================ UNIVERSAL MARKET INDICATOR — TEST LAB V1 ============================
+             RESEARCH / AUDIT ONLY. Reads Dhan historical candles (reusing the existing token — never shown),
+             runs the isolated no-lookahead engine (backend/testlab/*), and renders a 9-tab review of a run.
+             It never touches the live trading engine and never places or simulates a live order. -->
+        <div class="tab-panel" id="panel-testlab">
+          <div class="uil2">
+
+            <!-- ===== Top bar ===== -->
+            <div class="uil2-topbar">
+              <div class="uil2-brand">
+                <span class="uil2-logo">📊</span>
+                <div class="uil2-brandtxt">
+                  <b>Universal Indicator Test Lab</b>
+                  <span class="uil2-sub">Backtest • Replay • Analyze — Dhan Historical Data</span>
+                </div>
+              </div>
+              <div class="uil2-pills">
+                <span class="uil2-pill" id="uil2-conn">● Dhan —</span>
+                <span class="uil2-pill info">🛈 Test Zone (Read Only)</span>
+                <span class="uil2-pill danger">⛔ No Auto Execution</span>
+              </div>
+            </div>
+
+            <!-- ===== 9-tab strip ===== -->
+            <div class="uil2-tabs" id="uil2-tabs">
+              <button class="uil2-tab active" data-uil="config">1. Test Configuration</button>
+              <button class="uil2-tab" data-uil="chart">2. Chart &amp; Signals</button>
+              <button class="uil2-tab" data-uil="indicators">3. Indicator Status</button>
+              <button class="uil2-tab" data-uil="results">4. Backtest Results</button>
+              <button class="uil2-tab" data-uil="trades">5. Trades</button>
+              <button class="uil2-tab" data-uil="replay">6. Candle Replay</button>
+              <button class="uil2-tab" data-uil="ablation">7. Indicator Ablation</button>
+              <button class="uil2-tab" data-uil="validation">8. Data Validation</button>
+              <button class="uil2-tab" data-uil="export">9. Export &amp; Audit</button>
+              <button class="uil2-tab" data-uil="signal">🎯 Market Signal (15M→5M)</button>
+            </div>
+
+            <!-- ===== 3-column dashboard body ===== -->
+            <div class="uil2-body">
+
+              <!-- ---------- LEFT: configuration rail ---------- -->
+              <aside class="uil2-left">
+                <!-- 1. Instrument -->
+                <section class="uil2-sec">
+                  <div class="uil2-sec-h"><span class="uil2-num">1</span> Instrument Selection</div>
+                  <label class="uil2-field"><span>Index</span>
+                    <select id="uil2-index">
+                      <option value="NIFTY">NIFTY</option>
+                      <option value="BANKNIFTY">BANKNIFTY</option>
+                      <option value="FINNIFTY">FINNIFTY</option>
+                      <option value="SENSEX">SENSEX</option>
+                    </select>
+                  </label>
+                  <label class="uil2-field"><span>Instrument Type</span>
+                    <select id="uil2-instr">
+                      <option value="index">Index (Signal)</option>
+                      <option value="futures">Futures (Signal)</option>
+                    </select>
+                  </label>
+                  <div class="uil2-chips" id="uil2-index-chips">
+                    <button class="uil2-chip active" data-idx="NIFTY">NIFTY</button>
+                    <button class="uil2-chip" data-idx="BANKNIFTY">BANKNIFTY</button>
+                    <button class="uil2-chip" data-idx="FINNIFTY">FINNIFTY</button>
+                    <button class="uil2-chip" data-idx="SENSEX">SENSEX</button>
+                  </div>
+                </section>
+
+                <!-- 2. Timeframe -->
+                <section class="uil2-sec">
+                  <div class="uil2-sec-h"><span class="uil2-num">2</span> Timeframe</div>
+                  <div class="uil2-chips" id="uil2-tf-chips">
+                    <button class="uil2-chip" data-tf="1m">1 Min</button>
+                    <button class="uil2-chip" data-tf="3m">3 Min</button>
+                    <button class="uil2-chip active" data-tf="5m">5 Min</button>
+                    <button class="uil2-chip" data-tf="15m">15 Min</button>
+                    <button class="uil2-chip" data-tf="25m">25 Min</button>
+                    <button class="uil2-chip" data-tf="60m">60 Min</button>
+                  </div>
+                </section>
+
+                <!-- 3. Test Scope -->
+                <section class="uil2-sec">
+                  <div class="uil2-sec-h"><span class="uil2-num">3</span> Test Scope</div>
+                  <label class="uil2-radio"><input type="radio" name="uil2-scope" value="custom" checked /> <span>Custom Date Range</span></label>
+                  <div class="uil2-daterow" id="uil2-daterow">
+                    <label class="uil2-field"><span>From Date</span><input type="date" id="uil2-from" value="2026-09-01" /></label>
+                    <label class="uil2-field"><span>To Date</span><input type="date" id="uil2-to" value="2026-09-30" /></label>
+                  </div>
+                  <div class="uil2-chips uil2-ranges" id="uil2-ranges">
+                    <button class="uil2-chip sm" data-range="1M">1M</button>
+                    <button class="uil2-chip sm" data-range="3M">3M</button>
+                    <button class="uil2-chip sm" data-range="6M">6M</button>
+                    <button class="uil2-chip sm" data-range="1Y">1Y</button>
+                    <button class="uil2-chip sm" data-range="2Y">2Y</button>
+                    <button class="uil2-chip sm" data-range="3Y">3Y</button>
+                    <button class="uil2-chip sm" data-range="5Y">5Y</button>
+                  </div>
+                  <label class="uil2-radio"><input type="radio" name="uil2-scope" value="full" /> <span>Full Available History</span></label>
+                  <div class="uil2-availbox" id="uil2-availbox">
+                    <div class="uil2-availrow"><span>Available Data</span><b id="uil2-avail-sym">—</b></div>
+                    <div class="uil2-availrow"><span>From</span><b id="uil2-avail-from">—</b></div>
+                    <div class="uil2-availrow"><span>To</span><b id="uil2-avail-to">—</b></div>
+                    <div class="uil2-availrow"><span>Total Candles</span><b id="uil2-avail-total">—</b></div>
+                  </div>
+                </section>
+
+                <!-- 4. Futures Binding (auto) -->
+                <section class="uil2-sec">
+                  <div class="uil2-sec-h"><span class="uil2-num">4</span> Futures Binding (Auto) <span class="uil2-badge" id="uil2-bind-badge">— Pending</span></div>
+                  <div class="uil2-bindgrid">
+                    <div class="uil2-bindrow"><span>Underlying</span><b id="uil2-bind-under">—</b></div>
+                    <div class="uil2-bindrow"><span>Expiry</span><b id="uil2-bind-exp">—</b></div>
+                    <div class="uil2-bindrow"><span>Security ID</span><b id="uil2-bind-sec">—</b></div>
+                    <div class="uil2-bindrow"><span>Instrument</span><b id="uil2-bind-instr">—</b></div>
+                    <div class="uil2-bindrow"><span>Exchange</span><b id="uil2-bind-exch">—</b></div>
+                  </div>
+                  <div class="uil2-flags" id="uil2-flags">
+                    <span class="uil2-flag" id="uil2-flag-vol">○ Volume Available</span>
+                    <span class="uil2-flag" id="uil2-flag-vwap">○ VWAP Ready</span>
+                    <span class="uil2-flag" id="uil2-flag-oi">○ Open Interest Available</span>
+                    <span class="uil2-flag" id="uil2-flag-valid">○ Data Valid</span>
+                  </div>
+                </section>
+
+                <!-- 5. Test Options -->
+                <section class="uil2-sec">
+                  <div class="uil2-sec-h"><span class="uil2-num">5</span> Test Options</div>
+                  <label class="uil2-toggle"><span>Include Volume</span><input type="checkbox" id="uil2-opt-vol" checked /><i></i></label>
+                  <label class="uil2-toggle"><span>Include Open Interest (OI)</span><input type="checkbox" id="uil2-opt-oi" checked /><i></i></label>
+                  <label class="uil2-toggle"><span>Use Futures VWAP</span><input type="checkbox" id="uil2-opt-fvwap" checked /><i></i></label>
+                  <label class="uil2-toggle"><span>Include Expiry Days</span><input type="checkbox" id="uil2-opt-exp" checked /><i></i></label>
+                  <label class="uil2-toggle"><span>Use Normalized ATR (%)</span><input type="checkbox" id="uil2-opt-natr" checked /><i></i></label>
+                </section>
+
+                <div class="uil2-actions">
+                  <button id="uil2-fetch" class="uil2-btn ghost">⬇ Fetch Dhan Data</button>
+                  <button id="uil2-run" class="uil2-btn primary">▶ Run Indicator Test</button>
+                  <div class="uil2-actions2">
+                    <button id="uil2-replay-start" class="uil2-btn sm">▶ Start Replay</button>
+                    <button id="uil2-reset" class="uil2-btn sm ghost">↺ Reset</button>
+                  </div>
+                  <div id="uil2-runlog" class="uil2-runlog"></div>
+                </div>
+              </aside>
+
+              <!-- ---------- CENTER ---------- -->
+              <main class="uil2-center">
+                <!-- chart card -->
+                <div class="uil2-chartcard">
+                  <div class="uil2-charthead">
+                    <div class="uil2-chartsym"><b id="uil2-chart-sym">NIFTY</b> <span id="uil2-chart-meta" class="uil2-sub">— no run —</span></div>
+                    <div class="uil2-ohlc" id="uil2-chart-ohlc"></div>
+                    <div class="uil2-chart-tf" id="uil2-chart-tf">5m</div>
+                  </div>
+                  <div class="uil2-chart-legend" id="uil2-chart-legend">
+                    <span class="lg-ema9">EMA 9</span><span class="lg-ema21">EMA 21</span>
+                    <span class="lg-vwap">VWAP</span><span class="lg-buy">▲ BUY</span><span class="lg-sell">▼ SELL</span>
+                  </div>
+                  <div class="uil2-chart" id="uil2-chart"></div>
+                  <div class="uil2-replaybar" id="uil2-replaybar">
+                    <button id="uil2-replay-step" class="uil2-btn sm">⏭ Step</button>
+                    <input type="range" id="uil2-replay-range" min="0" max="100" value="100" />
+                    <span id="uil2-replay-pos" class="uil2-sub">—</span>
+                  </div>
+                </div>
+
+                <!-- indicator status strip -->
+                <div class="uil2-indstrip" id="uil2-indstrip"></div>
+
+                <!-- view region controlled by the 9 top tabs -->
+                <div class="uil2-view" id="uil2-view"><div class="uil2-empty">Configure a test on the left and press <b>Run Indicator Test</b>.</div></div>
+              </main>
+
+              <!-- ---------- RIGHT ---------- -->
+              <aside class="uil2-right">
+                <div class="uil2-rcard">
+                  <div class="uil2-rhead">Current Candle <span id="uil2-cc-time" class="uil2-sub">—</span></div>
+                  <div class="uil2-ccgrid" id="uil2-cc"></div>
+                </div>
+                <div class="uil2-rcard">
+                  <div class="uil2-rhead">Final Signal <span class="uil2-sub">(Closed Candle)</span></div>
+                  <div class="uil2-finalbig" id="uil2-final-badge">—</div>
+                  <div class="uil2-scorerow">
+                    <div class="uil2-score"><span>BUY Score</span><b id="uil2-final-buy">—</b></div>
+                    <div class="uil2-score"><span>SELL Score</span><b id="uil2-final-sell">—</b></div>
+                  </div>
+                  <div class="uil2-finalgrid" id="uil2-final-levels"></div>
+                </div>
+                <div class="uil2-rcard">
+                  <div class="uil2-rhead">Primary Reason</div>
+                  <div id="uil2-final-reason" class="uil2-reasonbox">—</div>
+                  <div class="uil2-rhead" style="margin-top:10px">Blockers</div>
+                  <div id="uil2-final-blockers" class="uil2-reasonbox">—</div>
+                </div>
+              </aside>
+            </div>
+
+            <!-- ===== bottom status + export bar ===== -->
+            <div class="uil2-statusbar">
+              <div class="uil2-statustxt" id="uil2-datastatus">Data Status: <b>—</b> &nbsp;·&nbsp; No run yet</div>
+              <div class="uil2-exportbtns">
+                <button id="uil2-exp-pkg" class="uil2-btn sm">⬇ Export Review Package</button>
+                <button id="uil2-exp-csv" class="uil2-btn sm">⬇ Export CSV</button>
+                <button id="uil2-exp-json" class="uil2-btn sm">⬇ Export JSON</button>
+                <button id="uil2-view-logs" class="uil2-btn sm ghost">📄 View Logs</button>
+              </div>
+            </div>
+
+          </div>
+        </div><!-- /panel-testlab -->
 
         <!-- 8. SCENARIO DETAIL MODAL -->
         <div id="msl-modal" class="msl-modal hidden">
@@ -1348,7 +1561,8 @@
                   <div class="mc-replay-note">Real candles + Order Blocks for that session (technical only).</div>
                 </div>
               </div>
-              <button class="mc2-replay" id="mc-open-optionterminal" title="Open the CE/PE Option Terminal for this index" style="margin-left:4px">📈 Option Terminal</button>
+              <button class="mc2-replay" id="mc-open-marketanalysis" title="Open the composite Market Analysis screen for this index" style="margin-left:4px">📊 Market Analysis</button>
+              <button class="mc2-replay" id="mc-open-optionterminal" title="Open the CE/PE Option Terminal for this index">📈 Option Terminal</button>
               <button class="mc2-replay" id="mc-open-oianalysis" title="Open the OI Analysis screen for this index">🔬 OI Analysis</button>
               <button class="mc2-replay" id="mc-open-tradeexec" title="Open the Trade & Levels / Trade Execution screen">🧾 Trade Execution</button>
               <div class="mc2-status">
@@ -1756,6 +1970,73 @@
           </div>
         </div><!-- /panel-optionterminal -->
 
+        <!-- ============================ MARKET ANALYSIS ============================ -->
+        <!-- Composite read-only analysis desk. CE on LEFT, PE on RIGHT. No charts.
+             All numbers come from /api/market-analysis (single shared state). -->
+        <div class="tab-panel" id="panel-marketanalysis">
+          <div class="ma-wrap">
+            <!-- ---- top control bar ---- -->
+            <div class="ma-topbar">
+              <div class="ma-brand">📊 MARKET ANALYSIS
+                <span class="ma-muted">model-derived · CE ◀ resistance · support ▶ PE</span>
+              </div>
+              <div class="ma-ctrls">
+                <div class="ma-idx" id="ma-idx-btns">
+                  <button class="ma-idxbtn active" data-sym="^NSEI">NIFTY 50</button>
+                  <button class="ma-idxbtn" data-sym="^NSEBANK">BANKNIFTY</button>
+                  <button class="ma-idxbtn" data-sym="^CNXFIN">FINNIFTY</button>
+                  <button class="ma-idxbtn" data-sym="^NSEMDCP50">MIDCPNIFTY</button>
+                  <button class="ma-idxbtn" data-sym="^BSESN">SENSEX</button>
+                </div>
+                <div class="ma-tf" id="ma-tf-btns">
+                  <button class="ma-tfbtn" data-tf="1m">1m</button>
+                  <button class="ma-tfbtn" data-tf="5m">5m</button>
+                  <button class="ma-tfbtn active" data-tf="15m">15m</button>
+                  <button class="ma-tfbtn" data-tf="30m">30m</button>
+                  <button class="ma-tfbtn" data-tf="60m">1h</button>
+                </div>
+                <label class="ma-range">Strikes ±
+                  <input id="ma-range" type="number" min="4" max="20" step="1" value="7" />
+                </label>
+                <div class="ma-expiry" id="ma-expiry">Expiry —</div>
+              </div>
+              <div class="ma-live" id="ma-livepills"></div>
+            </div>
+
+            <!-- ---- summary + VIX + movement + no-trade + levels + heatmap ---- -->
+            <div class="ma-grid-top">
+              <div class="ma-card ma-summary" id="ma-summary"></div>
+              <div class="ma-card ma-ncr" id="ma-ncr"></div>
+              <div class="ma-card ma-levels" id="ma-levels"></div>
+              <div class="ma-card ma-movecard" id="ma-move"></div>
+              <div class="ma-card ma-heat" id="ma-heat"></div>
+            </div>
+
+            <!-- ---- dynamic no-trade zone banner ---- -->
+            <div class="ma-ntz" id="ma-ntz"></div>
+
+            <!-- ---- CE (left) · NIFTY MOVE (center) · PE (right) ---- -->
+            <div class="ma-grid-tables">
+              <div class="ma-card ma-ce" id="ma-ce"></div>
+              <div class="ma-card ma-pe" id="ma-pe"></div>
+            </div>
+
+            <!-- ---- 9:15 baseline strip ---- -->
+            <div class="ma-base-strip" id="ma-baseline"></div>
+
+            <!-- ---- gamma · movement tilt · expected levels · data status ---- -->
+            <div class="ma-grid-bottom">
+              <div class="ma-card ma-vixcard" id="ma-vix"></div>
+              <div class="ma-card ma-gamma" id="ma-gamma"></div>
+              <div class="ma-card ma-tilt" id="ma-tilt"></div>
+              <div class="ma-card ma-explevels" id="ma-explevels"></div>
+              <div class="ma-card ma-datastatus" id="ma-datastatus"></div>
+            </div>
+
+            <div class="ma-foot" id="ma-foot"></div>
+          </div>
+        </div><!-- /panel-marketanalysis -->
+
         <!-- ============================ TRADE EXECUTION ============================ -->
         <!-- Trade & Levels: Daily Log + Important Market Levels + Levels chart. Uses
              the same authoritative snapshot + the new confirmation flow / cooldown. -->
@@ -1775,6 +2056,7 @@
               <span class="te-live" id="oia-live">LIVE</span>
               <button class="te-refresh" id="oia-refresh">↻ Refresh</button>
               <button class="te-navbtn" id="oia-open-command">⚡ Market Command</button>
+              <button class="te-navbtn" id="oia-open-marketanalysis">📊 Market Analysis</button>
               <button class="te-navbtn" id="oia-open-tradeexec">🧾 Trade Execution</button>
             </div>
 
@@ -1879,6 +2161,7 @@
               <span class="te-live" id="te-live">LIVE</span>
               <button class="te-refresh" id="te-refresh">↻ Refresh</button>
               <button class="te-refresh" id="te-log-trade" title="Record the current signal to the Daily Log">＋ Log Trade</button>
+              <button class="te-navbtn" id="te-open-marketanalysis">📊 Market Analysis</button>
               <button class="te-navbtn" id="te-open-optionterminal">📈 Option Terminal</button>
               <button class="te-navbtn" id="te-open-command">⚡ Market Command</button>
             </div>
@@ -2244,6 +2527,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=20260925-grwconn"></script>
+    <script src="app.js?v=20261004-testlab5"></script>
   </body>
 </html>
