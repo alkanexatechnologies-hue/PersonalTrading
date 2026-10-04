@@ -151,7 +151,7 @@ export function evaluateMorning930(inp: Morning930Inputs): Morning930Read {
     spotStop: built.spotStop,
     lotSize: built.lotSize,
     direction: built.direction,
-    strikeReason: built.strikeReason,
+    strikeReason: built.strikeReason ?? "",
   };
   return out;
 }
