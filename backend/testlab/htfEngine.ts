@@ -253,7 +253,7 @@ export function runHtfEngine(input: HtfInput): HtfResult {
             if (fake) block("FAKE MOVE"); else if (extended) block("EXTENDED MOVE");
             else if (expiryRisk === "HIGH" && exp.isExpiryDay) block("EXPIRY RISK"); else if (isLate) block("LATE CUTOFF");
             else if (!(risk > 0)) block("INVALID STRUCTURE");
-            else if (cfg.rrGateMode !== "OFF" && (rr ?? 0) < cfg.rrMin) block("R:R BELOW MIN");
+            // R:R is INFORMATION ONLY (user rule 2026-10-05): calculated and shown, never a gate
             else signal = "SELL";
           } else { if (risk > 0) signal = "SELL"; else block("INVALID STRUCTURE"); }
         } else {
@@ -265,7 +265,7 @@ export function runHtfEngine(input: HtfInput): HtfResult {
             if (fake) block("FAKE MOVE"); else if (extended) block("EXTENDED MOVE");
             else if (expiryRisk === "HIGH" && exp.isExpiryDay) block("EXPIRY RISK"); else if (isLate) block("LATE CUTOFF");
             else if (!(risk > 0)) block("INVALID STRUCTURE");
-            else if (cfg.rrGateMode !== "OFF" && (rr ?? 0) < cfg.rrMin) block("R:R BELOW MIN");
+            // R:R is INFORMATION ONLY (user rule 2026-10-05): calculated and shown, never a gate
             else signal = "BUY";
           } else { if (risk > 0) signal = "BUY"; else block("INVALID STRUCTURE"); }
         }

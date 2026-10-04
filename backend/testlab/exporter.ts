@@ -51,6 +51,7 @@ export function writeReviewPackage(result: RunResult): string {
   w("trades.csv", csv(result.trades, ["iso", "signal", "entry", "stopLoss", "target1", "target2", "rr", "entryTimestamp", "exitTimestamp", "exitPrice", "outcome", "rMultiple", "mfe", "mae", "holdBars", "timingClassification", "fillAmbiguity"]));
   w("audit.jsonl", result.rows.map((r) => JSON.stringify(r)).join("\n"));
 
+  if (result.decision) writeDecisionFiles(result, w);
   w("implementation-diff.md", implementationDiff(result));
   w("README.md", readme(result, base));
   return base;
@@ -153,4 +154,32 @@ Format: REQUIREMENT / STATUS / REASON / CURRENT IMPLEMENTATION / IMPACT
 
 No requirement was silently replaced with an alternative; every gap is listed above.
 `;
+}
+
+// ---- Trade Decision layer audit (additive). Every candidate movement is logged,
+// executable or not, with the exact block reason. ----
+function writeDecisionFiles(result: RunResult, w: (name: string, content: string) => void) {
+  const d = result.decision!;
+  w("decision-summary.json", JSON.stringify({ summary: d.summary, optionData: d.optionData, metrics: d.metrics, warmup: result.warmup }, null, 2));
+  w("decision-audit.jsonl", d.rows.map((r) => JSON.stringify(r)).join("\n"));
+  const cand = d.rows.filter((r) => r.plan).map((r) => ({
+    timestamp: r.iso, index: result.config.index, spot: r.spot, price: r.price, direction: r.movementDirection,
+    regime15: r.regime15, contextWarning: r.contextWarning,
+    movementState: r.movementState, breakoutLevel: r.breakoutLevel, breakdownLevel: r.breakdownLevel,
+    entry: r.plan!.entry, stopLoss: r.plan!.stopLoss, target1: r.plan!.target1, target2: r.plan!.target2,
+    riskPoints: r.plan!.riskPoints, rewardPoints: r.plan!.rewardPoints, rr: r.plan!.rr,
+    strike: r.option?.primary?.strike ?? null, optionType: r.option?.optionType ?? null, optionLTP: r.option?.primary?.ltp ?? null,
+    altStrike: r.option?.alternative?.strike ?? null, optionStop: r.option?.optionStop ?? null, optionTarget: r.option?.optionTarget ?? null,
+    gammaState: r.gamma?.state ?? null, gammaScore: r.gamma ? `${r.gamma.score}/${r.gamma.evaluated}` : null,
+    oiStatus: r.oiStatus, oiConfirmation: r.oiConfirmation, volumeState: r.volumeState, momentumState: r.momentumState,
+    structureState: r.structureState, vwapState: r.vwapState, emaState: r.emaState, liquidityState: r.liquidityState,
+    liquidityGrade: r.liquidityGrade, oiValidation: r.oiValidation.state, reversalRisk: r.reversalRisk?.level ?? null,
+    rrStatus: "INFORMATION ONLY", signal: r.action === "TAKE" ? (r.plan!.side === "BUY" ? "BUY CE" : "BUY PE") : "WAIT",
+    executionDecision: r.executionState, blockReason: r.blockReason, allReasons: r.blockReasons.join(" | "),
+    timingClassification: r.timingClassification, fill: r.fillPrice, outcome: r.outcome, rMultiple: r.rMultiple,
+  }));
+  w("decision-candidates.csv", csv(cand, Object.keys(cand[0] || { timestamp: "" })));
+  w("movement-events.csv", csv(d.events.map((e) => ({ ...e, blockCounts: JSON.stringify(e.blockCounts) })), ["moveId", "direction", "firstIso", "firstState", "confirmIso", "level", "startPrice", "endIso", "endReason", "mfeAtr", "genuine", "candidateBars", "readyBars", "blockCounts", "executed", "tradeOutcome", "tradeR", "timing"]));
+  w("big-moves.csv", csv(d.bigMoves, ["direction", "startIso", "endIso", "startPrice", "endPrice", "travelAtr", "detectedIso", "coverage"]));
+  w("decision-trades.csv", csv(d.trades, ["iso", "signal", "entry", "stopLoss", "target1", "target2", "rr", "exitPrice", "outcome", "rMultiple", "mfe", "mae", "holdBars", "fillAmbiguity"]));
 }

@@ -7,7 +7,11 @@ import { Candle } from "../types";
 import { INDEX_MASTER, TF_MINUTES } from "./config";
 import { resolvePerDateBindings } from "./futuresResolver";
 import { fetchIntraday, resample } from "./dhanData";
-import { runEngine } from "./engine";
+import { runEngine, computeMetrics, computeDaily } from "./engine";
+import { runDecisionLayer } from "./decision";
+import { fetchOptionSeries, OptionSeries } from "./optionsData";
+import { defaultDecisionConfig } from "./config";
+import { context15ForSeries } from "./context15";
 import { FuturesBinding, PerDateBindingRow, RunResult, TestConfig, VwapSource } from "./types";
 
 const DAY = 86_400_000;
@@ -21,7 +25,31 @@ const INVALID_BINDING: FuturesBinding = {
   bindingReason: "No date-correct futures contract available for this window.",
 };
 
+export interface LoadedSeries {
+  m: (typeof INDEX_MASTER)[keyof typeof INDEX_MASTER];
+  native: number;
+  warmupSessions: string[];
+  dateSet: string[];
+  spotByTime: Map<number, number>;
+  perDateBinding: PerDateBindingRow[];
+  contractChanges: { date: string; from: string | null; to: string | null }[];
+  unavailableDateCount: number;
+  candles: Candle[]; oi: (number | null)[];
+  candles15: Candle[];               // 15M series of the SAME instrument (higher-timeframe context), closed candles only
+  oiStatus: "AVAILABLE" | "UNAVAILABLE"; vwapSource: VwapSource; repBinding: FuturesBinding;
+  bindingStatusByTime: Map<number, "RESOLVED" | "UNAVAILABLE_HISTORICAL" | "INVALID">;
+  contractChangeTimes: Set<number>; otherPriceByTime: Map<number, number>; vwapInstrument: string;
+  bindingByDate: Map<string, FuturesBinding>;
+  options: OptionSeries | null;
+}
+
+/** One-shot batch run (unchanged behaviour): fetch everything, then evaluate. */
 export async function runTest(cfg: TestConfig): Promise<RunResult> {
+  return evaluateSeries(cfg, await loadSeries(cfg));
+}
+
+/** Fetch (async) every series a run needs. `cfg.asOfSec` keeps only candles CLOSED by then (live / replay). */
+export async function loadSeries(cfg: TestConfig): Promise<LoadedSeries> {
   const m = INDEX_MASTER[cfg.index];
   const tfMin = TF_MINUTES[cfg.timeframe];
   const native = cfg.timeframe === "3m" ? 1 : tfMin; // 3m => fetch 1m then resample
@@ -33,13 +61,29 @@ export async function runTest(cfg: TestConfig): Promise<RunResult> {
     if (!cfg.scope.fromDate || !cfg.scope.toDate) throw new Error("custom scope needs fromDate/toDate");
     fromMs = toEpoch(cfg.scope.fromDate) * 1000; toMs = endEpoch(cfg.scope.toDate) * 1000;
   }
-  const startSec = Math.floor(fromMs / 1000), endSec = Math.floor(toMs / 1000);
+  let startSec = Math.floor(fromMs / 1000);
+  const endSec = Math.floor(toMs / 1000);
+  // Warmup: the engine already scores only in-scope candles ("WARMUP HISTORY"),
+  // but nothing loaded prior sessions, so the first minHistory bars of a short
+  // window were blind. Load N prior sessions for indicator warmup only.
+  const warmupN = cfg.scope.mode === "custom" ? Math.max(0, cfg.warmupSessions ?? 0) : 0;
+  if (warmupN > 0) startSec -= (warmupN * 2 + 6) * 86400;
 
   // ---- SPOT series (always fetched: establishes trading dates + basis) ----
   const spotSec = await lookupDhanSecurity(m.nseSymbol);
   if (!spotSec) throw new Error(`No Dhan index security for ${m.nseSymbol}`);
   const spotFetch = await fetchIntraday(spotSec.securityId, spotSec.exchangeSegment, spotSec.instrument, native, startSec, endSec);
-  let spotCandles = spotFetch.candles, spotOi = spotFetch.oi;
+  const closedBy = (c: Candle) => cfg.asOfSec == null || c.time + tfMin * 60 <= cfg.asOfSec;
+  let spotCandles = spotFetch.candles.filter(closedBy), spotOi = spotFetch.oi.filter((_, i) => closedBy(spotFetch.candles[i]));
+  let warmupSessions: string[] = [];
+  if (warmupN > 0 && cfg.scope.fromDate) {
+    const before = [...new Set(spotCandles.map((c) => istDate(c.time)).filter((d) => d < cfg.scope.fromDate!))].sort();
+    warmupSessions = before.slice(-warmupN);
+    const keepFrom = warmupSessions[0] ?? cfg.scope.fromDate;
+    const keep = spotCandles.map((c, i) => (istDate(c.time) >= keepFrom ? i : -1)).filter((i) => i >= 0);
+    spotCandles = keep.map((i) => spotCandles[i]); spotOi = keep.map((i) => spotOi[i]);
+    startSec = toEpoch(keepFrom);
+  }
   if (cfg.timeframe === "3m") { const r = resample(spotCandles, spotOi, 3); spotCandles = r.candles; spotOi = r.oi; }
   const spotByTime = new Map<number, number>(); spotCandles.forEach((c) => spotByTime.set(c.time, c.close));
 
@@ -60,7 +104,7 @@ export async function runTest(cfg: TestConfig): Promise<RunResult> {
     .map((p, i) => ({ p, prev: i > 0 ? perDate[i - 1] : null }))
     .filter((x) => x.p.contractChange)
     .map((x) => ({ date: x.p.date, from: x.prev ? x.prev.binding.futuresSymbol : null, to: x.p.binding.futuresSymbol }));
-  const unavailableDateCount = perDate.filter((p) => p.binding.status !== "RESOLVED").length;
+  const unavailableDateCount = perDate.filter((p) => p.binding.status !== "RESOLVED" && !warmupSessions.includes(p.date)).length;
 
   // ---- choose the signal series per data mode ----
   let candles: Candle[] = [];
@@ -86,16 +130,21 @@ export async function runTest(cfg: TestConfig): Promise<RunResult> {
   // futures-by-time (for basis in SPOT_DIRECTION and the FUTURES_INTERNAL series)
   const futByTime = new Map<number, number>();
   const futCandlesAll: Candle[] = []; const futOiAll: (number | null)[] = [];
+  const fut15: Candle[] = [];
+  const closed15 = (c: Candle) => cfg.asOfSec == null || c.time + 900 <= cfg.asOfSec;
   let anyFutOi = false;
   for (const per of periods) {
     const ps = toEpoch(per.dates[0]); const pe = endEpoch(per.dates[per.dates.length - 1]);
     try {
       const f = await fetchIntraday(per.secId, per.seg, "FUTIDX", native, ps, pe);
-      let fc = f.candles, fo = f.oi;
+      let fc = f.candles.filter(closedBy), fo = f.oi.filter((_, i) => closedBy(f.candles[i]));
       if (cfg.timeframe === "3m") { const r = resample(fc, fo, 3); fc = r.candles; fo = r.oi; }
       if (f.oiStatus === "AVAILABLE") anyFutOi = true;
-      const firstTime = futCandlesAll.length ? null : (fc[0]?.time ?? null);
       fc.forEach((c, i) => { futCandlesAll.push(c); futOiAll.push(fo[i]); futByTime.set(c.time, c.close); });
+      if (cfg.dataMode === "FUTURES_INTERNAL") {
+        const f15 = native === 15 ? f : await fetchIntraday(per.secId, per.seg, "FUTIDX", 15, ps, pe).catch(() => null);
+        if (f15) f15.candles.filter(closed15).forEach((c) => fut15.push(c));
+      }
       // mark the first candle of a NEW contract period as a contract-change bar
       if (periods.indexOf(per) > 0 && fc.length) contractChangeTimes.add(fc[0].time);
     } catch { /* period unavailable at fetch — treated as unavailable */ }
@@ -115,7 +164,42 @@ export async function runTest(cfg: TestConfig): Promise<RunResult> {
     vwapInstrument = m.nseSymbol;
   }
 
-  // ---- expiry (instrument-master driven, §22): per candle's date binding ----
+  const dcfg0 = cfg.decision ?? defaultDecisionConfig();
+  let options: OptionSeries | null = null;
+  if (dcfg0.optionData === "ON") {
+    try { options = await fetchOptionSeries(cfg.index, native, dateSet.filter((d) => d >= (warmupSessions[warmupSessions.length - 1] ?? "")), dcfg0.strikeOffsets); }
+    catch { options = null; }
+  }
+  let candles15: Candle[] = fut15;
+  if (cfg.dataMode !== "FUTURES_INTERNAL") {
+    const s15 = native === 15 ? spotFetch : await fetchIntraday(spotSec.securityId, spotSec.exchangeSegment, spotSec.instrument, 15, startSec, endSec).catch(() => null);
+    candles15 = s15 ? s15.candles.filter((c) => closed15(c) && c.time >= startSec) : [];
+  }
+  return {
+    candles15,
+    m, native, warmupSessions, dateSet, spotByTime, perDateBinding, contractChanges, unavailableDateCount,
+    candles, oi, oiStatus, vwapSource, repBinding, bindingStatusByTime, contractChangeTimes, otherPriceByTime,
+    vwapInstrument, bindingByDate, options,
+  };
+}
+
+export interface LiveExtra {
+  forming?: { candle: Candle; oi: number | null; spotClose: number | null } | null; // partial candle, evaluated provisionally
+}
+
+/** Pure compute over loaded series. With `live.forming` the partial candle is appended (causal: earlier rows are unchanged). */
+export function evaluateSeries(cfg: TestConfig, L: LoadedSeries, live?: LiveExtra): RunResult {
+  const { m, warmupSessions, perDateBinding: pdb0, contractChanges, unavailableDateCount, oiStatus, vwapSource, repBinding, vwapInstrument, bindingByDate, options } = L;
+  let candles = [...L.candles]; let oi = [...L.oi];
+  const spotByTime = new Map(L.spotByTime), otherPriceByTime = new Map(L.otherPriceByTime);
+  const bindingStatusByTime = new Map(L.bindingStatusByTime), contractChangeTimes = L.contractChangeTimes;
+  const perDateBinding = pdb0.map((x) => ({ ...x }));
+  const f = live?.forming;
+  if (f && (!candles.length || f.candle.time > candles[candles.length - 1].time)) {
+    candles.push(f.candle); oi.push(f.oi);
+    bindingStatusByTime.set(f.candle.time, cfg.dataMode === "FUTURES_INTERNAL" ? "RESOLVED" : (bindingByDate.get(istDate(f.candle.time))?.status ?? "UNAVAILABLE_HISTORICAL"));
+    if (f.spotClose != null) { spotByTime.set(f.candle.time, f.spotClose); if (cfg.dataMode === "FUTURES_INTERNAL") otherPriceByTime.set(f.candle.time, f.spotClose); }
+  }
   const expiryForDate = (sec: number) => {
     const d = istDate(sec);
     const b = bindingByDate.get(d);
@@ -124,12 +208,38 @@ export async function runTest(cfg: TestConfig): Promise<RunResult> {
     return { expiryDate: b.expiry, daysToExpiry: Math.round((expMs - sec * 1000) / DAY), isExpiryDay: d === b.expiry };
   };
 
-  const { rows, trades, metrics, daily, gateBlocks } = runEngine({
+  const eng = runEngine({
     config: cfg, binding: repBinding, candles, oi, oiStatus, vwapSource, expiryForDate,
     symbol: m.internalSymbol, otherPriceByTime, bindingStatusByTime, contractChangeTimes, vwapInstrument,
   });
+  const gateBlocks = eng.gateBlocks;
+  const inScope = (sec: number) => {
+    if (cfg.scope.mode === "full") return true;
+    const d = istDate(sec);
+    return (!cfg.scope.fromDate || d >= cfg.scope.fromDate) && (!cfg.scope.toDate || d <= cfg.scope.toDate);
+  };
+
+  // ---- Trade Decision layer (additive): movement detection separate from execution ----
+  const dcfg = cfg.decision ?? defaultDecisionConfig();
+  const decision = runDecisionLayer({
+    cfg, dc: dcfg, candles, rows: eng.rows, oi, liveTail: !!live,
+    ctx15: context15ForSeries(candles, L.candles15, TF_MINUTES[cfg.timeframe] * 60, cfg),
+    spotByTime: cfg.dataMode === "FUTURES_INTERNAL" ? spotByTime : undefined,
+    options, strikeStep: m.strikeStep, inScope,
+  });
+
+  // Warmup candles are never scored or reported: keep only the requested window.
+  const scopedIdx = eng.rows.map((r, i) => (inScope(r.timestamp) ? i : -1)).filter((i) => i >= 0);
+  const rows = scopedIdx.map((i) => eng.rows[i]);
+  const trades = eng.trades.filter((t) => inScope(t.timestamp));
+  const metrics = warmupSessions.length ? computeMetrics(rows, trades) : eng.metrics;
+  const daily = warmupSessions.length ? computeDaily(rows, trades) : eng.daily;
+  const warmupCandles = eng.rows.length - rows.length;
+  candles = scopedIdx.map((i) => candles[i]); oi = scopedIdx.map((i) => oi[i]);
 
   // mark volume/OI availability back on the per-date binding rows (diagnostics)
+  const scopedBinding = perDateBinding.filter((pb) => inScope(toEpoch(pb.date) + 43200));
+  perDateBinding.length = 0; perDateBinding.push(...scopedBinding);
   perDateBinding.forEach((pb) => {
     const resolved = pb.status === "RESOLVED";
     pb.volumeAvailable = resolved && cfg.dataMode === "FUTURES_INTERNAL";
@@ -158,6 +268,8 @@ export async function runTest(cfg: TestConfig): Promise<RunResult> {
       totalCandles: candles.length, rejected,
     },
     oiStatus, dataQuality, rows, trades, chart, metrics, daily, gateBlocks,
+    warmup: { sessions: warmupSessions, candles: warmupCandles },
+    decision,
   };
 }
 

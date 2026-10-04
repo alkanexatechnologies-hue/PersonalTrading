@@ -59,6 +59,8 @@ import { withDhanPriority } from "../data/dhanClient";
 // Universal Market Indicator — Test Lab V1 (research/audit only, fully isolated).
 import { runTest as runTestLab, availableHistory as testLabAvailableHistory } from "../testlab/runner";
 import { writeReviewPackage as writeTestLabPackage } from "../testlab/exporter";
+import { decisionCard as tlDecisionCard } from "../testlab/decisionCard";
+import { liveDecision as tlLiveDecision } from "../testlab/live";
 import { defaultConfig as testLabDefaultConfig } from "../testlab/config";
 import { runHtf as runTestLabHtf } from "../testlab/htfRunner";
 import { abcComparison as htfAbc, timingDiagnostic as htfTiming, perCandleAudit as htfPerCandle } from "../testlab/htfAudit";
@@ -9624,6 +9626,33 @@ function _tlEvict() {
 // Shape a RunResult into a compact, UI-friendly payload for the 9-tab screen.
 // Signals/trades are capped so a multi-month run stays responsive; the full,
 // uncapped artifacts are always available in the export package on disk.
+// Trade Decision layer payload (additive): movement detection vs execution.
+// Candidate rows are capped; the export package keeps every candle.
+function tlDecisionShape(r: TLRunResult) {
+  const d = r.decision;
+  if (!d) return null;
+  const series = r.dataMode === "FUTURES_INTERNAL" ? (r.binding.futuresSymbol || "FUT") : `${r.config.index} spot`;
+  const card = (x: (typeof d.rows)[number] | undefined) => x ? { row: { ...x, option: x.option ? { ...x.option, candidates: x.option.candidates.slice(0, 12) } : null }, text: tlDecisionCard(x, r.config.index, series) } : null;
+  const pick = (side: "BUY" | "SELL") => [...d.rows].reverse().find((x) => x.plan?.side === side && x.action === "TAKE") || [...d.rows].reverse().find((x) => x.plan?.side === side);
+  const CAP = 1500;
+  const candidates = d.rows.filter((x) => x.plan).map((x) => ({
+    iso: x.iso, price: x.price, spot: x.spot, movementState: x.movementState, direction: x.movementDirection,
+    side: x.plan!.side, entry: x.plan!.entry, stopLoss: x.plan!.stopLoss, target1: x.plan!.target1, target2: x.plan!.target2,
+    riskPoints: x.plan!.riskPoints, rewardPoints: x.plan!.rewardPoints, rr: x.plan!.rr,
+    strike: x.option?.primary?.strike ?? null, optionType: x.option?.optionType ?? null, optionLTP: x.option?.primary?.ltp ?? null,
+    gammaState: x.gamma?.state ?? null, oiStatus: x.oiStatus, executionState: x.executionState, action: x.action,
+    blockReason: x.blockReason, timing: x.timingClassification, outcome: x.outcome, rMultiple: x.rMultiple,
+  }));
+  return {
+    summary: d.summary, optionData: d.optionData, metrics: d.metrics,
+    latest: card(d.rows[d.rows.length - 1]),
+    examples: { buy: card(pick("BUY")), sell: card(pick("SELL")) },
+    candidates: candidates.slice(-CAP), candidatesTruncated: candidates.length > CAP,
+    events: d.events, bigMoves: d.bigMoves,
+    timeline: d.rows.map((x) => ({ t: x.timestamp, m: x.movementState, e: x.executionState })),
+  };
+}
+
 function tlShape(j: TLJob) {
   const base = {
     runId: j.runId, status: j.status, startedAt: j.startedAt, finishedAt: j.finishedAt,
@@ -9708,6 +9737,8 @@ function tlShape(j: TLJob) {
     signalCount: signals.length,
     trades: r.trades.map(compactRow),
     indicators: { avgComponents, regimes },
+    warmup: r.warmup ?? null,
+    decision: tlDecisionShape(r),
     deviations: [
       { requirement: "1m & 3m timeframes", status: "PARTIAL", note: "Dhan native minutes are 1,5,15,25,60; 3m is resampled from 1m (standard OHLC aggregation)." },
       { requirement: "Historical per-candle OI (§5)", status: r.oiStatus === "AVAILABLE" ? "AVAILABLE" : "UNAVAILABLE (this run)", note: "Probed Dhan derivative /charts/intraday with oi:true. Live option-chain OI is NEVER substituted for historical OI." },
@@ -9840,6 +9871,25 @@ router.get("/testlab/htf-run/:runId", requirePermission("backtesting"), (req: Re
   const job = _htfJobs.get(req.params.runId);
   if (!job) return res.status(404).json({ error: "htf run not found" });
   res.json({ runId: job.runId, status: job.status, error: job.error, elapsedMs: (job.finishedAt || Date.now()) - job.startedAt, ...(job.payload || {}) });
+});
+
+// Running-candle recommendation for the Lab chart (advisory only; never orders).
+//   GET /api/testlab/live?index=NIFTY&timeframe=5m            -> live (polled by the UI)
+//   GET /api/testlab/live?...&asOf=2026-10-01T12:07           -> replay a past moment (IST), no look-ahead
+router.get("/testlab/live", requirePermission("backtesting"), async (req: Request, res: Response) => {
+  const index = String(req.query.index || "NIFTY").toUpperCase();
+  const timeframe = String(req.query.timeframe || "5m");
+  if (!TL_INDEXES.has(index)) return res.status(400).json({ error: "index must be NIFTY|BANKNIFTY|FINNIFTY|SENSEX" });
+  if (!["3m", "5m", "15m", "25m", "60m"].includes(timeframe)) return res.status(400).json({ error: "live timeframe must be 3m|5m|15m|25m|60m" });
+  let asOfSec: number | undefined;
+  if (req.query.asOf) {
+    const a = String(req.query.asOf);
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(a)) return res.status(400).json({ error: "asOf must be YYYY-MM-DDTHH:MM (IST)" });
+    asOfSec = Math.floor(Date.parse(a + ":00+05:30") / 1000);
+    if (!(asOfSec < Date.now() / 1000)) return res.status(400).json({ error: "asOf must be in the past" });
+  }
+  try { res.json(await tlLiveDecision({ index: index as TLIndexKey, timeframe: timeframe as TLTfKey, asOfSec })); }
+  catch (e: any) { res.status(502).json({ error: e?.message || "live decision failed" }); }
 });
 
 // Recent in-process runs (compact list for the UI history).

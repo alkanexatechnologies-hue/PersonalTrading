@@ -37,15 +37,52 @@ export function defaultConfig(index: IndexKey, timeframe: TfKey): TestConfig {
     slAtrBuffer: 0.5,
     targetAtrMult: 2.5,
     minHistory: 30,
-    lateCutoffMinIST: 14 * 60 + 30, // 14:30 IST (870) — no NEW entry after (§8)
+    sessionOpenMinIST: 9 * 60 + 15,  // 09:15 IST — session open / first tradable bar
+    lateCutoffMinIST: 15 * 60 + 10,  // 15:10 IST — no NEW entry at/after 15:10 (fill uses next open)
     cooldownCandles: 2,
     oneOpenTrade: true,
-    timeExitBars: 12,
+    timeExitBars: 0,               // 0 = no time exit: hold until SL/Target, square off at session end (user rule 2026-10-05)
     futuresBinding: "strict",      // §1/§6: date-correct binding; invalid => WAIT. (UI may pass spot-fallback research variant.)
     dataMode: "FUTURES_INTERNAL",  // §3 primary validation mode (internally consistent futures)
-    rrGateMode: "ON",              // §11 research switch (never auto-changed)
+    rrGateMode: "OFF",             // R:R is information only — it never blocks BUY/SELL (user rule 2026-10-05)
     buyThreshold: 55,
     sellThreshold: 55,
     ablationDisable: [],
+    warmupSessions: 3,             // prior sessions loaded ONLY to warm EMA/ATR/structure (never scored)
+    decision: defaultDecisionConfig(),
   };
 }
+
+// Trade Decision layer defaults. Chosen a priori from common price-action
+// conventions BEFORE any 2026-10-01 result was seen; never auto-optimized.
+export function defaultDecisionConfig() {
+  return {
+    dispStrongAtr: 0.6,
+    closeLocMax: 0.35,
+    preLevelAtr: 0.35,
+    falseBreakBars: 3,
+    zoneLookback: 6,
+    zoneMaxAtr: 2.0,
+    targetMinAtr: 1.0,
+    genuineMoveAtr: 2.0,
+    bigMoveAtr: 3.0,
+    strikeOffsets: 3,
+    minPremium: 5,
+    deltaMin: 0.2,
+    deltaMax: 0.8,
+    minTradesForRate: 30,
+    optionData: "ON" as "ON" | "OFF",
+    requireEngineAgreement: true,  // user choice 2026-10-04: movement break AND engine score must agree
+  };
+}
+
+// Option-expiry rule per index for the historical (rolling) option series: the
+// expired-options API does not return the expiry date, so time-to-expiry is
+// derived from the exchange schedule (weekday; shifted to the prior trading day
+// on a holiday). Labelled "derived" wherever it is used.
+export const OPTION_EXPIRY_RULE: Record<IndexKey, { flag: "WEEK" | "MONTH"; weekday: number }> = {
+  NIFTY: { flag: "WEEK", weekday: 2 },      // Tuesday weekly
+  BANKNIFTY: { flag: "MONTH", weekday: 2 }, // last Tuesday monthly
+  FINNIFTY: { flag: "MONTH", weekday: 2 },
+  SENSEX: { flag: "WEEK", weekday: 4 },     // Thursday weekly (BSE)
+};

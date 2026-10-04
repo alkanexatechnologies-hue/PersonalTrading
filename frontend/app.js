@@ -12233,6 +12233,7 @@ function initTestLab() {
   wire("uil2-exp-csv", "click", uil2ExportCsv);
   wire("uil2-exp-pkg", "click", uil2ExportPackage);
   wire("uil2-view-logs", "click", () => uil2SetTab("export"));
+  wire("uil2-live-btn", "click", uil2LiveToggle);
 
   if (!UIL2._ro && window.ResizeObserver) { try { UIL2._ro = new ResizeObserver(() => uil2ResizeChart()); const c = t2el("uil2-chart"); if (c) UIL2._ro.observe(c); } catch (_) {} }
   uil2SetScope("custom");
@@ -12765,7 +12766,7 @@ function uil2ViewSignal() {
           <div class="uil2-kv"><span>Entry</span><b>${risk ? t2num(risk.entry) : "—"}</b></div>
           <div class="uil2-kv"><span>SL</span><b class="u-red">${risk ? t2num(risk.sl) : "—"}</b></div>
           <div class="uil2-kv"><span>T1</span><b class="u-green">${risk ? t2num(risk.target1) : "—"}</b></div>
-          <div class="uil2-kv"><span>R:R</span><b class="u-amber">${risk && risk.rr != null ? "1:" + t2num(risk.rr, 2) : "—"}</b></div>
+          <div class="uil2-kv"><span>R:R</span><b class="u-amber">${risk && risk.rr != null ? "1:" + t2num(risk.rr, 2) + (risk.rr < 2 ? " ⚠ low (info only)" : "") : "—"}</b></div>
         </div>
       </div>
       <div class="uil2-sumcard">
@@ -12787,7 +12788,7 @@ function uil2ViewSignal() {
           <td>${t2esc(t2time(s.timestamp))}</td>
           <td class="${(s["15M"].direction || "").includes("BULL") ? "u-green" : (s["15M"].direction || "").includes("BEAR") ? "u-red" : "u-muted"}">${t2esc(s["15M"].direction)}</td>
           <td>${t2esc(s["5M"].vwapEvent)}</td><td>${t2esc(s["5M"].ema9 != null && s["5M"].ema21 != null ? (s["5M"].ema9 >= s["5M"].ema21 ? "UP" : "DOWN") : "—")}</td>
-          <td>${t2esc(s["5M"].ut)}</td><td>${t2esc(s.final.entryCandidate)}</td><td>${s.risk.rr != null ? "1:" + t2num(s.risk.rr, 2) : "—"}</td>
+          <td>${t2esc(s["5M"].ut)}</td><td>${t2esc(s.final.entryCandidate)}</td><td>${s.risk.rr != null ? "1:" + t2num(s.risk.rr, 2) + (s.risk.rr < 2 ? " ⚠" : "") : "—"}</td>
           <td class="${s.final.finalSignal === "BUY" ? "u-green" : s.final.finalSignal === "SELL" ? "u-red" : "u-muted"}">${t2esc(s.final.finalSignal)}</td>
           <td class="reason">${t2esc(s.final.primaryBlocker)}</td></tr>`).join("")}
       </tbody></table></div>
@@ -16727,4 +16728,138 @@ function renderMAData(d) {
     row("Price Feed", f.price) + row("Volume Feed", f.volume) + row("OI Feed", f.oi) + row("VIX Feed", f.vix) + row("Option Chain", f.chain) +
     `<div class="ma-ds-row"><span>Last Update</span><b>${maEsc(f.lastUpdate || "—")}</b></div>` +
     `<div class="ma-ds-row"><span>Breakout detect</span><b class="${(f.breakoutDetection || "").indexOf("ACTIVE") >= 0 ? "up" : "down"}">${maEsc(f.breakoutDetection || "—")}</b></div>`;
+}
+
+
+// ============================================================================
+// Universal Indicator Lab — running-candle LIVE signal (additive).
+// Polls /api/testlab/live and draws on the Lab's existing chart. FORMING = the
+// open candle (provisional, can change until it closes); CONFIRMED = closed
+// candle (final). Advisory only: never places or simulates an order.
+// ============================================================================
+const UIL2_LIVE_MS = 15000;
+function uil2LiveToggle() {
+  UIL2.live = !UIL2.live;
+  const b = t2el("uil2-live-btn");
+  if (b) { b.classList.toggle("live-on", UIL2.live); b.setAttribute("aria-pressed", String(UIL2.live)); b.textContent = UIL2.live ? "■ Stop live" : "● Live signal"; }
+  ["uil2-live-run", "uil2-live-sig"].forEach((id) => { const e = t2el(id); if (e) e.classList.toggle("hidden", !UIL2.live); });
+  if (UIL2.liveTimer) { clearInterval(UIL2.liveTimer); UIL2.liveTimer = null; }
+  UIL2._liveKey = null;
+  if (UIL2.live) {
+    const run = t2el("uil2-live-run"), sig = t2el("uil2-live-sig");
+    if (run) run.innerHTML = '<div class="uil2-rhead">Running candle</div><div class="lv-small">Loading live signal…</div>';
+    if (sig) sig.innerHTML = '<div class="uil2-rhead">Last confirmed signal</div><div class="lv-small">Loading…</div>';
+    uil2LivePoll(true);
+    UIL2.liveTimer = setInterval(() => uil2LivePoll(false), UIL2_LIVE_MS);
+  } else {
+    uil2LiveStatus("", "");
+    if (UIL2.data) uil2RenderChart(UIL2.data); // back to the last test run
+  }
+}
+function uil2LiveStatus(text, cls) { const e = t2el("uil2-live-status"); if (e) { e.textContent = text; e.className = "uil2-live-status " + (cls || ""); } }
+async function uil2LivePoll(force) {
+  if (!UIL2.live || UIL2._livePolling) return;
+  const chartEl = t2el("uil2-chart");
+  if (!force && (document.hidden || !chartEl || chartEl.offsetParent === null)) return; // only while the Lab is on screen
+  const asof = (t2el("uil2-live-asof") || {}).value || "";
+  if (!force && asof && UIL2._liveOk === asof) return; // a replay moment is static once loaded (retry until it loads)
+  UIL2._livePolling = true;
+  try {
+    const q = `index=${encodeURIComponent(UIL2.index)}&timeframe=${encodeURIComponent(UIL2.tf)}${asof ? "&asOf=" + encodeURIComponent(asof.slice(0, 16)) : ""}`;
+    if (!asof || force) uil2LiveStatus("loading…", "");
+    const p = await fetchJSON(`/api/testlab/live?${q}`, 90000);
+    if (!UIL2.live) return;
+    if (!p || p.error) { uil2LiveStatus(`DATA UNAVAILABLE — ${(p && p.error) || "no response"}`, "stale"); return; }
+    UIL2._liveOk = asof || null;
+    try { uil2LiveRender(p); }
+    catch (e) { console.error("live signal render failed", e); uil2LiveStatus("display error — see console", "stale"); }
+  } catch (e) {
+    uil2LiveStatus(e && e.name === "AbortError" ? "DATA UNAVAILABLE — Dhan slow, retrying" : "DATA UNAVAILABLE — request failed", "stale");
+  } finally { UIL2._livePolling = false; }
+}
+function uil2LiveRender(p) {
+  const key = `${p.index}|${p.timeframe}|${p.session}|${p.mode}`;
+  const first = UIL2._liveKey !== key;
+  if (first || !UIL2.chart) { if (!uil2BuildChart()) return; UIL2._liveKey = key; }
+  const rows = p.chart || [];
+  UIL2.series.candle.setData(rows.map((c) => c.forming
+    ? { time: uil2T(c.t), open: c.o, high: c.h, low: c.l, close: c.c, color: c.c >= c.o ? "rgba(34,197,94,.35)" : "rgba(239,68,68,.35)", borderColor: "#f59e0b", wickColor: "#f59e0b" }
+    : { time: uil2T(c.t), open: c.o, high: c.h, low: c.l, close: c.c }));
+  UIL2.series.ema9.setData(rows.filter((c) => c.ema9 != null).map((c) => ({ time: uil2T(c.t), value: c.ema9 })));
+  UIL2.series.ema21.setData(rows.filter((c) => c.ema21 != null).map((c) => ({ time: uil2T(c.t), value: c.ema21 })));
+  UIL2.series.vwap.setData(rows.filter((c) => c.vwap != null).map((c) => ({ time: uil2T(c.t), value: c.vwap })));
+  UIL2.series.vol.setData(rows.map((c) => ({ time: uil2T(c.t), value: c.v, color: c.c >= c.o ? "rgba(34,197,94,.4)" : "rgba(239,68,68,.4)" })));
+  UIL2.series.candle.setMarkers((p.markers || []).map((m) => m.state === "FORMING"
+    ? { time: uil2T(m.t), position: m.side === "BUY" ? "belowBar" : "aboveBar", color: "#f59e0b", shape: "circle", text: m.text }
+    : { time: uil2T(m.t), position: m.side === "BUY" ? "belowBar" : "aboveBar", color: m.side === "BUY" ? "#22c55e" : "#ef4444", shape: m.side === "BUY" ? "arrowUp" : "arrowDown", text: m.text }));
+  if (first) { try { UIL2.chart.timeScale().fitContent(); UIL2.chart.timeScale().applyOptions({ rightOffset: 3 }); } catch (_) {} }
+  if (t2el("uil2-chart-sym")) t2el("uil2-chart-sym").textContent = p.index;
+  const meta = t2el("uil2-chart-meta");
+  if (meta) meta.textContent = `${p.timeframe} · ${p.series} · ${p.session || "—"} · ${p.mode === "REPLAY" ? "replay as of " + p.asOfHm + " IST" : "live signal"}`;
+  uil2CrosshairOhlc(null, rows[rows.length - 1]);
+  const st = p.mode === "REPLAY" ? [`● REPLAY · as of ${p.asOfHm} IST`, "live"]
+    : p.dataStatus === "LIVE" ? [`● LIVE · ${p.formingAsOfHm || p.asOfHm} IST`, "live"]
+    : p.dataStatus === "STALE" ? [`STALE · data ${p.dataAgeSec}s old`, "stale"]
+    : p.dataStatus === "CLOSED" ? ["MARKET CLOSED · last session", "closed"] : ["DATA UNAVAILABLE", "stale"];
+  uil2LiveStatus(st[0], st[1]);
+  const run = t2el("uil2-live-run"), sig = t2el("uil2-live-sig");
+  if (run) run.innerHTML = uil2LiveRunCard(p);
+  if (sig) sig.innerHTML = uil2LiveSigCard(p);
+}
+const uil2Hm = (hm, n) => { const [h, m] = String(hm).split(":").map(Number); const t = h * 60 + m + n; return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; };
+const uil2Human = (s) => String(s || "").replace(/_/g, " ");
+function uil2LivePlan(r) {
+  const p = r.plan; if (!p) return "";
+  const o = r.option && r.option.primary ? r.option : null;
+  const kv = (k, v, c) => `<div class="lv-kv"><span>${k}</span><b class="${c || ""}">${v}</b></div>`;
+  return `<div class="lv-grid">
+    ${kv("Entry", t2num(p.entry))}${kv("Stop loss", t2num(p.stopLoss), "sl")}${kv("R:R", t2num(p.rr), p.rr >= 2 ? "tg" : "warn")}
+    ${kv("Target 1", t2num(p.target1), "tg")}${kv("Target 2", t2num(p.target2), "tg")}${kv("Risk / reward", `${t2num(p.riskPoints, 0)} / ${t2num(p.rewardPoints, 0)}`)}
+    ${o ? kv("Strike", `${o.primary.strike} ${o.optionType}`) + kv("Alt strike", o.alternative ? `${o.alternative.strike} ${o.optionType}` : "—") + kv("Option LTP", t2num(o.optionEntry)) : kv("Strike", "DATA UNAVAILABLE")}
+    ${o ? kv("Opt stop / tgt", `${t2num(o.optionStop, 0)} / ${t2num(o.optionTarget, 0)}`) : ""}
+    ${kv("Gamma", r.gamma ? `${r.gamma.state} · ${r.gamma.score}/10` : "—", r.gamma && r.gamma.state === "CONFIRMED" ? "tg" : "")}
+    ${kv("Liquidity", r.liquidityGrade || "—", r.liquidityGrade === "GOOD" ? "tg" : r.liquidityGrade === "POOR" ? "sl" : "warn")}
+  </div>
+  <div class="lv-small">OI: <b>${t2esc(r.oiStatus)}</b> · ${t2esc(r.oiConfirmation)} · ${t2esc(uil2Human(r.oiValidation ? r.oiValidation.state : "—"))}${r.oiValidation && (r.oiValidation.walls.ce || r.oiValidation.walls.pe) ? ` · walls CE ${r.oiValidation.walls.ce ?? "—"} / PE ${r.oiValidation.walls.pe ?? "—"}` : ""}</div>
+  ${r.reversalRisk ? `<div class="lv-small">Reversal risk: <b class="lv-rr-${r.reversalRisk.level.toLowerCase()}">${r.reversalRisk.level}</b>${r.reversalRisk.factors.length ? " — " + t2esc(r.reversalRisk.factors.join("; ")) : ""}</div>` : ""}
+  <div class="lv-grid lv-levels">
+    ${kv("Next resistance", (p.nextResistance || []).length ? p.nextResistance.map((x) => t2num(x)).join(" · ") : "none in view", "sl")}
+    ${kv("Next support", (p.nextSupport || []).length ? p.nextSupport.map((x) => t2num(x)).join(" · ") : "none in view", "tg")}
+  </div>
+  <div class="lv-small">R:R status: <b>INFORMATION ONLY</b> — never blocks the signal</div>
+  ${p.rrWarning ? `<div class="lv-warn">${t2esc(p.rrWarning)}</div>` : ""}`;
+}
+function uil2LiveCtx(r) {
+  const c = r.ctx15;
+  return `<div class="lv-small">15M regime: <b class="lv-reg-${String(r.regime15).toLowerCase()}">${t2esc(r.regime15)}</b>${c ? ` · ${t2esc(c.trend)} · momentum ${t2esc(c.momentum)}` : " · no closed 15M candle yet"}</div>${r.contextWarning ? `<div class="lv-warn">⚠ ${t2esc(r.contextWarning)}</div>` : ""}`;
+}
+function uil2LiveRunCard(p) {
+  const f = p.forming;
+  if (!f) return `<div class="uil2-rhead">Running candle <span class="uil2-sub">—</span></div><div class="lv-big wait">—</div><div class="lv-small">${t2esc(p.note)}</div>`;
+  const r = f.row, ready = r.action === "TAKE", bear = r.movementDirection === "BEARISH";
+  const head = ready ? (r.plan.side === "BUY" ? "BUY CE?" : "BUY PE?") : r.executionState === "HOLD" ? "HOLD" : uil2Human(r.movementState);
+  const cls = r.movementDirection === "NEUTRAL" ? "wait" : bear ? "bear" : "bull";
+  return `<div class="uil2-rhead">Running candle ${f.hm} <span class="uil2-sub">as of ${t2esc(p.formingAsOfHm || p.asOfHm)}</span></div>
+    <span class="lv-tag forming">FORMING · can change until ${uil2Hm(f.hm, parseInt(p.timeframe, 10))}</span>
+    <div class="lv-big ${cls}">${t2esc(head)}</div>
+    <div class="lv-small">${t2esc(uil2Human(r.movementState))} · ${t2esc(r.movementDirection)} · evidence ${r.movementScore}/100${r.movementEvidence && r.movementEvidence.length ? " · " + t2esc(r.movementEvidence.join("; ")) : ""}</div>
+    ${uil2LiveCtx(r)}
+    <div class="lv-small">Execution: <b>${t2esc(uil2Human(r.executionState))}</b>${r.blockReason ? " — " + t2esc(r.blockReason) : ""}</div>
+    ${ready ? uil2LivePlan(r) : ""}
+    ${ready && f.optionNote ? `<div class="lv-note">${t2esc(f.optionNote)}</div>` : ""}`;
+}
+function uil2LiveSigCard(p) {
+  const g = p.lastSignal;
+  const foot = `<div class="lv-note">15M context + 5M confirmed break + engine score agrees (counter-trend needs a strong 5M candle). R:R is information only. Backtest (30 sessions): 158 trades, 68W / 90L, +16.57R — research only, not advice.</div>`;
+  if (!g) return `<div class="uil2-rhead">Last confirmed signal</div><div class="lv-small">None yet this session.</div>${foot}`;
+  const r = g.row, side = r.plan.side;
+  const out = r.outcome === "OPEN" ? `<div class="lv-status open">OPEN · filled ${t2num(r.fillPrice)} at the next open, still running</div>`
+    : r.outcome === "NONE" ? `<div class="lv-status">Waiting for the next candle open to fill</div>`
+    : `<div class="lv-status ${r.rMultiple > 0 ? "win" : "loss"}">${r.outcome === "SL" ? "Stop hit" : r.outcome === "T1" ? "Target 1 hit" : r.outcome === "T2" ? "Target 2 hit" : uil2Human(r.outcome)} at ${t2num(r.exitPrice)} · ${r.rMultiple > 0 ? "+" : ""}${r.rMultiple}R</div>`;
+  return `<div class="uil2-rhead">Last confirmed signal ${g.hm} <span class="uil2-sub">${g.barsAgo === 0 ? "just closed" : g.barsAgo + " candles ago"}</span></div>
+    <span class="lv-tag confirmed">CONFIRMED · candle closed</span>
+    <div class="lv-big ${side === "BUY" ? "bull" : "bear"}">${side === "BUY" ? "BUY CE" : "BUY PE"}</div>
+    <div class="lv-small">5M: ${t2esc(uil2Human(r.movementState))} · evidence ${r.movementScore}/100</div>
+    ${uil2LiveCtx(r)}
+    ${uil2LivePlan(r)}${out}${foot}`;
 }
