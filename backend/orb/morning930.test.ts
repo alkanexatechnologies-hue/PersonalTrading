@@ -32,7 +32,7 @@ function oi(under: number, strike: number, ce: number, pe: number): OiAnalysis {
     symbol: "^NSEI", nseSymbol: "NIFTY", available: true, underlying: under, expiry: "2026-09-17",
     pcr: 1, maxPain: strike, totalCeOi: 1, totalPeOi: 1, verdict: { bias: "Neutral", confidence: 0, summary: "" },
     topStrikes: [{ strike, ceOi: 1, peOi: 1, ceChg: 0, peChg: 0, ceLtp: ce, peLtp: pe }],
-  } as OiAnalysis;
+  } as unknown as OiAnalysis;
 }
 
 test("morning 9:30: WAIT while the 09:15-09:30 range is still building", () => {
