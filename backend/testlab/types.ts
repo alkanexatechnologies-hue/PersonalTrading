@@ -88,7 +88,8 @@ export interface DecisionConfig {
   deltaMin: number; deltaMax: number; // eligible |delta| band
   minTradesForRate: number;   // do not quote a win rate below this many closed trades
   optionData: "ON" | "OFF";
-  requireEngineAgreement: boolean; // execute only when the existing engine's BUY/SELL score lean agrees with the break
+  requireEngineAgreement: boolean;
+  directionGuard: boolean;        // 5M direction-conflict + S/R rejection protection (added layer; false = previous behaviour) // execute only when the existing engine's BUY/SELL score lean agrees with the break
 }
 
 export interface FuturesBinding {
@@ -297,10 +298,11 @@ export type ExecutionState =
   | "WAIT" | "PRE_BREAKOUT" | "PRE_BREAKDOWN" | "BREAKOUT_ATTEMPT" | "BREAKDOWN_ATTEMPT"
   | "BREAKOUT_CONFIRMED" | "BREAKDOWN_CONFIRMED" | "BUY_READY" | "SELL_READY"
   | "TRADE_BLOCKED_DATA" | "TRADE_BLOCKED_LATE" | "TRADE_BLOCKED_LIQUIDITY"
-  | "TRADE_BLOCKED_STRUCTURE" | "HOLD" | "REVERSAL" | "NO_EDGE";
+  | "TRADE_BLOCKED_STRUCTURE" | "HOLD" | "REVERSAL" | "NO_EDGE"
+  | "WAIT_FOR_DIRECTION_RECONFIRMATION";   // 5M direction-conflict protection (added layer)
 export type GammaState = "NONE" | "BUILDING" | "PRE-BLAST" | "CONFIRMED" | "UNAVAILABLE";
 export type EvidenceStatus = "PASS" | "FAIL" | "UNAVAILABLE";
-export type DecisionTiming = "EARLY" | "TIMELY" | "LATE" | "FALSE" | "MISSED" | "BLOCKED_DATA" | "BLOCKED_LATE" | "BLOCKED_STRUCTURE" | "BLOCKED_LIQUIDITY" | "NA";
+export type DecisionTiming = "EARLY" | "TIMELY" | "LATE" | "FALSE" | "MISSED" | "BLOCKED_DIRECTION" | "BLOCKED_DATA" | "BLOCKED_LATE" | "BLOCKED_STRUCTURE" | "BLOCKED_LIQUIDITY" | "NA";
 export type OiFreshness = "LIVE" | "FRESH" | "AGING" | "DELAYED" | "STALE" | "UNAVAILABLE";
 
 export interface GammaRead {
@@ -374,6 +376,21 @@ export interface DecisionRow {
   reversalRisk: { level: "LOW" | "MEDIUM" | "HIGH"; factors: string[] } | null;
   oiValidation: import("./oiValidation").OiValidation;
   liquidityGrade: "GOOD" | "WARNING" | "POOR" | "DATA UNAVAILABLE" | null;
+  // ---- 5M direction-conflict protection + S/R rejection (added layer; audit fields) ----
+  guardState: "5M_DIRECTION_CONFLICT" | "WAIT_FOR_DIRECTION_RECONFIRMATION" | "DIRECTION_RECONFIRMED" | "REGIME_CHANGE_CONFIRMED" | "SUPPORT_REJECTION" | "RESISTANCE_REJECTION" | null;
+  directionConflict: boolean;
+  directionConflictReason: string | null;
+  previousRegime: string | null;          // 15M regime the conflict was raised against
+  current5mDirection: "BULLISH" | "BEARISH" | "FLAT";   // this 5M candle's own direction (close vs open)
+  reconfirmationRequired: boolean;
+  reconfirmationStatus: "NONE" | "PENDING" | "DIRECTION_RECONFIRMED" | "REGIME_CHANGE_CONFIRMED" | "CONTEXT_CHANGED" | "SESSION_RESET";
+  supportResistanceEvent: "SUPPORT_REJECTION" | "RESISTANCE_REJECTION" | null;
+  supportResistanceLevel: number | null;
+  rejectionType: string | null;           // e.g. "wick rejection at PDH" / "false breakout (existing state)"
+  rejectionStatus: "NEW" | "WATCH" | "CONFIRMED" | "RECLAIMED" | "FAILED" | null;
+  entryBlockedReason: string | null;
+  oiStatusLabel: "SUPPORTING" | "CONFIRMED" | "CONTRADICTING" | "UNCONFIRMED" | "STALE";
+  rrStatus: "GOOD" | "WARNING" | null;
   oiConfirmation: "SUPPORTS" | "CONTRADICTS" | "NEUTRAL" | "UNAVAILABLE";
   volumeState: string; momentumState: string; structureState: string;
   vwapState: string; emaState: string; liquidityState: string;
@@ -384,6 +401,11 @@ export interface DecisionRow {
   timingClassification: DecisionTiming;
   // filled by the forward walk (OUTCOME only, never an input)
   fillPrice: number | null; outcome: Outcome; rMultiple: number | null; exitPrice: number | null; exitIso: string | null;
+  finalAction: "BUY CE" | "BUY PE" | "WAIT";   // THE final signal (option-buyer view: bullish = buy CALL, bearish = buy PUT)
+  // option-buyer result from REAL historical premiums of the primary strike (null = DATA UNAVAILABLE)
+  optionFill: number | null;        // option open on the entry candle (same candle the index fill uses)
+  optionExit: number | null;        // option close on the exit candle
+  optionPnl: number | null;         // ₹ per unit = optionExit - optionFill
 }
 
 export interface MovementEvent {
@@ -410,6 +432,7 @@ export interface DecisionResult {
   bigMoves: MissedMove[];
   trades: AuditRow[];               // closed trades (shared walker, identical accounting)
   metrics: Metrics;
+  daily: DailyRow[];
   summary: DecisionSummary;
   optionData: { status: "AVAILABLE" | "PARTIAL" | "UNAVAILABLE"; note: string; barsWithChain: number };
 }

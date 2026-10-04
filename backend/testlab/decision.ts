@@ -19,7 +19,8 @@
 // only — never fed back into a decision. OI is confirmation only.
 
 import { Candle } from "../types";
-import { walkOutcomes, computeMetrics } from "./engine";
+import { walkOutcomes, computeMetrics, computeDaily } from "./engine";
+import { contractKey } from "./optionsData";
 import { OptionSeries } from "./optionsData";
 import { gammaRead, selectStrike } from "./strikeGamma";
 import { Ctx15 } from "./context15";
@@ -53,13 +54,14 @@ interface Active {
   extreme: number; startPrice: number; firstState: MovementState; confirmIdx: number | null;
 }
 
-type Group = "DATA" | "LATE" | "STRUCTURE" | "LIQUIDITY";   // R:R is deliberately NOT a gate group
+type Group = "DATA" | "LATE" | "DIRECTION" | "REJECTION" | "STRUCTURE" | "LIQUIDITY";   // R:R is deliberately NOT a gate group
+const GROUP_ORDER: Group[] = ["DATA", "LATE", "DIRECTION", "REJECTION", "STRUCTURE", "LIQUIDITY"];
 const GROUP_STATE: Record<Group, ExecutionState> = {
-  DATA: "TRADE_BLOCKED_DATA", LATE: "TRADE_BLOCKED_LATE", STRUCTURE: "TRADE_BLOCKED_STRUCTURE",
+  DATA: "TRADE_BLOCKED_DATA", LATE: "TRADE_BLOCKED_LATE", DIRECTION: "WAIT_FOR_DIRECTION_RECONFIRMATION", REJECTION: "WAIT", STRUCTURE: "TRADE_BLOCKED_STRUCTURE",
   LIQUIDITY: "TRADE_BLOCKED_LIQUIDITY",
 };
 const GROUP_TIMING: Record<Group, DecisionTiming> = {
-  DATA: "BLOCKED_DATA", LATE: "BLOCKED_LATE", STRUCTURE: "BLOCKED_STRUCTURE", LIQUIDITY: "BLOCKED_LIQUIDITY",
+  DATA: "BLOCKED_DATA", LATE: "BLOCKED_LATE", DIRECTION: "BLOCKED_DIRECTION", REJECTION: "BLOCKED_DIRECTION", STRUCTURE: "BLOCKED_STRUCTURE", LIQUIDITY: "BLOCKED_LIQUIDITY",
 };
 
 /** Pivot highs/lows (2 bars each side, same definition as components.supportResistance). Pivot j is known at j+2. */
@@ -105,6 +107,10 @@ export function runDecisionLayer(inp: DecisionInput): DecisionResult {
   const events: MovementEvent[] = [];
   const eventById = new Map<number, MovementEvent>();
   let active: Active | null = null;
+  // 5M direction-conflict protection + S/R rejection watch (added layer; new-entry permission only)
+  let guard: { regime: "BULLISH" | "BEARISH"; sinceIdx: number; reason: string } | null = null;
+  let rej: { type: "SUPPORT_REJECTION" | "RESISTANCE_REJECTION"; level: number; source: string; sinceIdx: number } | null = null;
+  const hm = (sec: number) => { const m = istMin(sec); return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`; };
   let moveSeq = 0;
   const openMin = cfg.sessionOpenMinIST ?? 555, cutoffMin = cfg.lateCutoffMinIST ?? 910;
 
@@ -259,6 +265,100 @@ export function runDecisionLayer(inp: DecisionInput): DecisionResult {
       : direction !== "NEUTRAL" && reg15 !== "BULLISH" && reg15 !== "BEARISH" ? `15M ${reg15} — needs stronger 5M confirmation` : null;
     let option: DecisionRow["option"] = null;
     const reasons: { g: Group; r: string }[] = [];
+    const oiVal = validateOi({ series: inp.options, times, i, spot, direction });
+
+    // ---------------- 5M direction-conflict protection (added layer) ----------------
+    // A 5M candle whose body fully engulfs the previous candle AGAINST the 15M context
+    // raises a conflict. It never changes the 15M regime. It is cleared only by the
+    // EXISTING engines: the 5M movement/structure re-confirming the 15M direction, or
+    // the 15M regime engine itself changing.
+    let guardState: DecisionRow["guardState"] = null;
+    let reconStatus: DecisionRow["reconfirmationStatus"] = "NONE";
+    let conflictReason: string | null = null, prevRegime: string | null = null;
+    const candleDir: DecisionRow["current5mDirection"] = bar.close > bar.open ? "BULLISH" : bar.close < bar.open ? "BEARISH" : "FLAT";
+    if (dc.directionGuard) {
+      if (newSession && (guard || rej)) { guard = null; rej = null; reconStatus = "SESSION_RESET"; }
+      if (guard) {
+        const g0: { regime: "BULLISH" | "BEARISH"; sinceIdx: number; reason: string } = guard;
+        prevRegime = g0.regime; conflictReason = g0.reason;
+        const origUp = g0.regime === "BULLISH";
+        if (reg15 !== g0.regime) {
+          reconStatus = reg15 === (origUp ? "BEARISH" : "BULLISH") ? "REGIME_CHANGE_CONFIRMED" : "CONTEXT_CHANGED";
+          if (reconStatus === "REGIME_CHANGE_CONFIRMED") guardState = "REGIME_CHANGE_CONFIRMED";
+          guard = null;
+        } else {
+          // a FRESH confirmation by the existing engine after the conflict candle — not the
+          // "still confirmed" label it keeps on every candle of an ongoing move
+          const freshConfirm = !!act && act.confirmIdx === i && i > g0.sinceIdx;
+          const freshLevel = evid.some((e) => e.startsWith("broke next level"));
+          const moveConfirms = direction === (origUp ? "BULLISH" : "BEARISH") && i > g0.sinceIdx && (state === "EXPANSION" || freshConfirm || freshLevel);
+          const bosTag = origUp ? "CONFIRMED-UP" : "CONFIRMED-DOWN";
+          const structureConfirms = row.bos === bosTag && i > g0.sinceIdx && rows[i - 1].bos !== bosTag;
+          if (moveConfirms || structureConfirms) { reconStatus = "DIRECTION_RECONFIRMED"; guardState = "DIRECTION_RECONFIRMED"; guard = null; }
+          else { reconStatus = "PENDING"; guardState = "WAIT_FOR_DIRECTION_RECONFIRMATION"; }
+        }
+      }
+      if (!guard && i > 0 && (reg15 === "BULLISH" || reg15 === "BEARISH") && guardState !== "DIRECTION_RECONFIRMED") {
+        const pc0 = c[i - 1];
+        const pBody = Math.abs(pc0.close - pc0.open), cBody = Math.abs(bar.close - bar.open);
+        const bearEngulf = pc0.close > pc0.open && bar.close < bar.open && bar.open >= pc0.close && bar.close <= pc0.open && cBody > pBody;
+        const bullEngulf = pc0.close < pc0.open && bar.close > bar.open && bar.open <= pc0.close && bar.close >= pc0.open && cBody > pBody;
+        if ((reg15 === "BULLISH" && bearEngulf) || (reg15 === "BEARISH" && bullEngulf)) {
+          conflictReason = `${reg15 === "BULLISH" ? "bearish" : "bullish"} 5M candle engulfed the previous ${reg15 === "BULLISH" ? "green" : "red"} candle against 15M ${reg15} (${hm(bar.time)})`;
+          guard = { regime: reg15, sinceIdx: i, reason: conflictReason };
+          prevRegime = reg15; guardState = "5M_DIRECTION_CONFLICT"; reconStatus = "PENDING";
+        }
+      }
+    }
+
+    // ---------------- Support / Resistance rejection (added layer; existing levels) ----------------
+    let srEvent: DecisionRow["supportResistanceEvent"] = null, srLevel: number | null = null, rejType: string | null = null;
+    let rejStatus: DecisionRow["rejectionStatus"] = null;
+    let rejectionNow = false;
+    if (dc.directionGuard && a) {
+      if (rej) {
+        const r0: { type: "SUPPORT_REJECTION" | "RESISTANCE_REJECTION"; level: number; source: string; sinceIdx: number } = rej;
+        const resist = r0.type === "RESISTANCE_REJECTION";
+        srEvent = r0.type; srLevel = r0.level; rejType = r0.source;
+        if (resist ? price > r0.level : price < r0.level) {
+          // resistance reclaimed => idea rejected; support lost => existing breakdown logic takes over
+          rejStatus = resist ? "RECLAIMED" : "FAILED"; rej = null;
+        } else if (direction === (resist ? "BEARISH" : "BULLISH") && (state === (resist ? "BREAKDOWN_CONFIRMED" : "BREAKOUT_CONFIRMED") || state === "EXPANSION")) {
+          rejStatus = "CONFIRMED"; rej = null;   // existing 5M confirmation: existing entry logic decides
+        } else rejStatus = "WATCH";
+      }
+      if (!rej && rejStatus !== "CONFIRMED") {
+        const basisNow = spot != null ? price - spot : 0;
+        const sessStart = (() => { let k = i; while (k > 0 && istDate(c[k - 1].time) === date) k--; return k; })();
+        const orBars = c.slice(sessStart, i + 1).filter((x) => istMin(x.time) < (cfg.sessionOpenMinIST ?? 555) + 15);
+        const orDone = istMin(bar.time) >= (cfg.sessionOpenMinIST ?? 555) + 15 && orBars.length > 0;
+        const resLv: [number, string][] = [], supLv: [number, string][] = [];
+        if (breakoutLevel != null) resLv.push([breakoutLevel, "5M swing / box resistance"]);
+        if (breakdownLevel != null) supLv.push([breakdownLevel, "5M swing / box support"]);
+        if (ctx?.resistance != null) resLv.push([ctx.resistance, "15M resistance"]);
+        if (ctx?.support != null) supLv.push([ctx.support, "15M support"]);
+        if (pd[i]) { resLv.push([pd[i]!.pdh, "previous-day high"]); supLv.push([pd[i]!.pdl, "previous-day low"]); }
+        if (orDone) { resLv.push([Math.max(...orBars.map((x) => x.high)), "opening-range high"]); supLv.push([Math.min(...orBars.map((x) => x.low)), "opening-range low"]); }
+        if (oiVal.walls.ce != null) resLv.push([oiVal.walls.ce + basisNow, `CE OI wall ${oiVal.walls.ce}`]);
+        if (oiVal.walls.pe != null) supLv.push([oiVal.walls.pe + basisNow, `PE OI wall ${oiVal.walls.pe}`]);
+        const body = Math.abs(bar.close - bar.open);
+        const upW = bar.high - Math.max(bar.open, bar.close), dnW = Math.min(bar.open, bar.close) - bar.low;
+        const tol = 0.1 * a;
+        const pcl = i > 0 ? c[i - 1].close : bar.open;
+        const resHit = resLv.filter(([L]) => bar.high >= L - tol && price < L && pcl < L && upW >= 0.2 * a && upW >= 0.5 * body).sort((x, y) => Math.abs(bar.high - x[0]) - Math.abs(bar.high - y[0]))[0];
+        const supHit = supLv.filter(([L]) => bar.low <= L + tol && price > L && pcl > L && dnW >= 0.2 * a && dnW >= 0.5 * body).sort((x, y) => Math.abs(bar.low - x[0]) - Math.abs(bar.low - y[0]))[0];
+        // the existing FALSE_BREAKOUT / FALSE_BREAKDOWN sweep states are the same event — reuse them, no duplicate state
+        const viaFalse = state === "FALSE_BREAKOUT" && breakoutLevel != null ? ["RESISTANCE_REJECTION", breakoutLevel, "false breakout (existing state)"] as const
+          : state === "FALSE_BREAKDOWN" && breakdownLevel != null ? ["SUPPORT_REJECTION", breakdownLevel, "false breakdown (existing state)"] as const : null;
+        const pick = resHit && (!supHit || upW >= dnW) ? ["RESISTANCE_REJECTION", resHit[0], `wick rejection at ${resHit[1]}`] as const
+          : supHit ? ["SUPPORT_REJECTION", supHit[0], `wick rejection at ${supHit[1]}`] as const : viaFalse;
+        if (pick) {
+          rej = { type: pick[0], level: +pick[1].toFixed(2), source: pick[2], sinceIdx: i };
+          srEvent = pick[0]; srLevel = rej.level; rejType = pick[2]; rejStatus = "NEW"; rejectionNow = true;
+        }
+      }
+      if (rejectionNow && !guardState) guardState = srEvent;
+    }
     const isCandidate = !!act && act.confirmed && (state === "BREAKDOWN_CONFIRMED" || state === "BREAKOUT_CONFIRMED" || state === "EXPANSION");
     if (isCandidate && a) {
       const up = act!.dir === "UP";
@@ -308,12 +408,21 @@ export function runDecisionLayer(inp: DecisionInput): DecisionResult {
       const m = istMin(bar.time);
       if (m < openMin) reasons.push({ g: "LATE", r: "OUTSIDE SESSION" });
       if (m >= cutoffMin) reasons.push({ g: "LATE", r: `LATE CUTOFF (>= ${String(Math.floor(cutoffMin / 60)).padStart(2, "0")}:${String(cutoffMin % 60).padStart(2, "0")} IST)` });
+      // added layer — new-entry permission only (open trades are never touched)
+      if (dc.directionGuard && guard) {
+        const origUp = guard.regime === "BULLISH";
+        reasons.push({ g: "DIRECTION", r: up === origUp
+          ? `5M DIRECTION CONFLICT — new ${up ? "BUY CE" : "BUY PE"} waits for reconfirmation (${guard.reason})`
+          : `5M DIRECTION CONFLICT — no ${up ? "BUY CE" : "BUY PE"} until the 15M regime itself changes (15M still ${guard.regime})` });
+      }
+      if (dc.directionGuard && rejectionNow && (srEvent === "RESISTANCE_REJECTION" ? !up : up))
+        reasons.push({ g: "REJECTION", r: `WAIT — ${srEvent === "RESISTANCE_REJECTION" ? "RESISTANCE" : "SUPPORT"} REJECTION at ${srLevel} (${rejType}): needs 5M confirmation first` });
       if (!(risk > 0)) reasons.push({ g: "STRUCTURE", r: "INVALID STRUCTURE (risk <= 0)" });
       if (row.extendedMove === "EXTENDED") reasons.push({ g: "STRUCTURE", r: `EXTENDED MOVE (> ${cfg.extendedAtrMult} ATR from EMA${cfg.emaFast})` });
       const prior = c.slice(Math.max(0, i - 6), i);
       if (prior.length >= 3) {
         const ph = Math.max(...prior.map((x) => x.high)), pl = Math.min(...prior.map((x) => x.low));
-        const trapAgainst = up ? bar.high > ph && price < ph : bar.low < pl && price > pl;
+        const trapAgainst = !(cfg.ablationDisable || []).includes("FAKE_MOVE") && (up ? bar.high > ph && price < ph : bar.low < pl && price > pl);
         if (trapAgainst) reasons.push({ g: "STRUCTURE", r: up ? "FAKE MOVE (bull trap on this bar)" : "FAKE MOVE (bear trap on this bar)" });
       }
       if (row.isExpiryDay && row.expiryRisk === "HIGH") reasons.push({ g: "STRUCTURE", r: "EXPIRY DAY RISK" });
@@ -339,7 +448,7 @@ export function runDecisionLayer(inp: DecisionInput): DecisionResult {
     let exec: ExecutionState;
     let blockReason: string | null = null;
     if (isCandidate) {
-      const order: Group[] = ["DATA", "LATE", "STRUCTURE", "LIQUIDITY"];
+      const order: Group[] = GROUP_ORDER;
       const first = order.map((g) => reasons.find((x) => x.g === g)).find(Boolean);
       if (first) { exec = GROUP_STATE[first.g]; blockReason = first.r; }
       else exec = act!.dir === "UP" ? "BUY_READY" : "SELL_READY";
@@ -366,7 +475,6 @@ export function runDecisionLayer(inp: DecisionInput): DecisionResult {
       : `${row.emaDirection === "FLAT" ? "FLAT" : (row.emaSpreadATR > 0.5 ? "STRONG_" : "") + row.emaDirection}`;
     const liq = option?.primary ? `OK (vol ${option.primary.volume}, OI ${option.primary.oi})` : option?.status === "AVAILABLE" ? "THIN" : "UNAVAILABLE";
 
-    const oiVal = validateOi({ series: inp.options, times, i, spot, direction });
     const liquidityGrade: DecisionRow["liquidityGrade"] = !option ? null
       : option.status !== "AVAILABLE" ? "DATA UNAVAILABLE" : option.primary && option.alternative ? "GOOD" : option.primary ? "WARNING" : "POOR";
 
@@ -403,12 +511,23 @@ export function runDecisionLayer(inp: DecisionInput): DecisionResult {
       plan, option, gamma, gammaCall, gammaPut,
       oiStatus, oiAgeBars: oiAge, oiConfirmation: oiConf,
       regime15: reg15, ctx15: ctx, contextWarning, reversalRisk, oiValidation: oiVal, liquidityGrade,
+      guardState, directionConflict: guardState === "5M_DIRECTION_CONFLICT" || guardState === "WAIT_FOR_DIRECTION_RECONFIRMATION",
+      directionConflictReason: conflictReason, previousRegime: prevRegime, current5mDirection: candleDir,
+      reconfirmationRequired: reconStatus === "PENDING", reconfirmationStatus: reconStatus,
+      supportResistanceEvent: srEvent, supportResistanceLevel: srLevel, rejectionType: rejType, rejectionStatus: rejStatus,
+      entryBlockedReason: planCore && exec !== "BUY_READY" && exec !== "SELL_READY" ? blockReason : null,
+      oiStatusLabel: oiStatus === "STALE" || oiStatus === "UNAVAILABLE" ? "STALE"
+        : oiConf === "CONTRADICTS" || oiVal.state === "OI_REVERSAL_WATCH" ? "CONTRADICTING"
+        : oiVal.state === "OI_CONFIRMED" ? "CONFIRMED" : oiConf === "SUPPORTS" ? "SUPPORTING" : "UNCONFIRMED",
+      rrStatus: plan ? (plan.rr >= cfg.rrMin ? "GOOD" : "WARNING") : null,
       volumeState: row.volumeState, momentumState: momentum, structureState: `${row.structureState} · BOS ${row.bos}`,
       vwapState: row.vwap == null ? "UNKNOWN" : price > row.vwap ? "ABOVE" : price < row.vwap ? "BELOW" : "AT",
       emaState: `${row.emaDirection} (price ${row.priceVsEMA} EMA${cfg.emaFast})`, liquidityState: liq,
       executionState: exec, action: exec === "BUY_READY" || exec === "SELL_READY" ? "TAKE" : "WAIT",
       blockReason, blockReasons: reasons.map((x) => x.r), timingClassification: "NA",
       fillPrice: null, outcome: "NONE", rMultiple: null, exitPrice: null, exitIso: null,
+      finalAction: exec === "BUY_READY" ? "BUY CE" : exec === "SELL_READY" ? "BUY PE" : "WAIT",
+      optionFill: null, optionExit: null, optionPnl: null,
     };
     out.push(dRow);
 
@@ -418,7 +537,7 @@ export function runDecisionLayer(inp: DecisionInput): DecisionResult {
       ev.candidateBars++;
       if (dRow.action === "TAKE") ev.readyBars++;
       else {
-        const g = (["DATA", "LATE", "STRUCTURE", "LIQUIDITY"] as Group[]).find((gg) => reasons.some((x) => x.g === gg));
+        const g = GROUP_ORDER.find((gg) => reasons.some((x) => x.g === gg));
         if (g) ev.blockCounts[g] = (ev.blockCounts[g] || 0) + 1;
       }
       if (act.confirmIdx === i && !ev.confirmIso) ev.confirmIso = row.iso;
@@ -428,7 +547,13 @@ export function runDecisionLayer(inp: DecisionInput): DecisionResult {
 
   // gate-block tally on candidate bars, taken BEFORE HOLD marking overwrites state
   const blocks: Record<string, number> = {};
-  out.forEach((d) => { if (d.plan && inp.inScope(d.timestamp) && d.executionState.startsWith("TRADE_BLOCKED_")) { const k = d.executionState.replace("TRADE_BLOCKED_", ""); blocks[k] = (blocks[k] || 0) + 1; } });
+  out.forEach((d) => {
+    if (!d.plan || !inp.inScope(d.timestamp)) return;
+    const k = d.executionState.startsWith("TRADE_BLOCKED_") ? d.executionState.replace("TRADE_BLOCKED_", "")
+      : d.executionState === "WAIT_FOR_DIRECTION_RECONFIRMATION" ? "DIRECTION_CONFLICT"
+      : d.executionState === "WAIT" && /REJECTION at/.test(d.blockReason ?? "") ? "SR_REJECTION" : null;
+    if (k) blocks[k] = (blocks[k] || 0) + 1;
+  });
 
   // ---------------- forward walk (shared walker, identical accounting) ----------------
   const pseudo: AuditRow[] = rows.map((r, i) => {
@@ -446,15 +571,26 @@ export function runDecisionLayer(inp: DecisionInput): DecisionResult {
     const i = idxByTime.get(t.timestamp)!;
     const d = out[i];
     d.fillPrice = t.entry; d.outcome = t.outcome; d.rMultiple = t.rMultiple; d.exitPrice = t.exitPrice;
+    // option-buyer result on the REAL premium of the selected strike (never modelled)
+    const pk = d.option?.primary && d.option.expiry ? contractKey(d.option.expiry, d.option.optionType, d.option.primary.strike) : null;
+    const cm = pk ? inp.options?.byContract.get(pk) : undefined;
+    const ob = cm && t.entryTimestamp != null ? cm.get(t.entryTimestamp) : undefined;
+    const xb = cm && t.exitTimestamp != null && t.outcome !== "OPEN" ? cm.get(t.exitTimestamp) : undefined;
+    d.optionFill = ob ? ob.open : null;
+    d.optionExit = xb ? xb.close : null;
+    d.optionPnl = d.optionFill != null && d.optionExit != null ? +(d.optionExit - d.optionFill).toFixed(2) : null;
     d.exitIso = t.exitTimestamp != null ? rows[idxByTime.get(t.exitTimestamp) ?? i]?.iso ?? null : null;
     const ev = d.moveId != null ? eventById.get(d.moveId) : undefined;
     if (ev && !ev.executed) { ev.executed = true; ev.tradeOutcome = t.outcome; ev.tradeR = t.rMultiple; }
     // HOLD while the position is open (entry candle .. exit candle)
     const eIdx = idxByTime.get(t.entryTimestamp as number) ?? i + 1, xIdx = t.exitTimestamp != null ? (idxByTime.get(t.exitTimestamp) ?? eIdx) : eIdx;
-    for (let k = eIdx; k <= xIdx && k < n; k++) if (k !== i) { out[k].executionState = "HOLD"; out[k].action = "WAIT"; }
+    for (let k = eIdx; k <= xIdx && k < n; k++) if (k !== i) {
+      out[k].executionState = "HOLD"; out[k].action = "WAIT"; out[k].finalAction = "WAIT";
+      if (out[k].plan) out[k].entryBlockedReason = `HOLD — ${d.plan?.side === "BUY" ? "BUY CE" : "BUY PE"} from ${hm(d.timestamp)} still open (until SL/Target)`;
+    }
     // the shared walker also skips new entries for cfg.cooldownCandles after an exit: say so on the row
-    for (let k = xIdx + 1; k <= xIdx + cfg.cooldownCandles && k < n; k++) {
-      if (out[k].action === "TAKE") { out[k].executionState = "WAIT"; out[k].action = "WAIT"; out[k].blockReason = `COOLDOWN (${cfg.cooldownCandles} candles after the last exit)`; out[k].blockReasons.push(out[k].blockReason!); }
+    for (let k = xIdx + 1; k <= xIdx + cfg.cooldownCandles && k < n && out[k].date === out[xIdx].date; k++) {
+      if (out[k].action === "TAKE") { out[k].executionState = "WAIT"; out[k].action = "WAIT"; out[k].finalAction = "WAIT"; out[k].blockReason = `COOLDOWN (${cfg.cooldownCandles} candles after the last exit)`; out[k].blockReasons.push(out[k].blockReason!); out[k].entryBlockedReason = out[k].blockReason; }
     }
   }
 
@@ -562,7 +698,8 @@ export function runDecisionLayer(inp: DecisionInput): DecisionResult {
   };
   const barsWithChain = inp.options ? scoped.filter((d) => inp.options!.byTime.has(d.timestamp)).length : 0;
   return {
-    rows: scoped, events: scopedEvents, bigMoves, trades, metrics: computeMetrics(pseudo.filter((r) => inp.inScope(r.timestamp)), trades), summary,
+    rows: scoped, events: scopedEvents, bigMoves, trades, metrics: computeMetrics(pseudo.filter((r) => inp.inScope(r.timestamp)), trades),
+    daily: computeDaily(pseudo.filter((r) => inp.inScope(r.timestamp)), trades), summary,
     optionData: { status: inp.options?.status ?? "UNAVAILABLE", note: inp.options?.note ?? "option data not requested", barsWithChain },
   };
 }

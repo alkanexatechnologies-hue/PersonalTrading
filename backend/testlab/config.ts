@@ -48,7 +48,7 @@ export function defaultConfig(index: IndexKey, timeframe: TfKey): TestConfig {
     buyThreshold: 55,
     sellThreshold: 55,
     ablationDisable: [],
-    warmupSessions: 3,             // prior sessions loaded ONLY to warm EMA/ATR/structure (never scored)
+    warmupSessions: 5,             // prior sessions loaded ONLY for warmup (never scored); 5 x 75 > the decision layer's 300-candle level window, so a test run sees the same history as live
     decision: defaultDecisionConfig(),
   };
 }
@@ -72,7 +72,8 @@ export function defaultDecisionConfig() {
     deltaMax: 0.8,
     minTradesForRate: 30,
     optionData: "ON" as "ON" | "OFF",
-    requireEngineAgreement: true,  // user choice 2026-10-04: movement break AND engine score must agree
+    requireEngineAgreement: true,
+    directionGuard: true,          // 2026-10-05: 5M direction-conflict + S/R rejection protection (new entries only)  // user choice 2026-10-04: movement break AND engine score must agree
   };
 }
 

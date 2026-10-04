@@ -8,6 +8,8 @@ import { contractKey, OptBar, OptionSeries } from "./optionsData";
 import { gammaRead } from "./strikeGamma";
 import { context15ForSeries, Ctx15 } from "./context15";
 import { validateOi } from "./oiValidation";
+import { decisionCard } from "./decisionCard";
+import { labViews } from "./views";
 import { FuturesBinding } from "./types";
 
 // Two synthetic sessions: a quiet 998<->1002 oscillation (session 1 = history),
@@ -323,4 +325,199 @@ test("legacy engine rows: a later SELL while one is open becomes WAIT with a HOL
   assert.equal(trades.length, 1);
   assert.equal(rows[1].signal, "WAIT"); assert.match(rows[1].hardGateReason, /HOLD — SELL from 10:00 still open/);
   assert.equal(rows[4].signal, "WAIT");
+});
+
+// ============ 5M direction-conflict protection + S/R rejection (spec tests 1-13) ============
+// Same two-session base as above (swing highs 1003 / lows 997), then explicit [open, close, high?, low?] candles.
+type Bar = [number, number, number?, number?];
+function build(extra: Bar[], pre = 20): Candle[] {
+  const out: Candle[] = []; let prev = 1000;
+  const push = (time: number, o: number, c: number, h?: number, l?: number) => { out.push({ time, open: o, high: h ?? Math.max(o, c) + 1, low: l ?? Math.min(o, c) - 1, close: c, volume: 1000 }); prev = c; };
+  for (let k = 0; k < 75; k++) push(T0("2026-09-28") + k * 300, prev, k % 2 === 0 ? 1002 : 998);
+  for (let k = 0; k < pre; k++) push(T0("2026-09-29") + k * 300, prev, k % 2 === 0 ? 1002 : 998);
+  extra.forEach(([o, c, h, l], j) => push(T0("2026-09-29") + (pre + j) * 300, o, c, h, l));
+  return out;
+}
+const X = 75 + 20; // index of the first explicit candle
+const ctxSeq = (c: Candle[], f: (i: number) => Ctx15["regime"]) => ctxAll(c, "RANGE").map((x, i) => ({ ...x, regime: f(i), master: f(i) }));
+const at = (res: ReturnType<typeof run>["res"], c: Candle[], i: number) => res.rows.find((r) => r.timestamp === c[i].time)!;
+const ENGULF_DOWN: Bar[] = [[998, 1001], [1002, 994]];   // green, then red whose body covers it
+
+test("T1: 15M BULLISH + 5M bullish breakout, no conflict -> existing BUY CE unchanged", () => {
+  const c = build([[998, 1010], [1010, 1011], [1011, 1012]]);
+  const on = at(run(c, { ctx15: ctxAll(c, "BULLISH") }).res, c, X);
+  assert.equal(on.guardState, null); assert.equal(on.directionConflict, false);
+  assert.equal(on.executionState, "BUY_READY");
+});
+
+test("T2: 15M BULLISH + 5M bearish engulfing -> 5M_DIRECTION_CONFLICT, WAIT_FOR_DIRECTION_RECONFIRMATION, no new entry, 15M unchanged", () => {
+  const c = build([...ENGULF_DOWN, [994, 993], [993, 992]]);
+  const { res } = run(c, { ctx15: ctxAll(c, "BULLISH") });
+  const r = at(res, c, X + 1);
+  assert.equal(r.guardState, "5M_DIRECTION_CONFLICT");
+  assert.equal(r.reconfirmationRequired, true); assert.equal(r.previousRegime, "BULLISH"); assert.equal(r.current5mDirection, "BEARISH");
+  assert.equal(r.regime15, "BULLISH", "one 5M candle never changes the 15M regime");
+  assert.equal(r.executionState, "WAIT_FOR_DIRECTION_RECONFIRMATION");
+  assert.match(r.entryBlockedReason!, /no BUY PE until the 15M regime itself changes/);
+  assert.equal(at(res, c, X + 2).guardState, "WAIT_FOR_DIRECTION_RECONFIRMATION");
+  assert.ok(res.rows.filter((x) => x.timestamp >= c[X + 1].time).every((x) => x.action !== "TAKE"));
+});
+
+test("T3: conflict, then the existing engine re-confirms bullish -> DIRECTION_RECONFIRMED and BUY CE eligible again", () => {
+  const c = build([...ENGULF_DOWN, [994, 999], [999, 1010], [1010, 1011]]);
+  const r = at(run(c, { ctx15: ctxAll(c, "BULLISH") }).res, c, X + 3);
+  assert.equal(r.movementState, "BREAKOUT_CONFIRMED");
+  assert.equal(r.guardState, "DIRECTION_RECONFIRMED"); assert.equal(r.reconfirmationStatus, "DIRECTION_RECONFIRMED");
+  assert.equal(r.executionState, "BUY_READY");
+});
+
+test("T4: conflict, bearish continuation, existing 15M engine turns BEARISH -> REGIME_CHANGE_CONFIRMED and BUY PE eligible", () => {
+  const c = build([...ENGULF_DOWN, [994, 989], [989, 988]]);
+  const { res } = run(c, { ctx15: ctxSeq(c, (i) => (i <= X + 1 ? "BULLISH" : "BEARISH")) });
+  assert.equal(at(res, c, X + 1).action, "WAIT", "no BUY PE on the conflict candle itself");
+  const r = at(res, c, X + 2);
+  assert.equal(r.guardState, "REGIME_CHANGE_CONFIRMED");
+  assert.equal(r.executionState, "SELL_READY");
+});
+
+test("T5: 15M BEARISH + 5M bullish engulfing -> conflict, no new BUY PE (and no immediate BUY CE)", () => {
+  const c = build([[1002, 999], [998, 1006], [1006, 1005], [1005, 1004]]);
+  const { res } = run(c, { ctx15: ctxAll(c, "BEARISH") });
+  const r = at(res, c, X + 1);
+  assert.equal(r.guardState, "5M_DIRECTION_CONFLICT");
+  assert.equal(r.action, "WAIT");
+  assert.ok(res.rows.filter((x) => x.timestamp >= c[X + 1].time).every((x) => x.action !== "TAKE"));
+});
+
+test("T6: resistance rejection -> RESISTANCE_REJECTION, WAIT, no immediate BUY PE", () => {
+  const c = build([[999, 1000, 1004, 998.5], [1000, 1000.5]]);
+  const r = at(run(c).res, c, X);
+  assert.equal(r.supportResistanceEvent, "RESISTANCE_REJECTION"); assert.equal(r.guardState, "RESISTANCE_REJECTION");
+  assert.equal(r.supportResistanceLevel, 1003);
+  assert.equal(r.action, "WAIT");
+});
+
+test("T7: resistance rejection followed by bearish 5M confirmation -> existing BUY PE can trigger", () => {
+  const c = build([[999, 1000, 1004, 998.5], [1000, 990], [990, 989]]);
+  const r = at(run(c).res, c, X + 1);
+  assert.equal(r.rejectionStatus, "CONFIRMED");
+  assert.equal(r.executionState, "SELL_READY");
+});
+
+test("T8: support rejection -> SUPPORT_REJECTION, WAIT, no immediate BUY CE", () => {
+  const c = build([[1001, 1000, 1001.5, 996], [1000, 1000.5]]);
+  const r = at(run(c).res, c, X);
+  assert.equal(r.supportResistanceEvent, "SUPPORT_REJECTION"); assert.equal(r.supportResistanceLevel, 997);
+  assert.equal(r.action, "WAIT");
+});
+
+test("T9: support rejection followed by bullish 5M confirmation -> existing BUY CE can trigger", () => {
+  const c = build([[1001, 1000, 1001.5, 996], [1000, 1010], [1010, 1011]]);
+  const r = at(run(c).res, c, X + 1);
+  assert.equal(r.rejectionStatus, "CONFIRMED");
+  assert.equal(r.executionState, "BUY_READY");
+});
+
+const ce = (time: number, strike: number, offset: number, close: number, volume: number, spot: number): OptBar =>
+  ({ time, strike, offset, side: "CE", open: close, high: close, low: close, close, iv: 15, oi: 50000, volume, spot, expiry: "2026-10-06" });
+const cardHas = (txt: string, side: "CE" | "PE") => {
+  for (const k of ["ENTRY (index)", "STOP LOSS (index)", "TARGET 1 (index)", "TARGET 2 (index)", "PRIMARY STRIKE", "ALTERNATIVE STRIKE", "OPTION ENTRY LTP", "OPTION SL", "OPTION TARGET 1", "OPTION TARGET 2", "GAMMA", "OI STATUS", "LIQUIDITY", "R:R STATUS", "FINAL ACTION"]) assert.match(txt, new RegExp(`^${k.replace(/[()]/g, "\\$&")}\\s+:`, "m"), `card has ${k}`);
+  assert.match(txt, new RegExp(`^PRIMARY STRIKE\\s+: \\d+ ${side}`, "m"));
+  assert.match(txt, new RegExp(`^FINAL ACTION\\s+: BUY ${side}`, "m"));
+};
+
+test("T10: BUY CE card shows Entry, SL, T1, T2, primary + alternative strike, option prices, R:R", () => {
+  const c = build([[998, 1010], [1010, 1011]]);
+  const opts = optSeries(c, (t, i) => (i === X ? [ce(t, 1005, -1, 12, 4000, 1010), ce(t, 1010, 0, 9, 5000, 1010), ce(t, 1015, 1, 6, 3000, 1010)] : []));
+  const r = at(run(c, { ctx15: ctxAll(c, "BULLISH"), options: opts }).res, c, X);
+  assert.equal(r.action, "TAKE");
+  cardHas(decisionCard(r, "NIFTY", "TEST"), "CE");
+});
+
+test("T11: BUY PE card shows Entry, SL, T1, T2, primary + alternative strike, option prices, R:R", () => {
+  const c = series(994);
+  const bi = 75 + 20;
+  const opts = optSeries(c, (t, i) => (i === bi ? [pe(t, 990, -1, 9, 4000, 994), pe(t, 995, 0, 12, 3500, 994), pe(t, 1000, 1, 15, 3000, 994)] : []));
+  const r = breakRow(c, run(c, { options: opts }).res);
+  assert.equal(r.action, "TAKE");
+  cardHas(decisionCard(r, "NIFTY", "TEST"), "PE");
+});
+
+test("T12: R:R < 2 -> BUY PE still generated, R:R STATUS WARNING, no BLOCKED_RR", () => {
+  const c = series(985);
+  const r = breakRow(c, run(c).res);
+  assert.equal(r.action, "TAKE"); assert.equal(r.rrStatus, "WARNING");
+  assert.doesNotMatch(r.executionState, /RR/);
+  assert.match(decisionCard(r, "NIFTY", "TEST"), /^R:R STATUS\s+: WARNING/m);
+});
+
+test("T13: open BUY CE + 5M bearish conflict -> position untouched (same exit as without the layer); conflict recorded", () => {
+  const extra: Bar[] = [[998, 1010], [1010, 1011], [1011, 1012], [1013, 1005], [1005, 1006], [1006, 1007]];
+  const c = build(extra);
+  const ctx15 = ctxAll(c, "BULLISH");
+  const on = run(c, { ctx15 }).res;
+  const cfg = defaultConfig("NIFTY", "5m"); cfg.scope = { mode: "full" }; cfg.dataMode = "SPOT_DIRECTION"; cfg.futuresBinding = "spot-fallback";
+  const oi = c.map((_, i) => 1_000_000 + i * 10);
+  const eng = runEngine({ config: cfg, binding: BINDING, candles: c, oi, oiStatus: "AVAILABLE", vwapSource: "SPOT", expiryForDate: () => ({ expiryDate: null, daysToExpiry: null, isExpiryDay: false }), symbol: "TEST" });
+  const off = runDecisionLayer({ cfg, dc: { ...defaultDecisionConfig(), requireEngineAgreement: false, directionGuard: false }, candles: c, rows: eng.rows, oi, options: null, strikeStep: 5, inScope: () => true, ctx15 });
+  assert.equal(on.trades.length, 1);
+  const a = on.trades[0], b = off.trades[0];
+  assert.deepEqual([a.outcome, a.exitTimestamp, a.exitPrice], [b.outcome, b.exitTimestamp, b.exitPrice], "existing management unchanged");
+  const conflictRow = at(on, c, X + 3);
+  assert.equal(conflictRow.guardState, "5M_DIRECTION_CONFLICT");
+  assert.equal(conflictRow.executionState, "HOLD", "the open BUY CE keeps running");
+});
+
+// ============ SINGLE SOURCE OF TRUTH: every panel derives from the same decision result ============
+test("consistency: chart marker, signals table, trades table and Final Signal agree with the decision layer for every candle", () => {
+  for (const c of [series(994), series(985), build([[998, 1010], [1010, 1011], [1011, 1012]]), build([...ENGULF_DOWN, [994, 999], [999, 1010], [1010, 1011]])]) {
+    const ctx15 = ctxAll(c, "BULLISH");
+    const { res, eng } = run(c, { ctx15 });
+    const rr: any = { rows: eng.rows, chart: c.map((x) => ({ t: x.time, o: x.open, h: x.high, l: x.low, c: x.close, v: x.volume, oi: null, ema9: null, ema21: null, vwap: null, signal: "WAIT" })), decision: res };
+    const v = labViews(rr)!;
+    for (const d of res.rows) {
+      const ch = v.chart.find((x) => x.t === d.timestamp)!;
+      assert.equal(ch.action, d.finalAction, "chart marker = decision");
+      const sv = v.signals.find((x) => x.timestamp === d.timestamp);
+      if (d.finalAction === "WAIT") { assert.equal(ch.signal, "WAIT"); assert.equal(sv, undefined); continue; }
+      assert.equal(ch.signal, d.plan!.side);
+      assert.ok(sv, "signals table has every BUY CE / BUY PE");
+      assert.equal(sv!.action, d.finalAction);
+      assert.deepEqual([sv!.entry, sv!.stopLoss, sv!.target1, sv!.target2, sv!.strike], [d.plan!.entry, d.plan!.stopLoss, d.plan!.target1, d.plan!.target2, d.option?.primary?.strike ?? null]);
+    }
+    const last = [...res.rows].reverse().find((x) => x.finalAction !== "WAIT");
+    assert.equal(v.final.lastSignal?.timestamp ?? null, last?.timestamp ?? null, "Final Signal = latest decision-layer signal");
+    assert.equal(v.final.latest?.timestamp, res.rows[res.rows.length - 1].timestamp);
+    for (const t of v.trades) assert.ok(v.signals.some((s) => s.timestamp === t.timestamp && s.entry === t.entry), "every trade is a listed signal");
+  }
+});
+
+test("BUY = BUY CE (call) and SELL = BUY PE (put): finalAction matches the plan side on every signal", () => {
+  for (const c of [series(994), build([[998, 1010], [1010, 1011], [1011, 1012]])]) {
+    for (const d of run(c, { ctx15: ctxAll(c, "BULLISH") }).res.rows.filter((x) => x.finalAction !== "WAIT")) {
+      assert.equal(d.finalAction, d.plan!.side === "BUY" ? "BUY CE" : "BUY PE");
+      assert.equal(d.option?.optionType ?? (d.plan!.side === "BUY" ? "CE" : "PE"), d.plan!.side === "BUY" ? "CE" : "PE");
+    }
+  }
+});
+
+test("delayed OI: breakout and breakdown are still detected and signalled", () => {
+  const up = build([[998, 1010], [1010, 1011], [1011, 1012]]);
+  const dn = series(994);
+  const stale = (c: Candle[]) => c.map((_, i) => (i < c.length - 12 ? 1_000_000 : null));
+  const u = at(run(up, { ctx15: ctxAll(up, "BULLISH"), oi: stale(up) }).res, up, X);
+  const d = breakRow(dn, run(dn, { oi: stale(dn) }).res);
+  assert.equal(u.movementState, "BREAKOUT_CONFIRMED"); assert.equal(u.finalAction, "BUY CE"); assert.match(u.oiStatus, /DELAYED|STALE|AGING/);
+  assert.equal(d.movementState, "BREAKDOWN_CONFIRMED"); assert.equal(d.finalAction, "BUY PE"); assert.match(d.oiStatus, /DELAYED|STALE|AGING/);
+});
+
+test("cooldown never carries into the next session", () => {
+  const cfg = defaultConfig("NIFTY", "5m");
+  const day1 = Math.floor(Date.parse("2026-09-28T15:20:00+05:30") / 1000), day2 = Math.floor(Date.parse("2026-09-29T09:15:00+05:30") / 1000);
+  const times = [day1, day1 + 300, day2, day2 + 300, day2 + 600];
+  const candles = times.map((t) => ({ time: t, open: 100, high: 101, low: 99, close: 100, volume: 1 }));
+  const mk = (i: number, sig: "SELL" | "WAIT") => ({ timestamp: times[i], iso: new Date((times[i] + 19800) * 1000).toISOString().replace("T", " ").slice(0, 19) + " IST", signal: sig, entry: sig === "SELL" ? 100 : null, entryTimestamp: times[i + 1], stopLoss: 110, target1: 80, target2: 70, rr: 2, bos: "NONE", internalState: "NONE", extendedMove: "NORMAL", hardGate: false, hardGateReason: "", primaryReason: "" } as any);
+  const rows = [mk(0, "SELL"), mk(1, "WAIT"), mk(2, "SELL"), mk(3, "WAIT"), mk(4, "WAIT")];
+  const trades = walkOutcomes(rows, candles, cfg);
+  assert.equal(trades.length, 2, "the next session's first-candle signal is not swallowed by yesterday's cooldown");
 });

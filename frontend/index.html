@@ -7,7 +7,7 @@
          under the home indicator. Android ignores it harmlessly. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>BC Data Status</title>
-    <link rel="stylesheet" href="styles.css?v=20261005-livesig7" />
+    <link rel="stylesheet" href="styles.css?v=20261005-livesig9" />
     <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   </head>
   <body class="oi-focus">
@@ -751,7 +751,7 @@
               <button class="uil2-tab" data-uil="ablation">7. Indicator Ablation</button>
               <button class="uil2-tab" data-uil="validation">8. Data Validation</button>
               <button class="uil2-tab" data-uil="export">9. Export &amp; Audit</button>
-              <button class="uil2-tab" data-uil="signal">🎯 Market Signal (15M→5M)</button>
+              <button class="uil2-tab" data-uil="signal">🗂 Legacy 15M→5M (comparison)</button>
             </div>
 
             <!-- ===== 3-column dashboard body ===== -->
@@ -772,8 +772,8 @@
                   </label>
                   <label class="uil2-field"><span>Instrument Type</span>
                     <select id="uil2-instr">
-                      <option value="index">Index (Signal)</option>
-                      <option value="futures">Futures (Signal)</option>
+                      <option value="futures" selected>Futures (Signal) — NIFTY current-month futures</option>
+                      <option value="index">Index (Signal) — index spot</option>
                     </select>
                   </label>
                   <div class="uil2-chips" id="uil2-index-chips">
@@ -845,10 +845,8 @@
                 <section class="uil2-sec">
                   <div class="uil2-sec-h"><span class="uil2-num">5</span> Test Options</div>
                   <label class="uil2-toggle"><span>Include Volume</span><input type="checkbox" id="uil2-opt-vol" checked /><i></i></label>
-                  <label class="uil2-toggle"><span>Include Open Interest (OI)</span><input type="checkbox" id="uil2-opt-oi" checked /><i></i></label>
-                  <label class="uil2-toggle"><span>Use Futures VWAP</span><input type="checkbox" id="uil2-opt-fvwap" checked /><i></i></label>
-                  <label class="uil2-toggle"><span>Include Expiry Days</span><input type="checkbox" id="uil2-opt-exp" checked /><i></i></label>
-                  <label class="uil2-toggle"><span>Use Normalized ATR (%)</span><input type="checkbox" id="uil2-opt-natr" checked /><i></i></label>
+                  <!-- Include OI / Use Futures VWAP / Include Expiry Days / Use Normalized ATR removed: they did not change the
+                       backend. OI is always shown as supporting evidence (never a gate); VWAP follows Instrument Type above. -->
                 </section>
 
                 <div class="uil2-actions">
@@ -2535,6 +2533,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=20261005-livesig7"></script>
+    <script src="app.js?v=20261005-livesig9"></script>
   </body>
 </html>

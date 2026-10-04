@@ -60,6 +60,7 @@ import { withDhanPriority } from "../data/dhanClient";
 import { runTest as runTestLab, availableHistory as testLabAvailableHistory } from "../testlab/runner";
 import { writeReviewPackage as writeTestLabPackage } from "../testlab/exporter";
 import { decisionCard as tlDecisionCard } from "../testlab/decisionCard";
+import { labViews as tlLabViews } from "../testlab/views";
 import { liveDecision as tlLiveDecision } from "../testlab/live";
 import { defaultConfig as testLabDefaultConfig } from "../testlab/config";
 import { runHtf as runTestLabHtf } from "../testlab/htfRunner";
@@ -9687,7 +9688,10 @@ function tlShape(j: TLJob) {
   // Chart series (cap to the most recent CHART_CAP candles so a long run stays
   // responsive in the browser; the export package keeps the full series).
   const CHART_CAP = 2500;
-  const chart = r.chart.length > CHART_CAP ? r.chart.slice(r.chart.length - CHART_CAP) : r.chart;
+  // SINGLE SOURCE OF TRUTH: every panel below is fed from the decision layer (views.ts).
+  const v = tlLabViews(r);
+  const chartAll = v ? v.chart : r.chart;
+  const chart = chartAll.length > CHART_CAP ? chartAll.slice(chartAll.length - CHART_CAP) : chartAll;
 
   // The final evaluated candle drives the right-rail "Final Signal", the
   // "Indicator Status" strip and the "Current Candle" panel.
@@ -9723,19 +9727,27 @@ function tlShape(j: TLJob) {
     dataRange: r.dataRange,
     oiStatus: r.oiStatus,
     dataQuality: r.dataQuality,
-    metrics: r.metrics,
-    daily: r.daily,
-    gateBlocks: r.gateBlocks,
+    metrics: v ? v.metrics : r.metrics,
+    daily: v ? v.daily : r.daily,
+    gateBlocks: v ? v.gateBlocks : r.gateBlocks,
+    signalSource: v ? "runDecisionLayer" : "runEngine (decision layer unavailable)",
+    legacyMetrics: r.metrics, legacyDaily: r.daily, legacyGateBlocks: r.gateBlocks,
     vwapSource: r.rows[0]?.vwapSource ?? null,
     chart,
     chartTruncated: r.chart.length > CHART_CAP,
     totalCandles: r.chart.length,
     lastRow,
     currentCandle,
-    signals: signals.slice(0, SIG_CAP).map(compactRow),
-    signalsTruncated: signals.length > SIG_CAP,
-    signalCount: signals.length,
-    trades: r.trades.map(compactRow),
+    signals: v ? v.signals.slice(-SIG_CAP) : signals.slice(0, SIG_CAP).map(compactRow),
+    signalsTruncated: (v ? v.signals.length : signals.length) > SIG_CAP,
+    signalCount: v ? v.signals.length : signals.length,
+    trades: v ? v.trades : r.trades.map(compactRow),
+    legacySignals: signals.slice(0, SIG_CAP).map(compactRow), legacyTrades: r.trades.map(compactRow),
+    final: v ? {
+      latest: v.final.latest ? { row: { ...v.final.latest, option: v.final.latest.option ? { ...v.final.latest.option, candidates: [] } : null }, text: tlDecisionCard(v.final.latest, r.config.index, r.dataMode === "FUTURES_INTERNAL" ? (r.binding.futuresSymbol || "FUT") : `${r.config.index} spot`) } : null,
+      lastSignal: v.final.lastSignal,
+      lastSignalRow: v.final.lastSignal ? (() => { const x = r.decision!.rows.find((y) => y.timestamp === v.final.lastSignal!.timestamp)!; return { ...x, option: x.option ? { ...x.option, candidates: [] } : null }; })() : null,
+    } : null,
     indicators: { avgComponents, regimes },
     warmup: r.warmup ?? null,
     decision: tlDecisionShape(r),

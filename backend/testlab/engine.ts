@@ -316,6 +316,8 @@ export function walkOutcomes(rows: AuditRow[], candles: Candle[], cfg: TestConfi
     row.timingClassification = classifyTiming(row);
     trades.push(row);
     openUntilIdx = exitIdx; cooldownUntilIdx = exitIdx + cfg.cooldownCandles;
+    // the cooldown never carries into the next session
+    { const exitDay = istDate(candles[exitIdx]?.time ?? 0); for (let q = exitIdx + 1; q <= cooldownUntilIdx && q < candles.length; q++) if (istDate(candles[q].time) !== exitDay) { cooldownUntilIdx = q - 1; break; } }
     // No new BUY/SELL while this trade is open (until SL/Target), nor during the cooldown after it.
     for (let q = r + 1; q < rows.length && q <= cooldownUntilIdx; q++) {
       if (rows[q].signal === "WAIT") continue;
