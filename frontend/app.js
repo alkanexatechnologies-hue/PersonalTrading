@@ -16838,6 +16838,7 @@ function uil2LivePlan(r) {
     ${kv("Next resistance", (p.nextResistance || []).length ? p.nextResistance.map((x) => t2num(x)).join(" · ") : "none in view", "sl")}
     ${kv("Next support", (p.nextSupport || []).length ? p.nextSupport.map((x) => t2num(x)).join(" · ") : "none in view", "tg")}
   </div>
+  ${r.precision ? `<div class="lv-small">Precision: ${Object.entries(r.precision).map(([k, v]) => `<span class="${v === "PASS" ? "u-green" : v === "FAIL" ? "u-red" : ""}">${t2esc(k)} ${v === "PASS" ? "✓" : v === "FAIL" ? "✗" : "n/a"}</span>`).join(" · ")}</div>` : ""}
   <div class="lv-small">OI: ${t2esc(r.oiStatus)} · ${t2esc(r.oiConfirmation)} · ${t2esc(uil2Human(r.oiValidation ? r.oiValidation.state : "—"))}${r.oiValidation && (r.oiValidation.walls.ce || r.oiValidation.walls.pe) ? ` · walls CE ${r.oiValidation.walls.ce ?? "—"} / PE ${r.oiValidation.walls.pe ?? "—"}` : ""}</div>
   ${r.reversalRisk ? `<div class="lv-small">Reversal risk: <b class="lv-rr-${r.reversalRisk.level.toLowerCase()}">${r.reversalRisk.level}</b>${r.reversalRisk.factors.length ? " — " + t2esc(r.reversalRisk.factors.join("; ")) : ""}</div>` : ""}
   ${p.rrWarning ? `<div class="lv-warn">${t2esc(p.rrWarning)}</div>` : ""}`;

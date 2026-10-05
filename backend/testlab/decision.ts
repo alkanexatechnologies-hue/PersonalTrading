@@ -54,14 +54,14 @@ interface Active {
   extreme: number; startPrice: number; firstState: MovementState; confirmIdx: number | null;
 }
 
-type Group = "DATA" | "LATE" | "DIRECTION" | "REJECTION" | "STRUCTURE" | "LIQUIDITY";   // R:R is deliberately NOT a gate group
-const GROUP_ORDER: Group[] = ["DATA", "LATE", "DIRECTION", "REJECTION", "STRUCTURE", "LIQUIDITY"];
+type Group = "DATA" | "LATE" | "DIRECTION" | "REJECTION" | "PRECISION" | "STRUCTURE" | "LIQUIDITY";   // R:R is deliberately NOT a gate group
+const GROUP_ORDER: Group[] = ["DATA", "LATE", "DIRECTION", "REJECTION", "PRECISION", "STRUCTURE", "LIQUIDITY"];
 const GROUP_STATE: Record<Group, ExecutionState> = {
-  DATA: "TRADE_BLOCKED_DATA", LATE: "TRADE_BLOCKED_LATE", DIRECTION: "WAIT_FOR_DIRECTION_RECONFIRMATION", REJECTION: "WAIT", STRUCTURE: "TRADE_BLOCKED_STRUCTURE",
+  DATA: "TRADE_BLOCKED_DATA", LATE: "TRADE_BLOCKED_LATE", DIRECTION: "WAIT_FOR_DIRECTION_RECONFIRMATION", REJECTION: "WAIT", PRECISION: "TRADE_BLOCKED_STRUCTURE", STRUCTURE: "TRADE_BLOCKED_STRUCTURE",
   LIQUIDITY: "TRADE_BLOCKED_LIQUIDITY",
 };
 const GROUP_TIMING: Record<Group, DecisionTiming> = {
-  DATA: "BLOCKED_DATA", LATE: "BLOCKED_LATE", DIRECTION: "BLOCKED_DIRECTION", REJECTION: "BLOCKED_DIRECTION", STRUCTURE: "BLOCKED_STRUCTURE", LIQUIDITY: "BLOCKED_LIQUIDITY",
+  DATA: "BLOCKED_DATA", LATE: "BLOCKED_LATE", DIRECTION: "BLOCKED_DIRECTION", REJECTION: "BLOCKED_DIRECTION", PRECISION: "BLOCKED_STRUCTURE", STRUCTURE: "BLOCKED_STRUCTURE", LIQUIDITY: "BLOCKED_LIQUIDITY",
 };
 
 /** Pivot highs/lows (2 bars each side, same definition as components.supportResistance). Pivot j is known at j+2. */
@@ -149,8 +149,14 @@ export function runDecisionLayer(inp: DecisionInput): DecisionResult {
     let breakoutLevel: number | null = null, breakdownLevel: number | null = null;
     if (prow) {
       const pc = c[i - 1].close;
-      const ups = [prow.resistance, pd[i]?.pdh ?? null, zone?.high ?? null].filter((x): x is number => x != null && x > pc);
-      const dns = [prow.support, pd[i]?.pdl ?? null, zone?.low ?? null].filter((x): x is number => x != null && x < pc);
+      // day high / day low so far = session extremes of the candles BEFORE this one (causal)
+      let dayHi: number | null = null, dayLo: number | null = null;
+      // used only once the opening range (first 15 minutes, same as the S/R-rejection opening range) is complete,
+      // so the first one or two candles' tiny range does not create false "day high/low" breaks at the open
+      if (istMin(bar.time) >= (cfg.sessionOpenMinIST ?? 555) + 15)
+        for (let k = i - 1; k >= 0 && istDate(c[k].time) === date; k--) { dayHi = dayHi == null ? c[k].high : Math.max(dayHi, c[k].high); dayLo = dayLo == null ? c[k].low : Math.min(dayLo, c[k].low); }
+      const ups = [prow.resistance, pd[i]?.pdh ?? null, zone?.high ?? null, dayHi].filter((x): x is number => x != null && x > pc);
+      const dns = [prow.support, pd[i]?.pdl ?? null, zone?.low ?? null, dayLo].filter((x): x is number => x != null && x < pc);
       breakoutLevel = ups.length ? Math.min(...ups) : null;
       breakdownLevel = dns.length ? Math.max(...dns) : null;
     }
@@ -258,6 +264,7 @@ export function runDecisionLayer(inp: DecisionInput): DecisionResult {
     // ---------------- Layer B: plan + gates (only after structural confirmation) ----------------
     let plan: TradePlan | null = null;
     let planCore: Omit<TradePlan, "rr" | "rrWarning"> | null = null;
+    let precisionRec: Record<string, "PASS" | "FAIL" | "N/A"> | null = null;
     const ctx = inp.ctx15?.[i] ?? null;
     const reg15 = ctx?.regime ?? "NEUTRAL";
     const contextWarning = direction === "BEARISH" && reg15 === "BULLISH" ? "BEARISH MOVEMENT vs 15M BULLISH — reversal warning"
@@ -423,7 +430,7 @@ export function runDecisionLayer(inp: DecisionInput): DecisionResult {
       if (prior.length >= 3) {
         const ph = Math.max(...prior.map((x) => x.high)), pl = Math.min(...prior.map((x) => x.low));
         const trapAgainst = !(cfg.ablationDisable || []).includes("FAKE_MOVE") && (up ? bar.high > ph && price < ph : bar.low < pl && price > pl);
-        if (trapAgainst) reasons.push({ g: "STRUCTURE", r: up ? "FAKE MOVE (bull trap on this bar)" : "FAKE MOVE (bear trap on this bar)" });
+        if (trapAgainst) reasons.push({ g: "REJECTION", r: up ? "FAKE MOVE (bull trap on this bar)" : "FAKE MOVE (bear trap on this bar)" });
       }
       if (row.isExpiryDay && row.expiryRisk === "HIGH") reasons.push({ g: "STRUCTURE", r: "EXPIRY DAY RISK" });
       if (dc.requireEngineAgreement) {
@@ -432,14 +439,35 @@ export function runDecisionLayer(inp: DecisionInput): DecisionResult {
                         : row.sellScore >= cfg.sellThreshold && row.sellScore >= row.buyScore + 10;
         if (!lean) reasons.push({ g: "STRUCTURE", r: `ENGINE SCORE DOES NOT AGREE (buy ${row.buyScore} / sell ${row.sellScore})` });
       }
-      // 15M + 5M arbitration: a break WITH the 15M context uses the normal 5M confirmation;
-      // against it (or in RANGE / TRANSITION / NEUTRAL) it needs a strong 5M candle. The movement itself is never hidden.
+      // PRECISION CHECK (2026-10-05 flow): each item must agree with the trade direction, in order.
+      // Every value comes from the existing engine row / 15M context — no new indicator or formula.
+      if (dc.precisionChain) {
+        const vw = row.vwap;
+        const momOk = up ? row.emaDirection === "UP" && (row.emaSpreadATR ?? 0) > 0.2 && row.priceVsEMA === "ABOVE"
+                         : row.emaDirection === "DOWN" && (row.emaSpreadATR ?? 0) > 0.2 && row.priceVsEMA === "BELOW";   // engine's existing momentum test
+        const chain: [string, boolean | null, string][] = [
+          ["15M + 5M agreement", up ? reg15 === "BULLISH" : reg15 === "BEARISH", `15M ${reg15}`],
+          [`EMA ${cfg.emaFast} / EMA ${cfg.emaSlow}`, row.emaDirection === (up ? "UP" : "DOWN"), `EMA ${row.emaDirection}`],
+          ["VWAP", vw == null ? null : up ? price > vw : price < vw, vw == null ? "VWAP unavailable" : `price ${price > vw ? "above" : price < vw ? "below" : "at"} VWAP`],
+          ["UT Bot", row.utState === (up ? "BULLISH" : "BEARISH"), `UT ${row.utState}`],
+          ["Structure / BOS", up ? row.structureState.startsWith("Bullish") || row.bos.includes("UP") : row.structureState.startsWith("Bearish") || row.bos.includes("DOWN"), `${row.structureState.split("/")[0]} · BOS ${row.bos}`],
+          ["Volume / Momentum", row.volumeState !== "WEAK" && momOk, `volume ${row.volumeState}, momentum ${momOk ? "OK" : "not in direction"}`],
+        ];
+        precisionRec = {};
+        for (const [k, ok, why] of chain) {
+          precisionRec[k] = ok == null ? "N/A" : ok ? "PASS" : "FAIL";
+          if (ok !== true) reasons.push({ g: "PRECISION", r: `PRECISION: ${k} does not agree (${why})` });
+        }
+      }
+      // (pre-2026-10-05 rule, used only when the precision chain is off) 15M + 5M arbitration: a break against the
+      // 15M context (or in RANGE / TRANSITION / NEUTRAL) needs a strong 5M candle. The movement itself is never hidden.
       const aligned = up ? reg15 === "BULLISH" : reg15 === "BEARISH";
-      if (!aligned) {
+      if (!aligned && !dc.precisionChain) {
         const strongNow = (up ? bullStrong : bearStrong) || (state === "EXPANSION" && row.volumeState === "EXPANSION");
         if (!strongNow) reasons.push({ g: "STRUCTURE", r: `15M ${reg15} vs ${up ? "upside" : "downside"} break — needs a strong 5M candle (body >= ${dc.dispStrongAtr} ATR, close in outer ${Math.round(dc.closeLocMax * 100)}%)` });
       }
       if (option.status === "AVAILABLE" && !option.primary) reasons.push({ g: "LIQUIDITY", r: "NO LIQUID STRIKE" });
+      if (precisionRec) precisionRec["Liquidity"] = option.status !== "AVAILABLE" ? "N/A" : option.primary ? "PASS" : "FAIL";
     } else if (isCandidate && !a) {
       reasons.push({ g: "DATA", r: "ATR UNAVAILABLE" });
     }
@@ -520,6 +548,7 @@ export function runDecisionLayer(inp: DecisionInput): DecisionResult {
         : oiConf === "CONTRADICTS" || oiVal.state === "OI_REVERSAL_WATCH" ? "CONTRADICTING"
         : oiVal.state === "OI_CONFIRMED" ? "CONFIRMED" : oiConf === "SUPPORTS" ? "SUPPORTING" : "UNCONFIRMED",
       rrStatus: plan ? (plan.rr >= cfg.rrMin ? "GOOD" : "WARNING") : null,
+      precision: precisionRec,
       volumeState: row.volumeState, momentumState: momentum, structureState: `${row.structureState} · BOS ${row.bos}`,
       vwapState: row.vwap == null ? "UNKNOWN" : price > row.vwap ? "ABOVE" : price < row.vwap ? "BELOW" : "AT",
       emaState: `${row.emaDirection} (price ${row.priceVsEMA} EMA${cfg.emaFast})`, liquidityState: liq,

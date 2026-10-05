@@ -35,7 +35,7 @@ function series(breakClose: number, opts: { preBars?: number; follow?: number[] 
 
 const BINDING: FuturesBinding = { underlying: "TEST", futuresSymbol: null, securityId: null, expiry: null, exchangeSegment: null, lotSize: null, status: "UNAVAILABLE_HISTORICAL", bindingReason: "synthetic" };
 
-function run(candles: Candle[], o: { oi?: (number | null)[]; options?: OptionSeries | null; agree?: boolean; ctx15?: (Ctx15 | null)[] } = {}) {
+function run(candles: Candle[], o: { oi?: (number | null)[]; options?: OptionSeries | null; agree?: boolean; ctx15?: (Ctx15 | null)[]; precision?: boolean } = {}) {
   const cfg = defaultConfig("NIFTY", "5m");
   cfg.scope = { mode: "full" };
   cfg.dataMode = "SPOT_DIRECTION"; cfg.futuresBinding = "spot-fallback";
@@ -45,7 +45,7 @@ function run(candles: Candle[], o: { oi?: (number | null)[]; options?: OptionSer
     expiryForDate: () => ({ expiryDate: null, daysToExpiry: null, isExpiryDay: false }), symbol: "TEST",
   });
   const before = JSON.stringify(eng.rows);
-  const dc = { ...defaultDecisionConfig(), requireEngineAgreement: o.agree ?? false };
+  const dc = { ...defaultDecisionConfig(), requireEngineAgreement: o.agree ?? false, precisionChain: o.precision ?? false };
   const res = runDecisionLayer({ cfg, dc, candles, rows: eng.rows, oi, options: o.options ?? null, strikeStep: 5, inScope: () => true, ctx15: o.ctx15 });
   return { cfg, eng, res, before };
 }
@@ -195,7 +195,7 @@ test("live tail: the last candle is not blocked just because its next candle has
   const cfg = defaultConfig("NIFTY", "5m"); cfg.scope = { mode: "full" }; cfg.dataMode = "SPOT_DIRECTION"; cfg.futuresBinding = "spot-fallback";
   const oi = c.map(() => 1_000_000);
   const eng = runEngine({ config: cfg, binding: BINDING, candles: c, oi, oiStatus: "AVAILABLE", vwapSource: "SPOT", expiryForDate: () => ({ expiryDate: null, daysToExpiry: null, isExpiryDay: false }), symbol: "TEST" });
-  const dc = { ...defaultDecisionConfig(), requireEngineAgreement: false };
+  const dc = { ...defaultDecisionConfig(), requireEngineAgreement: false, precisionChain: false };
   const batch = runDecisionLayer({ cfg, dc, candles: c, rows: eng.rows, oi, options: null, strikeStep: 5, inScope: () => true });
   const live = runDecisionLayer({ cfg, dc, candles: c, rows: eng.rows, oi, options: null, strikeStep: 5, inScope: () => true, liveTail: true });
   assert.equal(batch.rows[batch.rows.length - 1].executionState, "TRADE_BLOCKED_DATA");
@@ -267,7 +267,7 @@ test("OI freshness: DELAYED two candles back, LIVE on the live tail; never a gat
   const cfg = defaultConfig("NIFTY", "5m"); cfg.scope = { mode: "full" }; cfg.dataMode = "SPOT_DIRECTION"; cfg.futuresBinding = "spot-fallback";
   const cc = series(994, { follow: [] }); const oi = cc.map(() => 1_000_000);
   const eng = runEngine({ config: cfg, binding: BINDING, candles: cc, oi, oiStatus: "AVAILABLE", vwapSource: "SPOT", expiryForDate: () => ({ expiryDate: null, daysToExpiry: null, isExpiryDay: false }), symbol: "TEST" });
-  const live = runDecisionLayer({ cfg, dc: { ...defaultDecisionConfig(), requireEngineAgreement: false }, candles: cc, rows: eng.rows, oi, options: null, strikeStep: 5, inScope: () => true, liveTail: true });
+  const live = runDecisionLayer({ cfg, dc: { ...defaultDecisionConfig(), requireEngineAgreement: false, precisionChain: false }, candles: cc, rows: eng.rows, oi, options: null, strikeStep: 5, inScope: () => true, liveTail: true });
   assert.equal(live.rows[live.rows.length - 1].oiStatus, "LIVE");
 });
 
@@ -459,7 +459,7 @@ test("T13: open BUY CE + 5M bearish conflict -> position untouched (same exit as
   const cfg = defaultConfig("NIFTY", "5m"); cfg.scope = { mode: "full" }; cfg.dataMode = "SPOT_DIRECTION"; cfg.futuresBinding = "spot-fallback";
   const oi = c.map((_, i) => 1_000_000 + i * 10);
   const eng = runEngine({ config: cfg, binding: BINDING, candles: c, oi, oiStatus: "AVAILABLE", vwapSource: "SPOT", expiryForDate: () => ({ expiryDate: null, daysToExpiry: null, isExpiryDay: false }), symbol: "TEST" });
-  const off = runDecisionLayer({ cfg, dc: { ...defaultDecisionConfig(), requireEngineAgreement: false, directionGuard: false }, candles: c, rows: eng.rows, oi, options: null, strikeStep: 5, inScope: () => true, ctx15 });
+  const off = runDecisionLayer({ cfg, dc: { ...defaultDecisionConfig(), requireEngineAgreement: false, directionGuard: false, precisionChain: false }, candles: c, rows: eng.rows, oi, options: null, strikeStep: 5, inScope: () => true, ctx15 });
   assert.equal(on.trades.length, 1);
   const a = on.trades[0], b = off.trades[0];
   assert.deepEqual([a.outcome, a.exitTimestamp, a.exitPrice], [b.outcome, b.exitTimestamp, b.exitPrice], "existing management unchanged");
@@ -520,4 +520,56 @@ test("cooldown never carries into the next session", () => {
   const rows = [mk(0, "SELL"), mk(1, "WAIT"), mk(2, "SELL"), mk(3, "WAIT"), mk(4, "WAIT")];
   const trades = walkOutcomes(rows, candles, cfg);
   assert.equal(trades.length, 2, "the next session's first-candle signal is not swallowed by yesterday's cooldown");
+});
+
+// ============ PRECISION CHECK chain (2026-10-05 flow) ============
+// rising zig-zag: three up candles then one pullback, so real swing highs / lows and BOS form
+// rising zig-zag: five up candles then three pullback candles, so real swing highs / lows (3 candles each side) and BOS form
+const trend = (n: number, from: number, step: number): Bar[] => {
+  const out: Bar[] = []; let p = from;
+  for (let k = 0; k < n; k++) {
+    const d = k % 8 >= 5 ? -step : step; const o = p, c = p + d; p = c;
+    // the leg's top / bottom candle gets a distinct wick so it is a strict swing high / low (engine rule)
+    out.push(k % 8 === 4 ? [o, c, c + 3, Math.min(o, c) - 1] : k % 8 === 7 ? [o, c, Math.max(o, c) + 1, c - 3] : [o, c]);
+  }
+  return out;
+};
+test("precision chain: every item is evaluated on a candidate and listed; any FAIL -> WAIT with that item named", () => {
+  const c = build([[998, 1010], [1010, 1011], [1011, 1012]]);
+  const r = at(run(c, { ctx15: ctxAll(c, "RANGE"), precision: true }).res, c, X);
+  assert.equal(r.movementState, "BREAKOUT_CONFIRMED", "movement still detected");
+  assert.ok(r.precision, "precision record present");
+  assert.deepEqual(Object.keys(r.precision!), ["15M + 5M agreement", "EMA 21 / EMA 50", "VWAP", "UT Bot", "Structure / BOS", "Volume / Momentum", "Liquidity"]);
+  assert.equal(r.precision!["15M + 5M agreement"], "FAIL");
+  assert.equal(r.finalAction, "WAIT");
+  assert.match(r.blockReason!, /^PRECISION: 15M \+ 5M agreement does not agree \(15M RANGE\)/);
+});
+
+test("precision chain: a clean uptrend with 15M BULLISH passes every item and gives BUY CE", () => {
+  // 40 rising candles build EMA21>EMA50, price>VWAP, UT bullish, bullish structure, momentum; then a breakout candle
+  const tr = trend(56, 1000, 2); const last = tr[tr.length - 1][1];
+  const c = build([...tr, [last, last + 6], [last + 6, last + 7], [last + 7, last + 8], [last + 8, last + 9], [last + 9, last + 10]]);
+  const { res } = run(c, { ctx15: ctxAll(c, "BULLISH"), precision: true });
+  const sig = res.rows.find((r) => r.finalAction === "BUY CE");
+  assert.ok(sig, "a BUY CE is produced when every precision item agrees");
+  for (const [k, v] of Object.entries(sig!.precision!)) assert.notEqual(v, "FAIL", `${k} must not fail on the signal`);
+});
+
+test("precision chain off -> previous behaviour (no precision record, combined rules)", () => {
+  const c = build([[998, 1010], [1010, 1011], [1011, 1012]]);
+  const r = at(run(c, { ctx15: ctxAll(c, "BULLISH"), precision: false }).res, c, X);
+  assert.equal(r.precision, null);
+  assert.equal(r.finalAction, "BUY CE");
+});
+
+test("day high / day low are breakout levels only after the opening 15 minutes", () => {
+  // tiny first candle; second candle closes below its low at 09:20 -> must NOT be a day-low breakdown
+  const c = build([], 0);
+  const extra: Candle[] = [];
+  const base = T0("2026-09-29");
+  extra.push({ time: base, open: 1000, high: 1001, low: 999.5, close: 1000.5, volume: 1000 });
+  extra.push({ time: base + 300, open: 1000.5, high: 1000.6, low: 995, close: 995.5, volume: 1000 });
+  const cc = [...c, ...extra];
+  const r = run(cc, { precision: false }).res.rows.find((x) => x.timestamp === base + 300)!;
+  assert.notEqual(r.breakdownLevel, 999.5, "the 09:15 candle's low is not used as a day-low level at 09:20");
 });

@@ -72,8 +72,9 @@ export function defaultDecisionConfig() {
     deltaMax: 0.8,
     minTradesForRate: 30,
     optionData: "ON" as "ON" | "OFF",
-    requireEngineAgreement: true,
-    directionGuard: true,          // 2026-10-05: 5M direction-conflict + S/R rejection protection (new entries only)  // user choice 2026-10-04: movement break AND engine score must agree
+    requireEngineAgreement: false, // superseded 2026-10-05 by precisionChain (same indicators, each checked individually)
+    directionGuard: true,          // 2026-10-05: 5M direction-conflict + S/R rejection protection (new entries only)
+    precisionChain: true,          // 2026-10-05 flow: each precision item must agree with the trade direction
   };
 }
 

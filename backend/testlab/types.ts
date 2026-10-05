@@ -88,8 +88,9 @@ export interface DecisionConfig {
   deltaMin: number; deltaMax: number; // eligible |delta| band
   minTradesForRate: number;   // do not quote a win rate below this many closed trades
   optionData: "ON" | "OFF";
-  requireEngineAgreement: boolean;
-  directionGuard: boolean;        // 5M direction-conflict + S/R rejection protection (added layer; false = previous behaviour) // execute only when the existing engine's BUY/SELL score lean agrees with the break
+  requireEngineAgreement: boolean; // execute only when the existing engine's combined BUY/SELL score agrees with the break
+  directionGuard: boolean;         // 5M direction-conflict + S/R rejection protection (false = previous behaviour)
+  precisionChain: boolean;         // 2026-10-05 flow: 15M+5M, EMA21/50, VWAP, UT Bot, Structure/BOS, Volume/Momentum, Liquidity must EACH agree
 }
 
 export interface FuturesBinding {
@@ -391,6 +392,7 @@ export interface DecisionRow {
   entryBlockedReason: string | null;
   oiStatusLabel: "SUPPORTING" | "CONFIRMED" | "CONTRADICTING" | "UNCONFIRMED" | "STALE";
   rrStatus: "GOOD" | "WARNING" | null;
+  precision: Record<string, "PASS" | "FAIL" | "N/A"> | null;   // precision-check chain on a breakout/breakdown candidate
   oiConfirmation: "SUPPORTS" | "CONTRADICTS" | "NEUTRAL" | "UNAVAILABLE";
   volumeState: string; momentumState: string; structureState: string;
   vwapState: string; emaState: string; liquidityState: string;

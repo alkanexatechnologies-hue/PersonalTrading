@@ -39,6 +39,7 @@ export function decisionCard(r: DecisionRow, index: string, seriesLabel: string)
   row("LIQUIDITY", r.liquidityGrade ?? "DATA UNAVAILABLE");
   row("R:R", `${p.rr.toFixed(2)}`);
   row("R:R STATUS", `${r.rrStatus ?? "—"} — information only, never blocks${p.rrWarning ? "   " + p.rrWarning : ""}`);
+  if (r.precision) row("PRECISION CHECK", Object.entries(r.precision).map(([k, v]) => `${k} ${v === "PASS" ? "✓" : v === "FAIL" ? "✗" : "n/a"}`).join(" · "));
   row("FINAL ACTION", signal === "WAIT" ? `WAIT — ${human(r.executionState)}${r.blockReason ? ": " + r.blockReason : ""}` : signal);
   row("NEXT RESISTANCE", p.nextResistance.length ? p.nextResistance.join(", ") : "none in view");
   row("NEXT SUPPORT", p.nextSupport.length ? p.nextSupport.join(", ") : "none in view");
