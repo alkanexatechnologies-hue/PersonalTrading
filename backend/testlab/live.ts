@@ -52,6 +52,12 @@ export interface LivePayload {
   dataAgeSec: number | null;
   lastClosedHm: string | null;       // the latest CLOSED 5M candle evaluated
   awaitingCandleHm: string | null;   // LIVE: this closed candle is not published by Dhan yet (retried every poll)
+  // same panel data a test run sends, so EVERY Lab panel refreshes in Live mode
+  evidence: Record<string, unknown> | null;   // latest closed candle's indicator values (indicator strip)
+  currentCandle: { t: number; o: number; h: number; l: number; c: number; v: number; oi: number | null } | null;
+  binding: unknown; dataMode: string; dataQuality: string; oiStatus: string; vwapSource: string | null;
+  dataRange: unknown; unavailableDateCount: number;
+  liveLog: LiveLogEntry[];           // today's live log (LIVE mode), sent with the data so no extra request is needed
   nextCloseHm: string | null;        // when the next 5M candle closes (next evaluation)
   series: string;
   logic: string;
@@ -181,6 +187,23 @@ export async function liveDecision(opts: { index: IndexKey; timeframe: TfKey; as
     mode: replay ? "REPLAY" : "LIVE", index, timeframe, asOf: now, asOfHm: istHm(now),
     market: open ? "OPEN" : "CLOSED", session, dataStatus, dataAgeSec: age,
     lastClosedHm: lastClosedRow ? istHm(lastClosedRow.timestamp) : null,
+    evidence: (() => {
+      const er = lastClosedRow ? res.rows.find((x) => x.timestamp === lastClosedRow.timestamp) : undefined;
+      if (!er) return null;
+      return {
+        iso: er.iso, spotPrice: er.spotPrice, utState: er.utState, emaDirection: er.emaDirection, priceVsEMA: er.priceVsEMA,
+        ema9: er.ema9, ema21: er.ema21, vwap: er.vwap, vwapSource: er.vwapSource, structureState: er.structureState, bos: er.bos,
+        volumeState: er.volumeState, atr: er.atr, atrPercent: er.atrPercent, regressionDirection: er.regressionDirection, regressionR2: er.regressionR2,
+        support: er.support, resistance: er.resistance, fakeMove: er.fakeMove, extendedMove: er.extendedMove,
+        expiryRisk: er.expiryRisk, daysToExpiry: er.daysToExpiry, dataQuality: er.dataQuality, futuresOI: er.futuresOI, oiStatus: er.oiStatus,
+      };
+    })(),
+    currentCandle: (() => { const cc = res.chart.length ? res.chart[res.chart.length - 1] : null; return cc && istDate(cc.t) === session ? { t: cc.t, o: cc.o, h: cc.h, l: cc.l, c: cc.c, v: cc.v, oi: cc.oi } : null; })(),
+    binding: res.binding, dataMode: res.dataMode, dataQuality: res.dataQuality, oiStatus: res.oiStatus,
+    vwapSource: res.rows.length ? res.rows[res.rows.length - 1].vwapSource : null,
+    dataRange: { ...res.dataRange, from: session ?? res.dataRange.from, to: session ?? res.dataRange.to, totalCandles: chartAll.length },
+    unavailableDateCount: res.unavailableDateCount,
+    liveLog: !replay ? readLiveLog(today).slice(-50) : [],
     awaitingCandleHm: awaitingCandle && expectedLast != null ? istHm(expectedLast) : null,
     nextCloseHm: open && nextCloseSec != null ? istHm(nextCloseSec) : null,
     series,

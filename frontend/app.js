@@ -16781,7 +16781,7 @@ async function uil2LivePoll(force) {
   UIL2._livePolling = true;
   try {
     const q = `index=${encodeURIComponent(UIL2.index)}&timeframe=${encodeURIComponent(UIL2.tf)}${asof ? "&asOf=" + encodeURIComponent(asof.slice(0, 16)) : ""}`;
-    if (!asof || force) uil2LiveStatus("loading…", "");
+    if (force) uil2LiveStatus("loading…", "");   // only on the first load; later polls keep the last status until new data arrives
     const p = await fetchJSON(`/api/testlab/live?${q}`, 90000);
     if (!UIL2.live) return;
     if (!p || p.error) { uil2LiveStatus(`DATA UNAVAILABLE — ${(p && p.error) || "no response"}`, "stale"); return; }
@@ -16815,10 +16815,20 @@ function uil2LiveRender(p) {
     : p.dataStatus === "CLOSED" ? ["MARKET CLOSED · last session", "closed"] : ["DATA UNAVAILABLE", "stale"];
   uil2LiveStatus(st[0], st[1]);
   uil2RenderFinalSignal({ latest: p.lastClosed ? p.lastClosed.row : null, lastSignalRow: p.lastSignal ? p.lastSignal.row : null });
+  // every other Lab panel from the SAME live result (indicator strip, current candle, binding, data status)
+  try {
+    const ev = p.evidence ? { ...p.evidence, finalRr: p.lastSignal ? p.lastSignal.row.plan.rr : null } : null;
+    uil2RenderIndStrip(ev, { rrMin: 2 });
+    uil2RenderCurrentCandle(p.currentCandle, ev);
+    const dLike = { binding: p.binding, dataMode: p.dataMode, dataQuality: p.dataQuality, dataRange: p.dataRange, lastRow: ev, oiStatus: p.oiStatus, unavailableDateCount: p.unavailableDateCount, vwapSource: p.vwapSource };
+    uil2RenderBinding(dLike);
+    uil2RenderStatusBar(dLike);
+  } catch (e) { console.error("live panel refresh failed", e); }
   const run = t2el("uil2-live-run"), sig = t2el("uil2-live-sig");
   if (run) run.innerHTML = uil2LiveRunCard(p);
   uil2LiveAlert(p);
-  if (p.mode === "LIVE") uil2LiveLogRender();
+  if (p.mode === "LIVE") uil2LiveLogRender(p.liveLog);
+  else { const lb = t2el("uil2-live-log"); if (lb) lb.innerHTML = '<div class="uil2-rhead">Today\'s live log</div><div class="lv-small">Shown in LIVE mode only (not in replay).</div>'; }
   if (sig) sig.innerHTML = uil2LiveSigCard(p);
 }
 const uil2Hm = (hm, n) => { const [h, m] = String(hm).split(":").map(Number); const t = h * 60 + m + n; return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; };
@@ -16872,7 +16882,7 @@ function uil2LiveRunCard(p) {
 }
 function uil2LiveSigCard(p) {
   const g = p.lastSignal;
-  const foot = `<div class="lv-note">15M context + 5M confirmed break + engine score agrees (counter-trend needs a strong 5M candle). R:R is information only. Backtest (30 sessions): 158 trades, 68W / 90L, +16.57R — research only, not advice.</div>`;
+  const foot = `<div class="lv-note">Closed 15M context + closed 5M confirmed break + precision check (15M+5M, EMA 21/50, VWAP, UT Bot, Structure/BOS, Volume/Momentum, Liquidity). R:R is information only. Backtest (30 sessions, in-sample): 68 trades, 31W / 37L, +20.06R — research only, not advice.</div>`;
   if (!g) return `<div class="uil2-rhead">Last confirmed signal</div><div class="lv-small">None yet this session.</div>${foot}`;
   const r = g.row, side = r.plan.side;
   const out = r.outcome === "OPEN" ? `<div class="lv-status open">OPEN · filled ${t2num(r.fillPrice)} at the next open, still running</div>`
@@ -16902,13 +16912,10 @@ function uil2LiveAlert(p) {
     if (AC) { UIL2._ac = UIL2._ac || new AC(); const ac = UIL2._ac; const o = ac.createOscillator(), g = ac.createGain(); o.frequency.value = 880; g.gain.value = 0.08; o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + 0.35); }
   } catch (_) {}
 }
-async function uil2LiveLogRender() {
+function uil2LiveLogRender(es) {
   const box = t2el("uil2-live-log"); if (!box) return;
-  try {
-    const d = await fetchJSON("/api/testlab/live-log", 15000);
-    const es = (d && d.entries) || [];
-    if (!es.length) { box.innerHTML = '<div class="lv-small">No live signals logged yet today.</div>'; return; }
-    box.innerHTML = `<div class="uil2-rhead">Today's live log <span class="uil2-sub">${es.length} entr${es.length === 1 ? "y" : "ies"}</span></div>` +
-      es.slice(-12).reverse().map((e) => `<div class="lv-small">${t2esc(e.loggedAt.slice(11, 16))} · <b>${t2esc(e.action)}</b> ${t2esc(e.signalCandle)} ${t2esc(e.strike || "")} · E ${t2num(e.entry)} SL ${t2num(e.stopLoss)} T1 ${t2num(e.target1)} · <b>${t2esc(e.status)}</b>${e.rMultiple != null ? ` (${e.rMultiple}R)` : ""}</div>`).join("");
-  } catch (_) { box.innerHTML = '<div class="lv-small">Live log unavailable.</div>'; }
+  es = es || [];
+  if (!es.length) { box.innerHTML = '<div class="uil2-rhead">Today\'s live log</div><div class="lv-small">No BUY CE / BUY PE signal logged yet today.</div>'; return; }
+  box.innerHTML = `<div class="uil2-rhead">Today's live log <span class="uil2-sub">${es.length} entr${es.length === 1 ? "y" : "ies"}</span></div>` +
+    es.slice(-12).reverse().map((e) => `<div class="lv-small">${t2esc(e.loggedAt.slice(11, 16))} · <b>${t2esc(e.action)}</b> ${t2esc(e.signalCandle)} ${t2esc(e.strike || "")} · E ${t2num(e.entry)} SL ${t2num(e.stopLoss)} T1 ${t2num(e.target1)} · <b>${t2esc(e.status)}</b>${e.rMultiple != null ? ` (${e.rMultiple}R)` : ""}</div>`).join("");
 }
