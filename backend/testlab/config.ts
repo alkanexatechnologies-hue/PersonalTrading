@@ -22,8 +22,8 @@ export function defaultConfig(index: IndexKey, timeframe: TfKey): TestConfig {
     index,
     timeframe,
     scope: { mode: "custom" },
-    emaFast: 9,
-    emaSlow: 21,
+    emaFast: 21,                   // user choice 2026-10-05: EMA 21 / EMA 50 (was 9 / 21)
+    emaSlow: 50,
     atrPeriod: 14,
     utKeyValue: 1,
     utAtrPeriod: 10,

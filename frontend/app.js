@@ -12447,7 +12447,7 @@ function uil2IndList(r, cfg) {
   const atrOk = r.atrPercent != null && r.atrPercent > 0.03 && r.atrPercent < 3;
   return [
     { nm: "UT Alert", st: r.utState, sub: "", cls: uil2Cls(r.utState) },
-    { nm: "EMA 9/21", st: r.emaDirection, sub: r.priceVsEMA || "", cls: uil2Cls(r.emaDirection) },
+    { nm: "EMA 21/50", st: r.emaDirection, sub: r.priceVsEMA || "", cls: uil2Cls(r.emaDirection) },
     { nm: "VWAP", st: priceVsVwap, sub: r.vwapSource || "", cls: uil2Cls(priceVsVwap === "ABOVE" ? "UP" : priceVsVwap === "BELOW" ? "DOWN" : "FLAT") },
     { nm: "Market Structure", st: (r.structureState || "").split(" ")[0] || "—", sub: r.bos && r.bos !== "NONE" ? r.bos : "", cls: uil2Cls((r.structureState || "").startsWith("Bullish") ? "UP" : (r.structureState || "").startsWith("Bearish") ? "DOWN" : "RANGING") },
     { nm: "Volume", st: r.volumeState, sub: "", cls: r.volumeState === "EXPANSION" ? "pass" : r.volumeState === "WEAK" ? "fail" : r.volumeState === "UNKNOWN" ? "neutral" : "warn" },
@@ -12670,7 +12670,7 @@ function uil2ViewReplay(d) {
 }
 
 function uil2ViewAblation() {
-  const comps = [["EMA", "EMA 9/21"], ["UT", "UT Bot"], ["VWAP", "VWAP"], ["LINEAR_REGRESSION", "Linear Regression"], ["BOS", "Market Structure / BOS"], ["VOLUME", "Volume"], ["FAKE_MOVE", "Fake-Move filter"], ["EXTENDED_MOVE", "Extended-Move filter"]];
+  const comps = [["EMA", "EMA 21/50"], ["UT", "UT Bot"], ["VWAP", "VWAP"], ["LINEAR_REGRESSION", "Linear Regression"], ["BOS", "Market Structure / BOS"], ["VOLUME", "Volume"], ["FAKE_MOVE", "Fake-Move filter"], ["EXTENDED_MOVE", "Extended-Move filter"]];
   return `<div class="u-muted" style="font-size:12px;margin-bottom:10px">Disable a component and re-run to measure its contribution (research only). Disabling a filter removes its veto; disabling a scorer removes its weight. Results are a FINDING, not an optimization.</div>
     <div class="uil2-indstrip" style="border:none;padding:0;grid-template-columns:repeat(auto-fill,minmax(170px,1fr))">
     ${comps.map(([k, label]) => `<label class="uil2-toggle" style="background:var(--u-panel2);border:1px solid var(--u-border2);border-radius:8px;padding:8px 10px"><span>${label}</span><input type="checkbox" data-ab="${k}" ${UIL2.ablation[k] ? "checked" : ""}/><i></i></label>`).join("")}
