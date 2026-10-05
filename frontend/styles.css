@@ -6256,3 +6256,4 @@ body.uil-fullwidth .content { padding: 0 !important; }
 .uil2-live-card .lv-reg-bullish { color: var(--u-green); } .uil2-live-card .lv-reg-bearish { color: var(--u-red); }
 .uil2-live-card .lv-reg-range, .uil2-live-card .lv-reg-transition, .uil2-live-card .lv-reg-neutral { color: var(--u-amber); }
 .uil2-live-card .lv-rr-low { color: var(--u-green); } .uil2-live-card .lv-rr-medium { color: var(--u-amber); } .uil2-live-card .lv-rr-high { color: var(--u-red); }
+.uil2-live-card.lv-flash { border-color: var(--u-amber); box-shadow: 0 0 0 2px color-mix(in srgb, var(--u-amber) 45%, transparent); }

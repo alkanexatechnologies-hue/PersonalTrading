@@ -8,6 +8,8 @@
 // 5M candle closes, exactly as in a backtest. A replay `asOfSec` shows a past
 // session as it looked at that moment (only candles closed by then).
 
+import fs from "fs";
+import path from "path";
 import { ALL_SYMBOLS } from "../config";
 import { dhanChainForExpiry } from "../data/dhanProvider";
 import { defaultConfig, INDEX_MASTER, TF_MINUTES } from "./config";
@@ -49,6 +51,7 @@ export interface LivePayload {
   dataStatus: "LIVE" | "STALE" | "CLOSED" | "UNAVAILABLE";
   dataAgeSec: number | null;
   lastClosedHm: string | null;       // the latest CLOSED 5M candle evaluated
+  awaitingCandleHm: string | null;   // LIVE: this closed candle is not published by Dhan yet (retried every poll)
   nextCloseHm: string | null;        // when the next 5M candle closes (next evaluation)
   series: string;
   logic: string;
@@ -109,7 +112,14 @@ export async function liveDecision(opts: { index: IndexKey; timeframe: TfKey; as
   // closed series: reloaded once per 5M candle close (session-relative grid from 09:15)
   const sessOpen = dayStart(today) + OPEN_MIN * 60;
   const bucketKey = open ? Math.floor((now - sessOpen) / tfSec) : Math.floor(now / tfSec);
-  const L = await cached(seriesCache, `${index}|${timeframe}|${today}|${bucketKey}|${replay ? now : ""}`, replay ? 60_000 : 300_000, () => loadSeries(cfg));
+  const cacheKey = `${index}|${timeframe}|${today}|${bucketKey}|${replay ? now : ""}`;
+  const L = await cached(seriesCache, cacheKey, replay ? 60_000 : 300_000, () => loadSeries(cfg));
+  // LIVE: the 5M candle that just closed may not be published by Dhan yet — if it is missing,
+  // drop the cache so the next poll (15 s) fetches again instead of waiting for the next candle.
+  const expectedLast = open ? sessOpen + (bucketKey - 1) * tfSec : null;   // start time of the latest candle that should be closed
+  const haveLast = L.candles.length ? L.candles[L.candles.length - 1].time : null;
+  const awaitingCandle = !replay && expectedLast != null && expectedLast >= sessOpen && (haveLast == null || haveLast < expectedLast);
+  if (awaitingCandle) seriesCache.delete(cacheKey);
   // evaluate ONLY the closed candles (loadSeries keeps candles with time + interval <= now); no forming candle
   const res = evaluateSeries(cfg, L, {});
   const d = res.decision!;
@@ -164,12 +174,14 @@ export async function liveDecision(opts: { index: IndexKey; timeframe: TfKey; as
   const lastCloseSec = lastClosedRow ? lastClosedRow.timestamp + tfSec : null;
   const age = lastCloseSec != null ? Math.max(0, now - lastCloseSec) : null;
   const dataStatus: LivePayload["dataStatus"] = !open ? "CLOSED" : age == null ? "UNAVAILABLE" : age > tfSec + 150 ? "STALE" : "LIVE";
+  if (!replay && open) appendLiveLog(index, timeframe, today, closedRows, now);
   const nextCloseSec = lastCloseSec != null ? lastCloseSec + tfSec : null;
 
   return {
     mode: replay ? "REPLAY" : "LIVE", index, timeframe, asOf: now, asOfHm: istHm(now),
     market: open ? "OPEN" : "CLOSED", session, dataStatus, dataAgeSec: age,
     lastClosedHm: lastClosedRow ? istHm(lastClosedRow.timestamp) : null,
+    awaitingCandleHm: awaitingCandle && expectedLast != null ? istHm(expectedLast) : null,
     nextCloseHm: open && nextCloseSec != null ? istHm(nextCloseSec) : null,
     series,
     logic: "15M context + 5M confirmed break + engine score agrees (counter-trend / range breaks need a strong 5M candle). R:R is information only.",
@@ -178,4 +190,53 @@ export async function liveDecision(opts: { index: IndexKey; timeframe: TfKey; as
       ? `Market closed — showing the last session (${session ?? "none"}).`
       : `Evaluated on CLOSED 5M candles only (15M context from closed 15M candles). Last closed candle ${lastClosedRow ? istHm(lastClosedRow.timestamp) : "—"}; next evaluation when the candle closes at ${nextCloseSec != null ? istHm(nextCloseSec) : "—"}.`,
   };
+}
+
+// ---------------- live test log (server-side, LIVE mode only) ----------------
+// Records each BUY CE / BUY PE signal and every change of its status exactly as the
+// live screen saw it, with the wall-clock time, so a live session can be compared
+// with a backtest of the same day afterwards. Append-only JSONL per day.
+const LIVE_LOG_DIR = path.resolve(process.cwd(), "data", "test-zone", "live-log");
+const lastLogged = new Map<string, string>();   // `${date}|${index}|${tf}|${signalTime}` -> last logged status
+
+export interface LiveLogEntry {
+  loggedAt: string; index: string; timeframe: string; signalCandle: string;
+  action: string; regime15: string; movement: string;
+  entry: number; stopLoss: number; target1: number; target2: number; rr: number;
+  strike: string | null; optionLtp: number | null;
+  fill: number | null; status: string; exitPrice: number | null; rMultiple: number | null;
+  optionFill: number | null; optionExit: number | null; optionPnl: number | null;
+}
+
+function appendLiveLog(index: string, tf: string, date: string, rows: DecisionRow[], now: number) {
+  try {
+    const signals = rows.filter((r) => r.finalAction !== "WAIT" && r.plan);
+    if (!signals.length) return;
+    fs.mkdirSync(LIVE_LOG_DIR, { recursive: true });
+    const file = path.join(LIVE_LOG_DIR, `${date}.jsonl`);
+    for (const r of signals) {
+      const key = `${date}|${index}|${tf}|${r.timestamp}`;
+      const status = r.outcome === "NONE" ? "SIGNAL (awaiting next-candle fill)" : r.outcome;
+      if (lastLogged.get(key) === status) continue;
+      lastLogged.set(key, status);
+      const p = r.plan!, o = r.option;
+      const e: LiveLogEntry = {
+        loggedAt: new Date(now * 1000 + 19800000).toISOString().slice(0, 19).replace("T", " ") + " IST",
+        index, timeframe: tf, signalCandle: istHm(r.timestamp), action: r.finalAction, regime15: r.regime15, movement: r.movementState,
+        entry: p.entry, stopLoss: p.stopLoss, target1: p.target1, target2: p.target2, rr: p.rr,
+        strike: o?.primary ? `${o.primary.strike} ${o.optionType}` : null, optionLtp: o?.optionEntry ?? null,
+        fill: r.fillPrice, status, exitPrice: r.exitPrice, rMultiple: r.rMultiple,
+        optionFill: r.optionFill, optionExit: r.optionExit, optionPnl: r.optionPnl,
+      };
+      fs.appendFileSync(file, JSON.stringify(e) + "\n", "utf8");
+    }
+  } catch { /* logging must never break the live view */ }
+}
+
+export function readLiveLog(date: string): LiveLogEntry[] {
+  try {
+    const file = path.join(LIVE_LOG_DIR, `${date}.jsonl`);
+    if (!fs.existsSync(file)) return [];
+    return fs.readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  } catch { return []; }
 }

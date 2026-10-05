@@ -61,7 +61,7 @@ import { runTest as runTestLab, availableHistory as testLabAvailableHistory } fr
 import { writeReviewPackage as writeTestLabPackage } from "../testlab/exporter";
 import { decisionCard as tlDecisionCard } from "../testlab/decisionCard";
 import { labViews as tlLabViews } from "../testlab/views";
-import { liveDecision as tlLiveDecision } from "../testlab/live";
+import { liveDecision as tlLiveDecision, readLiveLog as tlReadLiveLog } from "../testlab/live";
 import { defaultConfig as testLabDefaultConfig } from "../testlab/config";
 import { runHtf as runTestLabHtf } from "../testlab/htfRunner";
 import { abcComparison as htfAbc, timingDiagnostic as htfTiming, perCandleAudit as htfPerCandle } from "../testlab/htfAudit";
@@ -9902,6 +9902,14 @@ router.get("/testlab/live", requirePermission("backtesting"), async (req: Reques
   }
   try { res.json(await tlLiveDecision({ index: index as TLIndexKey, timeframe: timeframe as TLTfKey, asOfSec })); }
   catch (e: any) { res.status(502).json({ error: e?.message || "live decision failed" }); }
+});
+
+// Live test log of the Lab (signals + status changes as the live screen saw them).
+//   GET /api/testlab/live-log?date=YYYY-MM-DD   (default: today IST)
+router.get("/testlab/live-log", requirePermission("backtesting"), (req: Request, res: Response) => {
+  const date = String(req.query.date || new Date(Date.now() + 19800000).toISOString().slice(0, 10));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "date must be YYYY-MM-DD" });
+  res.json({ date, entries: tlReadLiveLog(date) });
 });
 
 // Recent in-process runs (compact list for the UI history).

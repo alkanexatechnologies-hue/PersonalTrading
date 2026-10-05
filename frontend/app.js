@@ -16756,7 +16756,8 @@ function uil2LiveToggle() {
   UIL2.live = !UIL2.live;
   const b = t2el("uil2-live-btn");
   if (b) { b.classList.toggle("live-on", UIL2.live); b.setAttribute("aria-pressed", String(UIL2.live)); b.textContent = UIL2.live ? "■ Stop live" : "● Live signal"; }
-  ["uil2-live-run", "uil2-live-sig"].forEach((id) => { const e = t2el(id); if (e) e.classList.toggle("hidden", !UIL2.live); });
+  ["uil2-live-run", "uil2-live-sig", "uil2-live-log"].forEach((id) => { const e = t2el(id); if (e) e.classList.toggle("hidden", !UIL2.live); });
+  UIL2._lastSigKey = undefined;   // first poll sets the baseline; only later NEW signals alert
   if (UIL2.liveTimer) { clearInterval(UIL2.liveTimer); UIL2.liveTimer = null; }
   UIL2._liveKey = null;
   if (UIL2.live) {
@@ -16808,6 +16809,7 @@ function uil2LiveRender(p) {
   if (meta) meta.textContent = `${p.timeframe} · ${p.series} · ${p.session || "—"} · ${p.mode === "REPLAY" ? "replay as of " + p.asOfHm + " IST" : "live signal"}`;
   uil2CrosshairOhlc(null, rows[rows.length - 1]);
   const st = p.mode === "REPLAY" ? [`● REPLAY · as of ${p.asOfHm} IST`, "live"]
+    : p.awaitingCandleHm ? [`● LIVE · waiting for Dhan's ${p.awaitingCandleHm} candle (retrying)`, "stale"]
     : p.dataStatus === "LIVE" ? [`● LIVE · last closed 5M ${p.lastClosedHm || "—"} IST`, "live"]
     : p.dataStatus === "STALE" ? [`STALE · data ${p.dataAgeSec}s old`, "stale"]
     : p.dataStatus === "CLOSED" ? ["MARKET CLOSED · last session", "closed"] : ["DATA UNAVAILABLE", "stale"];
@@ -16815,6 +16817,8 @@ function uil2LiveRender(p) {
   uil2RenderFinalSignal({ latest: p.lastClosed ? p.lastClosed.row : null, lastSignalRow: p.lastSignal ? p.lastSignal.row : null });
   const run = t2el("uil2-live-run"), sig = t2el("uil2-live-sig");
   if (run) run.innerHTML = uil2LiveRunCard(p);
+  uil2LiveAlert(p);
+  if (p.mode === "LIVE") uil2LiveLogRender();
   if (sig) sig.innerHTML = uil2LiveSigCard(p);
 }
 const uil2Hm = (hm, n) => { const [h, m] = String(hm).split(":").map(Number); const t = h * 60 + m + n; return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; };
@@ -16880,4 +16884,31 @@ function uil2LiveSigCard(p) {
     <div class="lv-small">5M: ${t2esc(uil2Human(r.movementState))} · evidence ${r.movementScore}/100</div>
     ${uil2LiveCtx(r)}
     ${uil2LivePlan(r)}${out}${foot}`;
+}
+
+
+// ---- live test helpers: new-signal alert + today's live log (Lab only) ----
+function uil2LiveAlert(p) {
+  const ls = p && p.lastSignal ? `${p.lastSignal.time}|${p.lastSignal.row.finalAction}` : null;
+  const prev = UIL2._lastSigKey;
+  UIL2._lastSigKey = ls;
+  if (p.mode !== "LIVE" || !ls || prev === undefined || prev === ls) return;   // only a NEW signal while watching live
+  const label = `${p.lastSignal.row.finalAction} ${p.lastSignal.hm}`;
+  try { document.title = `🔔 ${label} — MarketPil`; } catch (_) {}
+  const sig = t2el("uil2-live-sig");
+  if (sig) { sig.classList.add("lv-flash"); setTimeout(() => sig.classList.remove("lv-flash"), 6000); }
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (AC) { UIL2._ac = UIL2._ac || new AC(); const ac = UIL2._ac; const o = ac.createOscillator(), g = ac.createGain(); o.frequency.value = 880; g.gain.value = 0.08; o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + 0.35); }
+  } catch (_) {}
+}
+async function uil2LiveLogRender() {
+  const box = t2el("uil2-live-log"); if (!box) return;
+  try {
+    const d = await fetchJSON("/api/testlab/live-log", 15000);
+    const es = (d && d.entries) || [];
+    if (!es.length) { box.innerHTML = '<div class="lv-small">No live signals logged yet today.</div>'; return; }
+    box.innerHTML = `<div class="uil2-rhead">Today's live log <span class="uil2-sub">${es.length} entr${es.length === 1 ? "y" : "ies"}</span></div>` +
+      es.slice(-12).reverse().map((e) => `<div class="lv-small">${t2esc(e.loggedAt.slice(11, 16))} · <b>${t2esc(e.action)}</b> ${t2esc(e.signalCandle)} ${t2esc(e.strike || "")} · E ${t2num(e.entry)} SL ${t2num(e.stopLoss)} T1 ${t2num(e.target1)} · <b>${t2esc(e.status)}</b>${e.rMultiple != null ? ` (${e.rMultiple}R)` : ""}</div>`).join("");
+  } catch (_) { box.innerHTML = '<div class="lv-small">Live log unavailable.</div>'; }
 }
