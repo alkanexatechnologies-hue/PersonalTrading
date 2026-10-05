@@ -6,7 +6,7 @@ import { lookupDhanSecurity } from "../data/dhanInstruments";
 import { Candle } from "../types";
 import { INDEX_MASTER, TF_MINUTES } from "./config";
 import { resolvePerDateBindings } from "./futuresResolver";
-import { fetchIntraday, resample } from "./dhanData";
+import { fetchIntraday } from "./dhanData";
 import { runEngine, computeMetrics, computeDaily } from "./engine";
 import { runDecisionLayer } from "./decision";
 import { fetchOptionSeries, OptionSeries } from "./optionsData";
@@ -51,8 +51,9 @@ export async function runTest(cfg: TestConfig): Promise<RunResult> {
 /** Fetch (async) every series a run needs. `cfg.asOfSec` keeps only candles CLOSED by then (live / replay). */
 export async function loadSeries(cfg: TestConfig): Promise<LoadedSeries> {
   const m = INDEX_MASTER[cfg.index];
+  assertLabTimeframe(cfg.timeframe);
   const tfMin = TF_MINUTES[cfg.timeframe];
-  const native = cfg.timeframe === "3m" ? 1 : tfMin; // 3m => fetch 1m then resample
+  const native = tfMin; // STRICTLY 5M / 15M Dhan-native candles — no 1-minute data, no resampling
 
   // ---- window ----
   let fromMs: number, toMs: number;
@@ -84,7 +85,6 @@ export async function loadSeries(cfg: TestConfig): Promise<LoadedSeries> {
     spotCandles = keep.map((i) => spotCandles[i]); spotOi = keep.map((i) => spotOi[i]);
     startSec = toEpoch(keepFrom);
   }
-  if (cfg.timeframe === "3m") { const r = resample(spotCandles, spotOi, 3); spotCandles = r.candles; spotOi = r.oi; }
   const spotByTime = new Map<number, number>(); spotCandles.forEach((c) => spotByTime.set(c.time, c.close));
 
   // trading dates (IST) in order
@@ -138,7 +138,6 @@ export async function loadSeries(cfg: TestConfig): Promise<LoadedSeries> {
     try {
       const f = await fetchIntraday(per.secId, per.seg, "FUTIDX", native, ps, pe);
       let fc = f.candles.filter(closedBy), fo = f.oi.filter((_, i) => closedBy(f.candles[i]));
-      if (cfg.timeframe === "3m") { const r = resample(fc, fo, 3); fc = r.candles; fo = r.oi; }
       if (f.oiStatus === "AVAILABLE") anyFutOi = true;
       fc.forEach((c, i) => { futCandlesAll.push(c); futOiAll.push(fo[i]); futByTime.set(c.time, c.close); });
       if (cfg.dataMode === "FUTURES_INTERNAL") {
@@ -183,23 +182,22 @@ export async function loadSeries(cfg: TestConfig): Promise<LoadedSeries> {
   };
 }
 
-export interface LiveExtra {
-  forming?: { candle: Candle; oi: number | null; spotClose: number | null } | null; // partial candle, evaluated provisionally
+/** Live evaluation flag: the latest CLOSED candle's next candle has not opened yet. No forming / intrabar candle exists. */
+export interface LiveExtra {}
+
+/** Trading timeframes of the Lab: STRICTLY 5M (with 15M context) or 15M. 1-minute based timeframes are not allowed. */
+export const LAB_TIMEFRAMES = ["5m", "15m"] as const;
+export function assertLabTimeframe(tf: string): void {
+  if (!(LAB_TIMEFRAMES as readonly string[]).includes(tf)) throw new Error(`Lab trading timeframe must be 5m or 15m (got ${tf}); 1-minute data is not used`);
 }
 
-/** Pure compute over loaded series. With `live.forming` the partial candle is appended (causal: earlier rows are unchanged). */
+/** Pure compute over CLOSED candles only. */
 export function evaluateSeries(cfg: TestConfig, L: LoadedSeries, live?: LiveExtra): RunResult {
   const { m, warmupSessions, perDateBinding: pdb0, contractChanges, unavailableDateCount, oiStatus, vwapSource, repBinding, vwapInstrument, bindingByDate, options } = L;
   let candles = [...L.candles]; let oi = [...L.oi];
   const spotByTime = new Map(L.spotByTime), otherPriceByTime = new Map(L.otherPriceByTime);
   const bindingStatusByTime = new Map(L.bindingStatusByTime), contractChangeTimes = L.contractChangeTimes;
   const perDateBinding = pdb0.map((x) => ({ ...x }));
-  const f = live?.forming;
-  if (f && (!candles.length || f.candle.time > candles[candles.length - 1].time)) {
-    candles.push(f.candle); oi.push(f.oi);
-    bindingStatusByTime.set(f.candle.time, cfg.dataMode === "FUTURES_INTERNAL" ? "RESOLVED" : (bindingByDate.get(istDate(f.candle.time))?.status ?? "UNAVAILABLE_HISTORICAL"));
-    if (f.spotClose != null) { spotByTime.set(f.candle.time, f.spotClose); if (cfg.dataMode === "FUTURES_INTERNAL") otherPriceByTime.set(f.candle.time, f.spotClose); }
-  }
   const expiryForDate = (sec: number) => {
     const d = istDate(sec);
     const b = bindingByDate.get(d);
@@ -276,13 +274,14 @@ export function evaluateSeries(cfg: TestConfig, L: LoadedSeries, live?: LiveExtr
 /** Lightweight availability probe for the UI "Full Available History" display. */
 export async function availableHistory(cfg: Pick<TestConfig, "index" | "timeframe">): Promise<{ from: string; to: string; totalCandles: number }> {
   const m = INDEX_MASTER[cfg.index];
-  const native = cfg.timeframe === "3m" ? 1 : TF_MINUTES[cfg.timeframe];
+  assertLabTimeframe(cfg.timeframe);
+  const native = TF_MINUTES[cfg.timeframe];
   const spotSec = await lookupDhanSecurity(m.nseSymbol);
   if (!spotSec) return { from: "—", to: "—", totalCandles: 0 };
   const endSec = Math.floor(Date.now() / 1000);
   const startSec = endSec - 730 * 86400;
   const r = await fetchIntraday(spotSec.securityId, spotSec.exchangeSegment, spotSec.instrument, native, startSec, endSec);
-  const cands = cfg.timeframe === "3m" ? resample(r.candles, r.oi, 3).candles : r.candles;
+  const cands = r.candles;
   return {
     from: cands.length ? istDate(cands[0].time) : "—",
     to: cands.length ? istDate(cands[cands.length - 1].time) : "—",

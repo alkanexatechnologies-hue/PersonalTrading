@@ -16747,9 +16747,9 @@ function renderMAData(d) {
 
 // ============================================================================
 // Universal Indicator Lab — running-candle LIVE signal (additive).
-// Polls /api/testlab/live and draws on the Lab's existing chart. FORMING = the
-// open candle (provisional, can change until it closes); CONFIRMED = closed
-// candle (final). Advisory only: never places or simulates an order.
+// Polls /api/testlab/live and draws on the Lab's existing chart. STRICTLY CLOSED
+// 5M candles (15M context from closed 15M candles); no forming / 1-minute data.
+// Advisory only: never places or simulates an order.
 // ============================================================================
 const UIL2_LIVE_MS = 15000;
 function uil2LiveToggle() {
@@ -16760,9 +16760,8 @@ function uil2LiveToggle() {
   if (UIL2.liveTimer) { clearInterval(UIL2.liveTimer); UIL2.liveTimer = null; }
   UIL2._liveKey = null;
   if (UIL2.live) {
-    uil2RenderFinalSignal({ latest: p.lastClosed ? p.lastClosed.row : null, lastSignalRow: p.lastSignal ? p.lastSignal.row : null });
-  const run = t2el("uil2-live-run"), sig = t2el("uil2-live-sig");
-    if (run) run.innerHTML = '<div class="uil2-rhead">Running candle</div><div class="lv-small">Loading live signal…</div>';
+    const run = t2el("uil2-live-run"), sig = t2el("uil2-live-sig");
+    if (run) run.innerHTML = '<div class="uil2-rhead">Latest closed candle</div><div class="lv-small">Loading live signal…</div>';
     if (sig) sig.innerHTML = '<div class="uil2-rhead">Last confirmed signal</div><div class="lv-small">Loading…</div>';
     uil2LivePoll(true);
     UIL2.liveTimer = setInterval(() => uil2LivePoll(false), UIL2_LIVE_MS);
@@ -16797,26 +16796,23 @@ function uil2LiveRender(p) {
   const first = UIL2._liveKey !== key;
   if (first || !UIL2.chart) { if (!uil2BuildChart()) return; UIL2._liveKey = key; }
   const rows = p.chart || [];
-  UIL2.series.candle.setData(rows.map((c) => c.forming
-    ? { time: uil2T(c.t), open: c.o, high: c.h, low: c.l, close: c.c, color: c.c >= c.o ? "rgba(34,197,94,.35)" : "rgba(239,68,68,.35)", borderColor: "#f59e0b", wickColor: "#f59e0b" }
-    : { time: uil2T(c.t), open: c.o, high: c.h, low: c.l, close: c.c }));
+  UIL2.series.candle.setData(rows.map((c) => ({ time: uil2T(c.t), open: c.o, high: c.h, low: c.l, close: c.c })));   // CLOSED 5M candles only
   UIL2.series.ema9.setData(rows.filter((c) => c.ema9 != null).map((c) => ({ time: uil2T(c.t), value: c.ema9 })));
   UIL2.series.ema21.setData(rows.filter((c) => c.ema21 != null).map((c) => ({ time: uil2T(c.t), value: c.ema21 })));
   UIL2.series.vwap.setData(rows.filter((c) => c.vwap != null).map((c) => ({ time: uil2T(c.t), value: c.vwap })));
   UIL2.series.vol.setData(rows.map((c) => ({ time: uil2T(c.t), value: c.v, color: c.c >= c.o ? "rgba(34,197,94,.4)" : "rgba(239,68,68,.4)" })));
-  UIL2.series.candle.setMarkers((p.markers || []).map((m) => m.state === "FORMING"
-    ? { time: uil2T(m.t), position: m.side === "BUY" ? "belowBar" : "aboveBar", color: "#f59e0b", shape: "circle", text: m.text }
-    : { time: uil2T(m.t), position: m.side === "BUY" ? "belowBar" : "aboveBar", color: m.side === "BUY" ? "#22c55e" : "#ef4444", shape: m.side === "BUY" ? "arrowUp" : "arrowDown", text: m.text }));
+  UIL2.series.candle.setMarkers((p.markers || []).map((m) => ({ time: uil2T(m.t), position: m.side === "BUY" ? "belowBar" : "aboveBar", color: m.side === "BUY" ? "#22c55e" : "#ef4444", shape: m.side === "BUY" ? "arrowUp" : "arrowDown", text: m.text })));
   if (first) { try { UIL2.chart.timeScale().fitContent(); UIL2.chart.timeScale().applyOptions({ rightOffset: 3 }); } catch (_) {} }
   if (t2el("uil2-chart-sym")) t2el("uil2-chart-sym").textContent = p.index;
   const meta = t2el("uil2-chart-meta");
   if (meta) meta.textContent = `${p.timeframe} · ${p.series} · ${p.session || "—"} · ${p.mode === "REPLAY" ? "replay as of " + p.asOfHm + " IST" : "live signal"}`;
   uil2CrosshairOhlc(null, rows[rows.length - 1]);
   const st = p.mode === "REPLAY" ? [`● REPLAY · as of ${p.asOfHm} IST`, "live"]
-    : p.dataStatus === "LIVE" ? [`● LIVE · ${p.formingAsOfHm || p.asOfHm} IST`, "live"]
+    : p.dataStatus === "LIVE" ? [`● LIVE · last closed 5M ${p.lastClosedHm || "—"} IST`, "live"]
     : p.dataStatus === "STALE" ? [`STALE · data ${p.dataAgeSec}s old`, "stale"]
     : p.dataStatus === "CLOSED" ? ["MARKET CLOSED · last session", "closed"] : ["DATA UNAVAILABLE", "stale"];
   uil2LiveStatus(st[0], st[1]);
+  uil2RenderFinalSignal({ latest: p.lastClosed ? p.lastClosed.row : null, lastSignalRow: p.lastSignal ? p.lastSignal.row : null });
   const run = t2el("uil2-live-run"), sig = t2el("uil2-live-sig");
   if (run) run.innerHTML = uil2LiveRunCard(p);
   if (sig) sig.innerHTML = uil2LiveSigCard(p);
@@ -16862,20 +16858,12 @@ function uil2LiveCtx(r) {
   return `<div class="lv-small">15M regime: <b class="lv-reg-${String(r.regime15).toLowerCase()}">${t2esc(r.regime15)}</b>${c ? ` · ${t2esc(c.trend)} · momentum ${t2esc(c.momentum)}` : " · no closed 15M candle yet"}</div>${r.contextWarning ? `<div class="lv-warn">⚠ ${t2esc(r.contextWarning)}</div>` : ""}`;
 }
 function uil2LiveRunCard(p) {
-  const f = p.forming;
-  if (!f) return `<div class="uil2-rhead">Running candle <span class="uil2-sub">—</span></div><div class="lv-big wait">—</div><div class="lv-small">${t2esc(p.note)}</div>`;
-  const r = f.row, ready = r.action === "TAKE", bear = r.movementDirection === "BEARISH";
-  const head = ready ? (r.plan.side === "BUY" ? "BUY CE?" : "BUY PE?") : r.executionState === "HOLD" ? "HOLD" : uil2Human(r.movementState);
-  const cls = r.movementDirection === "NEUTRAL" ? "wait" : bear ? "bear" : "bull";
-  return `<div class="uil2-rhead">Running candle ${f.hm} <span class="uil2-sub">as of ${t2esc(p.formingAsOfHm || p.asOfHm)}</span></div>
-    <span class="lv-tag forming">FORMING · can change until ${uil2Hm(f.hm, parseInt(p.timeframe, 10))}</span>
-    <div class="lv-big ${cls}">${t2esc(head)}</div>
-    <div class="lv-small">${t2esc(uil2Human(r.movementState))} · ${t2esc(r.movementDirection)} · evidence ${r.movementScore}/100${r.movementEvidence && r.movementEvidence.length ? " · " + t2esc(r.movementEvidence.join("; ")) : ""}</div>
-    ${uil2LiveCtx(r)}
-    ${uil2LiveGuard(r)}
-    <div class="lv-small">Execution: <b>${t2esc(uil2Human(r.executionState))}</b>${r.blockReason ? " — " + t2esc(r.blockReason) : ""}</div>
-    ${ready ? uil2LivePlan(r) : ""}
-    ${ready && f.optionNote ? `<div class="lv-note">${t2esc(f.optionNote)}</div>` : ""}`;
+  // STRICTLY closed 5M candles: no forming / intrabar read. Status only — the signal is in "Last confirmed signal".
+  const r = p.lastClosed ? p.lastClosed.row : null;
+  return `<div class="uil2-rhead">Latest closed ${t2esc(p.timeframe)} candle <span class="uil2-sub">${t2esc(p.lastClosedHm || "—")}</span></div>
+    <div class="lv-small">${p.market === "OPEN" && p.nextCloseHm ? `Next evaluation when the ${t2esc(p.timeframe)} candle closes at <b>${t2esc(p.nextCloseHm)}</b> IST.` : t2esc(p.note || "")}</div>
+    ${r ? `<div class="lv-small">${t2esc(uil2Human(r.movementState))} · ${t2esc(r.movementDirection)} · ${t2esc(uil2Human(r.executionState))}${r.entryBlockedReason ? " — " + t2esc(r.entryBlockedReason) : ""}</div>${uil2LiveCtx(r)}${uil2LiveGuard(r)}` : ""}
+    <div class="lv-note">Signals, entry, SL and targets use only CLOSED 5M candles (15M context from closed 15M candles). No 1-minute data.</div>`;
 }
 function uil2LiveSigCard(p) {
   const g = p.lastSignal;

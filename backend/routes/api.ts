@@ -9603,7 +9603,7 @@ router.get("/analyst/direction-changes", requirePermission("oiAnalysis"), (req: 
 // background job so long "full history" fetches don't time out the browser.
 
 const TL_INDEXES = new Set(["NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX"]);
-const TL_TFS = new Set(["1m", "3m", "5m", "15m", "25m", "60m"]);
+const TL_TFS = new Set(["5m", "15m"]); // Universal Indicator Lab trades STRICTLY on 5M / 15M (no 1-minute data)
 
 interface TLJob {
   runId: string;
@@ -9767,7 +9767,7 @@ router.get("/testlab/available-history", requirePermission("backtesting"), async
   const index = String(req.query.index || "NIFTY").toUpperCase();
   const timeframe = String(req.query.timeframe || "5m");
   if (!TL_INDEXES.has(index)) return res.status(400).json({ error: "index must be NIFTY|BANKNIFTY|FINNIFTY|SENSEX" });
-  if (!TL_TFS.has(timeframe)) return res.status(400).json({ error: "timeframe must be 1m|3m|5m|15m|25m|60m" });
+  if (!TL_TFS.has(timeframe)) return res.status(400).json({ error: "timeframe must be 5m or 15m" });
   try {
     const r = await testLabAvailableHistory({ index: index as TLIndexKey, timeframe: timeframe as TLTfKey });
     res.json({ index, timeframe, ...r });
@@ -9784,7 +9784,7 @@ router.post("/testlab/run", requirePermission("backtesting"), (req: Request, res
   const index = String(b.index || "NIFTY").toUpperCase();
   const timeframe = String(b.timeframe || "5m");
   if (!TL_INDEXES.has(index)) return res.status(400).json({ error: "index must be NIFTY|BANKNIFTY|FINNIFTY|SENSEX" });
-  if (!TL_TFS.has(timeframe)) return res.status(400).json({ error: "timeframe must be 1m|3m|5m|15m|25m|60m" });
+  if (!TL_TFS.has(timeframe)) return res.status(400).json({ error: "timeframe must be 5m or 15m" });
 
   const cfg = testLabDefaultConfig(index as TLIndexKey, timeframe as TLTfKey);
   const scope = b.scope || {};
@@ -9892,7 +9892,7 @@ router.get("/testlab/live", requirePermission("backtesting"), async (req: Reques
   const index = String(req.query.index || "NIFTY").toUpperCase();
   const timeframe = String(req.query.timeframe || "5m");
   if (!TL_INDEXES.has(index)) return res.status(400).json({ error: "index must be NIFTY|BANKNIFTY|FINNIFTY|SENSEX" });
-  if (!["3m", "5m", "15m", "25m", "60m"].includes(timeframe)) return res.status(400).json({ error: "live timeframe must be 3m|5m|15m|25m|60m" });
+  if (!TL_TFS.has(timeframe)) return res.status(400).json({ error: "live timeframe must be 5m or 15m" });
   let asOfSec: number | undefined;
   if (req.query.asOf) {
     const a = String(req.query.asOf);
