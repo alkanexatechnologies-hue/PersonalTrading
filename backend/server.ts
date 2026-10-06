@@ -51,6 +51,14 @@ app.get("/", (_req, res) => {
   res.sendFile(path.join(publicDir, "index.html"));
 });
 
+// SPA deep-link fallback: a non-API GET that didn't match a static file (e.g.
+// /market-analysis) serves index.html so the client router can open the tab.
+// Static files above already resolve first; /api/* and /health are excluded.
+app.get(/^\/(?!api\/|health$).*/, (_req, res) => {
+  res.setHeader("Cache-Control", "no-store, max-age=0");
+  res.sendFile(path.join(publicDir, "index.html"));
+});
+
 // Health
 app.get("/health", (_req, res) =>
   res.json({

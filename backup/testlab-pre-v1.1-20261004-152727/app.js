@@ -12295,10 +12295,7 @@ async function uil2FetchData() {
 }
 
 function uil2Config() {
-  // "Use Futures VWAP" ON => FUTURES_INTERNAL (date-correct futures, strict binding);
-  // OFF => SPOT_DIRECTION (price-only research on index spot).
-  const useFut = t2el("uil2-opt-fvwap") ? t2el("uil2-opt-fvwap").checked : true;
-  const body = { index: UIL2.index, timeframe: UIL2.tf, dataMode: useFut ? "FUTURES_INTERNAL" : "SPOT_DIRECTION", futuresBinding: useFut ? "strict" : "spot-fallback", overrides: {} };
+  const body = { index: UIL2.index, timeframe: UIL2.tf, futuresBinding: t2el("uil2-opt-fvwap")?.checked ? "spot-fallback" : "strict", overrides: {} };
   if (UIL2.scope === "full") body.scope = { mode: "full" };
   else body.scope = { mode: "custom", fromDate: t2el("uil2-from").value, toDate: t2el("uil2-to").value };
   const ab = [];
@@ -12518,13 +12515,12 @@ function uil2RenderBinding(d) {
 function uil2RenderStatusBar(d) {
   const el2 = t2el("uil2-datastatus"); if (!el2) return;
   const dr = d.dataRange || {};
-  el2.innerHTML = `Mode: <b>${t2esc(d.dataMode || "—")}</b>` +
-    ` &nbsp;·&nbsp; Data Status: <b class="${d.dataQuality === "PASS" ? "u-green" : d.dataQuality === "BLOCKED" ? "u-red" : "u-amber"}">${t2esc(d.dataQuality)}</b>` +
+  el2.innerHTML = `Data Status: <b class="${d.dataQuality === "PASS" ? "u-green" : d.dataQuality === "BLOCKED" ? "u-red" : "u-amber"}">${t2esc(d.dataQuality)}</b>` +
     ` &nbsp;·&nbsp; Candles: <b>${t2int(dr.totalCandles)}</b> (${t2int(dr.rejected)} rejected)` +
     ` &nbsp;·&nbsp; ${t2esc(dr.from)} → ${t2esc(dr.to)}` +
     ` &nbsp;·&nbsp; OI: <b>${t2esc(d.oiStatus)}</b>` +
     ` &nbsp;·&nbsp; Futures: <b>${t2esc(d.binding && d.binding.futuresSymbol || "—")}</b>` +
-    (d.unavailableDateCount ? ` &nbsp;·&nbsp; <b class="u-amber">${t2int(d.unavailableDateCount)}</b> date(s) UNAVAILABLE_HISTORICAL` : "") +
+    (d.binding && d.binding.securityId ? ` (${t2esc(d.binding.securityId)})` : "") +
     ` &nbsp;·&nbsp; VWAP: <b>${t2esc(d.vwapSource || "—")}</b>`;
 }
 
@@ -12542,7 +12538,6 @@ function uil2RenderView() {
     case "ablation": v.innerHTML = uil2ViewAblation(); uil2WireAblation(); break;
     case "validation": v.innerHTML = uil2ViewValidation(d); break;
     case "export": v.innerHTML = uil2ViewExport(d); break;
-    case "signal": v.innerHTML = uil2ViewSignal(); uil2WireSignal(); break;
     default: v.innerHTML = "";
   }
 }
@@ -12711,118 +12706,6 @@ function uil2ViewExport(d) {
     </div>
     <div class="uil2-sumcard"><h6>Implementation Deviations (nothing silently replaced)</h6><div class="uil2-kvs">${devList || '<div class="u-muted">—</div>'}</div></div>
   </div>`;
-}
-
-// ---- V1.2 Market Signal (15M direction -> 5M timing -> risk) ----
-UIL2.htf = { data: null, runId: null, timer: null, busy: false };
-function uil2ViewSignal() {
-  const h = UIL2.htf.data;
-  const ctrls = `<div class="u-muted" style="font-size:12px;margin-bottom:10px">15M establishes direction → 5M establishes timing → risk gates decide. Production uses 15M+5M only (never 1m/3m). Uses the From/To window + index on the left.</div>
-    <button class="uil2-btn primary" id="uil2-htf-run" ${UIL2.htf.busy ? "disabled" : ""}>${UIL2.htf.busy ? "⏳ Running…" : "▶ Run 15M→5M Signal"}</button>
-    <span id="uil2-htf-log" class="u-muted" style="margin-left:10px;font-size:12px"></span>`;
-  if (!h) return ctrls + '<div class="uil2-empty">Run to compute the 15M→5M market signal.</div>';
-  const L = h.latest; const dec = L ? L.final : null; const risk = L ? L.risk : null; const m15 = L ? L["15M"] : null; const m5 = L ? L["5M"] : null;
-  const sig = dec ? dec.finalSignal : "WAIT";
-  const dirCls = m15 && (m15.direction || "").includes("BULL") ? "buy" : m15 && (m15.direction || "").includes("BEAR") ? "sell" : "wait";
-  const sigCls = sig === "BUY" ? "buy" : sig === "SELL" ? "sell" : "wait";
-  const why = [];
-  if (m15) why.push(`15M ${m15.direction} (${m15.confidence})`);
-  if (m5) why.push(`5M VWAP ${m5.vwapEvent}`);
-  if (m5) why.push(`EMA ${m5.ema9 != null && m5.ema21 != null ? (m5.ema9 >= m5.ema21 ? "bullish" : "bearish") : "—"}`);
-  if (m5) why.push(`structure ${(m5.structure || "").split(" ")[0]}`);
-  if (m5) why.push(`UT ${m5.ut}`);
-  if (dec && sig === "WAIT") why.push(`BLOCKED: ${dec.primaryBlocker}`);
-  const abc = h.comparison;
-  const card = `
-    <div class="uil2-sumrow" style="grid-template-columns: 1fr 1fr;">
-      <div class="uil2-sumcard">
-        <div class="uil2-rhead">${t2esc(h.config.index)} — MASTER DIRECTION <span class="uil2-sub">${L ? t2esc(L.timestamp) : ""}</span></div>
-        <div class="uil2-finalbig ${dirCls}">${m15 ? t2esc(m15.direction) : "—"}</div>
-        <div class="uil2-kvs">
-          <div class="uil2-kv"><span>15M confidence</span><b>${m15 ? t2esc(m15.confidence) : "—"}</b></div>
-          <div class="uil2-kv"><span>15M EMA</span><b>${m15 ? t2esc(m15.ema) : "—"}</b></div>
-          <div class="uil2-kv"><span>15M VWAP side</span><b>${m15 ? t2esc(m15.vwapSide) : "—"}</b></div>
-          <div class="uil2-kv"><span>15M structure</span><b>${m15 ? t2esc((m15.structure || "").split(" ")[0]) : "—"}</b></div>
-          <div class="uil2-kv"><span>Direction accuracy (next-15M, post-hoc)</span><b>${h.timing && h.timing.directionAccuracyNext15m != null ? h.timing.directionAccuracyNext15m + "%" : "—"}</b></div>
-        </div>
-      </div>
-      <div class="uil2-sumcard">
-        <div class="uil2-rhead">5M TIMING</div>
-        <div class="uil2-kvs">
-          <div class="uil2-kv"><span>VWAP event</span><b>${m5 ? t2esc(m5.vwapEvent) : "—"}</b></div>
-          <div class="uil2-kv"><span>EMA</span><b>${m5 && m5.ema9 != null && m5.ema21 != null ? (m5.ema9 >= m5.ema21 ? "BULLISH" : "BEARISH") : "—"}</b></div>
-          <div class="uil2-kv"><span>Structure</span><b>${m5 ? t2esc((m5.structure || "").split(" ")[0]) : "—"}</b></div>
-          <div class="uil2-kv"><span>UT</span><b>${m5 ? t2esc(m5.ut) : "—"}</b></div>
-          <div class="uil2-kv"><span>Timing score</span><b>${m5 ? t2int(m5.timingScore) : "—"}</b></div>
-        </div>
-      </div>
-    </div>
-    <div class="uil2-sumrow" style="grid-template-columns: 1fr 1fr;">
-      <div class="uil2-sumcard">
-        <div class="uil2-rhead">TRADE DECISION</div>
-        <div class="uil2-finalbig ${sigCls}">${t2esc(sig)}</div>
-        <div class="uil2-kvs">
-          <div class="uil2-kv"><span>Entry</span><b>${risk ? t2num(risk.entry) : "—"}</b></div>
-          <div class="uil2-kv"><span>SL</span><b class="u-red">${risk ? t2num(risk.sl) : "—"}</b></div>
-          <div class="uil2-kv"><span>T1</span><b class="u-green">${risk ? t2num(risk.target1) : "—"}</b></div>
-          <div class="uil2-kv"><span>R:R</span><b class="u-amber">${risk && risk.rr != null ? "1:" + t2num(risk.rr, 2) : "—"}</b></div>
-        </div>
-      </div>
-      <div class="uil2-sumcard">
-        <div class="uil2-rhead">WHY</div>
-        <div class="uil2-kvs">${why.map((x) => `<div class="uil2-kv"><span>•</span><b style="font-weight:500">${t2esc(x)}</b></div>`).join("")}</div>
-      </div>
-    </div>
-    <div class="uil2-sumcard" style="margin-top:10px">
-      <div class="uil2-rhead">A / B / C comparison (no tuning)</div>
-      <div class="uil2-tbl-wrap"><table class="uil2-tbl"><thead><tr><th>Test</th><th>BUY</th><th>SELL</th><th>WAIT</th><th>Trades</th><th>Win%</th><th>PF</th><th>AvgR</th></tr></thead><tbody>
-        ${["testA", "testB", "testC"].map((k) => { const t = abc[k]; return `<tr><td>${t2esc(t.test)}</td><td>${t2int(t.BUY)}</td><td>${t2int(t.SELL)}</td><td>${t2int(t.WAIT)}</td><td>${t2int(t.trades)}</td><td>${t2num(t.winRate, 1)}</td><td>${t2num(t.profitFactor, 2)}</td><td>${t2num(t.avgR, 2)}</td></tr>`; }).join("")}
-      </tbody></table></div>
-      <div class="u-muted" style="font-size:11px;margin-top:6px">A = current engine · B = 15M+5M (no risk) · C = 15M+5M+risk (production path). VWAP events: ${t2esc(JSON.stringify(h.comparison.vwapEvents))}</div>
-    </div>
-    <div class="uil2-sumcard" style="margin-top:10px">
-      <div class="uil2-rhead">Step-by-step (per 5M candle)</div>
-      <div class="uil2-tbl-wrap"><table class="uil2-tbl"><thead><tr><th>Time</th><th>15M dir</th><th>5M VWAP</th><th>EMA</th><th>UT</th><th>Cand</th><th>R:R</th><th>Final</th><th>Blocker</th></tr></thead><tbody>
-        ${(h.steps || []).slice(-80).map((s) => `<tr>
-          <td>${t2esc(t2time(s.timestamp))}</td>
-          <td class="${(s["15M"].direction || "").includes("BULL") ? "u-green" : (s["15M"].direction || "").includes("BEAR") ? "u-red" : "u-muted"}">${t2esc(s["15M"].direction)}</td>
-          <td>${t2esc(s["5M"].vwapEvent)}</td><td>${t2esc(s["5M"].ema9 != null && s["5M"].ema21 != null ? (s["5M"].ema9 >= s["5M"].ema21 ? "UP" : "DOWN") : "—")}</td>
-          <td>${t2esc(s["5M"].ut)}</td><td>${t2esc(s.final.entryCandidate)}</td><td>${s.risk.rr != null ? "1:" + t2num(s.risk.rr, 2) : "—"}</td>
-          <td class="${s.final.finalSignal === "BUY" ? "u-green" : s.final.finalSignal === "SELL" ? "u-red" : "u-muted"}">${t2esc(s.final.finalSignal)}</td>
-          <td class="reason">${t2esc(s.final.primaryBlocker)}</td></tr>`).join("")}
-      </tbody></table></div>
-      <div class="u-muted" style="font-size:11px;margin-top:6px">Showing last 80 of ${(h.steps || []).length} candles. Full per-candle audit is in the server package (per-candle-audit.jsonl).</div>
-    </div>`;
-  return ctrls + card;
-}
-function uil2WireSignal() { const b = t2el("uil2-htf-run"); if (b && !b.dataset.w) { b.dataset.w = "1"; b.addEventListener("click", uil2HtfRun); } }
-async function uil2HtfRun() {
-  if (UIL2.htf.busy) return;
-  const scope = UIL2.scope === "full" ? null : { fromDate: t2el("uil2-from").value, toDate: t2el("uil2-to").value };
-  if (!scope || !scope.fromDate || !scope.toDate) { const l = t2el("uil2-htf-log"); if (l) l.textContent = "Pick a custom From/To window on the left (full-history not supported for HTF)."; return; }
-  const useFut = t2el("uil2-opt-fvwap") ? t2el("uil2-opt-fvwap").checked : true;
-  UIL2.htf.busy = true; uil2RenderView();
-  const log = (m) => { const l = t2el("uil2-htf-log"); if (l) l.textContent = m; };
-  log("Starting 15M→5M run…");
-  try {
-    const start = await fetch("/api/testlab/htf-run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ index: UIL2.index, scope, dataMode: useFut ? "FUTURES_INTERNAL" : "SPOT_DIRECTION" }) }).then((r) => r.json());
-    if (start.error || !start.runId) { UIL2.htf.busy = false; log("Failed: " + (start.error || "no runId")); uil2RenderView(); return; }
-    UIL2.htf.runId = start.runId;
-    if (UIL2.htf.timer) clearInterval(UIL2.htf.timer);
-    UIL2.htf.timer = setInterval(uil2HtfPoll, 1300); uil2HtfPoll();
-  } catch (e) { UIL2.htf.busy = false; log("Failed: " + e.message); uil2RenderView(); }
-}
-async function uil2HtfPoll() {
-  if (!UIL2.htf.runId) return;
-  try {
-    const d = await fetchJSON(`/api/testlab/htf-run/${encodeURIComponent(UIL2.htf.runId)}`, 30000);
-    if (d.error && !d.status) { UIL2.htf.busy = false; if (UIL2.htf.timer) clearInterval(UIL2.htf.timer); uil2RenderView(); return; }
-    if (d.status === "running") { const l = t2el("uil2-htf-log"); if (l) l.textContent = `Running… ${((d.elapsedMs || 0) / 1000).toFixed(0)}s`; return; }
-    if (UIL2.htf.timer) { clearInterval(UIL2.htf.timer); UIL2.htf.timer = null; }
-    UIL2.htf.busy = false;
-    if (d.status === "error") { const l = t2el("uil2-htf-log"); if (l) l.textContent = "Failed: " + (d.error || "unknown"); uil2RenderView(); return; }
-    UIL2.htf.data = d; if (UIL2.tab === "signal") uil2RenderView();
-  } catch (e) { /* keep polling */ }
 }
 
 // ---- client-side exports (full artifacts always remain on disk) ----

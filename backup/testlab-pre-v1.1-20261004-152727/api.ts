@@ -60,8 +60,6 @@ import { withDhanPriority } from "../data/dhanClient";
 import { runTest as runTestLab, availableHistory as testLabAvailableHistory } from "../testlab/runner";
 import { writeReviewPackage as writeTestLabPackage } from "../testlab/exporter";
 import { defaultConfig as testLabDefaultConfig } from "../testlab/config";
-import { runHtf as runTestLabHtf } from "../testlab/htfRunner";
-import { abcComparison as htfAbc, timingDiagnostic as htfTiming, perCandleAudit as htfPerCandle } from "../testlab/htfAudit";
 import type { IndexKey as TLIndexKey, TfKey as TLTfKey, RunResult as TLRunResult, AuditRow as TLAuditRow } from "../testlab/types";
 import {
   getDhanHealth as computeDhanHealth, decodeDhanToken, setDhanConnecting, recordDhanAuthSuccess,
@@ -9686,11 +9684,6 @@ function tlShape(j: TLJob) {
   return {
     ...base,
     binding: r.binding,
-    dataMode: r.dataMode,
-    perDateBinding: r.perDateBinding,
-    contractChanges: r.contractChanges,
-    unavailableDateCount: r.unavailableDateCount,
-    researchBlockedSignals: r.researchBlockedSignals,
     dataRange: r.dataRange,
     oiStatus: r.oiStatus,
     dataQuality: r.dataQuality,
@@ -9757,8 +9750,6 @@ router.post("/testlab/run", requirePermission("backtesting"), (req: Request, res
     cfg.scope = { mode: "custom", fromDate, toDate };
   }
   if (b.futuresBinding === "strict" || b.futuresBinding === "spot-fallback") cfg.futuresBinding = b.futuresBinding;
-  if (b.dataMode === "FUTURES_INTERNAL" || b.dataMode === "SPOT_DIRECTION") cfg.dataMode = b.dataMode;
-  if (b.rrGateMode === "ON" || b.rrGateMode === "OFF") cfg.rrGateMode = b.rrGateMode;
   // Config-driven overrides are allowed (research), but changing a V1 baseline is
   // a FINDING, not an optimization. We only accept a small, safe numeric set.
   const ov = b.overrides || {};
@@ -9792,54 +9783,6 @@ router.get("/testlab/run/:runId", requirePermission("backtesting"), (req: Reques
   const job = _tlJobs.get(req.params.runId);
   if (!job) return res.status(404).json({ error: "run not found (it may have been evicted — artifacts are on disk)" });
   res.json(tlShape(job));
-});
-
-// ---- V1.2 HTF (15M direction -> 5M timing -> risk) run job ----
-interface HtfJob { runId: string; status: "running" | "done" | "error"; startedAt: number; finishedAt: number | null; error: string | null; payload: any | null; }
-const _htfJobs = new Map<string, HtfJob>();
-function _htfEvict() { if (_htfJobs.size <= 8) return; const old = [..._htfJobs.values()].sort((a, b) => a.startedAt - b.startedAt); for (const j of old.slice(0, _htfJobs.size - 8)) _htfJobs.delete(j.runId); }
-
-// Start a 15M->5M HTF run (background). Body: { index, scope:{fromDate,toDate}, dataMode? }
-router.post("/testlab/htf-run", requirePermission("backtesting"), (req: Request, res: Response) => {
-  const b = req.body || {};
-  const index = String(b.index || "NIFTY").toUpperCase();
-  if (!TL_INDEXES.has(index)) return res.status(400).json({ error: "index must be NIFTY|BANKNIFTY|FINNIFTY|SENSEX" });
-  const from = String((b.scope && b.scope.fromDate) || ""), to = String((b.scope && b.scope.toDate) || "");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return res.status(400).json({ error: "scope needs fromDate & toDate (YYYY-MM-DD)" });
-  const dataMode = (b.dataMode === "SPOT_DIRECTION" ? "SPOT_DIRECTION" : "FUTURES_INTERNAL");
-  const cfg = testLabDefaultConfig(index as TLIndexKey, "5m");
-  cfg.scope = { mode: "custom", fromDate: from, toDate: to };
-  cfg.dataMode = dataMode as any;
-  cfg.futuresBinding = dataMode === "FUTURES_INTERNAL" ? "strict" : "spot-fallback";
-
-  const runId = `htf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  const job: HtfJob = { runId, status: "running", startedAt: Date.now(), finishedAt: null, error: null, payload: null };
-  _htfJobs.set(runId, job); _htfEvict();
-  (async () => {
-    try {
-      const bundle = await runTestLabHtf(cfg);
-      // Latest actionable 5M candle for the Market Signal card (last row with a
-      // directional master, else the final row).
-      const rowsC = bundle.testC.rows;
-      const latest = [...rowsC].reverse().find((r) => r.masterDirection && r.masterDirection !== "NEUTRAL" && r.masterDirection !== "CONFLICT") || rowsC[rowsC.length - 1] || null;
-      job.payload = {
-        config: bundle.config, dataMode: bundle.dataMode, binding: bundle.binding, dataRange: bundle.dataRange,
-        oiStatus: bundle.oiStatus, unavailableDateCount: bundle.unavailableDateCount,
-        comparison: htfAbc(bundle), timing: htfTiming(bundle),
-        latest: latest ? htfPerCandle(latest) : null,
-        steps: rowsC.map(htfPerCandle),           // full per-5M-candle step-by-step
-        signals: bundle.testC.rows.filter((r) => r.signal !== "WAIT").map(htfPerCandle),
-      };
-      job.status = "done"; job.finishedAt = Date.now();
-    } catch (e: any) { job.error = e?.message || "htf run failed"; job.status = "error"; job.finishedAt = Date.now(); }
-  })();
-  res.json({ runId, status: job.status });
-});
-
-router.get("/testlab/htf-run/:runId", requirePermission("backtesting"), (req: Request, res: Response) => {
-  const job = _htfJobs.get(req.params.runId);
-  if (!job) return res.status(404).json({ error: "htf run not found" });
-  res.json({ runId: job.runId, status: job.status, error: job.error, elapsedMs: (job.finishedAt || Date.now()) - job.startedAt, ...(job.payload || {}) });
 });
 
 // Recent in-process runs (compact list for the UI history).
