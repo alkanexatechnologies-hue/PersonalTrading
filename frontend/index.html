@@ -7,7 +7,7 @@
          under the home indicator. Android ignores it harmlessly. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>BC Data Status</title>
-    <link rel="stylesheet" href="styles.css?v=20261004-testlab5" />
+    <link rel="stylesheet" href="styles.css?v=20261005-livesig16" />
     <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   </head>
   <body class="oi-focus">
@@ -751,7 +751,7 @@
               <button class="uil2-tab" data-uil="ablation">7. Indicator Ablation</button>
               <button class="uil2-tab" data-uil="validation">8. Data Validation</button>
               <button class="uil2-tab" data-uil="export">9. Export &amp; Audit</button>
-              <button class="uil2-tab" data-uil="signal">🎯 Market Signal (15M→5M)</button>
+              <button class="uil2-tab" data-uil="signal">🗂 Legacy 15M→5M (comparison)</button>
             </div>
 
             <!-- ===== 3-column dashboard body ===== -->
@@ -772,8 +772,8 @@
                   </label>
                   <label class="uil2-field"><span>Instrument Type</span>
                     <select id="uil2-instr">
-                      <option value="index">Index (Signal)</option>
-                      <option value="futures">Futures (Signal)</option>
+                      <option value="futures" selected>Futures (Signal) — NIFTY current-month futures</option>
+                      <option value="index">Index (Signal) — index spot</option>
                     </select>
                   </label>
                   <div class="uil2-chips" id="uil2-index-chips">
@@ -788,12 +788,9 @@
                 <section class="uil2-sec">
                   <div class="uil2-sec-h"><span class="uil2-num">2</span> Timeframe</div>
                   <div class="uil2-chips" id="uil2-tf-chips">
-                    <button class="uil2-chip" data-tf="1m">1 Min</button>
-                    <button class="uil2-chip" data-tf="3m">3 Min</button>
+                    <!-- Universal Indicator Lab trades STRICTLY on 5M / 15M (15M = context). 1/3/25/60 Min removed. -->
                     <button class="uil2-chip active" data-tf="5m">5 Min</button>
                     <button class="uil2-chip" data-tf="15m">15 Min</button>
-                    <button class="uil2-chip" data-tf="25m">25 Min</button>
-                    <button class="uil2-chip" data-tf="60m">60 Min</button>
                   </div>
                 </section>
 
@@ -845,10 +842,8 @@
                 <section class="uil2-sec">
                   <div class="uil2-sec-h"><span class="uil2-num">5</span> Test Options</div>
                   <label class="uil2-toggle"><span>Include Volume</span><input type="checkbox" id="uil2-opt-vol" checked /><i></i></label>
-                  <label class="uil2-toggle"><span>Include Open Interest (OI)</span><input type="checkbox" id="uil2-opt-oi" checked /><i></i></label>
-                  <label class="uil2-toggle"><span>Use Futures VWAP</span><input type="checkbox" id="uil2-opt-fvwap" checked /><i></i></label>
-                  <label class="uil2-toggle"><span>Include Expiry Days</span><input type="checkbox" id="uil2-opt-exp" checked /><i></i></label>
-                  <label class="uil2-toggle"><span>Use Normalized ATR (%)</span><input type="checkbox" id="uil2-opt-natr" checked /><i></i></label>
+                  <!-- Include OI / Use Futures VWAP / Include Expiry Days / Use Normalized ATR removed: they did not change the
+                       backend. OI is always shown as supporting evidence (never a gate); VWAP follows Instrument Type above. -->
                 </section>
 
                 <div class="uil2-actions">
@@ -870,9 +865,15 @@
                     <div class="uil2-chartsym"><b id="uil2-chart-sym">NIFTY</b> <span id="uil2-chart-meta" class="uil2-sub">— no run —</span></div>
                     <div class="uil2-ohlc" id="uil2-chart-ohlc"></div>
                     <div class="uil2-chart-tf" id="uil2-chart-tf">5m</div>
+                    <div class="uil2-livectl">
+                      <button id="uil2-live-btn" class="uil2-btn sm" aria-pressed="false">● Live signal</button>
+                      <label class="uil2-sub" for="uil2-live-asof">Replay at</label>
+                      <input type="datetime-local" id="uil2-live-asof" class="uil2-live-asof" title="Optional: replay a past moment (IST) exactly as it looked then" />
+                      <span id="uil2-live-status" class="uil2-live-status"></span>
+                    </div>
                   </div>
                   <div class="uil2-chart-legend" id="uil2-chart-legend">
-                    <span class="lg-ema9">EMA 9</span><span class="lg-ema21">EMA 21</span>
+                    <span class="lg-ema9">EMA 21</span><span class="lg-ema21">EMA 50</span>
                     <span class="lg-vwap">VWAP</span><span class="lg-buy">▲ BUY</span><span class="lg-sell">▼ SELL</span>
                   </div>
                   <div class="uil2-chart" id="uil2-chart"></div>
@@ -892,6 +893,9 @@
 
               <!-- ---------- RIGHT ---------- -->
               <aside class="uil2-right">
+                <div class="uil2-rcard uil2-live-card hidden" id="uil2-live-run"></div>
+                <div class="uil2-rcard uil2-live-card hidden" id="uil2-live-sig"></div>
+                <div class="uil2-rcard uil2-live-card hidden" id="uil2-live-log"></div>
                 <div class="uil2-rcard">
                   <div class="uil2-rhead">Current Candle <span id="uil2-cc-time" class="uil2-sub">—</span></div>
                   <div class="uil2-ccgrid" id="uil2-cc"></div>
@@ -2527,6 +2531,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=20261004-testlab5"></script>
+    <script src="app.js?v=20261005-livesig16"></script>
   </body>
 </html>

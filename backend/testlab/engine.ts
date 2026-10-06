@@ -138,11 +138,22 @@ export function runEngine(input: EngineInput): { rows: AuditRow[]; trades: Audit
       else { if (dq !== "BLOCKED") dq = "WARNING"; dqReasons.push("OI UNAVAILABLE (spot research — price only)"); } // §4 price-only research
     }
 
-    let hardGate = false; let hardGateReason = "";
-    const block = (r: string) => { if (!hardGate) { hardGate = true; hardGateReason = r; bump(r); } };
-    if (dq === "BLOCKED") block(dqReasons[0] || "DATA QUALITY");
     const lateMin = istMinuteOfDay(c.time);
-    const isLate = lateMin >= cfg.lateCutoffMinIST;
+    const openMin = cfg.sessionOpenMinIST ?? (9 * 60 + 15);
+    const cutoffMin = cfg.lateCutoffMinIST ?? (15 * 60 + 10);
+    const scoreDate = istDate(c.time);
+    const inScope = cfg.scope?.mode === "full" || (
+      (!cfg.scope?.fromDate || scoreDate >= cfg.scope.fromDate) &&
+      (!cfg.scope?.toDate || scoreDate <= cfg.scope.toDate)
+    );
+    const beforeOpen = lateMin < openMin;
+    const isLate = lateMin >= cutoffMin;
+
+    let hardGate = false; let hardGateReason = "";
+    const block = (r: string) => { if (!hardGate) { hardGate = true; hardGateReason = r; if (inScope) bump(r); } };
+    if (dq === "BLOCKED") block(dqReasons[0] || "DATA QUALITY");
+    else if (!inScope) { hardGate = true; hardGateReason = "WARMUP HISTORY"; }
+    else if (beforeOpen) block("OUTSIDE SESSION");
 
     // ---- directional candidate + entry/SL/target (only if a lean exists) ----
     let signal: FinalSignal = "WAIT";
@@ -168,7 +179,7 @@ export function runEngine(input: EngineInput): { rows: AuditRow[]; trades: Audit
           rr = risk > 0 ? +((t1 - entry) / risk).toFixed(2) : 0;
           t2 = +(entry + (t1 - entry) * 1.6).toFixed(2);
           if (!(risk > 0)) block("INVALID STRUCTURE");
-          else if (cfg.rrGateMode !== "OFF" && (rr ?? 0) < cfg.rrMin) block("R:R BELOW MIN");
+            // R:R is INFORMATION ONLY (user rule 2026-10-05): calculated and shown, never a gate
           else signal = "BUY";
         } else {
           const invalidation = resistance != null ? resistance : price + (a ?? price * 0.003);
@@ -178,7 +189,7 @@ export function runEngine(input: EngineInput): { rows: AuditRow[]; trades: Audit
           rr = risk > 0 ? +((entry - t1) / risk).toFixed(2) : 0;
           t2 = +(entry - (entry - t1) * 1.6).toFixed(2);
           if (!(risk > 0)) block("INVALID STRUCTURE");
-          else if (cfg.rrGateMode !== "OFF" && (rr ?? 0) < cfg.rrMin) block("R:R BELOW MIN");
+            // R:R is INFORMATION ONLY (user rule 2026-10-05): calculated and shown, never a gate
           else signal = "SELL";
         }
       }
@@ -272,8 +283,14 @@ export function walkOutcomes(rows: AuditRow[], candles: Candle[], cfg: TestConfi
     let outcome: Outcome = "OPEN"; let exitPrice: number | null = null; let exitIdx = entryIdx; let fillAmbig = false;
     let mfe = 0, mae = 0;
     const entryDay = istDate(candles[entryIdx].time);
-    for (let k = entryIdx; k < candles.length && k < entryIdx + cfg.timeExitBars; k++) {
+    // A trade is held until it hits SL or a Target (user rule 2026-10-05). It is only
+    // squared off at the end of its own session (never carried overnight). An optional
+    // time exit applies only when cfg.timeExitBars > 0 (default 0 = off).
+    const lastK = cfg.timeExitBars > 0 ? entryIdx + cfg.timeExitBars - 1 : Infinity;
+    let k = entryIdx;
+    for (; k < candles.length && k <= lastK; k++) {
       const cd = candles[k];
+      if (istDate(cd.time) !== entryDay) { outcome = "EOD_EXIT"; exitIdx = k - 1; exitPrice = candles[k - 1].close; break; } // square off at the entry day's last candle
       // excursions in R
       const fav = isBuy ? (cd.high - entry) : (entry - cd.low);
       const adv = isBuy ? (entry - cd.low) : (cd.high - entry);
@@ -285,11 +302,12 @@ export function walkOutcomes(rows: AuditRow[], candles: Candle[], cfg: TestConfi
       if (hitSL) { outcome = "SL"; exitPrice = sl; exitIdx = k; break; }
       if (hitT2) { outcome = "T2"; exitPrice = t2; exitIdx = k; break; }
       if (hitT1) { outcome = "T1"; exitPrice = t1; exitIdx = k; break; }
-      if (istDate(cd.time) !== entryDay) { outcome = "EOD_EXIT"; exitPrice = cd.open; exitIdx = k; break; }
     }
     if (outcome === "OPEN") {
-      const lastK = Math.min(candles.length - 1, entryIdx + cfg.timeExitBars - 1);
-      outcome = "TIME_EXIT"; exitPrice = candles[lastK].close; exitIdx = lastK;
+      const last = Math.min(candles.length - 1, k - 1);
+      if (k > lastK) { outcome = "TIME_EXIT"; exitPrice = candles[last].close; exitIdx = last; }
+      else if (istMinuteOfDay(candles[last].time) >= 15 * 60 + 25) { outcome = "EOD_EXIT"; exitPrice = candles[last].close; exitIdx = last; } // data ends at the session close
+      else { exitIdx = last; } // data ends mid-session (live / replay): still OPEN — no exit price, no R
     }
     const rMultiple = risk > 0 && exitPrice != null ? +(((isBuy ? exitPrice - entry : entry - exitPrice)) / risk).toFixed(2) : null;
     row.outcome = outcome; row.exitPrice = exitPrice != null ? +exitPrice.toFixed(2) : null;
@@ -298,11 +316,21 @@ export function walkOutcomes(rows: AuditRow[], candles: Candle[], cfg: TestConfi
     row.timingClassification = classifyTiming(row);
     trades.push(row);
     openUntilIdx = exitIdx; cooldownUntilIdx = exitIdx + cfg.cooldownCandles;
+    // the cooldown never carries into the next session
+    { const exitDay = istDate(candles[exitIdx]?.time ?? 0); for (let q = exitIdx + 1; q <= cooldownUntilIdx && q < candles.length; q++) if (istDate(candles[q].time) !== exitDay) { cooldownUntilIdx = q - 1; break; } }
+    // No new BUY/SELL while this trade is open (until SL/Target), nor during the cooldown after it.
+    for (let q = r + 1; q < rows.length && q <= cooldownUntilIdx; q++) {
+      if (rows[q].signal === "WAIT") continue;
+      rows[q].signal = "WAIT"; rows[q].hardGate = true;
+      rows[q].hardGateReason = q <= openUntilIdx ? `HOLD — ${row.signal} from ${row.iso.slice(11, 16)} still open (until SL/Target)` : `COOLDOWN (${cfg.cooldownCandles} candles after the last exit)`;
+      rows[q].primaryReason = rows[q].hardGateReason;
+    }
   }
   return trades;
 }
 
 function classifyTiming(row: AuditRow): Timing {
+  if (row.outcome === "OPEN") return "NA"; // still running — not judged yet
   if (row.outcome === "SL") return "FALSE";
   const win = row.rMultiple != null && row.rMultiple > 0;
   if (!win) return "FALSE";
@@ -331,7 +359,8 @@ function reasonFor(sig: FinalSignal, emaDir: string, vw: number | null, price: n
   return parts.join("+") || sig;
 }
 
-export function computeMetrics(rows: AuditRow[], trades: AuditRow[]): Metrics {
+export function computeMetrics(rows: AuditRow[], allTrades: AuditRow[]): Metrics {
+  const trades = allTrades.filter((t) => t.outcome !== "OPEN"); // statistics use CLOSED trades only
   const buy = rows.filter((r) => r.signal === "BUY").length;
   const sell = rows.filter((r) => r.signal === "SELL").length;
   const wait = rows.filter((r) => r.signal === "WAIT").length;
@@ -368,7 +397,8 @@ export function computeMetrics(rows: AuditRow[], trades: AuditRow[]): Metrics {
   };
 }
 
-export function computeDaily(rows: AuditRow[], trades: AuditRow[]): DailyRow[] {
+export function computeDaily(rows: AuditRow[], allTrades: AuditRow[]): DailyRow[] {
+  const trades = allTrades.filter((t) => t.outcome !== "OPEN"); // closed trades only
   const byDay = new Map<string, AuditRow[]>();
   rows.forEach((r) => { const d = istDate(r.timestamp); (byDay.get(d) || byDay.set(d, []).get(d)!).push(r); });
   const tradesByDay = new Map<string, AuditRow[]>();

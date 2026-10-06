@@ -12233,6 +12233,7 @@ function initTestLab() {
   wire("uil2-exp-csv", "click", uil2ExportCsv);
   wire("uil2-exp-pkg", "click", uil2ExportPackage);
   wire("uil2-view-logs", "click", () => uil2SetTab("export"));
+  wire("uil2-live-btn", "click", uil2LiveToggle);
 
   if (!UIL2._ro && window.ResizeObserver) { try { UIL2._ro = new ResizeObserver(() => uil2ResizeChart()); const c = t2el("uil2-chart"); if (c) UIL2._ro.observe(c); } catch (_) {} }
   uil2SetScope("custom");
@@ -12297,7 +12298,8 @@ async function uil2FetchData() {
 function uil2Config() {
   // "Use Futures VWAP" ON => FUTURES_INTERNAL (date-correct futures, strict binding);
   // OFF => SPOT_DIRECTION (price-only research on index spot).
-  const useFut = t2el("uil2-opt-fvwap") ? t2el("uil2-opt-fvwap").checked : true;
+  const inst = t2el("uil2-instr") ? t2el("uil2-instr").value : "futures";
+  const useFut = inst !== "index"; // Futures (Signal) => FUTURES_INTERNAL; Index (Signal) => SPOT_DIRECTION
   const body = { index: UIL2.index, timeframe: UIL2.tf, dataMode: useFut ? "FUTURES_INTERNAL" : "SPOT_DIRECTION", futuresBinding: useFut ? "strict" : "spot-fallback", overrides: {} };
   if (UIL2.scope === "full") body.scope = { mode: "full" };
   else body.scope = { mode: "custom", fromDate: t2el("uil2-from").value, toDate: t2el("uil2-to").value };
@@ -12370,9 +12372,10 @@ function uil2RenderAll(d) {
   if (conn) { conn.textContent = live ? "● Dhan Connected" : "● Dhan — no data"; conn.className = "uil2-pill " + (live ? "ok" : "warn"); }
 
   uil2RenderChart(d);
-  uil2RenderIndStrip(d.lastRow, d.config);
+  const finRr = d.final && d.final.lastSignal ? d.final.lastSignal.rr : null;
+  uil2RenderIndStrip(d.lastRow ? { ...d.lastRow, finalRr: finRr } : d.lastRow, d.config);
   uil2RenderCurrentCandle(d.currentCandle, d.lastRow);
-  uil2RenderFinalSignal(d.lastRow, d.config);
+  uil2RenderFinalSignal(d.final);
   uil2RenderBinding(d);
   uil2RenderStatusBar(d);
   uil2RenderView();
@@ -12411,7 +12414,7 @@ function uil2RenderChart(d, upto) {
   UIL2.series.ema21.setData(arr.filter((c) => c.ema21 != null).map((c) => ({ time: uil2T(c.t), value: c.ema21 })));
   UIL2.series.vwap.setData(arr.filter((c) => c.vwap != null).map((c) => ({ time: uil2T(c.t), value: c.vwap })));
   UIL2.series.vol.setData(arr.map((c) => ({ time: uil2T(c.t), value: c.v, color: c.c >= c.o ? "rgba(34,197,94,.4)" : "rgba(239,68,68,.4)" })));
-  UIL2.series.candle.setMarkers(arr.filter((c) => c.signal !== "WAIT").map((c) => ({ time: uil2T(c.t), position: c.signal === "BUY" ? "belowBar" : "aboveBar", color: c.signal === "BUY" ? "#22c55e" : "#ef4444", shape: c.signal === "BUY" ? "arrowUp" : "arrowDown", text: c.signal })));
+  UIL2.series.candle.setMarkers(arr.filter((c) => c.signal !== "WAIT").map((c) => ({ time: uil2T(c.t), position: c.signal === "BUY" ? "belowBar" : "aboveBar", color: c.signal === "BUY" ? "#22c55e" : "#ef4444", shape: c.signal === "BUY" ? "arrowUp" : "arrowDown", text: c.action || (c.signal === "BUY" ? "BUY CE" : "BUY PE") })));
   UIL2.chart.timeScale().fitContent();
   const meta = t2el("uil2-chart-meta");
   if (meta) meta.textContent = d.config ? `${d.config.timeframe} · ${d.dataRange.from} → ${d.dataRange.to}` : "";
@@ -12444,7 +12447,7 @@ function uil2IndList(r, cfg) {
   const atrOk = r.atrPercent != null && r.atrPercent > 0.03 && r.atrPercent < 3;
   return [
     { nm: "UT Alert", st: r.utState, sub: "", cls: uil2Cls(r.utState) },
-    { nm: "EMA 9/21", st: r.emaDirection, sub: r.priceVsEMA || "", cls: uil2Cls(r.emaDirection) },
+    { nm: "EMA 21/50", st: r.emaDirection, sub: r.priceVsEMA || "", cls: uil2Cls(r.emaDirection) },
     { nm: "VWAP", st: priceVsVwap, sub: r.vwapSource || "", cls: uil2Cls(priceVsVwap === "ABOVE" ? "UP" : priceVsVwap === "BELOW" ? "DOWN" : "FLAT") },
     { nm: "Market Structure", st: (r.structureState || "").split(" ")[0] || "—", sub: r.bos && r.bos !== "NONE" ? r.bos : "", cls: uil2Cls((r.structureState || "").startsWith("Bullish") ? "UP" : (r.structureState || "").startsWith("Bearish") ? "DOWN" : "RANGING") },
     { nm: "Volume", st: r.volumeState, sub: "", cls: r.volumeState === "EXPANSION" ? "pass" : r.volumeState === "WEAK" ? "fail" : r.volumeState === "UNKNOWN" ? "neutral" : "warn" },
@@ -12453,7 +12456,7 @@ function uil2IndList(r, cfg) {
     { nm: "Support/Res", st: (r.support != null || r.resistance != null) ? "SET" : "—", sub: r.support != null ? "S " + t2num(r.support, 0) : "", cls: (r.support != null || r.resistance != null) ? "pass" : "neutral" },
     { nm: "Fake Move", st: r.fakeMove ? "RISK" : "NO RISK", sub: "", cls: r.fakeMove ? "fail" : "pass" },
     { nm: "Extended", st: r.extendedMove, sub: "", cls: r.extendedMove === "EXTENDED" ? "fail" : "pass" },
-    { nm: "R:R Gate", st: r.rr != null ? "1:" + t2num(r.rr, 2) : "—", sub: "min " + rrMin, cls: r.rr != null ? (r.rr >= rrMin ? "pass" : "fail") : "neutral" },
+    { nm: "R:R (Info)", st: r.finalRr != null ? t2num(r.finalRr, 2) : "—", sub: r.finalRr != null ? (r.finalRr >= rrMin ? "GOOD" : "WARNING") + " · never blocks" : "no signal yet", cls: r.finalRr != null ? (r.finalRr >= rrMin ? "pass" : "warn") : "neutral" },
     { nm: "Expiry", st: r.expiryRisk, sub: r.daysToExpiry != null ? r.daysToExpiry + "d" : "", cls: r.expiryRisk === "HIGH" ? "fail" : r.expiryRisk === "MEDIUM" ? "warn" : "pass" },
     { nm: "Data Quality", st: r.dataQuality, sub: "", cls: uil2Cls(r.dataQuality) },
   ];
@@ -12481,21 +12484,23 @@ function uil2RenderCurrentCandle(c, r) {
 }
 
 // ---- final signal ----
-function uil2RenderFinalSignal(r, cfg) {
-  const badge = t2el("uil2-final-badge");
-  if (!r) { if (badge) { badge.textContent = "—"; badge.className = "uil2-finalbig"; } return; }
-  if (badge) { badge.textContent = r.signal; badge.className = "uil2-finalbig " + (r.signal === "BUY" ? "buy" : r.signal === "SELL" ? "sell" : "wait"); }
-  if (t2el("uil2-final-buy")) t2el("uil2-final-buy").textContent = t2int(r.buyScore);
-  if (t2el("uil2-final-sell")) t2el("uil2-final-sell").textContent = t2int(r.sellScore);
-  const lv = t2el("uil2-final-levels");
-  if (lv) lv.innerHTML = `
-    <div class="uil2-kv"><span>Entry (Next Candle)</span><b>${t2num(r.entry)}</b></div>
-    <div class="uil2-kv"><span>Stop Loss</span><b class="u-red">${t2num(r.stopLoss)}</b></div>
-    <div class="uil2-kv"><span>Target 1</span><b class="u-green">${t2num(r.target1)}</b></div>
-    <div class="uil2-kv"><span>Target 2</span><b class="u-green">${t2num(r.target2)}</b></div>
-    <div class="uil2-kv"><span>R : R</span><b class="u-amber">${r.rr != null ? "1 : " + t2num(r.rr, 2) : "—"}</b></div>`;
-  if (t2el("uil2-final-reason")) t2el("uil2-final-reason").textContent = r.primaryReason || "—";
-  if (t2el("uil2-final-blockers")) { const b = t2el("uil2-final-blockers"); if (r.hardGate && r.hardGateReason) { b.textContent = r.hardGateReason; b.className = "uil2-reasonbox u-red"; } else { b.textContent = "None"; b.className = "uil2-reasonbox"; } }
+function uil2RenderFinalSignal(fin) {
+  // SINGLE SOURCE OF TRUTH: the decision layer's latest candle + its last BUY CE / BUY PE plan.
+  const badge = t2el("uil2-final-badge"), lv = t2el("uil2-final-levels");
+  const latest = fin && fin.latest ? fin.latest.row || fin.latest : null;
+  const sigRow = fin ? fin.lastSignalRow : null;
+  if (!latest) { if (badge) { badge.textContent = "—"; badge.className = "uil2-finalbig"; } if (lv) lv.innerHTML = ""; return; }
+  const act = latest.finalAction || "WAIT";
+  if (badge) { badge.textContent = act; badge.className = "uil2-finalbig " + (act === "BUY CE" ? "buy" : act === "BUY PE" ? "sell" : "wait"); }
+  if (t2el("uil2-final-buy")) t2el("uil2-final-buy").textContent = latest.regime15 || "—";
+  if (t2el("uil2-final-sell")) t2el("uil2-final-sell").textContent = uil2Human(latest.movementState || "—");
+  if (lv) lv.innerHTML = sigRow && sigRow.plan
+    ? `<div class="uil2-live-card"><div class="lv-small">${act === "WAIT" ? `Last BUY CE / BUY PE signal: <b>${t2esc(t2time(sigRow.iso))}</b>` : "This candle's plan"}</div>
+       <div class="lv-big ${sigRow.plan.side === "BUY" ? "bull" : "bear"}" style="font-size:18px">${sigRow.plan.side === "BUY" ? "BUY CE" : "BUY PE"}</div>
+       ${uil2LiveCtx(sigRow)}${uil2LivePlan(sigRow)}</div>`
+    : '<div class="u-muted">No BUY CE / BUY PE signal yet in this window.</div>';
+  if (t2el("uil2-final-reason")) t2el("uil2-final-reason").textContent = `${uil2Human(latest.movementState)} · 15M ${latest.regime15}${latest.movementEvidence && latest.movementEvidence.length ? " · " + latest.movementEvidence.join("; ") : ""}`;
+  if (t2el("uil2-final-blockers")) { const b = t2el("uil2-final-blockers"); const why = latest.entryBlockedReason || latest.blockReason; if (act === "WAIT" && why) { b.textContent = why; b.className = "uil2-reasonbox u-red"; } else { b.textContent = "None"; b.className = "uil2-reasonbox"; } }
 }
 
 // ---- left-rail futures binding ----
@@ -12562,30 +12567,37 @@ function uil2WireSubtabs() {
   document.querySelectorAll("#uil2-view .uil2-subtab").forEach((b) => b.addEventListener("click", () => { UIL2.sub = b.getAttribute("data-sub"); uil2RenderView(); }));
 }
 
-function uil2SigPill(s) { return `<span class="uil2-pillcell ${String(s).toLowerCase()}">${t2esc(s)}</span>`; }
+function uil2SigPill(s, action) {
+  const cls = s === "BUY" || action === "BUY CE" ? "buy" : s === "SELL" || action === "BUY PE" ? "sell" : String(s).toLowerCase();
+  const label = action || (s === "BUY" ? "BUY CE" : s === "SELL" ? "BUY PE" : s);
+  return `<span class="uil2-pillcell ${cls}">${t2esc(label)}</span>`;
+}
 function uil2OutPill(o) { return o && o !== "NONE" ? `<span class="uil2-pillcell ${String(o).toLowerCase()}">${t2esc(o)}</span>` : "—"; }
 
 function uil2SignalsTable(d) {
   const rows = d.signals || [];
-  const head = ["#", "Date & Time", "Price", "Signal", "Buy", "Sell", "Entry", "SL", "T1", "T2", "R:R", "Reason", "Outcome", "R"];
+  const head = ["#", "Date & Time", "Price", "Signal", "Strike", "Entry", "SL", "T1", "T2", "Option LTP", "R:R (info)", "Reason", "Outcome", "R"];
   const body = rows.length ? rows.map((r, i) => `<tr>
     <td>${i + 1}</td><td>${t2esc(t2time(r.iso))}</td><td>${t2num(r.spotPrice)}</td>
-    <td>${uil2SigPill(r.signal)}</td><td>${t2int(r.buyScore)}</td><td>${t2int(r.sellScore)}</td>
+    <td>${uil2SigPill(r.signal, r.action)}</td><td>${r.strike != null ? `${r.strike} ${r.optionType}` : "DATA UNAVAILABLE"}</td>
     <td>${t2num(r.entry)}</td><td>${t2num(r.stopLoss)}</td><td>${t2num(r.target1)}</td><td>${t2num(r.target2)}</td>
-    <td>${r.rr != null ? "1:" + t2num(r.rr, 2) : "—"}</td><td class="reason">${t2esc(r.primaryReason)}</td>
-    <td>${uil2OutPill(r.outcome)}</td><td class="${(r.rMultiple || 0) >= 0 ? "u-green" : "u-red"}">${t2num(r.rMultiple, 2)}</td></tr>`).join("") : `<tr><td colspan="${head.length}" class="u-muted">No BUY/SELL signals in this window.</td></tr>`;
+    <td>${r.optionLtp != null ? "₹" + t2num(r.optionLtp) : "—"}</td>
+    <td class="${r.rrStatus === "WARNING" ? "u-amber" : ""}">${r.rr != null ? t2num(r.rr, 2) + (r.rrStatus ? " " + r.rrStatus : "") : "—"}</td><td class="reason">${t2esc(r.primaryReason)}</td>
+    <td>${uil2OutPill(r.outcome)}</td><td class="${(r.rMultiple || 0) >= 0 ? "u-green" : "u-red"}">${t2num(r.rMultiple, 2)}</td></tr>`).join("") : `<tr><td colspan="${head.length}" class="u-muted">No BUY CE / BUY PE signals in this window.</td></tr>`;
   const note = d.signalsTruncated ? `<div class="u-muted" style="margin-top:6px;font-size:11px">Showing first ${rows.length} of ${d.signalCount} signals — full set in the export package.</div>` : "";
   return `<div class="uil2-tbl-wrap"><table class="uil2-tbl"><thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>${note}`;
 }
 function uil2TradesTable(d) {
   const rows = d.trades || [];
-  const head = ["#", "Date & Time", "Signal", "Entry", "SL", "T1", "T2", "R:R", "Outcome", "R", "MFE", "MAE", "Hold", "Timing"];
+  const head = ["#", "Date & Time", "Signal", "Strike", "Index fill", "SL", "T1", "T2", "R:R (info)", "Outcome", "R", "Option fill", "Option exit", "Option P&L ₹", "Timing"];
+  const opt = (x) => (x != null ? "₹" + t2num(x) : "DATA UNAVAILABLE");
   const body = rows.length ? rows.map((r, i) => `<tr>
-    <td>${i + 1}</td><td>${t2esc(t2time(r.iso))}</td><td>${uil2SigPill(r.signal)}</td>
-    <td>${t2num(r.entry)}</td><td>${t2num(r.stopLoss)}</td><td>${t2num(r.target1)}</td><td>${t2num(r.target2)}</td>
-    <td>${r.rr != null ? "1:" + t2num(r.rr, 2) : "—"}</td><td>${uil2OutPill(r.outcome)}</td>
+    <td>${i + 1}</td><td>${t2esc(t2time(r.iso))}</td><td>${uil2SigPill(r.signal, r.action)}</td><td>${r.strike != null ? `${r.strike} ${r.optionType}` : "—"}</td>
+    <td>${t2num(r.fill != null ? r.fill : r.entry)}</td><td>${t2num(r.stopLoss)}</td><td>${t2num(r.target1)}</td><td>${t2num(r.target2)}</td>
+    <td>${r.rr != null ? t2num(r.rr, 2) : "—"}</td><td>${uil2OutPill(r.outcome)}</td>
     <td class="${(r.rMultiple || 0) >= 0 ? "u-green" : "u-red"}">${t2num(r.rMultiple, 2)}</td>
-    <td>${t2num(r.mfe, 2)}</td><td>${t2num(r.mae, 2)}</td><td>${t2int(r.holdBars)}</td><td>${t2esc(r.timingClassification)}</td></tr>`).join("") : `<tr><td colspan="${head.length}" class="u-muted">No trades.</td></tr>`;
+    <td>${r.action ? opt(r.optionFill) : "—"}</td><td>${r.action ? (r.outcome === "OPEN" ? "OPEN" : opt(r.optionExit)) : "—"}</td>
+    <td class="${(r.optionPnl || 0) >= 0 ? "u-green" : "u-red"}">${r.optionPnl != null ? t2num(r.optionPnl) : "—"}</td><td>${t2esc(r.timingClassification)}</td></tr>`).join("") : `<tr><td colspan="${head.length}" class="u-muted">No trades.</td></tr>`;
   return `<div class="uil2-tbl-wrap"><table class="uil2-tbl"><thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 function uil2DailyTable(d) {
@@ -12613,11 +12625,13 @@ function uil2ViewSummary(d) {
   const obar = (nm, val, cls) => `<div class="uil2-bar"><span>${nm}</span><span class="track"><span class="fill ${cls}" style="width:${pct(val)}%"></span></span><b>${pct(val)}%</b></div>`;
   const gates = Object.entries(d.gateBlocks || {}).sort((a, b) => b[1] - a[1]).slice(0, 6);
   const gmax = gates.length ? gates[0][1] : 1;
-  return `<div class="uil2-sumrow">
+  const lm = d.legacyMetrics;
+  const src = `<div class="u-muted" style="font-size:11px;margin-bottom:8px">Signals, trades and results below come from the decision layer (single source). BUY = BUY CE, SELL = BUY PE.${lm ? ` Legacy engine on the same data, for comparison only: ${t2int(lm.totalTrades)} trades, ${t2int(lm.wins)}W / ${t2int(lm.losses)}L, PF ${t2num(lm.profitFactor, 2)}.` : ""}</div>`;
+  return src + `<div class="uil2-sumrow">
     <div class="uil2-sumcard"><h6>Test Summary</h6><div class="uil2-statgrid">
       ${stat("Total Candles", t2int(d.totalCandles || m.totalCandles))}
-      ${stat("Buy Signals", t2int(m.buy), "u-green")}
-      ${stat("SELL Signals", t2int(m.sell), "u-red")}
+      ${stat("BUY CE Signals", t2int(m.buy), "u-green")}
+      ${stat("BUY PE Signals", t2int(m.sell), "u-red")}
       ${stat("WAIT Signals", t2int(m.wait), "u-muted")}
     </div></div>
     <div class="uil2-sumcard"><h6>Performance (Closed Trades)</h6><div class="uil2-statgrid">
@@ -12656,7 +12670,7 @@ function uil2ViewReplay(d) {
 }
 
 function uil2ViewAblation() {
-  const comps = [["EMA", "EMA 9/21"], ["UT", "UT Bot"], ["VWAP", "VWAP"], ["LINEAR_REGRESSION", "Linear Regression"], ["BOS", "Market Structure / BOS"], ["VOLUME", "Volume"], ["FAKE_MOVE", "Fake-Move filter"], ["EXTENDED_MOVE", "Extended-Move filter"]];
+  const comps = [["EMA", "EMA 21/50"], ["UT", "UT Bot"], ["VWAP", "VWAP"], ["LINEAR_REGRESSION", "Linear Regression"], ["BOS", "Market Structure / BOS"], ["VOLUME", "Volume"], ["FAKE_MOVE", "Fake-Move filter"], ["EXTENDED_MOVE", "Extended-Move filter"]];
   return `<div class="u-muted" style="font-size:12px;margin-bottom:10px">Disable a component and re-run to measure its contribution (research only). Disabling a filter removes its veto; disabling a scorer removes its weight. Results are a FINDING, not an optimization.</div>
     <div class="uil2-indstrip" style="border:none;padding:0;grid-template-columns:repeat(auto-fill,minmax(170px,1fr))">
     ${comps.map(([k, label]) => `<label class="uil2-toggle" style="background:var(--u-panel2);border:1px solid var(--u-border2);border-radius:8px;padding:8px 10px"><span>${label}</span><input type="checkbox" data-ab="${k}" ${UIL2.ablation[k] ? "checked" : ""}/><i></i></label>`).join("")}
@@ -12760,12 +12774,12 @@ function uil2ViewSignal() {
     <div class="uil2-sumrow" style="grid-template-columns: 1fr 1fr;">
       <div class="uil2-sumcard">
         <div class="uil2-rhead">TRADE DECISION</div>
-        <div class="uil2-finalbig ${sigCls}">${t2esc(sig)}</div>
+        <div class="uil2-finalbig ${sigCls}">LEGACY ${t2esc(sig)}</div>
         <div class="uil2-kvs">
           <div class="uil2-kv"><span>Entry</span><b>${risk ? t2num(risk.entry) : "—"}</b></div>
           <div class="uil2-kv"><span>SL</span><b class="u-red">${risk ? t2num(risk.sl) : "—"}</b></div>
           <div class="uil2-kv"><span>T1</span><b class="u-green">${risk ? t2num(risk.target1) : "—"}</b></div>
-          <div class="uil2-kv"><span>R:R</span><b class="u-amber">${risk && risk.rr != null ? "1:" + t2num(risk.rr, 2) : "—"}</b></div>
+          <div class="uil2-kv"><span>R:R</span><b class="u-amber">${risk && risk.rr != null ? "1:" + t2num(risk.rr, 2) + (risk.rr < 2 ? " ⚠ low (info only)" : "") : "—"}</b></div>
         </div>
       </div>
       <div class="uil2-sumcard">
@@ -12782,25 +12796,26 @@ function uil2ViewSignal() {
     </div>
     <div class="uil2-sumcard" style="margin-top:10px">
       <div class="uil2-rhead">Step-by-step (per 5M candle)</div>
-      <div class="uil2-tbl-wrap"><table class="uil2-tbl"><thead><tr><th>Time</th><th>15M dir</th><th>5M VWAP</th><th>EMA</th><th>UT</th><th>Cand</th><th>R:R</th><th>Final</th><th>Blocker</th></tr></thead><tbody>
+      <div class="uil2-tbl-wrap"><table class="uil2-tbl"><thead><tr><th>Time</th><th>15M dir</th><th>5M VWAP</th><th>EMA</th><th>UT</th><th>Cand</th><th>R:R</th><th>Legacy signal</th><th>Blocker</th></tr></thead><tbody>
         ${(h.steps || []).slice(-80).map((s) => `<tr>
           <td>${t2esc(t2time(s.timestamp))}</td>
           <td class="${(s["15M"].direction || "").includes("BULL") ? "u-green" : (s["15M"].direction || "").includes("BEAR") ? "u-red" : "u-muted"}">${t2esc(s["15M"].direction)}</td>
           <td>${t2esc(s["5M"].vwapEvent)}</td><td>${t2esc(s["5M"].ema9 != null && s["5M"].ema21 != null ? (s["5M"].ema9 >= s["5M"].ema21 ? "UP" : "DOWN") : "—")}</td>
-          <td>${t2esc(s["5M"].ut)}</td><td>${t2esc(s.final.entryCandidate)}</td><td>${s.risk.rr != null ? "1:" + t2num(s.risk.rr, 2) : "—"}</td>
+          <td>${t2esc(s["5M"].ut)}</td><td>${t2esc(s.final.entryCandidate)}</td><td>${s.risk.rr != null ? "1:" + t2num(s.risk.rr, 2) + (s.risk.rr < 2 ? " ⚠" : "") : "—"}</td>
           <td class="${s.final.finalSignal === "BUY" ? "u-green" : s.final.finalSignal === "SELL" ? "u-red" : "u-muted"}">${t2esc(s.final.finalSignal)}</td>
           <td class="reason">${t2esc(s.final.primaryBlocker)}</td></tr>`).join("")}
       </tbody></table></div>
       <div class="u-muted" style="font-size:11px;margin-top:6px">Showing last 80 of ${(h.steps || []).length} candles. Full per-candle audit is in the server package (per-candle-audit.jsonl).</div>
     </div>`;
-  return ctrls + card;
+  const legacyNote = `<div class="lv-warn" style="margin-bottom:10px">LEGACY COMPARISON ONLY — this tab runs the older 15M→5M engine (runHtfEngine). It is NOT the production signal. The production BUY CE / BUY PE, Entry, SL, T1, T2 and strike come only from the decision layer (Final Signal, chart, Signals/Trades tables, Live cards).</div>`;
+  return legacyNote + ctrls + card;
 }
 function uil2WireSignal() { const b = t2el("uil2-htf-run"); if (b && !b.dataset.w) { b.dataset.w = "1"; b.addEventListener("click", uil2HtfRun); } }
 async function uil2HtfRun() {
   if (UIL2.htf.busy) return;
   const scope = UIL2.scope === "full" ? null : { fromDate: t2el("uil2-from").value, toDate: t2el("uil2-to").value };
   if (!scope || !scope.fromDate || !scope.toDate) { const l = t2el("uil2-htf-log"); if (l) l.textContent = "Pick a custom From/To window on the left (full-history not supported for HTF)."; return; }
-  const useFut = t2el("uil2-opt-fvwap") ? t2el("uil2-opt-fvwap").checked : true;
+  const useFut = (t2el("uil2-instr") ? t2el("uil2-instr").value : "futures") !== "index";
   UIL2.htf.busy = true; uil2RenderView();
   const log = (m) => { const l = t2el("uil2-htf-log"); if (l) l.textContent = m; };
   log("Starting 15M→5M run…");
@@ -16727,4 +16742,180 @@ function renderMAData(d) {
     row("Price Feed", f.price) + row("Volume Feed", f.volume) + row("OI Feed", f.oi) + row("VIX Feed", f.vix) + row("Option Chain", f.chain) +
     `<div class="ma-ds-row"><span>Last Update</span><b>${maEsc(f.lastUpdate || "—")}</b></div>` +
     `<div class="ma-ds-row"><span>Breakout detect</span><b class="${(f.breakoutDetection || "").indexOf("ACTIVE") >= 0 ? "up" : "down"}">${maEsc(f.breakoutDetection || "—")}</b></div>`;
+}
+
+
+// ============================================================================
+// Universal Indicator Lab — running-candle LIVE signal (additive).
+// Polls /api/testlab/live and draws on the Lab's existing chart. STRICTLY CLOSED
+// 5M candles (15M context from closed 15M candles); no forming / 1-minute data.
+// Advisory only: never places or simulates an order.
+// ============================================================================
+const UIL2_LIVE_MS = 15000;
+function uil2LiveToggle() {
+  UIL2.live = !UIL2.live;
+  const b = t2el("uil2-live-btn");
+  if (b) { b.classList.toggle("live-on", UIL2.live); b.setAttribute("aria-pressed", String(UIL2.live)); b.textContent = UIL2.live ? "■ Stop live" : "● Live signal"; }
+  ["uil2-live-run", "uil2-live-sig", "uil2-live-log"].forEach((id) => { const e = t2el(id); if (e) e.classList.toggle("hidden", !UIL2.live); });
+  UIL2._lastSigKey = undefined;   // first poll sets the baseline; only later NEW signals alert
+  if (UIL2.liveTimer) { clearInterval(UIL2.liveTimer); UIL2.liveTimer = null; }
+  UIL2._liveKey = null;
+  if (UIL2.live) {
+    const run = t2el("uil2-live-run"), sig = t2el("uil2-live-sig");
+    if (run) run.innerHTML = '<div class="uil2-rhead">Latest closed candle</div><div class="lv-small">Loading live signal…</div>';
+    if (sig) sig.innerHTML = '<div class="uil2-rhead">Last confirmed signal</div><div class="lv-small">Loading…</div>';
+    uil2LivePoll(true);
+    UIL2.liveTimer = setInterval(() => uil2LivePoll(false), UIL2_LIVE_MS);
+  } else {
+    uil2LiveStatus("", "");
+    if (UIL2.data) uil2RenderChart(UIL2.data); // back to the last test run
+  }
+}
+function uil2LiveStatus(text, cls) { const e = t2el("uil2-live-status"); if (e) { e.textContent = text; e.className = "uil2-live-status " + (cls || ""); } }
+async function uil2LivePoll(force) {
+  if (!UIL2.live || UIL2._livePolling) return;
+  const chartEl = t2el("uil2-chart");
+  if (!force && (document.hidden || !chartEl || chartEl.offsetParent === null)) return; // only while the Lab is on screen
+  const asof = (t2el("uil2-live-asof") || {}).value || "";
+  if (!force && asof && UIL2._liveOk === asof) return; // a replay moment is static once loaded (retry until it loads)
+  UIL2._livePolling = true;
+  try {
+    const q = `index=${encodeURIComponent(UIL2.index)}&timeframe=${encodeURIComponent(UIL2.tf)}${asof ? "&asOf=" + encodeURIComponent(asof.slice(0, 16)) : ""}`;
+    if (force) uil2LiveStatus("loading…", "");   // only on the first load; later polls keep the last status until new data arrives
+    const p = await fetchJSON(`/api/testlab/live?${q}`, 90000);
+    if (!UIL2.live) return;
+    if (!p || p.error) { uil2LiveStatus(`DATA UNAVAILABLE — ${(p && p.error) || "no response"}`, "stale"); return; }
+    UIL2._liveOk = asof || null;
+    try { uil2LiveRender(p); }
+    catch (e) { console.error("live signal render failed", e); uil2LiveStatus("display error — see console", "stale"); }
+  } catch (e) {
+    uil2LiveStatus(e && e.name === "AbortError" ? "DATA UNAVAILABLE — Dhan slow, retrying" : "DATA UNAVAILABLE — request failed", "stale");
+  } finally { UIL2._livePolling = false; }
+}
+function uil2LiveRender(p) {
+  const key = `${p.index}|${p.timeframe}|${p.session}|${p.mode}`;
+  const first = UIL2._liveKey !== key;
+  if (first || !UIL2.chart) { if (!uil2BuildChart()) return; UIL2._liveKey = key; }
+  const rows = p.chart || [];
+  UIL2.series.candle.setData(rows.map((c) => ({ time: uil2T(c.t), open: c.o, high: c.h, low: c.l, close: c.c })));   // CLOSED 5M candles only
+  UIL2.series.ema9.setData(rows.filter((c) => c.ema9 != null).map((c) => ({ time: uil2T(c.t), value: c.ema9 })));
+  UIL2.series.ema21.setData(rows.filter((c) => c.ema21 != null).map((c) => ({ time: uil2T(c.t), value: c.ema21 })));
+  UIL2.series.vwap.setData(rows.filter((c) => c.vwap != null).map((c) => ({ time: uil2T(c.t), value: c.vwap })));
+  UIL2.series.vol.setData(rows.map((c) => ({ time: uil2T(c.t), value: c.v, color: c.c >= c.o ? "rgba(34,197,94,.4)" : "rgba(239,68,68,.4)" })));
+  UIL2.series.candle.setMarkers((p.markers || []).map((m) => ({ time: uil2T(m.t), position: m.side === "BUY" ? "belowBar" : "aboveBar", color: m.side === "BUY" ? "#22c55e" : "#ef4444", shape: m.side === "BUY" ? "arrowUp" : "arrowDown", text: m.text })));
+  if (first) { try { UIL2.chart.timeScale().fitContent(); UIL2.chart.timeScale().applyOptions({ rightOffset: 3 }); } catch (_) {} }
+  if (t2el("uil2-chart-sym")) t2el("uil2-chart-sym").textContent = p.index;
+  const meta = t2el("uil2-chart-meta");
+  if (meta) meta.textContent = `${p.timeframe} · ${p.series} · ${p.session || "—"} · ${p.mode === "REPLAY" ? "replay as of " + p.asOfHm + " IST" : "live signal"}`;
+  uil2CrosshairOhlc(null, rows[rows.length - 1]);
+  const st = p.mode === "REPLAY" ? [`● REPLAY · as of ${p.asOfHm} IST`, "live"]
+    : p.awaitingCandleHm ? [`● LIVE · waiting for Dhan's ${p.awaitingCandleHm} candle (retrying)`, "stale"]
+    : p.dataStatus === "LIVE" ? [`● LIVE · last closed 5M ${p.lastClosedHm || "—"} IST`, "live"]
+    : p.dataStatus === "STALE" ? [`STALE · data ${p.dataAgeSec}s old`, "stale"]
+    : p.dataStatus === "CLOSED" ? ["MARKET CLOSED · last session", "closed"] : ["DATA UNAVAILABLE", "stale"];
+  uil2LiveStatus(st[0], st[1]);
+  uil2RenderFinalSignal({ latest: p.lastClosed ? p.lastClosed.row : null, lastSignalRow: p.lastSignal ? p.lastSignal.row : null });
+  // every other Lab panel from the SAME live result (indicator strip, current candle, binding, data status)
+  try {
+    const ev = p.evidence ? { ...p.evidence, finalRr: p.lastSignal ? p.lastSignal.row.plan.rr : null } : null;
+    uil2RenderIndStrip(ev, { rrMin: 2 });
+    uil2RenderCurrentCandle(p.currentCandle, ev);
+    const dLike = { binding: p.binding, dataMode: p.dataMode, dataQuality: p.dataQuality, dataRange: p.dataRange, lastRow: ev, oiStatus: p.oiStatus, unavailableDateCount: p.unavailableDateCount, vwapSource: p.vwapSource };
+    uil2RenderBinding(dLike);
+    uil2RenderStatusBar(dLike);
+  } catch (e) { console.error("live panel refresh failed", e); }
+  const run = t2el("uil2-live-run"), sig = t2el("uil2-live-sig");
+  if (run) run.innerHTML = uil2LiveRunCard(p);
+  uil2LiveAlert(p);
+  if (p.mode === "LIVE") uil2LiveLogRender(p.liveLog);
+  else { const lb = t2el("uil2-live-log"); if (lb) lb.innerHTML = '<div class="uil2-rhead">Today\'s live log</div><div class="lv-small">Shown in LIVE mode only (not in replay).</div>'; }
+  if (sig) sig.innerHTML = uil2LiveSigCard(p);
+}
+const uil2Hm = (hm, n) => { const [h, m] = String(hm).split(":").map(Number); const t = h * 60 + m + n; return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; };
+const uil2Human = (s) => String(s || "").replace(/_/g, " ");
+function uil2LivePlan(r) {
+  const p = r.plan; if (!p) return "";
+  const o = r.option && r.option.primary ? r.option : null;
+  const kv = (k, v, c) => `<div class="lv-kv"><span>${k}</span><b class="${c || ""}">${v}</b></div>`;
+  const rs = (x) => (x == null ? "DATA UNAVAILABLE" : "₹" + t2num(x));
+  return `<div class="lv-grid">
+    ${kv(p.side === "BUY" ? "Breakout level" : "Breakdown level", t2num(p.invalidation))}${kv("Entry", t2num(p.entry))}${kv("Stop loss", t2num(p.stopLoss), "sl")}
+    ${kv("Target 1", t2num(p.target1), "tg")}${kv("Target 2", t2num(p.target2), "tg")}${kv("Risk / reward", `${t2num(p.riskPoints, 0)} / ${t2num(p.rewardPoints, 0)}`)}
+    ${kv("Primary strike", o ? `${o.primary.strike} ${o.optionType}` : "DATA UNAVAILABLE")}${kv("Alt strike", o && o.alternative ? `${o.alternative.strike} ${o.optionType}` : "—")}${kv("Option entry LTP", rs(o && o.optionEntry))}
+    ${kv("Option SL", rs(o && o.optionStop), "sl")}${kv("Option T1", rs(o && o.optionTarget), "tg")}${kv("Option T2", "not calculated")}
+    ${kv("Gamma", r.gamma ? `${r.gamma.state} · ${r.gamma.score}/10` : "—", r.gamma && r.gamma.state === "CONFIRMED" ? "tg" : "")}
+    ${kv("OI status", r.oiStatusLabel || "—", r.oiStatusLabel === "CONTRADICTING" || r.oiStatusLabel === "STALE" ? "warn" : r.oiStatusLabel === "UNCONFIRMED" ? "" : "tg")}
+    ${kv("Liquidity", r.liquidityGrade || "—", r.liquidityGrade === "GOOD" ? "tg" : r.liquidityGrade === "POOR" ? "sl" : "warn")}
+    ${kv("R:R", t2num(p.rr), p.rr >= 2 ? "tg" : "warn")}${kv("R:R status", `${r.rrStatus || "—"} · info only`, r.rrStatus === "GOOD" ? "tg" : "warn")}
+  </div>
+  <div class="lv-grid lv-levels">
+    ${kv("Next resistance", (p.nextResistance || []).length ? p.nextResistance.map((x) => t2num(x)).join(" · ") : "none in view", "sl")}
+    ${kv("Next support", (p.nextSupport || []).length ? p.nextSupport.map((x) => t2num(x)).join(" · ") : "none in view", "tg")}
+  </div>
+  ${r.precision ? `<div class="lv-small">Precision: ${Object.entries(r.precision).map(([k, v]) => `<span class="${v === "PASS" ? "u-green" : v === "FAIL" ? "u-red" : ""}">${t2esc(k)} ${v === "PASS" ? "✓" : v === "FAIL" ? "✗" : "n/a"}</span>`).join(" · ")}</div>` : ""}
+  <div class="lv-small">OI: ${t2esc(r.oiStatus)} · ${t2esc(r.oiConfirmation)} · ${t2esc(uil2Human(r.oiValidation ? r.oiValidation.state : "—"))}${r.oiValidation && (r.oiValidation.walls.ce || r.oiValidation.walls.pe) ? ` · walls CE ${r.oiValidation.walls.ce ?? "—"} / PE ${r.oiValidation.walls.pe ?? "—"}` : ""}</div>
+  ${r.reversalRisk ? `<div class="lv-small">Reversal risk: <b class="lv-rr-${r.reversalRisk.level.toLowerCase()}">${r.reversalRisk.level}</b>${r.reversalRisk.factors.length ? " — " + t2esc(r.reversalRisk.factors.join("; ")) : ""}</div>` : ""}
+  ${p.rrWarning ? `<div class="lv-warn">${t2esc(p.rrWarning)}</div>` : ""}`;
+}
+function uil2LiveGuard(r) {
+  if (!r || !r.guardState) return "";
+  const g = r.guardState;
+  if (g === "5M_DIRECTION_CONFLICT" || g === "WAIT_FOR_DIRECTION_RECONFIRMATION")
+    return `<div class="lv-warn">⚠ 5M DIRECTION CONFLICT — WAIT FOR RECONFIRMATION${r.directionConflictReason ? ` (${t2esc(r.directionConflictReason)})` : ""}. Open trades keep their SL/Target.</div>`;
+  if (g === "DIRECTION_RECONFIRMED") return `<div class="lv-small">✓ Direction reconfirmed by the 5M engine — entries in the 15M direction allowed again.</div>`;
+  if (g === "REGIME_CHANGE_CONFIRMED") return `<div class="lv-small">↻ 15M regime change confirmed — entries follow the new regime.</div>`;
+  if (g === "RESISTANCE_REJECTION" || g === "SUPPORT_REJECTION")
+    return `<div class="lv-warn">⚠ ${g === "RESISTANCE_REJECTION" ? "RESISTANCE" : "SUPPORT"} REJECTION at ${t2num(r.supportResistanceLevel)} (${t2esc(r.rejectionType || "")}) — WAIT for 5M confirmation.</div>`;
+  return "";
+}
+function uil2LiveCtx(r) {
+  const c = r.ctx15;
+  return `<div class="lv-small">15M regime: <b class="lv-reg-${String(r.regime15).toLowerCase()}">${t2esc(r.regime15)}</b>${c ? ` · ${t2esc(c.trend)} · momentum ${t2esc(c.momentum)}` : " · no closed 15M candle yet"}</div>${r.contextWarning ? `<div class="lv-warn">⚠ ${t2esc(r.contextWarning)}</div>` : ""}`;
+}
+function uil2LiveRunCard(p) {
+  // STRICTLY closed 5M candles: no forming / intrabar read. Status only — the signal is in "Last confirmed signal".
+  const r = p.lastClosed ? p.lastClosed.row : null;
+  return `<div class="uil2-rhead">Latest closed ${t2esc(p.timeframe)} candle <span class="uil2-sub">${t2esc(p.lastClosedHm || "—")}</span></div>
+    <div class="lv-small">${p.market === "OPEN" && p.nextCloseHm ? `Next evaluation when the ${t2esc(p.timeframe)} candle closes at <b>${t2esc(p.nextCloseHm)}</b> IST.` : t2esc(p.note || "")}</div>
+    ${r ? `<div class="lv-small">${t2esc(uil2Human(r.movementState))} · ${t2esc(r.movementDirection)} · ${t2esc(uil2Human(r.executionState))}${r.entryBlockedReason ? " — " + t2esc(r.entryBlockedReason) : ""}</div>${uil2LiveCtx(r)}${uil2LiveGuard(r)}` : ""}
+    <div class="lv-note">Signals, entry, SL and targets use only CLOSED 5M candles (15M context from closed 15M candles). No 1-minute data.</div>`;
+}
+function uil2LiveSigCard(p) {
+  const g = p.lastSignal;
+  const foot = `<div class="lv-note">Closed 15M context + closed 5M confirmed break + precision check (15M+5M, EMA 21/50, VWAP, UT Bot, Structure/BOS, Volume/Momentum, Liquidity). R:R is information only. Backtest (30 sessions, in-sample): 68 trades, 31W / 37L, +20.06R — research only, not advice.</div>`;
+  if (!g) return `<div class="uil2-rhead">Last confirmed signal</div><div class="lv-small">None yet this session.</div>${foot}`;
+  const r = g.row, side = r.plan.side;
+  const out = r.outcome === "OPEN" ? `<div class="lv-status open">OPEN · filled ${t2num(r.fillPrice)} at the next open, still running</div>`
+    : r.outcome === "NONE" ? `<div class="lv-status">Waiting for the next candle open to fill</div>`
+    : `<div class="lv-status ${r.rMultiple > 0 ? "win" : "loss"}">${r.outcome === "SL" ? "Stop hit" : r.outcome === "T1" ? "Target 1 hit" : r.outcome === "T2" ? "Target 2 hit" : uil2Human(r.outcome)} at ${t2num(r.exitPrice)} · ${r.rMultiple > 0 ? "+" : ""}${r.rMultiple}R</div>`;
+  return `<div class="uil2-rhead">Last confirmed signal ${g.hm} <span class="uil2-sub">${g.barsAgo === 0 ? "just closed" : g.barsAgo + " candles ago"}</span></div>
+    <span class="lv-tag confirmed">CONFIRMED · candle closed</span>
+    <div class="lv-big ${side === "BUY" ? "bull" : "bear"}">${side === "BUY" ? "BUY CE" : "BUY PE"}</div>
+    <div class="lv-small">5M: ${t2esc(uil2Human(r.movementState))} · evidence ${r.movementScore}/100</div>
+    ${uil2LiveCtx(r)}
+    ${uil2LivePlan(r)}${out}${foot}`;
+}
+
+
+// ---- live test helpers: new-signal alert + today's live log (Lab only) ----
+function uil2LiveAlert(p) {
+  const ls = p && p.lastSignal ? `${p.lastSignal.time}|${p.lastSignal.row.finalAction}` : null;
+  const prev = UIL2._lastSigKey;
+  UIL2._lastSigKey = ls;
+  if (p.mode !== "LIVE" || !ls || prev === undefined || prev === ls) return;   // only a NEW signal while watching live
+  const label = `${p.lastSignal.row.finalAction} ${p.lastSignal.hm}`;
+  try { document.title = `🔔 ${label} — MarketPil`; } catch (_) {}
+  const sig = t2el("uil2-live-sig");
+  if (sig) { sig.classList.add("lv-flash"); setTimeout(() => sig.classList.remove("lv-flash"), 6000); }
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (AC) { UIL2._ac = UIL2._ac || new AC(); const ac = UIL2._ac; const o = ac.createOscillator(), g = ac.createGain(); o.frequency.value = 880; g.gain.value = 0.08; o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + 0.35); }
+  } catch (_) {}
+}
+function uil2LiveLogRender(es) {
+  const box = t2el("uil2-live-log"); if (!box) return;
+  es = es || [];
+  if (!es.length) { box.innerHTML = '<div class="uil2-rhead">Today\'s live log</div><div class="lv-small">No BUY CE / BUY PE signal logged yet today.</div>'; return; }
+  box.innerHTML = `<div class="uil2-rhead">Today's live log <span class="uil2-sub">${es.length} entr${es.length === 1 ? "y" : "ies"}</span></div>` +
+    es.slice(-12).reverse().map((e) => `<div class="lv-small">${t2esc(e.loggedAt.slice(11, 16))} · <b>${t2esc(e.action)}</b> ${t2esc(e.signalCandle)} ${t2esc(e.strike || "")} · E ${t2num(e.entry)} SL ${t2num(e.stopLoss)} T1 ${t2num(e.target1)} · <b>${t2esc(e.status)}</b>${e.rMultiple != null ? ` (${e.rMultiple}R)` : ""}</div>`).join("");
 }

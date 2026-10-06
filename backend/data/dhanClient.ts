@@ -22,6 +22,7 @@ const BASE = "https://api.dhan.co/v2";
 const ALLOWED_PATHS = new Set<string>([
   "/charts/historical", // daily OHLC(+OI)
   "/charts/intraday",   // intraday OHLC(+OI)
+  "/charts/rollingoption", // historical (incl. expired) option OHLC+IV+OI per ATM offset — read-only
   "/fundlimit",         // account read-only, used only to verify a token works
   "/marketfeed/ltp",    // live LTP for quotes
   "/marketfeed/ohlc",   // live OHLC for quotes
