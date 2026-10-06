@@ -54,8 +54,12 @@ export function linReg(closes: number[]): { direction: "UP" | "DOWN" | "FLAT"; s
 }
 
 // ---- Support / Resistance from recent swing highs/lows in a trailing window ----
-export function supportResistance(window: Candle[], price: number): { support: number | null; resistance: number | null } {
-  if (window.length < 5) return { support: null, resistance: null };
+// `supports` / `resistances` list every level nearest-first (the window extreme
+// is the last fallback) so a target can skip a level that is too close to entry.
+export function supportResistance(window: Candle[], price: number): {
+  support: number | null; resistance: number | null; supports: number[]; resistances: number[];
+} {
+  if (window.length < 5) return { support: null, resistance: null, supports: [], resistances: [] };
   const highs: number[] = [], lows: number[] = [];
   for (let i = 2; i < window.length - 2; i++) {
     const h = window[i].high, l = window[i].low;
@@ -65,9 +69,13 @@ export function supportResistance(window: Candle[], price: number): { support: n
   const belows = lows.filter((l) => l < price).sort((a, b) => b - a);
   const aboves = highs.filter((h) => h > price).sort((a, b) => a - b);
   // fall back to window extremes so S/R is always defined
-  const support = belows[0] ?? Math.min(...window.map((c) => c.low));
-  const resistance = aboves[0] ?? Math.max(...window.map((c) => c.high));
-  return { support, resistance };
+  const minLow = Math.min(...window.map((c) => c.low));
+  const maxHigh = Math.max(...window.map((c) => c.high));
+  const support = belows[0] ?? minLow;
+  const resistance = aboves[0] ?? maxHigh;
+  const supports = belows.length ? (minLow < belows[belows.length - 1] ? [...belows, minLow] : belows) : [minLow];
+  const resistances = aboves.length ? (maxHigh > aboves[aboves.length - 1] ? [...aboves, maxHigh] : aboves) : [maxHigh];
+  return { support, resistance, supports, resistances };
 }
 
 // ---- Volume state (NORMALIZED vs trailing median — no fixed "2 million" rule) ----

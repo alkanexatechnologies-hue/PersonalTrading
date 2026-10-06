@@ -35,8 +35,11 @@ export function defaultConfig(index: IndexKey, timeframe: TfKey): TestConfig {
     extendedAtrMult: 3.0,
     rrMin: 2.0,
     slAtrBuffer: 0.5,
+    slMaxAtr: 0,                   // research: >0 caps stop distance at N ATR (0 = structural stop, V1 behaviour)
     targetAtrMult: 2.5,
+    targetMinAtr: 0,               // research: >0 skips S/R targets closer than N ATR (0 = nearest level, V1 behaviour)
     minHistory: 30,
+    warmupCandles: 75,             // ~1 session of 5m; window's first candle already has minHistory behind it
     lateCutoffMinIST: 14 * 60 + 30, // 14:30 IST (870) — no NEW entry after (§8)
     cooldownCandles: 2,
     oneOpenTrade: true,

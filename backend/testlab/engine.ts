@@ -31,6 +31,9 @@ export interface EngineInput {
   bindingStatusByTime?: Map<number, "RESOLVED" | "UNAVAILABLE_HISTORICAL" | "INVALID">;
   contractChangeTimes?: Set<number>;
   vwapInstrument?: string;      // §7 instrument the VWAP series belongs to
+  // Leading candles that precede the test window: they feed indicators/history
+  // (causal) but produce no audit rows, signals or trades.
+  warmupCount?: number;
 }
 
 const istMinuteOfDay = (epochSec: number) => Math.floor(((epochSec + 19800) % 86400) / 60);
@@ -58,7 +61,8 @@ export function runEngine(input: EngineInput): { rows: AuditRow[]; trades: Audit
   const gateBlocks: Record<string, number> = {};
   const bump = (k: string) => { gateBlocks[k] = (gateBlocks[k] || 0) + 1; };
 
-  for (let i = 0; i < n; i++) {
+  const warmup = Math.min(Math.max(0, input.warmupCount ?? 0), n);
+  for (let i = warmup; i < n; i++) {
     const c = candles[i];
     const price = c.close;
     const a = atr[i] ?? null;
@@ -68,7 +72,7 @@ export function runEngine(input: EngineInput): { rows: AuditRow[]; trades: Audit
     const win = candles.slice(Math.max(0, i - WINDOW + 1), i + 1);
     const volWin = candles.slice(Math.max(0, i - cfg.volLookback), i).map((x) => x.volume);
     const { structure, bos } = off(cfg, "BOS") ? { structure: "Ranging", bos: "NONE" } : structureAt(win);
-    const { support, resistance } = supportResistance(win, price);
+    const { support, resistance, supports, resistances } = supportResistance(win, price);
     const reg = off(cfg, "LINEAR_REGRESSION") ? { direction: "FLAT" as const, slope: 0, r2: 0 } : linReg(closes.slice(Math.max(0, i - cfg.regLookback + 1), i + 1));
     const vState: VolumeState = off(cfg, "VOLUME") ? "UNKNOWN" : volumeState(volWin, c.volume, cfg.volExpansionMult, cfg.volWeakMult);
     const utState = off(cfg, "UT") ? "NEUTRAL" : ut[i];
@@ -155,16 +159,23 @@ export function runEngine(input: EngineInput): { rows: AuditRow[]; trades: Audit
       // gates that only matter when there IS directional intent
       if (fake) block("FAKE MOVE");
       else if (extended) block("EXTENDED MOVE");
-      else if (expiryRisk === "HIGH" && isExpiryDay) block("EXPIRY RISK");
+      else if (!off(cfg, "EXPIRY_RISK") && expiryRisk === "HIGH" && isExpiryDay) block("EXPIRY RISK");
       else if (isLate) block("LATE CUTOFF");
       else if (!next) block("NO EXECUTABLE CANDLE");
       else {
         entry = next.open; // next executable candle open (no same-candle fill)
+        // first S/R level at least targetMinAtr away; nearer levels are the ones being broken
+        const minTgt = (a ?? 0) * (cfg.targetMinAtr ?? 0);
+        // structural stop, but never further than slMaxAtr from entry
+        const maxSl = (a ?? 0) * (cfg.slMaxAtr ?? 0);
         if (dir === "BUY") {
           const invalidation = support != null ? support : price - (a ?? price * 0.003);
           sl = +(invalidation - (a ?? 0) * cfg.slAtrBuffer).toFixed(2);
+          if (maxSl > 0 && entry - sl > maxSl) sl = +(entry - maxSl).toFixed(2);
           const risk = entry - sl;
-          t1 = resistance != null && resistance > entry ? resistance : +(entry + (a ?? 0) * cfg.targetAtrMult).toFixed(2);
+          const e = entry;
+          const structT = minTgt > 0 ? resistances.find((r) => r > e && r - e >= minTgt) : (resistance != null && resistance > e ? resistance : undefined);
+          t1 = structT != null ? structT : +(entry + (a ?? 0) * cfg.targetAtrMult).toFixed(2);
           rr = risk > 0 ? +((t1 - entry) / risk).toFixed(2) : 0;
           t2 = +(entry + (t1 - entry) * 1.6).toFixed(2);
           if (!(risk > 0)) block("INVALID STRUCTURE");
@@ -173,8 +184,11 @@ export function runEngine(input: EngineInput): { rows: AuditRow[]; trades: Audit
         } else {
           const invalidation = resistance != null ? resistance : price + (a ?? price * 0.003);
           sl = +(invalidation + (a ?? 0) * cfg.slAtrBuffer).toFixed(2);
+          if (maxSl > 0 && sl - entry > maxSl) sl = +(entry + maxSl).toFixed(2);
           const risk = sl - entry;
-          t1 = support != null && support < entry ? support : +(entry - (a ?? 0) * cfg.targetAtrMult).toFixed(2);
+          const e = entry;
+          const structT = minTgt > 0 ? supports.find((s) => s < e && e - s >= minTgt) : (support != null && support < e ? support : undefined);
+          t1 = structT != null ? structT : +(entry - (a ?? 0) * cfg.targetAtrMult).toFixed(2);
           rr = risk > 0 ? +((entry - t1) / risk).toFixed(2) : 0;
           t2 = +(entry - (entry - t1) * 1.6).toFixed(2);
           if (!(risk > 0)) block("INVALID STRUCTURE");
@@ -257,6 +271,9 @@ export function runEngine(input: EngineInput): { rows: AuditRow[]; trades: Audit
 export function walkOutcomes(rows: AuditRow[], candles: Candle[], cfg: TestConfig): AuditRow[] {
   const trades: AuditRow[] = [];
   let openUntilIdx = -1; let cooldownUntilIdx = -1;
+  // rows are the tail of candles (leading warm-up candles have no row): convert
+  // candle indexes to row indexes before comparing with r.
+  const rowOffset = candles.length - rows.length;
   const idxByTime = new Map<number, number>();
   candles.forEach((c, i) => idxByTime.set(c.time, i));
   for (let r = 0; r < rows.length; r++) {
@@ -297,7 +314,7 @@ export function walkOutcomes(rows: AuditRow[], candles: Candle[], cfg: TestConfi
     row.rMultiple = rMultiple; row.holdBars = exitIdx - entryIdx; row.fillAmbiguity = fillAmbig;
     row.timingClassification = classifyTiming(row);
     trades.push(row);
-    openUntilIdx = exitIdx; cooldownUntilIdx = exitIdx + cfg.cooldownCandles;
+    openUntilIdx = exitIdx - rowOffset; cooldownUntilIdx = exitIdx - rowOffset + cfg.cooldownCandles;
   }
   return trades;
 }

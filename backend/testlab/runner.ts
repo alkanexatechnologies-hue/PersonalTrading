@@ -34,13 +34,25 @@ export async function runTest(cfg: TestConfig): Promise<RunResult> {
     fromMs = toEpoch(cfg.scope.fromDate) * 1000; toMs = endEpoch(cfg.scope.toDate) * 1000;
   }
   const startSec = Math.floor(fromMs / 1000), endSec = Math.floor(toMs / 1000);
+  // Warm-up: fetch enough earlier sessions (~375 trading min/day, padded for
+  // weekends/holidays) to hold cfg.warmupCandles candles before the window.
+  const warmN = Math.max(0, cfg.warmupCandles ?? 0);
+  const warmTradingDays = Math.ceil((warmN * tfMin) / 375);
+  const warmStartSec = warmN > 0 ? startSec - (Math.ceil(warmTradingDays * 7 / 5) + 4) * 86400 : startSec;
+  const takeWarm = (cs: Candle[], os: (number | null)[]) => {
+    let k = 0; while (k < cs.length && cs[k].time < startSec) k++;
+    const from = Math.max(0, k - warmN);
+    return { warm: cs.slice(from, k), warmOi: os.slice(from, k), candles: cs.slice(k), oi: os.slice(k) };
+  };
 
   // ---- SPOT series (always fetched: establishes trading dates + basis) ----
   const spotSec = await lookupDhanSecurity(m.nseSymbol);
   if (!spotSec) throw new Error(`No Dhan index security for ${m.nseSymbol}`);
-  const spotFetch = await fetchIntraday(spotSec.securityId, spotSec.exchangeSegment, spotSec.instrument, native, startSec, endSec);
+  const spotFetch = await fetchIntraday(spotSec.securityId, spotSec.exchangeSegment, spotSec.instrument, native, warmStartSec, endSec);
   let spotCandles = spotFetch.candles, spotOi = spotFetch.oi;
   if (cfg.timeframe === "3m") { const r = resample(spotCandles, spotOi, 3); spotCandles = r.candles; spotOi = r.oi; }
+  const spotSplit = takeWarm(spotCandles, spotOi);
+  spotCandles = spotSplit.candles; spotOi = spotSplit.oi;
   const spotByTime = new Map<number, number>(); spotCandles.forEach((c) => spotByTime.set(c.time, c.close));
 
   // trading dates (IST) in order
@@ -72,6 +84,7 @@ export async function runTest(cfg: TestConfig): Promise<RunResult> {
   const contractChangeTimes = new Set<number>();
   const otherPriceByTime = new Map<number, number>();
   let vwapInstrument: string;
+  let warmCandles: Candle[] = [], warmOi: (number | null)[] = [];
 
   // Group consecutive RESOLVED dates by contract (securityId) into periods.
   const periods: { secId: string; seg: string; sym: string; expiry: string; dates: string[] }[] = [];
@@ -86,13 +99,17 @@ export async function runTest(cfg: TestConfig): Promise<RunResult> {
   // futures-by-time (for basis in SPOT_DIRECTION and the FUTURES_INTERNAL series)
   const futByTime = new Map<number, number>();
   const futCandlesAll: Candle[] = []; const futOiAll: (number | null)[] = [];
+  let futWarm: Candle[] = [], futWarmOi: (number | null)[] = [];
   let anyFutOi = false;
   for (const per of periods) {
-    const ps = toEpoch(per.dates[0]); const pe = endEpoch(per.dates[per.dates.length - 1]);
+    const first = periods.indexOf(per) === 0;
+    // warm-up uses the FIRST period's own contract (same instrument, earlier days)
+    const ps = first ? Math.min(warmStartSec, toEpoch(per.dates[0])) : toEpoch(per.dates[0]); const pe = endEpoch(per.dates[per.dates.length - 1]);
     try {
       const f = await fetchIntraday(per.secId, per.seg, "FUTIDX", native, ps, pe);
       let fc = f.candles, fo = f.oi;
       if (cfg.timeframe === "3m") { const r = resample(fc, fo, 3); fc = r.candles; fo = r.oi; }
+      if (first) { const sp = takeWarm(fc, fo); futWarm = sp.warm; futWarmOi = sp.warmOi; fc = sp.candles; fo = sp.oi; }
       if (f.oiStatus === "AVAILABLE") anyFutOi = true;
       const firstTime = futCandlesAll.length ? null : (fc[0]?.time ?? null);
       fc.forEach((c, i) => { futCandlesAll.push(c); futOiAll.push(fo[i]); futByTime.set(c.time, c.close); });
@@ -103,12 +120,14 @@ export async function runTest(cfg: TestConfig): Promise<RunResult> {
 
   if (cfg.dataMode === "FUTURES_INTERNAL") {
     candles = futCandlesAll; oi = futOiAll; oiStatus = anyFutOi ? "AVAILABLE" : "UNAVAILABLE"; vwapSource = "FUTURES";
+    warmCandles = futWarm; warmOi = futWarmOi;
     candles.forEach((c) => bindingStatusByTime.set(c.time, "RESOLVED")); // series only contains resolved candles
     candles.forEach((c) => { const s = spotByTime.get(c.time); if (s != null) otherPriceByTime.set(c.time, s); });
     repBinding = periods.length ? { underlying: m.nseSymbol, futuresSymbol: periods[periods.length - 1].sym, securityId: periods[periods.length - 1].secId, expiry: periods[periods.length - 1].expiry, exchangeSegment: periods[periods.length - 1].seg, lotSize: null, status: "RESOLVED", bindingReason: `${periods.length} resolved contract period(s).` } : INVALID_BINDING;
     vwapInstrument = repBinding.futuresSymbol || `${m.nseSymbol} FUT`;
   } else { // SPOT_DIRECTION
     candles = spotCandles; oi = spotOi; oiStatus = spotFetch.oiStatus; vwapSource = "SPOT";
+    warmCandles = spotSplit.warm; warmOi = spotSplit.warmOi;
     candles.forEach((c) => bindingStatusByTime.set(c.time, bindingByDate.get(istDate(c.time))?.status ?? "UNAVAILABLE_HISTORICAL"));
     candles.forEach((c) => { const f = futByTime.get(c.time); if (f != null) otherPriceByTime.set(c.time, f); });
     repBinding = bindingByDate.get(dateSet[dateSet.length - 1]) ?? INVALID_BINDING;
@@ -124,9 +143,12 @@ export async function runTest(cfg: TestConfig): Promise<RunResult> {
     return { expiryDate: b.expiry, daysToExpiry: Math.round((expMs - sec * 1000) / DAY), isExpiryDay: d === b.expiry };
   };
 
+  // warm-up candles only when the window itself has data (never warm-up alone)
+  if (!candles.length) { warmCandles = []; warmOi = []; }
   const { rows, trades, metrics, daily, gateBlocks } = runEngine({
-    config: cfg, binding: repBinding, candles, oi, oiStatus, vwapSource, expiryForDate,
+    config: cfg, binding: repBinding, candles: [...warmCandles, ...candles], oi: [...warmOi, ...oi], oiStatus, vwapSource, expiryForDate,
     symbol: m.internalSymbol, otherPriceByTime, bindingStatusByTime, contractChangeTimes, vwapInstrument,
+    warmupCount: warmCandles.length,
   });
 
   // mark volume/OI availability back on the per-date binding rows (diagnostics)
@@ -156,6 +178,8 @@ export async function runTest(cfg: TestConfig): Promise<RunResult> {
       from: candles.length ? istDate(candles[0].time) : "—",
       to: candles.length ? istDate(candles[candles.length - 1].time) : "—",
       totalCandles: candles.length, rejected,
+      warmupCandles: warmCandles.length,
+      warmupFrom: warmCandles.length ? istDate(warmCandles[0].time) : null,
     },
     oiStatus, dataQuality, rows, trades, chart, metrics, daily, gateBlocks,
   };

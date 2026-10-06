@@ -54,8 +54,11 @@ export interface TestConfig {
   extendedAtrMult: number;  // distanceFromEMA/ATR beyond this => EXTENDED
   rrMin: number;            // minimum reward:risk (default 2.0)
   slAtrBuffer: number;      // extra ATR beyond structural invalidation
+  slMaxAtr: number;         // cap stop distance at this many ATR from entry (0 = no cap)
   targetAtrMult: number;    // fallback ATR target when no opposing structure
+  targetMinAtr: number;     // skip S/R target levels closer than this many ATR to entry
   minHistory: number;       // min candles before any signal
+  warmupCandles: number;    // prior-session candles loaded before the window (indicator warm-up only; no rows/signals)
   lateCutoffMinIST: number; // no new entries after this IST minute-of-day
   cooldownCandles: number;  // bars to wait after a trade closes
   oneOpenTrade: boolean;
@@ -220,7 +223,7 @@ export interface RunResult {
   contractChanges: { date: string; from: string | null; to: string | null }[]; // §2
   unavailableDateCount: number;         // trading dates with no date-correct futures
   researchBlockedSignals: number;       // §8 candidate signals blocked by the 14:30 cutoff
-  dataRange: { from: string; to: string; totalCandles: number; rejected: number };
+  dataRange: { from: string; to: string; totalCandles: number; rejected: number; warmupCandles?: number; warmupFrom?: string | null };
   oiStatus: "AVAILABLE" | "UNAVAILABLE";
   dataQuality: GateStatus;
   rows: AuditRow[];

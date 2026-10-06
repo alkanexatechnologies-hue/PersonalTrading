@@ -9762,7 +9762,7 @@ router.post("/testlab/run", requirePermission("backtesting"), (req: Request, res
   // Config-driven overrides are allowed (research), but changing a V1 baseline is
   // a FINDING, not an optimization. We only accept a small, safe numeric set.
   const ov = b.overrides || {};
-  const NUM = ["rrMin", "buyThreshold", "sellThreshold", "minHistory", "cooldownCandles", "timeExitBars", "lateCutoffMinIST", "extendedAtrMult", "volExpansionMult", "volWeakMult"] as const;
+  const NUM = ["rrMin", "buyThreshold", "sellThreshold", "minHistory", "cooldownCandles", "timeExitBars", "lateCutoffMinIST", "extendedAtrMult", "volExpansionMult", "volWeakMult", "targetMinAtr", "warmupCandles", "slMaxAtr"] as const;
   for (const k of NUM) { if (typeof ov[k] === "number" && isFinite(ov[k])) (cfg as any)[k] = ov[k]; }
   if (Array.isArray(ov.ablationDisable)) cfg.ablationDisable = ov.ablationDisable.filter((s: any) => typeof s === "string").slice(0, 10);
 
