@@ -201,7 +201,12 @@ import { buildPremarketOverview } from "../sentiment/overview";
 import { todaySnapshots } from "../sentiment/snapshotStore";
 import { getMarketDataHealth, fetchMarketData, marketDataProviderName, MdKey } from "../sentiment/marketDataProvider";
 import { globalCues, indexSentiment, indiaSentiment, briefPhase, briefHeadline, SentimentBrief, IndexSentiment } from "../sentiment/brief";
-import { sessionsOf, analyseDay, aggregate, LiqEvent, LiqLevel } from "../liquidity/liquidityTake";
+import { sessionsOf, analyseDay, aggregate, buildLevels, LiqEvent, LiqLevel } from "../liquidity/liquidityTake";
+import { evaluateSession, dailyAtrFrom5m, summarizeReplay, SETUP_CONFIG, SetupSignal, SessionResult } from "../signals/setupSignals";
+import { regimeAt } from "../decision/regime";
+import { buildOptionPlan } from "../signals/breakoutOption";
+import { tradeFriction } from "../paper/engine";
+import { MIN_DTE, OPTION_NET_RR_MIN } from "../decision/arbiter";
 import fs from "fs";
 import path from "path";
 import {
@@ -8315,6 +8320,116 @@ router.get("/liquidity-analysis", requirePermission("oiAnalysis"), async (req: R
     // Recomputed at most once per 30s per index/timeframe (statuses change per closed 5m candle).
     res.json(await cached(`liq-analysis:${symbol}:${tf}`, 30_000, () => buildLiquidityAnalysis(symbol, tf as 5 | 15)));
   } catch (e: any) { res.json({ error: e?.message || "liquidity analysis failed" }); }
+});
+// ============================ Setup Signals (trader's rejection / VWAP logic) ============================
+// ADVISORY signals for the MC Summary screen — the arbiter's FINAL DECISION and the
+// paper engine are NOT changed. Levels = the Liquidity Analysis level engine (incl.
+// the morning OI snapshot); candles = the same 45-day history + live 5m cache.
+const SETUP_LEDGER_DIR = path.join(process.cwd(), "data", "setup-signals");
+const _setupLogged = new Map<string, string>();    // signal id → last logged status
+function logSetupSignals(sym: string, date: string, sigs: SetupSignal[]) {
+  try {
+    fs.mkdirSync(SETUP_LEDGER_DIR, { recursive: true });
+    const f = path.join(SETUP_LEDGER_DIR, `${date}.jsonl`);
+    if (!_setupLogged.size && fs.existsSync(f)) for (const ln of fs.readFileSync(f, "utf8").split("\n")) { try { const o = JSON.parse(ln); _setupLogged.set(o.id, o.status); } catch { /* skip */ } }
+    for (const s of sigs) {
+      if (_setupLogged.get(s.id) === s.status) continue;
+      _setupLogged.set(s.id, s.status);
+      fs.appendFileSync(f, JSON.stringify({ at: Math.floor(Date.now() / 1000), symbol: sym, ...s }) + "\n");
+    }
+  } catch { /* best effort */ }
+}
+async function setupOptionLeg(def: any, side: "CE" | "PE", plan: NonNullable<SetupSignal["plan"]>) {
+  try {
+    let oi: any = await withTimeout(getOiCached(def), 12_000, "setup oi");
+    if (!oi || !oi.available) return { available: false, reason: "Option chain unavailable" };
+    const today = istDateStr();
+    const dte = oi.expiry ? Math.round((Date.parse(oi.expiry + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / 86400000) : null;
+    let note: string | null = null;
+    if (dte != null && dte < MIN_DTE) {
+      const nx = await decisionDeps.getNextExpiryChain!(def.symbol).catch(() => null);
+      if (!nx) return { available: false, reason: `Nearest expiry ${oi.expiry} is ${dte} day(s) away; next expiry chain unavailable` };
+      note = `Using next expiry ${nx.expiry} (nearest ${oi.expiry} is ${dte} day(s) away)`; oi = nx;
+    }
+    const tp: any = { dir: side === "CE" ? "BUY" : "SELL", entry: plan.entry ?? plan.entryRef, stopLoss: plan.stop, target1: plan.target, target2: null, risk: plan.risk, reward: plan.reward, rr: plan.rr,
+      slReason: "", targetReason: plan.targetWhy, target2Reason: null, trigger: plan.entryRef, triggerLabel: "", triggerType: side === "CE" ? "RESISTANCE BREAKOUT" : "SUPPORT BREAKDOWN", obstacles: [] };
+    const pre = buildOptionPlan(tp, oi, { name: def.name, rrMin: 0 });
+    let securityId: string | null = null, detail = "";
+    if (pre.strike != null && pre.expiry) {
+      const m = await lookupDhanOption(def.nseSymbol || def.symbol, side, pre.strike, pre.expiry).catch(() => null);
+      securityId = m ? String((m as any).securityId) : null; detail = m ? "instrument master" : "not in instrument master";
+    }
+    const op = buildOptionPlan(tp, oi, { name: def.name, rrMin: 0, securityId, securityDetail: detail });
+    const lot = def.lotSize ?? null;
+    let costPerUnit: number | null = null, netRR: number | null = null;
+    if (op.available && op.entry != null && op.risk != null && op.reward != null && lot) {
+      costPerUnit = Math.round(tradeFriction("indexOption", op.entry * lot, op.entry * lot) / lot * 100) / 100;
+      netRR = Math.round((op.reward - costPerUnit) / (op.risk + costPerUnit) * 100) / 100;
+    }
+    const absDelta = op.delta != null ? Math.abs(op.delta) : null;
+    let reason = op.reason;
+    if (!reason && absDelta != null && (absDelta < 0.35 || absDelta > 0.65)) reason = `Delta ${absDelta.toFixed(2)} outside 0.35–0.65 (premium would not track the index well)`;
+    if (!reason && netRR != null && netRR < OPTION_NET_RR_MIN) reason = `Option R:R after costs 1:${netRR} < 1:${OPTION_NET_RR_MIN}`;
+    return { available: op.available, valid: op.available && !reason, reason, note, side, strike: op.strike, expiry: op.expiry, securityId: op.securityId, verified: !!op.identity?.verified,
+      ltp: op.optionLtp, entry: op.entry, stopLoss: op.stopLoss, target: op.target1, rr: op.rr, netRR, costPerUnit, delta: op.delta, iv: op.iv, oi: op.oi, volume: op.volume, why: op.why, lotSize: lot };
+  } catch (e: any) { return { available: false, reason: e?.message || "option leg failed" }; }
+}
+async function buildSetupSignals(symbol: string) {
+  const def = findSymbolDef(symbol); if (!def) throw new Error("unknown symbol");
+  const nowSec = Math.floor(Date.now() / 1000), today = istDateStr();
+  const hist: Candle[] = await cached(`liq-hist5:${symbol}:${today}`, 6 * 3600_000, () => getProvider().getCandles(symbol, "5m", 45) as Promise<Candle[]>);
+  let live: Candle[] = [];
+  try { live = (await getCandlesCached(symbol, "5m")) as Candle[]; } catch { live = (_cache.get(`c:${symbol}:5m`)?.v as Candle[]) || []; }
+  const byT = new Map<number, Candle>(); for (const c of hist) byT.set(c.time, c); for (const c of live) byT.set(c.time, c);
+  const ses = sessionsOf([...byT.values()].sort((a, b) => a.time - b.time));
+  const days = [...ses.keys()].sort();
+  if (days.length < 7) throw new Error("not enough candle history");
+  const lastDay = days[days.length - 1], isToday = lastDay === today;
+  const dayEnd = (d: string) => { const a = ses.get(d)!; return a[a.length - 1].time + 300; };
+  const runDay = (di: number, asOf: number, extra: LiqLevel[] | null): SessionResult => {
+    const prior = days.slice(Math.max(0, di - 15), di).map((d) => ses.get(d)!);
+    const todayC = ses.get(days[di])!.filter((c) => c.time + 300 <= asOf);
+    const levels = extra ?? buildLevels(prior.slice(-6), todayC, asOf);
+    const dAtr = dailyAtrFrom5m(prior);
+    return evaluateSession(prior.slice(-5).flat(), todayC, levels, dAtr, asOf, { regimeAt: (upto) => regimeAt(upto.filter((c) => c.time + 300 <= asOf), dAtr).regime });
+  };
+  // Today: the Liquidity Analysis level set (includes the morning OI support / resistance).
+  let todayLevels: LiqLevel[] | null = null;
+  try {
+    const la: any = await cached(`liq-analysis:${symbol}:5`, 30_000, () => buildLiquidityAnalysis(symbol, 5));
+    if (la && Array.isArray(la.levels)) todayLevels = la.levels.map((l: any) => ({ id: l.id, type: l.type, sources: l.sources, price: l.price, side: l.side, activeFrom: l.activeFrom, refPrice: l.refPrice, priority: l.priority }));
+  } catch { todayLevels = null; }
+  const asOf = isToday ? nowSec : dayEnd(lastDay);
+  const cur = runDay(days.length - 1, asOf, todayLevels);
+  // Option plans for live signals only (entry ready / in trade today).
+  const liveSigs = isToday ? cur.signals.filter((s) => (s.status === "ENTRY_READY" || s.status === "ACTIVE") && s.plan) : [];
+  const legs: Record<string, any> = {};
+  for (const s of liveSigs) legs[s.id] = await setupOptionLeg(def, s.side, s.plan!);
+  logSetupSignals(symbol, lastDay, cur.signals);
+  // 20-session replay (completed sessions; cached for the day).
+  const replay = await cached(`setup-replay:${symbol}:${lastDay}`, 6 * 3600_000, async () => {
+    const res: SessionResult[] = [];
+    for (let di = Math.max(7, days.length - 21); di < days.length - 1; di++) res.push(runDay(di, dayEnd(days[di]), null));
+    const s = summarizeReplay(res);
+    return { ...s, recent: res.flatMap((r) => r.signals.filter((x) => !x.blockedBy)).sort((a, b) => b.barTime - a.barTime).slice(0, 40) };
+  });
+  const lastLive = live.length ? live[live.length - 1].time : null;
+  const marketOpen = isTradingTimeIST();
+  return {
+    symbol, index: def.nseSymbol || def.name, name: def.name, date: lastDay, isToday, asOf,
+    dataStatus: !marketOpen ? "CLOSED" : lastLive != null && nowSec - (lastLive + 300) < 10 * 60 ? "LIVE" : "STALE",
+    today: { ...cur, signals: cur.signals.map((s) => ({ ...s, option: legs[s.id] ?? null })) },
+    replay, config: SETUP_CONFIG,
+    notes: [
+      "Advisory signals from your rejection / VWAP logic — the Market Command FINAL DECISION and the paper engine are unchanged.",
+      "Closed 5m candles only; entry at the next candle's open; no new signal before 09:20 or after 14:00; exit by 15:15.",
+    ],
+  };
+}
+router.get("/setup-signals", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  const symbol = LIQ_INDEX.includes(String(req.query.symbol)) ? String(req.query.symbol) : "^NSEI";
+  try { res.json(await cached(`setup-signals:${symbol}`, 30_000, () => buildSetupSignals(symbol))); }
+  catch (e: any) { res.json({ error: e?.message || "setup signals failed" }); }
 });
 router.get("/market-sentiment-brief", requirePermission("oiAnalysis"), async (_req: Request, res: Response) => {
   try { res.json(await cached("sentiment-brief", 60_000, () => buildSentimentBrief())); }

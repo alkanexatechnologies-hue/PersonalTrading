@@ -6751,3 +6751,30 @@ body.lqa-fullwidth .content { padding-left: 0; padding-right: 0; }
 .mcs-lvt .mcs-src { max-width: 105px; }
 .mcs-lvt .mcs-st { padding: 2px 6px; }
 .mcs-top { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1.25fr) minmax(0, 0.95fr); }
+
+/* ===================== MC SUMMARY — Setup Signals ===================== */
+.mcs-setups { margin-bottom: 8px; }
+.mcs-ssadv { margin-left: auto; font-size: 12px; font-weight: 700; color: #fbbf24; border: 1px solid #fbbf24; border-radius: 4px; padding: 1px 6px; }
+.mcs-ssgrid { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr); gap: 8px; margin-bottom: 8px; }
+.mcs-sslive { border-radius: 8px; padding: 8px 10px; border: 1px solid var(--border); background: rgba(255,255,255,.02); }
+.mcs-sslive.ce { border-color: #16a34a; background: rgba(22,163,74,.08); } .mcs-sslive.pe { border-color: #dc2626; background: rgba(220,38,38,.08); }
+.mcs-ssbig { font-size: 22px; font-weight: 900; letter-spacing: .5px; }
+.mcs-sslive.ce .mcs-ssbig { color: #22c55e; } .mcs-sslive.pe .mcs-ssbig { color: #ef4444; } .mcs-sslive.none .mcs-ssbig { color: #fbbf24; }
+.mcs-ssplan, .mcs-ssopt { margin-top: 4px; font-size: 13px; }
+.mcs-ssopt.bad { opacity: .8; }
+.mcs-ssev { margin: 4px 0 0 16px; padding: 0; font-size: 12px; color: var(--muted); }
+.mcs-sswatch { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.mcs-sswc { font-size: 12px; padding: 3px 7px; border-radius: 6px; background: #131c2e; border: 1px solid #1f2a40; }
+.mcs-sswc i { font-style: normal; color: var(--muted); }
+.mcs-sswc.level_test, .mcs-sswc.confirmation_pending { border-color: #fbbf24; color: #fde68a; }
+.mcs-sswc.accepted { border-color: #60a5fa; }
+.mcs-sstoday h5, .mcs-ssrp h5 { margin: 0 0 4px; font-size: 13px; }
+.mcs-sstbl td, .mcs-sstbl th { font-size: 12px; padding: 4px 6px; }
+.mcs-ssst { font-size: 12px; font-weight: 800; padding: 1px 6px; border-radius: 4px; background: #1e293b; }
+.mcs-ssst.win { background: #16a34a; color: #fff; } .mcs-ssst.loss { background: #dc2626; color: #fff; } .mcs-ssst.act { background: #2563eb; color: #fff; }
+.mcs-ssblk { margin-top: 6px; font-size: 12px; } .mcs-ssblk summary { cursor: pointer; color: var(--muted); min-height: 32px; }
+.mcs-ssrp { border-top: 1px solid var(--border); padding-top: 6px; }
+.mcs-ssrp .r, .mcs-sstbl .r { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 900px) { .mcs-ssgrid { grid-template-columns: minmax(0, 1fr); } .mcs-sstoday { overflow-x: auto; } }
+.mcs-ssvb { font-size: 13px; margin: 0 0 6px; padding: 4px 8px; border-radius: 6px; background: #131c2e; border-left: 3px solid #64748b; }
+.mcs-ssvb.up { border-left-color: #22c55e; } .mcs-ssvb.up b { color: #22c55e; } .mcs-ssvb.dn { border-left-color: #ef4444; } .mcs-ssvb.dn b { color: #ef4444; }

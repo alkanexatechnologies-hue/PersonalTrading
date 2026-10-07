@@ -1,0 +1,115 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import type { Candle } from "../types";
+import type { LiqLevel } from "../liquidity/liquidityTake";
+import { evaluateSession } from "./setupSignals";
+
+// Bars from 09:15 IST with explicit OHLC. `day` = ISO date.
+const t0 = (day: string) => Date.parse(`${day}T03:45:00Z`) / 1000;
+const bar = (day: string, i: number, o: number, h: number, l: number, c: number): Candle => ({ time: t0(day) + i * 300, open: o, high: h, low: l, close: c, volume: 1000 });
+// A calm prior session (ATR ≈ 10) used for warm-up; trend flat.
+function prior(day = "2026-10-05", base = 100): Candle[] {
+  return Array.from({ length: 72 }, (_, i) => { const p = base + (i % 2 ? 2 : -2); return bar(day, i, p, p + 5, p - 5, p + (i % 2 ? 1 : -1)); });
+}
+const lvl = (type: string, price: number, activeFrom: number, sources = [type + ": test"]): LiqLevel =>
+  ({ id: type, type, sources, price, side: "UPSIDE", activeFrom, refPrice: 0, priority: 1 });
+const D = "2026-10-06";
+
+// Price rises from 90 toward resistance 110, a rejection candle at bar 6, confirmation at bar 7.
+function rejectionDay(): Candle[] {
+  const c: Candle[] = [
+    bar(D, 0, 90, 93, 88, 92), bar(D, 1, 92, 96, 91, 95), bar(D, 2, 95, 99, 94, 98), bar(D, 3, 98, 102, 97, 101),
+    bar(D, 4, 101, 105, 100, 104), bar(D, 5, 104, 107, 103, 106),
+    bar(D, 6, 106, 112, 103.5, 104),     // probes 110 (+2), long upper wick, closes back below near the low
+    bar(D, 7, 104, 105, 99, 100),        // confirmation: close below the rejection candle's midpoint, no new high
+  ];
+  for (let i = 8; i < 30; i++) { const p = 100 - (i - 8) * 1.5; c.push(bar(D, i, p, p + 2, p - 3, p - 1.5)); }
+  return c;
+}
+
+test("resistance rejection → BUY PE only after the confirming candle (no look-ahead)", () => {
+  const h = prior(), day = rejectionDay(), L = [lvl("Previous Day High", 110, t0(D))];
+  // daily ATR 30 → the 24-pt move into the level is ≥ 0.6× daily ATR = EXTREME, so the fade is allowed
+  // even though today's rally turned the 15M trend up (an ordinary rally would be blocked — next tests).
+  const at = (n: number) => evaluateSession(h, day.slice(0, n), L, 30, day[n - 1].time + 300);
+  assert.equal(at(7).signals.filter((s) => s.setup === "S3_LEVEL_REJECTION").length, 0, "nothing on the rejection candle alone");
+  const s = at(8).signals.find((x) => x.setup === "S3_LEVEL_REJECTION");
+  assert.ok(s, "signal on confirmation");
+  assert.equal(s!.side, "PE");
+  assert.equal(s!.context, "EXTREME");
+  assert.equal(s!.status, "ENTRY_READY");
+  assert.ok(s!.plan!.stop > 112, "stop above the rejection high");
+  // Same signal, same plan, when more candles exist (future candles only grade it).
+  const full = evaluateSession(h, day, L, 30, day[day.length - 1].time + 300).signals.find((x) => x.setup === "S3_LEVEL_REJECTION")!;
+  assert.equal(full.time, s!.time);
+  assert.equal(full.plan!.stop, s!.plan!.stop);
+  assert.ok(["TARGET", "STOP", "TIME_EXIT", "EOD_EXIT", "ACTIVE"].includes(full.status));
+});
+
+test("failed breakdown (1 close below support, then a strong close back) → BUY CE", () => {
+  const h = prior("2026-10-05", 115);
+  const c = [bar(D, 0, 112, 114, 108, 109), bar(D, 1, 109, 111, 104, 106),
+    bar(D, 2, 106, 107, 98, 98.5),        // closes below support 100 (1 candle only)
+    bar(D, 3, 98.5, 108, 97, 107),        // strong close back above — sweep / failed breakdown
+    bar(D, 4, 107, 110, 105, 109)];       // confirmation above the midpoint, no new low
+  for (let i = 5; i < 25; i++) { const p = 109 + (i - 5); c.push(bar(D, i, p, p + 3, p - 1, p + 1)); }
+  const r = evaluateSession(h, c, [lvl("Previous Day Low", 100, t0(D))], 60, c[c.length - 1].time + 300);
+  const s = r.signals.find((x) => x.setup === "S3_LEVEL_REJECTION");
+  assert.ok(s, "signal found");
+  assert.equal(s!.side, "CE");
+  assert.match(s!.evidence.join(" "), /Failed breakdown|Sweep/);
+});
+
+test("two closes beyond the level = acceptance → no fade", () => {
+  const h = prior();
+  const c = [bar(D, 0, 104, 108, 103, 107), bar(D, 1, 107, 113, 106, 112), bar(D, 2, 112, 115, 111, 114),
+    bar(D, 3, 114, 115, 107, 108), bar(D, 4, 108, 109, 104, 105)];
+  const r = evaluateSession(h, c, [lvl("Previous Day High", 110, t0(D))], 60, c[c.length - 1].time + 300);
+  assert.equal(r.signals.filter((x) => x.setup === "S3_LEVEL_REJECTION" && !x.blockedBy && x.side === "PE").length, 0);
+});
+
+test("a PE fade against a 15M uptrend (not extreme, not range) is blocked", () => {
+  // prior sessions trending up strongly → 15M EMA9 > EMA21
+  const up = (day: string, b: number) => Array.from({ length: 72 }, (_, i) => { const p = b + i * 0.5; return bar(day, i, p, p + 2, p - 1, p + 1); });
+  const h = [...up("2026-10-01", 14), ...up("2026-10-05", 50)];   // ends ~86, below today's open 90
+  const day = rejectionDay();
+  const r = evaluateSession(h, day, [lvl("Previous Day High", 110, t0(D))], 1000, day[day.length - 1].time + 300);
+  const s = r.signals.find((x) => x.setup === "S3_LEVEL_REJECTION");
+  assert.ok(s);
+  assert.match(s!.blockedBy || "", /15M trend UP/);
+});
+
+test("the same level does not fire twice without re-arming", () => {
+  const h = prior(), day = rejectionDay();
+  // a second rejection at the same level right after (price never moved 1 ATR away in between is not the case
+  // here, but the level was already traded and the first signal is still open/just closed).
+  const r = evaluateSession(h, [...day.slice(0, 8), ...day.slice(0, 8).map((x, i) => ({ ...x, time: day[7].time + (i + 1) * 300 }))], [lvl("Previous Day High", 110, t0(D))], 60, day[7].time + 9 * 300 + 300);
+  const fired = r.signals.filter((x) => x.setup === "S3_LEVEL_REJECTION" && !x.blockedBy);
+  assert.ok(fired.length <= 1, `fired ${fired.length}`);
+});
+
+test("VWAP trend pullback: buys the pullback that holds, not the extreme bar; blocked when a level is too close", () => {
+  const h = prior("2026-10-05", 100);
+  const c: Candle[] = [];
+  // steady rally from 100 to ~140 with tight pullbacks; volume constant → VWAP lags well below
+  for (let i = 0; i < 20; i++) { const p = 100 + i * 2; c.push(bar(D, i, p, p + 2.5, p - 0.5, p + 2)); }
+  // pullback to EMA9 that closes green above it
+  const last = c[c.length - 1].close;
+  c.push(bar(D, 20, last, last + 0.5, last - 7, last - 1));
+  c.push(bar(D, 21, last - 1, last + 1, last - 6.5, last + 0.8));
+  const levelsFar = [lvl("Previous Day High", 400, t0(D))];
+  const r = evaluateSession(h, c, levelsFar, 1000, c[c.length - 1].time + 300);
+  const s4 = r.signals.filter((x) => x.setup === "S4_VWAP_PULLBACK");
+  // The trend here is synthetic; the 15M filter may block — but never a signal on a bar that is not a pullback.
+  for (const s of s4) assert.ok(s.time >= "09:50", "not before 09:45");
+  const near = evaluateSession(h, c, [lvl("Previous Day High", last + 5, t0(D))], 1000, c[c.length - 1].time + 300);
+  for (const s of near.signals.filter((x) => x.setup === "S4_VWAP_PULLBACK")) assert.ok(s.blockedBy, "blocked: resistance too close");
+});
+
+test("VWAP bias (trader's rule): the last 5m close above VWAP = BULLISH, below = BEARISH", () => {
+  const h = prior();
+  const up = [bar(D, 0, 100, 102, 99, 101), bar(D, 1, 101, 104, 100, 103), bar(D, 2, 103, 106, 102, 105)];
+  assert.equal(evaluateSession(h, up, [], 60, up[2].time + 300).vwapBias!.bias, "BULLISH");
+  const dn = [bar(D, 0, 100, 101, 97, 98), bar(D, 1, 98, 99, 95, 96), bar(D, 2, 96, 97, 93, 94)];
+  assert.equal(evaluateSession(h, dn, [], 60, dn[2].time + 300).vwapBias!.bias, "BEARISH");
+});

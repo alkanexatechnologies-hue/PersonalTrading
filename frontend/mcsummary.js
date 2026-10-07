@@ -60,6 +60,7 @@ function mcsShell() {
     <section class="mcs-card mcs-optlv" id="mcs-optlv"></section>
   </div>
   <div class="mcs-keyrow" id="mcs-keyrow"></div>
+  <section class="mcs-card mcs-setups" id="mcs-setups"></section>
   <section class="mcs-card mcs-analysis" id="mcs-analysis"></section>
   <section class="mcs-card mcs-fast" id="mcs-fast"></section>
   <div class="mcs-grid2">
@@ -79,7 +80,7 @@ function mcsShell() {
   </div>
   <div class="mcs-foot">Data: existing Dhan connection (Market Command, Market Analysis, Option Terminal endpoints). Expected moves, delta/gamma projections and spike triggers are model estimates, not guarantees. Advisory only — no orders are placed.</div>`;
   mcsEl("mcs-back").onclick = () => { if (typeof switchTab === "function") switchTab("marketcommand"); };
-  root.querySelectorAll("#mcs-syms .mcs-chip").forEach((b) => (b.onclick = () => { MCS.sym = b.dataset.sym; root.querySelectorAll("#mcs-syms .mcs-chip").forEach((x) => x.classList.toggle("on", x === b)); MCS.d = null; MCS.ma = null; MCS.maAt = 0; MCS.optKey = null; MCS._fit = null; MCS.selStrike = null; mcsUnlockHeights(); mcsLoading(); mcsRefresh(true); }));
+  root.querySelectorAll("#mcs-syms .mcs-chip").forEach((b) => (b.onclick = () => { MCS.sym = b.dataset.sym; root.querySelectorAll("#mcs-syms .mcs-chip").forEach((x) => x.classList.toggle("on", x === b)); MCS.d = null; MCS.ss = null; MCS.ma = null; MCS.maAt = 0; MCS.optKey = null; MCS._fit = null; MCS.selStrike = null; mcsUnlockHeights(); mcsLoading(); mcsRefresh(true); }));
   root.querySelectorAll("#mcs-tfs .mcs-tf").forEach((b) => (b.onclick = () => { MCS.tf = b.dataset.tf; root.querySelectorAll("#mcs-tfs .mcs-tf").forEach((x) => x.classList.toggle("on", x === b)); MCS._fit = null; mcsUnlockHeights(); mcsRefresh(true); }));
   root.querySelectorAll("#mcs-toggles input").forEach((c) => (c.onchange = () => { MCS.show[c.dataset.k] = c.checked; mcsRenderChart(); }));
 }
@@ -201,6 +202,8 @@ function mcsRenderChart() {
   if (MCS.show.ntz && ntz?.active && ntz.low != null && ntz.high != null) zones.push({ lo: ntz.low, hi: ntz.high, kind: "ntz", label: `NO TRADE ZONE ${mcsN(ntz.low)} – ${mcsN(ntz.high)}` });
   mcsSetZones(MCS.zones, zones);
   const mk = MCS.show.bos ? (d.structure?.bosEvents || []).map((b) => ({ time: mcsT(b.time), position: b.direction === "Bullish" ? "belowBar" : "aboveBar", color: b.direction === "Bullish" ? "#16c784" : "#ea3943", shape: b.stage === "Pre" ? "circle" : b.direction === "Bullish" ? "arrowUp" : "arrowDown", text: b.stage === "Pre" ? "BOS?" : "BOS" })) : [];
+  const ssig = MCS.ss && MCS.ss.symbol === MCS.sym && MCS.ss.today ? MCS.ss.today.signals.filter((x) => !x.blockedBy) : [];
+  if (MCS.tf === "5m") for (const x of ssig) if (cs.some((k) => k.time === x.barTime)) mk.push({ time: mcsT(x.barTime), position: x.side === "CE" ? "belowBar" : "aboveBar", color: x.side === "CE" ? "#22c55e" : "#ef4444", shape: x.side === "CE" ? "arrowUp" : "arrowDown", text: `${x.setup === "S3_LEVEL_REJECTION" ? "S3" : "S4"} ${x.side}` });
   if (MCS.show.levels) {
     const t0 = cs.length ? mcsIstDay(cs[cs.length - 1].time) : null;
     (d.structure?.swingPoints || []).filter((p) => mcsIstDay(p.time) === t0 && cs.some((x) => x.time === p.time)).slice(-6).forEach((p) => {
@@ -708,7 +711,7 @@ function mcsRenderAnalysis() {
 }
 
 function mcsRenderAll() {
-  mcsStable(() => { mcsRenderHeader(); mcsRenderChart(); mcsRenderLvTable(); mcsRenderOptLv(); mcsRenderKeyRow(); mcsRenderAnalysis(); mcsRenderLevels(); mcsRenderFast(); mcsRenderStrikes(); mcsRenderOpt("CE"); mcsRenderOpt("PE");
+  mcsStable(() => { mcsRenderHeader(); mcsRenderChart(); mcsRenderLvTable(); mcsRenderOptLv(); mcsRenderKeyRow(); mcsRenderSetups(); mcsRenderAnalysis(); mcsRenderLevels(); mcsRenderFast(); mcsRenderStrikes(); mcsRenderOpt("CE"); mcsRenderOpt("PE");
   mcsRenderNext(5); mcsRenderNext(15); mcsRenderMovers(); mcsRenderChain(); mcsRenderTopMove(); mcsRenderCmd(); });
 }
 
@@ -721,6 +724,12 @@ async function mcsRefresh(force) {
       fetchJSON(`/api/market-command?symbol=${encodeURIComponent(sym)}&interval=${tf}`, 45000).catch(() => null),
       fetchJSON(`/api/quotes?symbols=${encodeURIComponent(MCS_SYMS.map((x) => x[0]).join(","))}`, 20000).catch(() => null),
     ]);
+    // Setup signals (your rejection / VWAP logic) — loaded alongside, never blocks the chart.
+    fetchJSON(`/api/setup-signals?symbol=${encodeURIComponent(sym)}`, 45000).catch(() => null).then((ss) => {
+      if (sym !== MCS.sym) return;
+      if (ss && !ss.error) MCS.ss = ss; else if (!MCS.ss || MCS.ss.symbol !== sym) MCS.ss = { error: ss?.error || (ss?.disabled ? "Data paused (Data Control)" : "unavailable"), symbol: sym };
+      mcsStable(() => { mcsRenderSetups(); mcsRenderChart(); });
+    });
     if (sym !== MCS.sym || tf !== MCS.tf) return;   // user switched — the pending reload picks up the new selection
     if (d && !d.error) MCS.d = d; else if (!MCS.d) { const m = mcsEl("mcs-meta"); if (m) m.innerHTML = `<span class="mcs-warn">${mcsEsc(d?.error || "Market Command data unavailable")}</span>`; }
     if (q && q.quotes) MCS.q = q;
@@ -878,4 +887,63 @@ function mcsRenderKeyRow() {
     card("STRUCTURE LEVELS", kv("Swing High (SWH)", swH ? swH.price : null, "mcs-dn") + kv("Swing Low (SWL)", swL ? swL.price : null, "mcs-up") + kv("Equal High (EQH)", eqh ?? "none") + kv("Equal Low (EQL)", eql ?? "none") + kv("BOS Level", d.bos?.price ?? null, d.bos?.direction === "BULLISH" ? "mcs-up" : "mcs-dn", d.bos ? ` <em>${mcsEsc(d.bos.direction || "")} ${mcsEsc(d.bos.stage || "")}</em>` : "")) +
     card("OI LEVELS", kv("OI Resistance", oi.resistance ?? null, "mcs-dn") + kv("OI Support", oi.support ?? null, "mcs-up") + kv("Max Call OI Strike", sR, "", lv.strongResistance?.oi ? ` <em>${mcsL(lv.strongResistance.oi)}</em>` : "") + kv("Max Put OI Strike", sS, "", lv.strongSupport?.oi ? ` <em>${mcsL(lv.strongSupport.oi)}</em>` : "") + kv("PCR", oi.pcr != null ? mcsN(oi.pcr) : null) + (oi.maxPain != null ? kv("Max Pain", oi.maxPain) : "")) +
     card("QUICK STATS", kv("LTP", d.spot) + kv("Change", chg != null ? `${chg >= 0 ? "+" : ""}${mcsN(chg)} (${mcsPct((chg / s.prevClose) * 100)})` : null, mcsCls(chg)) + kv("Day Range", s.low != null ? `${mcsN(s.low)} – ${mcsN(s.high)}` : null) + kv("ATR (14)", atr != null ? mcsN(atr) : null) + kv("Volatility", d.vix?.available ? `${mcsEsc(d.vixEnvironment?.environment || "—")} · VIX ${mcsN(d.vix.value)}` : null));
+}
+
+
+// ===========================================================================
+// SETUP SIGNALS — the trader's rejection / VWAP logic (advisory). Shows the live
+// signal with its option plan, the level watch list, today's signals (and why the
+// others were blocked) and a 20-session replay. The FINAL DECISION is unchanged.
+// ===========================================================================
+function mcsRenderSetups() {
+  const box = mcsEl("mcs-setups"); if (!box) return;
+  const ss = MCS.ss, nm = MCS_SYMS.find((x) => x[0] === MCS.sym)?.[1] || MCS.sym;
+  const head = `<h4>🎯 SETUP SIGNALS — ${mcsEsc(nm)} <span class="mcs-sub">your rejection &amp; VWAP logic · S3 Level Rejection (Setup 1 morning / Setup 2 extreme) · S4 VWAP Trend Pullback (Setup 3)</span>
+    <span class="mcs-ssadv">Advisory — the FINAL DECISION and paper engine are unchanged</span></h4>`;
+  if (!ss || ss.symbol !== MCS.sym) { box.innerHTML = head + `<div class="mcs-sub">Loading setup signals…</div>`; return; }
+  if (ss.error) { box.innerHTML = head + `<div class="mcs-na">${mcsEsc(ss.error)}</div>`; return; }
+  const t = ss.today || { signals: [], watch: [] };
+  const vb = t.vwapBias;
+  const vbHtml = vb ? `<div class="mcs-ssvb ${vb.bias === "BULLISH" ? "up" : vb.bias === "BEARISH" ? "dn" : ""}">VWAP bias: <b>${vb.bias}</b> <span class="mcs-sub">5m candle ${vb.time} closed ${mcsN(vb.close)} ${vb.bias === "BULLISH" ? "above" : vb.bias === "BEARISH" ? "below" : "at"} VWAP ${mcsN(vb.vwap)} · 15M trend ${mcsEsc(t.dir15 || "—")}</span></div>` : "";
+  const valid = t.signals.filter((x) => !x.blockedBy), blocked = t.signals.filter((x) => x.blockedBy);
+  const live = valid.find((x) => x.status === "ENTRY_READY" || x.status === "ACTIVE");
+  const setupName = (x) => (x.setup === "S3_LEVEL_REJECTION" ? "S3" : "S4");
+  const stCls = (st) => ({ TARGET: "win", STOP: "loss", TIME_EXIT: "flat", EOD_EXIT: "flat", ACTIVE: "act", ENTRY_READY: "act", EXTENDED: "flat", BLOCKED: "blk" }[st] || "");
+  // --- live box ---
+  let liveHtml;
+  if (live) {
+    const p = live.plan || {}, o = live.option;
+    const opt = !o ? `<div class="mcs-sub">Option plan loading…</div>`
+      : o.available ? `<div class="mcs-ssopt ${o.valid ? "" : "bad"}"><b>${mcsEsc(nm)} ${o.strike} ${o.side}</b> <span class="mcs-sub">${mcsEsc(o.expiry || "")}${o.verified ? " · verified" : ""}</span>
+          · Entry <b>₹${mcsN(o.entry)}</b> · SL <b class="mcs-dn">₹${mcsN(o.stopLoss)}</b> · Target <b class="mcs-up">₹${mcsN(o.target)}</b> · R:R after costs <b>1:${mcsN(o.netRR)}</b> · Δ ${o.delta != null ? mcsN(Math.abs(o.delta), 2) : "—"} · IV ${o.iv != null ? mcsN(o.iv, 1) : "—"}
+          ${o.reason ? `<div class="mcs-warn">⚠ ${mcsEsc(o.reason)} — option not valid, treat as WAIT</div>` : ""}${o.note ? `<div class="mcs-sub">${mcsEsc(o.note)}</div>` : ""}</div>`
+      : `<div class="mcs-warn">Option: ${mcsEsc(o.reason || "unavailable")}</div>`;
+    liveHtml = `<div class="mcs-sslive ${live.side === "CE" ? "ce" : "pe"}">
+      <div class="mcs-ssbig">${live.status === "ACTIVE" ? "IN TRADE · " : ""}BUY ${live.side}</div>
+      <div><b>${mcsEsc(live.label)}</b> <span class="mcs-sub">${live.time} ${live.level ? `· ${mcsEsc(live.level.type)} ${mcsN(live.level.price)}` : ""}</span></div>
+      <div class="mcs-ssplan">Spot: entry ${p.entry != null ? mcsN(p.entry) : `next candle open (≈ ${mcsN(p.entryRef)})`} · SL <b class="mcs-dn">${mcsN(p.stop)}</b> · Target <b class="mcs-up">${mcsN(p.target)}</b> <span class="mcs-sub">(${mcsEsc(p.targetWhy || "")}, 1:${mcsN(p.rr)})</span></div>
+      ${opt}
+      <ul class="mcs-ssev">${live.evidence.map((e) => `<li>${mcsEsc(e)}</li>`).join("")}</ul></div>`;
+  } else {
+    liveHtml = `<div class="mcs-sslive none"><div class="mcs-ssbig">WAIT</div><div class="mcs-sub">${ss.isToday ? "No setup signal is live right now." : `Market closed — showing ${mcsEsc(ss.date)}.`}</div>
+      ${t.watch.length ? `<div class="mcs-sswatch">${t.watch.map((w) => `<span class="mcs-sswc ${w.state.toLowerCase()}" title="${mcsEsc(w.note)}">${mcsEsc(w.state.replace(/_/g, " "))} · ${mcsEsc(w.level)} ${mcsN(w.price)} <i>${w.side === "RESISTANCE" ? "res → PE" : "sup → CE"}</i></span>`).join("")}</div>` : `<div class="mcs-sub">No level being approached.</div>`}</div>`;
+  }
+  // --- today's list ---
+  const row = (x) => `<tr class="${stCls(x.status)}"><td>${x.time}</td><td>${setupName(x)} <i>${mcsEsc(x.context)}</i></td><td class="${x.side === "CE" ? "mcs-up" : "mcs-dn"}"><b>${x.side}</b></td>
+    <td>${x.level ? `${mcsEsc(x.level.type)} ${mcsN(x.level.price)}` : "VWAP pullback"}</td><td class="r">${x.plan ? mcsN(x.plan.entry ?? x.plan.entryRef) : "—"}</td><td class="r">${x.plan ? mcsN(x.plan.stop) : "—"}</td><td class="r">${x.plan ? mcsN(x.plan.target) : "—"}</td>
+    <td><span class="mcs-ssst ${stCls(x.status)}">${mcsEsc(x.status.replace("_", " "))}</span></td><td class="r ${mcsCls(x.resultR)}">${x.resultR != null ? (x.resultR > 0 ? "+" : "") + mcsN(x.resultR, 2) + "R" : "—"}</td></tr>`;
+  const todayTbl = valid.length ? `<table class="mcs-tbl mcs-sstbl"><thead><tr><th>Time</th><th>Setup</th><th>Side</th><th>Level</th><th class="r">Entry</th><th class="r">SL</th><th class="r">Target</th><th>Status</th><th class="r">Result</th></tr></thead><tbody>${valid.map(row).join("")}</tbody></table>` : `<div class="mcs-sub">No valid signal today.</div>`;
+  const blk = blocked.length ? `<details class="mcs-ssblk"><summary>Blocked today (${blocked.length}) — why the logic said WAIT</summary><table class="mcs-tbl"><tbody>${blocked.slice(0, 40).map((x) => `<tr><td>${x.time}</td><td>${setupName(x)}</td><td>${x.side}</td><td>${x.level ? mcsEsc(x.level.type) + " " + mcsN(x.level.price) : "VWAP"}</td><td class="mcs-src" style="max-width:none">${mcsEsc(x.blockedBy)}</td></tr>`).join("")}</tbody></table></details>` : "";
+  // --- replay ---
+  const rp = ss.replay || {}, by = rp.bySetup || {};
+  const rpRow = (k, n) => { const v = by[k]; if (!v) return `<tr><td><b>${n}</b></td><td colspan="6" class="mcs-sub">no signals</td></tr>`;
+    const wr = v.signals ? Math.round((v.wins / v.signals) * 100) : null;
+    return `<tr><td><b>${n}</b></td><td class="r">${v.signals}</td><td class="r">${v.wins}/${v.losses}</td><td class="r">${wr != null ? wr + "%" : "—"}</td><td class="r ${mcsCls(v.avgR)}">${v.avgR != null ? (v.avgR > 0 ? "+" : "") + mcsN(v.avgR, 2) + "R" : "—"}</td><td class="r ${mcsCls(v.totalR)}">${(v.totalR > 0 ? "+" : "") + mcsN(v.totalR, 2)}R</td>
+      <td class="mcs-src" style="max-width:none">${Object.entries(v.byContext).map(([c, x]) => `${mcsEsc(c)} ${x.n} (${x.avgR > 0 ? "+" : ""}${mcsN(x.avgR, 2)}R)`).join(" · ")}</td></tr>`; };
+  const replayHtml = `<div class="mcs-ssrp"><h5>Last ${rp.sessions || 0} sessions — how this logic would have done <span class="mcs-sub">${mcsEsc(rp.note || "")}</span></h5>
+    <table class="mcs-tbl"><thead><tr><th>Setup</th><th class="r">Signals</th><th class="r">Win/Loss</th><th class="r">Win %</th><th class="r">Avg</th><th class="r">Total</th><th>By context</th></tr></thead><tbody>
+    ${rpRow("S3_LEVEL_REJECTION", "S3 Level Rejection")}${rpRow("S4_VWAP_PULLBACK", "S4 VWAP Pullback")}</tbody></table>
+    <div class="mcs-sub">Most common blocks: ${["S3_LEVEL_REJECTION", "S4_VWAP_PULLBACK"].map((k) => by[k] ? `${k.slice(0, 2)}: ${by[k].topBlocks.slice(0, 3).map(([r, n]) => `${mcsEsc(r)} (${n})`).join(", ")}` : "").filter(Boolean).join(" · ")}</div></div>`;
+  box.innerHTML = head + vbHtml + `<div class="mcs-ssgrid">${liveHtml}<div class="mcs-sstoday"><h5>Today's signals ${ss.isToday ? "" : `(${mcsEsc(ss.date)})`}</h5>${todayTbl}${blk}</div></div>${replayHtml}
+    <div class="mcs-sub">${(ss.notes || []).map(mcsEsc).join(" · ")}</div>`;
 }
