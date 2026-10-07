@@ -203,6 +203,7 @@ import { getMarketDataHealth, fetchMarketData, marketDataProviderName, MdKey } f
 import { globalCues, indexSentiment, indiaSentiment, briefPhase, briefHeadline, SentimentBrief, IndexSentiment } from "../sentiment/brief";
 import { sessionsOf, analyseDay, aggregate, buildLevels, LiqEvent, LiqLevel } from "../liquidity/liquidityTake";
 import { evaluateSession, dailyAtrFrom5m, summarizeReplay, analyzeMoves, SETUP_CONFIG, SetupSignal, SessionResult } from "../signals/setupSignals";
+import { runLabStrategy, pdhPdlLevels, swingLevels, oiLevels, LAB_CONFIG, type LabTrade } from "../signals/strategyLab";
 import { regimeAt } from "../decision/regime";
 import { buildOptionPlan } from "../signals/breakoutOption";
 import { tradeFriction } from "../paper/engine";
@@ -8382,6 +8383,63 @@ function setupRunDay(days: string[], ses: Map<string, Candle[]>, di: number, asO
   const r = evaluateSession(prior.slice(-5).flat(), todayC, levels, dAtr, asOf, { regimeAt: (upto) => regimeAt(upto.filter((c) => c.time + 300 <= asOf), dAtr).regime, s5DistPts, only, s5Trend15 });
   return { ...r, levels: levels.filter((l) => l.activeFrom <= asOf) };
 }
+// ---- Strategy Lab: separate reversal strategies (PDH/PDL, swing H/L, OI S/R) + VWAP (S4 alone).
+// Independent of the live Setup Signals rules; each strategy is its own one-trade-at-a-time book.
+const LAB_STRATS = [
+  { id: "VWAP", name: "VWAP pullback (S4 alone)" },
+  { id: "PDH_PDL", name: "PDH / PDL reversal" },
+  { id: "SWING", name: "Swing high / low reversal" },
+  { id: "OI_SR", name: "OI support / resistance reversal" },
+] as const;
+function labRunDay(symbol: string, days: string[], ses: Map<string, Candle[]>, di: number, asOf: number, s5Pts: number | null): Record<string, LabTrade[]> {
+  const d = days[di], prev = ses.get(days[di - 1]) || [], dayC = ses.get(d)!;
+  const hist = days.slice(Math.max(0, di - 3), di).flatMap((x) => ses.get(x)!);
+  // OI levels = the last snapshot of the PREVIOUS trading day (known before the open; never today's later readings)
+  const snap = priorDaySnapshot(symbol, d);
+  const oiSnap = snap && snap.date === days[di - 1] ? snap : null;
+  const s4 = setupRunDay(days, ses, di, asOf, null, s5Pts, "S4_VWAP_PULLBACK").signals
+    .filter((x) => x.setup === "S4_VWAP_PULLBACK" && !x.blockedBy && x.plan)
+    .map((x): LabTrade => ({ strategy: "PDH_PDL", side: x.side, level: "VWAP", levelPrice: x.plan!.entryRef, signalTime: x.time, entryTime: x.plan!.entry != null ? x.time : null, entry: x.plan!.entry ?? null,
+      stop: x.plan!.stop, target: x.plan!.target, status: (["TARGET", "STOP", "NO_TRIGGER"].includes(x.status) ? x.status : x.resultR != null ? "TIME_EXIT" : x.status === "ACTIVE" ? "OPEN" : "WAITING") as LabTrade["status"], exitTime: null, resultR: x.resultR ?? null }))
+    .map((t) => ({ ...t, strategy: "VWAP" as any }));
+  return {
+    VWAP: s4,
+    PDH_PDL: runLabStrategy("PDH_PDL", hist, dayC, pdhPdlLevels(prev, dayC), asOf),
+    SWING: runLabStrategy("SWING", hist, dayC, swingLevels(prev, dayC), asOf),
+    OI_SR: runLabStrategy("OI_SR", hist, dayC, oiLevels(oiSnap, dayC), asOf),
+  };
+}
+// Record of each strategy over the last `n` completed sessions before index `uptoDi` (cached per day).
+function labRecord(symbol: string, days: string[], ses: Map<string, Candle[]>, uptoDi: number, s5Pts: number | null, n = 30) {
+  const out: Record<string, { trades: number; wins: number; stops: number; totalR: number; afterCostsR: number }> = {};
+  for (const st of LAB_STRATS) out[st.id] = { trades: 0, wins: 0, stops: 0, totalR: 0, afterCostsR: 0 };
+  let sessions = 0;
+  for (let di = Math.max(4, uptoDi - n); di < uptoDi; di++) {
+    const dc = ses.get(days[di])!; const r = labRunDay(symbol, days, ses, di, dc[dc.length - 1].time + 300, s5Pts); sessions++;
+    for (const [k, ts] of Object.entries(r)) for (const t of ts) if (t.resultR != null) {
+      const o = out[k]; o.trades++; o.totalR += t.resultR; if (t.resultR > 0.05) o.wins++; if (t.status === "STOP") o.stops++;
+    }
+  }
+  for (const o of Object.values(out)) { o.totalR = Math.round(o.totalR * 100) / 100; o.afterCostsR = Math.round((o.totalR - 0.15 * o.trades) * 100) / 100; }
+  return { sessions, from: days[Math.max(4, uptoDi - n)], to: days[uptoDi - 1], byStrategy: out };
+}
+function buildLab(symbol: string, days: string[], ses: Map<string, Candle[]>, di: number, asOf: number, s5Pts: number | null) {
+  const today = labRunDay(symbol, days, ses, di, asOf, s5Pts);
+  const record = cachedSync(`lab-record:${symbol}:${days[di]}`, () => labRecord(symbol, days, ses, di, s5Pts));
+  return {
+    strategies: LAB_STRATS.map((s) => ({ ...s, trades: today[s.id] || [], record: record.byStrategy[s.id] })),
+    recordWindow: { sessions: record.sessions, from: record.from, to: record.to },
+    config: LAB_CONFIG,
+    notes: ["Separate strategies — they do not change the Setup Signals rules above. Paper / study only.",
+      "Reversal = price comes into the level, wicks it and closes back (green at support / red at resistance); entry on the break of that candle within 2 candles; stop beyond the last 3 candles; target 1.5R; exit 15:15.",
+      "OI levels = max put OI (support) / max call OI (resistance) from the previous day's last option-chain snapshot. Record after costs = total R − 0.15R per trade."],
+  };
+}
+const _labSync = new Map<string, { at: number; v: any }>();
+function cachedSync<T>(key: string, fn: () => T, ttl = 6 * 3600_000): T {
+  const hit = _labSync.get(key); if (hit && Date.now() - hit.at < ttl) return hit.v;
+  const v = fn(); _labSync.set(key, { at: Date.now(), v }); if (_labSync.size > 50) _labSync.delete(_labSync.keys().next().value as string); return v;
+}
 async function buildSetupSignals(symbol: string) {
   const def = findSymbolDef(symbol); if (!def) throw new Error("unknown symbol");
   const nowSec = Math.floor(Date.now() / 1000), today = istDateStr();
@@ -8428,6 +8486,7 @@ async function buildSetupSignals(symbol: string) {
     dataStatus: !marketOpen ? "CLOSED" : lastLive != null && nowSec - (lastLive + 300) < 10 * 60 ? "LIVE" : "STALE",
     today: { ...cur, signals: cur.signals.map((s) => ({ ...s, option: legs[s.id] ?? null })) },
     replay, config: SETUP_CONFIG, s5Filter: s5Flt,
+    lab: (() => { try { return buildLab(symbol, days, ses, days.length - 1, asOf, s5Pts); } catch (e: any) { return { error: e?.message || "strategy lab failed" }; } })(),
     notes: [
       "Advisory signals from your rejection / VWAP logic — the Market Command FINAL DECISION and the paper engine are unchanged.",
       "Closed 5m candles only; entry at the next candle's open; no new signal before 09:20 or after 14:00; exit by 15:15.",
@@ -8519,6 +8578,7 @@ async function buildSetupSignalsForDate(symbol: string, date: string, uptoMin: n
     mode: "TEST", symbol, index: def.nseSymbol || def.name, name: def.name, date, isToday: false, asOf, upto: new Date((asOf + 19800) * 1000).toISOString().slice(11, 16),
     dataStatus: "HISTORICAL", today: { ...r, signals: r.signals.map((x) => ({ ...x, option: { available: false, reason: "Testing mode — historical option prices are not available (index plan only)" } })) },
     levelsForChart: { pdh: lv("Previous Day High"), pdl: lv("Previous Day Low"), pdc: lv("Previous Day Close"), orbHigh: lv("Opening Range High"), orbLow: lv("Opening Range Low") },
+    lab: (() => { try { return buildLab(symbol, days, ses, di, asOf, (def.nseSymbol || "") === "NIFTY" ? SETUP_CONFIG.s5DistPtsNifty : null); } catch (e: any) { return { error: e?.message || "strategy lab failed" }; } })(),
     sessions: days.slice(7), config: SETUP_CONFIG, analysis, s5Filter: SETUP_CONFIG.s5TrendFilterByIndex[def.nseSymbol || ""] || "off",
     notes: [`TESTING ${date} as of ${new Date((asOf + 19800) * 1000).toISOString().slice(11, 16)} — closed candles up to that time only; outcomes graded on candles up to that time.`, "Index-point plans only; no option prices for past dates."],
   };

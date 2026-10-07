@@ -85,6 +85,7 @@ function mcsShell() {
   </div>
   <div class="mcs-keyrow" id="mcs-keyrow"></div>
   <section class="mcs-card mcs-setups" id="mcs-setups"></section>
+  <section class="mcs-card mcs-lab" id="mcs-lab"></section>
   <section class="mcs-card mcs-testlog" id="mcs-testlog" hidden></section>
   <section class="mcs-card mcs-analysis" id="mcs-analysis"></section>
   <section class="mcs-card mcs-fast" id="mcs-fast"></section>
@@ -764,11 +765,11 @@ function mcsLiveOnly(id) {
 }
 function mcsRenderAll() {
   if (MCS.mode === "TEST") {
-    mcsStable(() => { mcsRenderHeader(); mcsRenderChart(); mcsRenderLvTable(); mcsRenderKeyRow(); mcsRenderSetups();
+    mcsStable(() => { mcsRenderHeader(); mcsRenderChart(); mcsRenderLvTable(); mcsRenderKeyRow(); mcsRenderSetups(); mcsRenderLab();
       ["mcs-optlv", "mcs-analysis", "mcs-fast", "mcs-strikes", "mcs-optCE", "mcs-optPE", "mcs-next5", "mcs-next15", "mcs-movers", "mcs-chain", "mcs-topmove", "mcs-cmd"].forEach(mcsLiveOnly); });
     return;
   }
-  mcsStable(() => { mcsRenderHeader(); mcsRenderChart(); mcsRenderLvTable(); mcsRenderOptLv(); mcsRenderKeyRow(); mcsRenderSetups(); mcsRenderAnalysis(); mcsRenderLevels(); mcsRenderFast(); mcsRenderStrikes(); mcsRenderOpt("CE"); mcsRenderOpt("PE");
+  mcsStable(() => { mcsRenderHeader(); mcsRenderChart(); mcsRenderLvTable(); mcsRenderOptLv(); mcsRenderKeyRow(); mcsRenderSetups(); mcsRenderLab(); mcsRenderAnalysis(); mcsRenderLevels(); mcsRenderFast(); mcsRenderStrikes(); mcsRenderOpt("CE"); mcsRenderOpt("PE");
   mcsRenderNext(5); mcsRenderNext(15); mcsRenderMovers(); mcsRenderChain(); mcsRenderTopMove(); mcsRenderCmd(); });
 }
 
@@ -786,7 +787,7 @@ async function mcsRefresh(force) {
     fetchJSON(`/api/setup-signals?symbol=${encodeURIComponent(sym)}`, 45000).catch(() => null).then((ss) => {
       if (sym !== MCS.sym || gen !== MCS.gen || MCS.mode !== "LIVE") return;
       if (ss && !ss.error) MCS.ss = ss; else if (!MCS.ss || MCS.ss.symbol !== sym) MCS.ss = { error: ss?.error || (ss?.disabled ? "Data paused (Data Control)" : "unavailable"), symbol: sym };
-      mcsStable(() => { mcsRenderSetups(); mcsRenderChart(); });
+      mcsStable(() => { mcsRenderSetups(); mcsRenderLab(); mcsRenderChart(); });
     });
     if (sym !== MCS.sym || tf !== MCS.tf || gen !== MCS.gen || MCS.mode !== "LIVE") return;   // user switched (symbol / tf / mode) — never paint stale results
     if (d && !d.error) MCS.d = d; else if (!MCS.d) { const m = mcsEl("mcs-meta"); if (m) m.innerHTML = `<span class="mcs-warn">${mcsEsc(d?.error || "Market Command data unavailable")}</span>`; }
@@ -954,6 +955,31 @@ function mcsRenderKeyRow() {
 // signal with its option plan, the level watch list, today's signals (and why the
 // others were blocked) and a 20-session replay. The FINAL DECISION is unchanged.
 // ===========================================================================
+// Strategy Lab — separate reversal strategies (PDH/PDL, swing, OI) + VWAP alone; does not change Setup Signals.
+function mcsRenderLab() {
+  const box = mcsEl("mcs-lab"); if (!box) return;
+  const ss = MCS.ss, lab = ss && ss.symbol === MCS.sym ? ss.lab : null;
+  const head = `<h4>🧪 STRATEGY LAB${ss && ss.date ? ` — ${mcsEsc(ss.date)}` : ""} <span class="mcs-sub">separate strategies, each with its own trades &amp; record · paper / study only · Setup Signals rules above are unchanged</span></h4>`;
+  if (!lab) { box.innerHTML = head + `<div class="mcs-sub">Loading…</div>`; return; }
+  if (lab.error) { box.innerHTML = head + `<div class="mcs-na">${mcsEsc(lab.error)}</div>`; return; }
+  const rw = lab.recordWindow || {};
+  const stCls = (st) => (st === "TARGET" ? "up" : st === "STOP" ? "dn" : "");
+  const cards = lab.strategies.map((s) => {
+    const r = s.record || {}, wr = r.trades ? Math.round((100 * r.wins) / r.trades) : 0;
+    const rows = s.trades.length ? s.trades.map((t) => `<div class="mcs-labtr">
+        <b class="${t.side === "CE" ? "up" : "dn"}">${t.side}</b> <span>${mcsEsc(t.signalTime)}</span>
+        <span class="mcs-sub">${mcsEsc(t.level)}${t.level === "VWAP" ? "" : ` ${mcsN(t.levelPrice, 1)}`}</span>
+        <span>${t.entry != null ? `in ${mcsN(t.entry, 1)}` : "—"} · SL ${mcsN(t.stop, 1)}${t.target != null ? ` · T ${mcsN(t.target, 1)}` : ""}</span>
+        <b class="${stCls(t.status)}">${mcsEsc(t.status.replace("_", " "))}${t.resultR != null ? ` ${t.resultR > 0 ? "+" : ""}${mcsN(t.resultR, 2)}R` : ""}</b></div>`).join("")
+      : `<div class="mcs-sub">No signal ${ss.mode !== "TEST" && ss.isToday ? "yet today" : `on ${mcsEsc(ss.date || "this day")}`}.</div>`;
+    return `<div class="mcs-labcard"><div class="mcs-labhd"><b>${mcsEsc(s.name)}</b>
+        <span class="mcs-labrec ${r.afterCostsR > 0 ? "up" : r.afterCostsR < 0 ? "dn" : ""}" title="Last ${rw.sessions || 0} sessions (${mcsEsc(rw.from || "")} → ${mcsEsc(rw.to || "")}). Total ${mcsN(r.totalR, 1)}R before costs; ${r.stops} stop-losses.">
+        ${r.trades || 0} trades · ${wr}% win · ${r.afterCostsR > 0 ? "+" : ""}${mcsN(r.afterCostsR, 1)}R after costs</span></div>${rows}</div>`;
+  }).join("");
+  box.innerHTML = head + `<div class="mcs-labgrid">${cards}</div>
+    <div class="mcs-sub">Record = last ${rw.sessions || 0} completed sessions${rw.from ? ` (${mcsEsc(rw.from)} → ${mcsEsc(rw.to)})` : ""} for this index. ${(lab.notes || []).slice(1).map(mcsEsc).join(" ")}</div>`;
+}
+
 function mcsRenderSetups() {
   const box = mcsEl("mcs-setups"); if (!box) return;
   const ss = MCS.ss, nm = MCS_SYMS.find((x) => x[0] === MCS.sym)?.[1] || MCS.sym;
