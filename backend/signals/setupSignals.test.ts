@@ -21,7 +21,7 @@ function rejectionDay(): Candle[] {
     bar(D, 0, 90, 93, 88, 92), bar(D, 1, 92, 96, 91, 95), bar(D, 2, 95, 99, 94, 98), bar(D, 3, 98, 102, 97, 101),
     bar(D, 4, 101, 105, 100, 104), bar(D, 5, 104, 107, 103, 106),
     bar(D, 6, 106, 112, 103.5, 104),     // probes 110 (+2), long upper wick, closes back below near the low
-    bar(D, 7, 104, 105, 99, 100),        // confirmation: close below the rejection candle's midpoint, no new high
+    bar(D, 7, 104, 105, 97, 98),         // confirmation: close below the rejection candle's midpoint (and below VWAP), no new high
   ];
   for (let i = 8; i < 30; i++) { const p = 100 - (i - 8) * 1.5; c.push(bar(D, i, p, p + 2, p - 3, p - 1.5)); }
   return c;
@@ -177,4 +177,12 @@ test("S5 trend filter is configured per index (trader's choice)", () => {
   const f = SETUP_CONFIG.s5TrendFilterByIndex;
   assert.equal(f.NIFTY, "notAgainst"); assert.equal(f.FINNIFTY, "notAgainst");
   assert.equal(f.BANKNIFTY, "slow5m"); assert.equal(f.SENSEX, "off");
+});
+
+test("VWAP gate: a PE rejection whose confirming close is ABOVE VWAP does not start a trade", () => {
+  const h = prior(), day = rejectionDay();
+  day[7] = bar(D, 7, 104, 105, 99.9, 100.5);      // confirms below the rejection midpoint but closes above VWAP (~99.8)
+  const s = evaluateSession(h, day.slice(0, 8), [lvl("Previous Day High", 110, t0(D))], 30, day[7].time + 300).signals.find((x) => x.setup === "S3_LEVEL_REJECTION");
+  assert.ok(s, "setup recognised");
+  assert.match(s!.blockedBy || "", /VWAP gate/);
 });

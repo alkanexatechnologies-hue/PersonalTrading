@@ -29,6 +29,9 @@ export const SETUP_CONFIG = {
   extremeDailyAtrFrac: 0.6, rearmAtr: 1.0, maxRearm: 1, slCooldownMin: 30, failedBreakBars: 3,
   // VWAP trend pullback
   // VWAP bias (trader's rule): a 5m candle CLOSING above VWAP = bullish, closing below = bearish.
+  // VWAP GATE (trader's rule, all setups): a CE trade starts only on a 5m close ABOVE VWAP, a PE trade only on a close BELOW.
+  vwapGate: true,
+  vwapGateExemptExtreme: false,   // true = an EXTREME rejection (Setup 2) may trade against the VWAP side
   vwapK: 2.0, roomM: 2.7, vwapHoldBars: 1, pullbackAtr: 0.2, extendedDailyAtr: 1.2, maxS4PerSide: 2,
   // execution / grading
   entrySlipAtr: 0.5, timeExitBars: 12,
@@ -221,6 +224,10 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
           const reg = opts.regimeAt ? opts.regimeAt(all.slice(0, i + 1)) : null;
           let block: string | null = null;
           if (context === "INTRADAY" && !major) block = "Minor level outside the morning window (needs a major level or an extreme move)";
+          // VWAP gate: CE only on a 5m close above VWAP, PE only on a close below (same rule as S4 / S5)
+          const vwC = VW[i];
+          if (!block && C.vwapGate && !(C.vwapGateExemptExtreme && context === "EXTREME") && vwC != null && (res ? c.close >= vwC : c.close <= vwC))
+            block = `VWAP gate — 5m close ${r2(c.close)} is ${c.close >= vwC ? "above" : "below"} VWAP ${r2(vwC)}; ${res ? "PE needs a close below VWAP" : "CE needs a close above VWAP"}`;
           // higher-timeframe permission: do not fade the 15M trend unless the move is extreme or the market is ranging
           if (!block && ((res && d15 === "UP") || (!res && d15 === "DOWN")) && context !== "EXTREME" && reg !== "RANGE")
             block = `15M trend ${d15} — this is more likely a pullback than a reversal`;
