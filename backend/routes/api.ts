@@ -203,7 +203,7 @@ import { getMarketDataHealth, fetchMarketData, marketDataProviderName, MdKey } f
 import { globalCues, indexSentiment, indiaSentiment, briefPhase, briefHeadline, SentimentBrief, IndexSentiment } from "../sentiment/brief";
 import { sessionsOf, analyseDay, aggregate, buildLevels, LiqEvent, LiqLevel } from "../liquidity/liquidityTake";
 import { evaluateSession, dailyAtrFrom5m, summarizeReplay, analyzeMoves, SETUP_CONFIG, SetupSignal, SessionResult } from "../signals/setupSignals";
-import { runLabStrategy, pdhPdlLevels, swingLevels, oiLevels, LAB_CONFIG, LAB_OVERRIDES, type LabTrade } from "../signals/strategyLab";
+import { runLabStrategy, pdhPdlLevels, swingLevels, oiLevels, liquidityMap, LAB_CONFIG, LAB_OVERRIDES, type LabTrade } from "../signals/strategyLab";
 import { regimeAt } from "../decision/regime";
 import { buildOptionPlan } from "../signals/breakoutOption";
 import { tradeFriction } from "../paper/engine";
@@ -8383,30 +8383,36 @@ function setupRunDay(days: string[], ses: Map<string, Candle[]>, di: number, asO
   const r = evaluateSession(prior.slice(-5).flat(), todayC, levels, dAtr, asOf, { regimeAt: (upto) => regimeAt(upto.filter((c) => c.time + 300 <= asOf), dAtr).regime, s5DistPts, only, s5Trend15 });
   return { ...r, levels: levels.filter((l) => l.activeFrom <= asOf) };
 }
-// ---- Strategy Lab: separate reversal strategies (PDH/PDL, swing H/L, OI S/R) + VWAP (S4 alone).
-// Independent of the live Setup Signals rules; each strategy is its own one-trade-at-a-time book.
+// ---- Strategy Lab: independent strategies, each with its OWN logic (no cross-gating).
+// LIVE: VWAP (S4 logic alone) and LIQUIDITY (PDH/PDL sweep & reclaim — no VWAP rule).
+// STUDY only: swing H/L and OI S/R reversals (record shown, not live signals).
 const LAB_STRATS = [
-  { id: "VWAP", name: "VWAP pullback (S4 alone)" },
-  { id: "PDH_PDL", name: "PDH / PDL reversal" },
-  { id: "SWING", name: "Swing high / low reversal" },
-  { id: "OI_SR", name: "OI support / resistance reversal" },
+  { id: "VWAP", name: "VWAP strategy", live: true, logic: "VWAP pullback: price holds one side of VWAP, pulls back to EMA 9 and resumes (S4 logic on its own)." },
+  { id: "PDH_PDL", name: "Liquidity strategy (PDH / PDL)", live: true, logic: "Liquidity sweep & reclaim at Previous Day High / Low — VWAP is NOT used." },
+  { id: "SWING", name: "Swing high / low reversal", live: false, logic: "Study only — loses after costs on 30 days." },
+  { id: "OI_SR", name: "OI support / resistance reversal", live: false, logic: "Study only — too little OI history to judge yet." },
 ] as const;
-function labRunDay(symbol: string, days: string[], ses: Map<string, Candle[]>, di: number, asOf: number, s5Pts: number | null): Record<string, LabTrade[]> {
+const labRound = (v: number) => Math.round(v * 100) / 100;
+function labLevelsFor(symbol: string, days: string[], ses: Map<string, Candle[]>, di: number) {
   const d = days[di], prev = ses.get(days[di - 1]) || [], dayC = ses.get(d)!;
-  const hist = days.slice(Math.max(0, di - 3), di).flatMap((x) => ses.get(x)!);
   // OI levels = the last snapshot of the PREVIOUS trading day (known before the open; never today's later readings)
   const snap = priorDaySnapshot(symbol, d);
   const oiSnap = snap && snap.date === days[di - 1] ? snap : null;
+  return { prev, dayC, pdh: pdhPdlLevels(prev, dayC), swing: swingLevels(prev, dayC), oi: oiLevels(oiSnap, dayC) };
+}
+function labRunDay(symbol: string, days: string[], ses: Map<string, Candle[]>, di: number, asOf: number, s5Pts: number | null): Record<string, LabTrade[]> {
+  const { dayC, pdh, swing, oi } = labLevelsFor(symbol, days, ses, di);
+  const hist = days.slice(Math.max(0, di - 3), di).flatMap((x) => ses.get(x)!);
   const s4 = setupRunDay(days, ses, di, asOf, null, s5Pts, "S4_VWAP_PULLBACK").signals
     .filter((x) => x.setup === "S4_VWAP_PULLBACK" && !x.blockedBy && x.plan)
-    .map((x): LabTrade => ({ strategy: "PDH_PDL", side: x.side, level: "VWAP", levelPrice: x.plan!.entryRef, signalTime: x.time, entryTime: x.plan!.entry != null ? x.time : null, entry: x.plan!.entry ?? null,
-      stop: x.plan!.stop, target: x.plan!.target, status: (["TARGET", "STOP", "NO_TRIGGER"].includes(x.status) ? x.status : x.resultR != null ? "TIME_EXIT" : x.status === "ACTIVE" ? "OPEN" : "WAITING") as LabTrade["status"], exitTime: null, resultR: x.resultR ?? null }))
-    .map((t) => ({ ...t, strategy: "VWAP" as any }));
+    .map((x): LabTrade => ({ strategy: "VWAP" as any, side: x.side, level: "VWAP", levelPrice: x.plan!.entryRef, signalTime: x.time, trigger: x.plan!.entryRef,
+      entryTime: x.plan!.entry != null ? x.time : null, entry: x.plan!.entry ?? null, stop: x.plan!.stop, target: x.plan!.target,
+      status: (["TARGET", "STOP", "NO_TRIGGER"].includes(x.status) ? x.status : x.resultR != null ? "TIME_EXIT" : x.status === "ACTIVE" ? "OPEN" : "WAITING") as LabTrade["status"], exitTime: null, resultR: x.resultR ?? null }));
   return {
     VWAP: s4,
-    PDH_PDL: runLabStrategy("PDH_PDL", hist, dayC, pdhPdlLevels(prev, dayC), asOf),
-    SWING: runLabStrategy("SWING", hist, dayC, swingLevels(prev, dayC), asOf),
-    OI_SR: runLabStrategy("OI_SR", hist, dayC, oiLevels(oiSnap, dayC), asOf),
+    PDH_PDL: runLabStrategy("PDH_PDL", hist, dayC, pdh, asOf),
+    SWING: runLabStrategy("SWING", hist, dayC, swing, asOf),
+    OI_SR: runLabStrategy("OI_SR", hist, dayC, oi, asOf),
   };
 }
 // Record of each strategy over the last `n` completed sessions before index `uptoDi` (cached per day).
@@ -8420,20 +8426,46 @@ function labRecord(symbol: string, days: string[], ses: Map<string, Candle[]>, u
       const o = out[k]; o.trades++; o.totalR += t.resultR; if (t.resultR > 0.05) o.wins++; if (t.status === "STOP") o.stops++;
     }
   }
-  for (const o of Object.values(out)) { o.totalR = Math.round(o.totalR * 100) / 100; o.afterCostsR = Math.round((o.totalR - 0.15 * o.trades) * 100) / 100; }
+  for (const o of Object.values(out)) { o.totalR = labRound(o.totalR); o.afterCostsR = labRound(o.totalR - 0.15 * o.trades); }
   return { sessions, from: days[Math.max(4, uptoDi - n)], to: days[uptoDi - 1], byStrategy: out };
 }
 function buildLab(symbol: string, days: string[], ses: Map<string, Candle[]>, di: number, asOf: number, s5Pts: number | null) {
   const today = labRunDay(symbol, days, ses, di, asOf, s5Pts);
   const record = cachedSync(`lab-record:${symbol}:${days[di]}`, () => labRecord(symbol, days, ses, di, s5Pts));
+  // Pre-identified liquidity map: PDH/PDL (trade) + OI S/R and the nearest unbroken swing high/low each side (watch only)
+  const { dayC, pdh, swing, oi } = labLevelsFor(symbol, days, ses, di);
+  const hist = days.slice(Math.max(0, di - 3), di).flatMap((x) => ses.get(x)!);
+  const closed = dayC.filter((c) => c.time + 300 <= asOf), lastC = closed.length ? closed[closed.length - 1].close : null;
+  const unbroken = swing.filter((l) => l.from <= asOf && !closed.some((c) => c.time >= l.from && (l.kind === "SUPPORT" ? c.close < l.price : c.close > l.price)));
+  const nearest = lastC == null ? [] : [
+    unbroken.filter((l) => l.kind === "RESISTANCE" && l.price > lastC).sort((a, b) => a.price - b.price)[0],
+    unbroken.filter((l) => l.kind === "SUPPORT" && l.price < lastC).sort((a, b) => b.price - a.price)[0],
+  ].filter(Boolean) as typeof swing;
+  const map = liquidityMap("PDH_PDL", hist, dayC, [...pdh.map((l) => ({ ...l, trades: true })), ...oi.map((l) => ({ ...l, trades: false })), ...nearest.map((l) => ({ ...l, trades: false }))], asOf, today.PDH_PDL);
   return {
     strategies: LAB_STRATS.map((s) => ({ ...s, trades: today[s.id] || [], record: record.byStrategy[s.id] })),
+    liquidityMap: map,
     recordWindow: { sessions: record.sessions, from: record.from, to: record.to },
     config: LAB_CONFIG, overrides: LAB_OVERRIDES,
-    notes: ["Separate strategies — they do not change the Setup Signals rules above. Paper / study only.",
-      "Reversal = price comes into the level, wicks it and closes back (green at support / red at resistance); entry on the break of that candle within 2 candles; stop beyond the last 3 candles; target 1.5R; exit 15:15. PDH/PDL: signals until 14:30, wick up to 1 ATR through the level, target 2R.",
-      "OI levels = max put OI (support) / max call OI (resistance) from the previous day's last option-chain snapshot. Record after costs = total R − 0.15R per trade."],
+    notes: ["Each strategy is independent with its own logic; the Setup Signals rules above are unchanged.",
+      "Liquidity: price comes into PDH/PDL, wicks through (up to 1 ATR) and closes back (green at PDL / red at PDH); entry on the break of that candle within 2 candles; stop beyond the last 3 candles; target 2R; signals 09:25–14:30; exit 15:15. No VWAP rule.",
+      "Record after costs = total R − 0.15R per trade. Paper / advisory — no orders are placed."],
   };
+}
+// Live log of Strategy Lab signals (one line per status change).
+const LAB_LOG_DIR = path.join(process.cwd(), "data", "strategy-lab");
+const _labLogged = new Map<string, string>();
+function logLabTrades(sym: string, date: string, lab: any) {
+  try {
+    fs.mkdirSync(LAB_LOG_DIR, { recursive: true });
+    const f = path.join(LAB_LOG_DIR, `${date}.jsonl`);
+    for (const s of lab.strategies || []) if (s.live) for (const t of s.trades) {
+      const id = `${sym}|${date}|${s.id}|${t.signalTime}|${t.level}`;
+      if (_labLogged.get(id) === t.status) continue;
+      _labLogged.set(id, t.status);
+      fs.appendFileSync(f, JSON.stringify({ at: Math.floor(Date.now() / 1000), id, symbol: sym, strategy: s.id, ...t, option: undefined }) + "\n");
+    }
+  } catch { /* best effort */ }
 }
 const _labSync = new Map<string, { at: number; v: any }>();
 function cachedSync<T>(key: string, fn: () => T, ttl = 6 * 3600_000): T {
@@ -8479,6 +8511,17 @@ async function buildSetupSignals(symbol: string) {
     const s = summarizeReplay(res);
     return { ...s, recent: res.flatMap((r) => r.signals.filter((x) => !x.blockedBy)).sort((a, b) => b.barTime - a.barTime).slice(0, 40) };
   });
+  let lab: any;
+  try {
+    lab = buildLab(symbol, days, ses, days.length - 1, asOf, s5Pts);
+    if (isToday) {
+      for (const st of lab.strategies) if (st.live) for (const t of st.trades) if (t.status === "WAITING" || t.status === "OPEN") {
+        const ref = t.entry ?? t.trigger, risk = Math.abs(ref - t.stop), reward = t.target != null ? Math.abs(t.target - ref) : 0;
+        t.option = await setupOptionLeg(def, t.side, { entryRef: ref, entry: t.entry ?? ref, stop: t.stop, target: t.target ?? ref, risk, reward, rr: risk > 0 ? labRound(reward / risk) : 0, targetWhy: st.id === "PDH_PDL" ? `${LAB_OVERRIDES.PDH_PDL?.targetR ?? 2}R target` : "VWAP plan target" } as any);
+      }
+      logLabTrades(symbol, lastDay, lab);
+    }
+  } catch (e: any) { lab = { error: e?.message || "strategy lab failed" }; }
   const lastLive = live.length ? live[live.length - 1].time : null;
   const marketOpen = isTradingTimeIST();
   return {
@@ -8486,7 +8529,7 @@ async function buildSetupSignals(symbol: string) {
     dataStatus: !marketOpen ? "CLOSED" : lastLive != null && nowSec - (lastLive + 300) < 10 * 60 ? "LIVE" : "STALE",
     today: { ...cur, signals: cur.signals.map((s) => ({ ...s, option: legs[s.id] ?? null })) },
     replay, config: SETUP_CONFIG, s5Filter: s5Flt,
-    lab: (() => { try { return buildLab(symbol, days, ses, days.length - 1, asOf, s5Pts); } catch (e: any) { return { error: e?.message || "strategy lab failed" }; } })(),
+    lab,
     notes: [
       "Advisory signals from your rejection / VWAP logic — the Market Command FINAL DECISION and the paper engine are unchanged.",
       "Closed 5m candles only; entry at the next candle's open; no new signal before 09:20 or after 14:00; exit by 15:15.",

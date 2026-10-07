@@ -6847,6 +6847,21 @@ body.lqa-fullwidth .content { padding-left: 0; padding-right: 0; }
 .mcs-labrec { font-size: 12px; color: #94a3b8; }
 .mcs-labtr { display: flex; flex-wrap: wrap; gap: 2px 8px; font-size: 12px; padding: 3px 0; border-top: 1px solid #1e293b; }
 .mcs-lab .up { color: #22c55e; } .mcs-lab .dn { color: #ef4444; }
+.mcs-lab .live { color: #f59e0b; }
+.mcs-labgrid.two { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.mcs-labcard.live { border-left: 3px solid #3b82f6; }
+.mcs-labopt { flex-basis: 100%; font-size: 12px; color: #cbd5e1; }
+.mcs-liqmap { margin: 6px 0; display: flex; flex-direction: column; gap: 4px; }
+.mcs-liqrow { background: #0f1626; border-radius: 6px; padding: 4px 8px; border-left: 3px solid #475569; font-size: 12px; }
+.mcs-liqrow.trade { border-left-color: #3b82f6; }
+.mcs-liqrow.st-swept { border-left-color: #f59e0b; background: #2a1f0a; }
+.mcs-liqrow.st-broken { opacity: .6; }
+.mcs-liqtop { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; font-size: 13px; }
+.mcs-liqst { font-weight: 600; }
+.mcs-liqplan { color: #cbd5e1; margin-top: 2px; }
+.mcs-labstudy { margin: 4px 0 6px; font-size: 12px; }
+.mcs-labstudy summary { cursor: pointer; color: #94a3b8; min-height: 32px; line-height: 32px; }
+.mcs-labtoast { bottom: 96px; }
 .mcs-sseff .mcs-effstate { margin-left: auto; } .mcs-sseff.chop .mcs-effstate { color: #fbbf24; } .mcs-sseff.ok .mcs-effstate { color: #86efac; }
 .mcs-effbar { display: inline-flex; align-items: flex-end; gap: 1px; height: 18px; cursor: help; }
 .mcs-effbar i { display: block; width: 3px; border-radius: 1px; } .mcs-effbar i.o { background: #22c55e; } .mcs-effbar i.c { background: #f59e0b; }

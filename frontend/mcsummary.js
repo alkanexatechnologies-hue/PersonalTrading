@@ -959,25 +959,58 @@ function mcsRenderKeyRow() {
 function mcsRenderLab() {
   const box = mcsEl("mcs-lab"); if (!box) return;
   const ss = MCS.ss, lab = ss && ss.symbol === MCS.sym ? ss.lab : null;
-  const head = `<h4>🧪 STRATEGY LAB${ss && ss.date ? ` — ${mcsEsc(ss.date)}` : ""} <span class="mcs-sub">separate strategies, each with its own trades &amp; record · paper / study only · Setup Signals rules above are unchanged</span></h4>`;
+  const head = `<h4>🧪 STRATEGIES${ss && ss.date ? ` — ${mcsEsc(ss.date)}` : ""} <span class="mcs-sub">each strategy is independent with its own logic · advisory / paper — no orders · Setup Signals rules above are unchanged</span></h4>`;
   if (!lab) { box.innerHTML = head + `<div class="mcs-sub">Loading…</div>`; return; }
   if (lab.error) { box.innerHTML = head + `<div class="mcs-na">${mcsEsc(lab.error)}</div>`; return; }
-  const rw = lab.recordWindow || {};
-  const stCls = (st) => (st === "TARGET" ? "up" : st === "STOP" ? "dn" : "");
-  const cards = lab.strategies.map((s) => {
-    const r = s.record || {}, wr = r.trades ? Math.round((100 * r.wins) / r.trades) : 0;
-    const rows = s.trades.length ? s.trades.map((t) => `<div class="mcs-labtr">
-        <b class="${t.side === "CE" ? "up" : "dn"}">${t.side}</b> <span>${mcsEsc(t.signalTime)}</span>
-        <span class="mcs-sub">${mcsEsc(t.level)}${t.level === "VWAP" ? "" : ` ${mcsN(t.levelPrice, 1)}`}</span>
-        <span>${t.entry != null ? `in ${mcsN(t.entry, 1)}` : "—"} · SL ${mcsN(t.stop, 1)}${t.target != null ? ` · T ${mcsN(t.target, 1)}` : ""}</span>
-        <b class="${stCls(t.status)}">${mcsEsc(t.status.replace("_", " "))}${t.resultR != null ? ` ${t.resultR > 0 ? "+" : ""}${mcsN(t.resultR, 2)}R` : ""}</b></div>`).join("")
-      : `<div class="mcs-sub">No signal ${ss.mode !== "TEST" && ss.isToday ? "yet today" : `on ${mcsEsc(ss.date || "this day")}`}.</div>`;
-    return `<div class="mcs-labcard"><div class="mcs-labhd"><b>${mcsEsc(s.name)}</b>
-        <span class="mcs-labrec ${r.afterCostsR > 0 ? "up" : r.afterCostsR < 0 ? "dn" : ""}" title="Last ${rw.sessions || 0} sessions (${mcsEsc(rw.from || "")} → ${mcsEsc(rw.to || "")}). Total ${mcsN(r.totalR, 1)}R before costs; ${r.stops} stop-losses.">
-        ${r.trades || 0} trades · ${wr}% win · ${r.afterCostsR > 0 ? "+" : ""}${mcsN(r.afterCostsR, 1)}R after costs</span></div>${rows}</div>`;
-  }).join("");
-  box.innerHTML = head + `<div class="mcs-labgrid">${cards}</div>
-    <div class="mcs-sub">Record = last ${rw.sessions || 0} completed sessions${rw.from ? ` (${mcsEsc(rw.from)} → ${mcsEsc(rw.to)})` : ""} for this index. ${(lab.notes || []).slice(1).map(mcsEsc).join(" ")}</div>`;
+  const rw = lab.recordWindow || {}, live = ss.mode !== "TEST" && ss.isToday;
+  const sg = (v) => (v > 0 ? "+" : "") + mcsN(v, 1);
+  const stCls = (st) => (st === "TARGET" ? "up" : st === "STOP" ? "dn" : st === "OPEN" || st === "WAITING" ? "live" : "");
+  const recHtml = (r) => { const wr = r.trades ? Math.round((100 * r.wins) / r.trades) : 0;
+    return `<span class="mcs-labrec ${r.afterCostsR > 0 ? "up" : r.afterCostsR < 0 ? "dn" : ""}" title="Last ${rw.sessions || 0} sessions (${mcsEsc(rw.from || "")} → ${mcsEsc(rw.to || "")}) · ${mcsN(r.totalR, 1)}R before costs · ${r.stops} stop-losses">${r.trades || 0} trades · ${wr}% win · ${sg(r.afterCostsR)}R after costs (last ${rw.sessions || 0} sessions)</span>`; };
+  const optHtml = (o) => !o ? "" : o.valid ? `<div class="mcs-labopt">Option: <b>${mcsEsc(o.strike)} ${mcsEsc(o.side)}</b> ${mcsEsc(o.expiry || "")} · entry ₹${mcsN(o.entry, 1)} · SL ₹${mcsN(o.stopLoss, 1)} · target ₹${mcsN(o.target, 1)}${o.lotSize ? ` · lot ${o.lotSize}` : ""}</div>`
+    : `<div class="mcs-labopt mcs-sub">Option: ${mcsEsc(o.reason || "not available")}</div>`;
+  const trRows = (s) => s.trades.length ? s.trades.map((t) => `<div class="mcs-labtr">
+      <b class="${t.side === "CE" ? "up" : "dn"}">${t.side}</b> <span>${mcsEsc(t.signalTime)}</span>
+      <span class="mcs-sub">${mcsEsc(t.level)}${t.level === "VWAP" ? "" : ` ${mcsN(t.levelPrice, 1)}`}</span>
+      <span>${t.entry != null ? `in ${mcsN(t.entry, 1)}` : `buy above/below ${mcsN(t.trigger, 1)}`} · SL ${mcsN(t.stop, 1)}${t.target != null ? ` · T ${mcsN(t.target, 1)}` : ""}</span>
+      <b class="${stCls(t.status)}">${mcsEsc(t.status === "WAITING" ? "WAITING FOR BREAK" : t.status.replace("_", " "))}${t.resultR != null ? ` ${t.resultR > 0 ? "+" : ""}${mcsN(t.resultR, 2)}R` : ""}</b>${optHtml(t.option)}</div>`).join("")
+    : `<div class="mcs-sub">No signal ${live ? "yet today" : `on ${mcsEsc(ss.date || "this day")}`}.</div>`;
+  const by = Object.fromEntries(lab.strategies.map((s) => [s.id, s]));
+  const m = lab.liquidityMap || { rows: [] };
+  const stLbl = { WAITING: "⏳ not reached", TESTED: "👀 tested", SWEPT: "⚡ SWEPT — watch reclaim", BROKEN: "❌ broken", TRADED: "🎯 traded", SPENT: "✔ done for today" };
+  const mapHtml = m.rows.length ? `<div class="mcs-liqmap"><div class="mcs-sub">Pre-identified liquidity${m.last != null ? ` · last close ${mcsN(m.last, 1)}` : ""}${m.atr ? ` · ATR ${mcsN(m.atr, 1)}` : ""}</div>
+      ${m.rows.map((r) => `<div class="mcs-liqrow ${r.trades ? "trade" : "watch"} st-${r.state.toLowerCase()}">
+        <div class="mcs-liqtop"><b>${mcsEsc(r.name)}</b> <b>${mcsN(r.price, 1)}</b>
+          <span class="mcs-sub">${r.distPts != null ? `${r.distPts > 0 ? "price " + mcsN(r.distPts, 1) + " pts above" : "price " + mcsN(-r.distPts, 1) + " pts below"}${r.distAtr != null ? ` (${mcsN(Math.abs(r.distAtr), 1)}× ATR)` : ""}` : ""}</span>
+          <span class="mcs-liqst" title="${mcsEsc(r.stateWhy)}">${stLbl[r.state] || mcsEsc(r.state)}</span>${r.trades ? "" : `<span class="mcs-sub">watch only</span>`}</div>
+        <div class="mcs-liqplan">${mcsEsc(r.plan)}${r.state !== "WAITING" ? ` <span class="mcs-sub">· ${mcsEsc(r.stateWhy)}</span>` : ""}</div></div>`).join("")}</div>` : `<div class="mcs-sub">No liquidity levels for this day.</div>`;
+  const card = (s, extra) => s ? `<div class="mcs-labcard live"><div class="mcs-labhd"><b>${mcsEsc(s.name)}</b>${recHtml(s.record || {})}</div>
+      <div class="mcs-sub">${mcsEsc(s.logic)}</div>${extra || ""}${trRows(s)}</div>` : "";
+  const study = lab.strategies.filter((s) => !s.live);
+  box.innerHTML = head + `<div class="mcs-labgrid two">${card(by.PDH_PDL, mapHtml)}${card(by.VWAP)}</div>
+    ${study.length ? `<details class="mcs-labstudy"><summary>Study only (not live): ${study.map((s) => `${mcsEsc(s.name)} — ${s.record ? `${s.record.trades} trades, ${sg(s.record.afterCostsR)}R after costs` : ""}`).join(" · ")}</summary>
+      <div class="mcs-labgrid">${study.map((s) => card(s)).join("")}</div></details>` : ""}
+    <div class="mcs-sub">${(lab.notes || []).map(mcsEsc).join(" ")}</div>`;
+  if (live) mcsLabAlert(ss.symbol, MCS_SYMS.find((x) => x[0] === MCS.sym)?.[1] || MCS.sym, lab);
+}
+// Alerts (LIVE only): a new signal from a live strategy, or a trade-able liquidity level just SWEPT.
+function mcsLabAlert(sym, nm, lab) {
+  MCS._labSeen = MCS._labSeen || {};
+  const keys = [];
+  for (const s of lab.strategies || []) if (s.live) for (const t of s.trades) if (t.status === "WAITING" || t.status === "OPEN")
+    keys.push({ k: `${s.id}|${t.signalTime}|${t.status}`, side: t.side, msg: `${s.name}: ${t.side} ${t.status === "OPEN" ? `entered at ${mcsN(t.entry, 1)}` : `signal — buy on break of ${mcsN(t.trigger, 1)}`} · SL ${mcsN(t.stop, 1)} · T ${mcsN(t.target, 1)}`, why: `${t.signalTime} · ${t.level} ${t.level === "VWAP" ? "" : mcsN(t.levelPrice, 1)}` });
+  for (const r of (lab.liquidityMap && lab.liquidityMap.rows) || []) if (r.trades && r.state === "SWEPT")
+    keys.push({ k: `SWEPT|${r.name}`, side: r.kind === "SUPPORT" ? "CE" : "PE", msg: `${r.name} ${mcsN(r.price, 1)} swept — watch for a close back ${r.kind === "SUPPORT" ? "above (CE)" : "below (PE)"}`, why: r.plan });
+  const prev = MCS._labSeen[sym];
+  MCS._labSeen[sym] = new Set(keys.map((x) => x.k));
+  if (!prev) return;                                             // first load: no alert for what was already there
+  const fresh = keys.filter((x) => !prev.has(x.k)); if (!fresh.length) return;
+  const x = fresh[fresh.length - 1];
+  let t = document.getElementById("mcs-labtoast");
+  if (!t) { t = document.createElement("div"); t.id = "mcs-labtoast"; t.setAttribute("role", "alert"); document.body.appendChild(t); }
+  t.className = "mcs-dirtoast mcs-labtoast " + (x.side === "CE" ? "up" : "dn");
+  t.innerHTML = `<b>${mcsEsc(nm)} — ${mcsEsc(x.msg)}</b><div>${mcsEsc(x.why)}</div><button type="button" onclick="this.parentElement.remove()" aria-label="Close">✕</button>`;
+  clearTimeout(MCS._labToastT); MCS._labToastT = setTimeout(() => t && t.remove(), 30000);
 }
 
 function mcsRenderSetups() {

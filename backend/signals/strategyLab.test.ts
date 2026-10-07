@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Candle } from "../types";
-import { runLabStrategy, pdhPdlLevels, swingLevels, oiLevels, labConfigFor } from "./strategyLab";
+import { runLabStrategy, pdhPdlLevels, swingLevels, oiLevels, labConfigFor, liquidityMap } from "./strategyLab";
 
 // 09:15 IST on 2026-10-07 in epoch seconds
 const T0 = Date.UTC(2026, 9, 7, 3, 45) / 1000;
@@ -59,4 +59,16 @@ test("PDH/PDL settings: until 14:30, wick up to 1 ATR, 2R; other strategies keep
 test("OI levels: none without a snapshot", () => {
   assert.deepEqual(oiLevels(null, [bar(0, 1, 1, 1, 1)]), []);
   assert.equal(oiLevels({ support: 22000, resistance: 23000 }, [bar(0, 1, 1, 1, 1)]).length, 2);
+});
+
+test("liquidity map: PDL pre-identified as WAITING, then SWEPT after a close below, BROKEN after 2 closes", () => {
+  const base: Candle[] = []; for (let k = 0; k < 6; k++) base.push(bar(k, 110, 111, 109, 110));
+  const lv = pdhPdlLevels(prev, base).map((l) => ({ ...l, trades: true }));
+  const st = (today: Candle[]) => liquidityMap("PDH_PDL", hist, today, lv, today[today.length - 1].time + 300, []).rows.find((r) => r.name === "PDL")!;
+  const w = st(base);
+  assert.equal(w.state, "WAITING"); assert.equal(w.distPts, 10); assert.match(w.plan, /BUY CE/);
+  const swept = [...base, bar(6, 104, 104, 98, 99)];
+  assert.equal(st(swept).state, "SWEPT");
+  assert.equal(st([...swept, bar(7, 99, 99.5, 97, 98)]).state, "BROKEN");
+  assert.equal(st([...swept, bar(7, 99, 103, 98.5, 102.5)]).state, "TESTED");
 });

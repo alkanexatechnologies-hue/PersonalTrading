@@ -16,7 +16,7 @@ export type LabStrategyId = "PDH_PDL" | "SWING" | "OI_SR";
 export interface LabLevel { price: number; kind: "SUPPORT" | "RESISTANCE"; name: string; from: number /* usable from this candle time */ }
 export interface LabTrade {
   strategy: LabStrategyId; side: "CE" | "PE"; level: string; levelPrice: number;
-  signalTime: string; entryTime: string | null; entry: number | null; stop: number; target: number | null;
+  signalTime: string; trigger: number; entryTime: string | null; entry: number | null; stop: number; target: number | null;
   status: "WAITING" | "OPEN" | "TARGET" | "STOP" | "TIME_EXIT" | "NO_TRIGGER"; exitTime: string | null; resultR: number | null;
 }
 
@@ -113,12 +113,52 @@ export function runLabStrategy(strategy: LabStrategyId, hist: Candle[], today: C
       if (!sg) continue;
       const last3 = all.slice(Math.max(0, i - 2), i + 1);
       const stop = sg > 0 ? Math.min(...last3.map((x) => x.low)) - L.stopBufferAtr * a : Math.max(...last3.map((x) => x.high)) + L.stopBufferAtr * a;
-      const t: LabTrade = { strategy, side: sg > 0 ? "CE" : "PE", level: lv.name, levelPrice: Math.round(p * 100) / 100, signalTime: hm(c.time + 300),
-        entryTime: null, entry: null, stop: Math.round(stop * 100) / 100, target: null, status: "WAITING", exitTime: null, resultR: null };
+      const trig = sg > 0 ? c.high : c.low;
+      const t: LabTrade = { strategy, side: sg > 0 ? "CE" : "PE", level: lv.name, levelPrice: Math.round(p * 100) / 100, signalTime: hm(c.time + 300), trigger: Math.round(trig * 100) / 100,
+        entryTime: null, entry: null, stop: Math.round(stop * 100) / 100, target: Math.round((trig + sg * L.targetR * Math.abs(trig - stop)) * 100) / 100, status: "WAITING", exitTime: null, resultR: null };
       trades.push(t); used.set(lv.name, (used.get(lv.name) || 0) + 1);
       open = Object.assign(t, { _k: k, _risk: 0, _sg: sg, _trig: sg > 0 ? c.high : c.low });
       break;
     }
   }
   return trades.map(({ _k, _risk, _sg, _trig, ...t }: any) => t as LabTrade);
+}
+
+// ---- Pre-identified liquidity map (LIVE): where stops / liquidity sit BEFORE price gets there ----
+// For each level: distance from the last close, its state on closed candles, and the exact
+// trigger plan. Only `trades: true` levels produce signals (PDH/PDL); the rest are watch-only.
+export interface LiqMapRow {
+  name: string; price: number; kind: "SUPPORT" | "RESISTANCE"; trades: boolean;
+  distPts: number | null; distAtr: number | null;
+  state: "WAITING" | "TESTED" | "SWEPT" | "BROKEN" | "TRADED" | "SPENT";
+  stateWhy: string; plan: string;
+}
+export function liquidityMap(strategy: LabStrategyId, hist: Candle[], today: Candle[], levels: (LabLevel & { trades: boolean })[], asOf: number, trades: LabTrade[]): { atr: number | null; last: number | null; rows: LiqMapRow[] } {
+  const L = labConfigFor(strategy);
+  const day = today.filter((c) => c.time + 300 <= asOf);
+  const all = [...hist, ...day], A = atr(all, 14);
+  const a = A[A.length - 1] || 0, last = day.length ? day[day.length - 1].close : null;
+  const r2 = (v: number) => Math.round(v * 100) / 100;
+  const rows = levels.map((lv): LiqMapRow => {
+    const sup = lv.kind === "SUPPORT", p = lv.price, sg = sup ? 1 : -1;
+    const seen = day.filter((c) => c.time >= lv.from);
+    const tested = seen.some((c) => (sup ? c.low <= p + L.touchAtr * a : c.high >= p - L.touchAtr * a));
+    let streak = 0, broken = false;
+    for (const c of seen) { if (sg * (c.close - p) < 0) { streak++; if (streak >= 2) broken = true; } else { streak = 0; broken = false; } }
+    const lastBeyond = seen.length > 0 && sg * (seen[seen.length - 1].close - p) < 0;
+    const mine = trades.filter((t) => t.level === lv.name);
+    let state: LiqMapRow["state"] = "WAITING", why = "price has not reached it yet";
+    if (tested) { state = "TESTED"; why = "price touched it and closed back — no valid reversal candle yet"; }
+    if (lastBeyond && !broken) { state = "SWEPT"; why = `last candle closed ${sup ? "below" : "above"} — watch for a close back ${sup ? "above" : "below"} (reversal) or a 2nd close beyond (break)`; }
+    if (broken) { state = "BROKEN"; why = `2+ closes ${sup ? "below" : "above"} — accepted beyond the level, no reversal trade`; }
+    if (mine.length) { state = "TRADED"; why = mine.map((t) => `${t.side} ${t.signalTime} ${t.status}${t.resultR != null ? ` ${t.resultR > 0 ? "+" : ""}${t.resultR}R` : ""}`).join(" · "); }
+    if (lv.trades && mine.length >= L.maxPerLevel) state = "SPENT";
+    const deep = r2(p - sg * L.maxPierceAtr * a);
+    const plan = !lv.trades ? `Watch only — ${sup ? "support" : "resistance"} liquidity (stops ${sup ? "below" : "above"}).`
+      : sup ? `After price comes down into it: a 5m candle wicks to ${r2(p)} (not below ~${deep}) and closes back ABOVE green → BUY CE on a break of that candle's high within 2 candles · SL below the sweep low · target ${L.targetR}R`
+            : `After price comes up into it: a 5m candle wicks to ${r2(p)} (not above ~${deep}) and closes back BELOW red → BUY PE on a break of that candle's low within 2 candles · SL above the sweep high · target ${L.targetR}R`;
+    return { name: lv.name, price: r2(p), kind: lv.kind, trades: lv.trades, distPts: last != null ? r2(last - p) : null, distAtr: last != null && a > 0 ? r2((last - p) / a) : null, state, stateWhy: why, plan };
+  });
+  rows.sort((x, y) => y.price - x.price);
+  return { atr: a ? r2(a) : null, last, rows };
 }
