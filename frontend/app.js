@@ -5710,6 +5710,8 @@ function initMarketCommand() {
     });
   });
 
+  el("mc-refresh")?.addEventListener("click", () => { MC._fitKey = null; loadMarketCommand(!MC.replayDate); if (!MC.replayDate) loadIndexNews(); });
+
   // Wire timeframe buttons
   el("mc-tf-btns")?.querySelectorAll(".mc2-tfbtn").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -6020,6 +6022,7 @@ function initOptionTerminal() {
     otEl("ot-idx-btns").querySelectorAll(".ot-idxbtn").forEach((x) => x.classList.remove("active"));
     b.classList.add("active"); OT.sym = b.getAttribute("data-sym"); OT.manualStrike = null; OT._candleKey = null; OT._structKey = null; loadOptionTerminal();
   }));
+  otEl("ot-refresh")?.addEventListener("click", () => { OT._candleKey = null; OT._structKey = null; loadOptionTerminal(); });
   otEl("ot-tf-btns")?.querySelectorAll(".ot-tfbtn").forEach((b) => b.addEventListener("click", () => {
     otEl("ot-tf-btns").querySelectorAll(".ot-tfbtn").forEach((x) => x.classList.remove("active"));
     b.classList.add("active"); OT.tf = b.getAttribute("data-tf"); OT._candleKey = null; OT._structKey = null; loadOptionTerminal();
@@ -6109,12 +6112,14 @@ function otResize() {
 }
 
 async function loadOptionTerminal() {
-  if (OT.loading) return;
-  OT.loading = true;
+  if (OT.loading) { OT._pending = true; return; }     // index/tf switched mid-load → reload once it finishes
+  OT.loading = true; scrRefreshState("ot-refresh", true);
+  const reqSym = OT.sym, reqTf = OT.tf;
   try {
     const url = `/api/market-command?symbol=${encodeURIComponent(OT.sym)}&interval=${OT.tf}`;
     const d = await fetchJSON(url, 25000);
-    if (d && !d.error) { OT.lastData = d; renderOptionTerminal(d); }
+    if (OT.sym !== reqSym || OT.tf !== reqTf) { /* switched mid-flight — never paint the old index */ }
+    else if (d && !d.error) { OT.lastData = d; renderOptionTerminal(d); }
     else if (OT.lastData) {
       // Transient error (rate-limit / token expiry) but we have prior data — keep
       // the last render and just flag it in the footer, so the screen never blanks
@@ -6123,6 +6128,7 @@ async function loadOptionTerminal() {
     } else otShowError((d && d.error) || "No data from Market Command.");
   } catch (e) { console.error("[OptionTerminal]", e); if (!OT.lastData) otShowError("Network error loading Option Terminal."); }
   OT.loading = false;
+  if (OT._pending) { OT._pending = false; loadOptionTerminal(); } else scrRefreshState("ot-refresh", false);
 }
 
 // Surface WHY the terminal is empty (most often: Dhan feed off / token expired)
@@ -7765,7 +7771,25 @@ function renderOTGuidance(d, row) {
     `<div class="otg-disc">Model estimate from real VIX + greeks + option structure — odds, not a guarantee.</div>`;
 }
 
+// ---- Screen refresh helpers (Market Command / Option Terminal / Market Analysis / MC Summary) ----
+// An index switch while a load is in flight used to be DROPPED (the loader returned early and the
+// in-flight result for the old index was discarded) → the new index showed nothing new until the
+// next poll. Loaders now queue one follow-up load instead, and every screen has a ⟳ Refresh button.
+function scrRefreshState(id, busy) {
+  const b = document.getElementById(id); if (!b) return;
+  b.classList.toggle("busy", !!busy); b.disabled = !!busy;
+  b.textContent = busy ? "⟳ Loading…" : "⟳ Refresh";
+}
 async function loadMarketCommand(chartOnly = false) {
+  if (MC.loading) { MC._pending = true; return; }      // index/tf switched mid-load → reload once it finishes
+  scrRefreshState("mc-refresh", true);
+  try { await loadMarketCommandOnce(chartOnly); }
+  finally {
+    if (MC._pending) { MC._pending = false; loadMarketCommand(!MC.replayDate); }
+    else if (!MC.loading) scrRefreshState("mc-refresh", false);
+  }
+}
+async function loadMarketCommandOnce(chartOnly = false) {
   // chartOnly (view=chart) skips the heavy OI pipeline so the chart paints fast;
   // a full load follows to fill the OI-based command panel. Replay never uses it.
   if (MC.loading) return;
@@ -7821,7 +7845,7 @@ async function loadMarketCommand(chartOnly = false) {
   }
   MC.loading = false;
   // After a fast chart-only paint, immediately fetch the full payload (OI/command).
-  if (chartOnly && !MC.replayDate) loadMarketCommand(false);
+  if (chartOnly && !MC.replayDate) await loadMarketCommandOnce(false);
 }
 
 function mcFmtK(v) {
@@ -16813,6 +16837,7 @@ function initMarketAnalysis() {
     maEl("ma-idx-btns").querySelectorAll(".ma-idxbtn").forEach((x) => x.classList.remove("active"));
     b.classList.add("active"); MA.sym = b.getAttribute("data-sym"); MA.selCE = null; MA.selPE = null; MA._centerPending = true; loadMarketAnalysis();
   }));
+  maEl("ma-refresh")?.addEventListener("click", () => { loadMarketAnalysis(); });
   maEl("ma-tf-btns")?.querySelectorAll(".ma-tfbtn").forEach((b) => b.addEventListener("click", () => {
     maEl("ma-tf-btns").querySelectorAll(".ma-tfbtn").forEach((x) => x.classList.remove("active"));
     b.classList.add("active"); MA.tf = b.getAttribute("data-tf"); loadMarketAnalysis();
@@ -16835,13 +16860,15 @@ function initMarketAnalysis() {
 }
 
 async function loadMarketAnalysis() {
-  if (MA.loading) return;
-  MA.loading = true;
+  if (MA.loading) { MA._pending = true; return; }     // index/tf switched mid-load → reload once it finishes
+  MA.loading = true; scrRefreshState("ma-refresh", true);
+  const reqSym = MA.sym, reqTf = MA.tf, reqRange = MA.range;
   if (!MA.lastData && !MA._shownLoading) { MA._shownLoading = true; maShowMAError("Loading market analysis…"); }
   try {
     const url = `/api/market-analysis?symbol=${encodeURIComponent(MA.sym)}&interval=${MA.tf}&strikeRange=${MA.range}`;
     const d = await fetchJSON(url, 25000);   // same patience as Option Terminal / Trade Execution
-    if (d && d.available) {
+    if (MA.sym !== reqSym || MA.tf !== reqTf || MA.range !== reqRange) { /* switched mid-flight — never paint the old index */ }
+    else if (d && d.available) {
       MA.lastData = d; MA._errStreak = 0; renderMarketAnalysis(d);
       // On first load / index change, centre every table on the ATM strike.
       if (MA._centerPending) { MA._centerPending = false; requestAnimationFrame(() => { try { maCenterATM(); } catch (_) {} }); }
@@ -16856,6 +16883,7 @@ async function loadMarketAnalysis() {
     if (!MA.lastData) maShowMAError("Loading market analysis… (reconnecting " + MA._errStreak + ")");
   }
   MA.loading = false;
+  if (MA._pending) { MA._pending = false; loadMarketAnalysis(); } else scrRefreshState("ma-refresh", false);
 }
 
 function startMarketAnalysisLive() {

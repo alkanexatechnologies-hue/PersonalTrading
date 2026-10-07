@@ -53,7 +53,7 @@ function mcsShell() {
     <div class="mcs-tickers" id="mcs-tickers"></div>
   </div>
   <div class="mcs-bar">
-    <div class="mcs-chips" id="mcs-syms">${MCS_SYMS.map(([s, n]) => `<button class="mcs-chip${s === MCS.sym ? " on" : ""}" data-sym="${s}">${n}</button>`).join("")}</div>
+    <div class="mcs-chips" id="mcs-syms">${MCS_SYMS.map(([s, n]) => `<button class="mcs-chip${s === MCS.sym ? " on" : ""}" data-sym="${s}">${n}</button>`).join("")}<button type="button" class="scr-refresh" id="mcs-refresh" title="Reload this screen's data now">⟳ Refresh</button></div>
     <div class="mcs-modes" id="mcs-modes"><button type="button" data-mode="LIVE" class="on">🟢 LIVE</button><button type="button" data-mode="TEST">🧪 TESTING</button></div>
     <div class="mcs-meta" id="mcs-meta"></div>
   </div>
@@ -117,6 +117,8 @@ function mcsShell() {
   const pl = mcsEl("mcs-tplay"); if (pl) pl.onclick = () => (MCS.play.on ? mcsPlayStop("Paused") : mcsPlayStart());
   const stp = mcsEl("mcs-tstop"); if (stp) stp.onclick = () => mcsPlayStop("Stopped");
   const spd = mcsEl("mcs-tspeed"); if (spd) spd.onchange = () => { MCS.play.speedMs = Number(spd.value) || 2000; };
+  const rb = root.querySelector("#mcs-refresh");
+  if (rb) rb.onclick = () => { if (MCS.mode === "LIVE") { MCS.gen++; MCS.maAt = 0; MCS.optKey = null; } mcsRefresh(true); };
   root.querySelectorAll("#mcs-syms .mcs-chip").forEach((b) => (b.onclick = () => { mcsPlayStop(); MCS.gen++; MCS.sym = b.dataset.sym; root.querySelectorAll("#mcs-syms .mcs-chip").forEach((x) => x.classList.toggle("on", x === b)); MCS.d = null; MCS.ss = null; MCS.ma = null; MCS.maAt = 0; MCS.optKey = null; MCS._fit = null; MCS.selStrike = null; mcsUnlockHeights(); mcsLoading(); mcsRefresh(true); }));
   root.querySelectorAll("#mcs-tfs .mcs-tf").forEach((b) => (b.onclick = () => { mcsPlayStop(); MCS.gen++; MCS.tf = b.dataset.tf; root.querySelectorAll("#mcs-tfs .mcs-tf").forEach((x) => x.classList.toggle("on", x === b)); MCS._fit = null; mcsUnlockHeights(); mcsRefresh(true); }));
   root.querySelectorAll("#mcs-toggles input").forEach((c) => (c.onchange = () => { MCS.show[c.dataset.k] = c.checked; mcsRenderChart(); }));
@@ -778,10 +780,13 @@ function mcsRenderAll() {
 }
 
 async function mcsRefresh(force) {
-  if (MCS.busy) { MCS._pending = true; return; }
-  MCS.busy = true; MCS._pending = false;
+  // busy only blocks refreshes of the SAME generation; an index / mode switch (gen++) starts at once
+  // instead of waiting up to 45 s for the old index's requests (their results are discarded by gen).
+  if (MCS.busy && MCS.busyGen === MCS.gen) { MCS._pending = true; return; }
+  MCS.busy = true; MCS.busyGen = MCS.gen; MCS._pending = false;
+  if (typeof scrRefreshState === "function") scrRefreshState("mcs-refresh", true);
   const sym = MCS.sym, tf = MCS.tf, gen = MCS.gen;
-  if (MCS.mode === "TEST") { try { await mcsRefreshTest(gen); } catch (e) { console.error("[MCS test]", e); } finally { MCS.busy = false; if (MCS._pending) { MCS._pending = false; mcsRefresh(true); } } return; }
+  if (MCS.mode === "TEST") { try { await mcsRefreshTest(gen); } catch (e) { console.error("[MCS test]", e); } finally { mcsRefreshDone(gen); } return; }
   try {
     const [d, q] = await Promise.all([
       fetchJSON(`/api/market-command?symbol=${encodeURIComponent(sym)}&interval=${tf}`, 45000).catch(() => null),
@@ -805,7 +810,13 @@ async function mcsRefresh(force) {
     const optP = mcsLoadOptions(force).then(() => { if (sym === MCS.sym && gen === MCS.gen && MCS.mode === "LIVE") mcsStable(() => { mcsRenderOpt("CE"); mcsRenderOpt("PE"); mcsRenderOptLv(); mcsRenderAnalysis(); }); });
     await Promise.all([maP, optP]);
   } catch (e) { console.error("[MCS]", e); }
-  finally { MCS.busy = false; if (MCS._pending) { MCS._pending = false; mcsRefresh(true); } }
+  finally { mcsRefreshDone(gen); }
+}
+function mcsRefreshDone(gen) {
+  if (MCS.busyGen !== gen) return;                      // a newer generation owns the busy flag
+  MCS.busy = false;
+  if (MCS._pending) { MCS._pending = false; mcsRefresh(true); }
+  else if (typeof scrRefreshState === "function") scrRefreshState("mcs-refresh", false);
 }
 
 function initMcSummary() {

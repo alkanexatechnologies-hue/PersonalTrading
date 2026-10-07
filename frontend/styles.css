@@ -6867,3 +6867,9 @@ body.lqa-fullwidth .content { padding-left: 0; padding-right: 0; }
 .mcs-sseff .mcs-effstate { margin-left: auto; } .mcs-sseff.chop .mcs-effstate { color: #fbbf24; } .mcs-sseff.ok .mcs-effstate { color: #86efac; }
 .mcs-effbar { display: inline-flex; align-items: flex-end; gap: 1px; height: 18px; cursor: help; }
 .mcs-effbar i { display: block; width: 3px; border-radius: 1px; } .mcs-effbar i.o { background: #22c55e; } .mcs-effbar i.c { background: #f59e0b; }
+
+/* ⟳ Refresh button — Market Command / Option Terminal / Market Analysis / MC Summary */
+.scr-refresh { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 4px 12px; margin-left: 6px; border-radius: 6px; border: 1px solid #3b82f6; background: #1d4ed8; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.scr-refresh:hover { background: #2563eb; }
+.scr-refresh.busy { background: #334155; border-color: #475569; color: #cbd5e1; cursor: progress; }
+@media (max-width: 768px) { .scr-refresh { min-height: 44px; font-size: 14px; } }
