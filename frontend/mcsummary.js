@@ -18,6 +18,7 @@ const MCS = {
   maAt: 0, optAt: 0, hmMode: "oiChg", hmSide: "CE", selStrike: null,   // null = follow the current ATM strike
   // LIVE = today, auto-refresh. TEST = re-run the logic on a past date (as of a time); live refresh stops.
   mode: "LIVE", gen: 0, test: { date: null, upto: "15:15" },
+  play: { on: false, speedMs: 2000, token: 0 }, _hist: new Map(),   // full-session replay; day chart cache (sym|tf|date)
 };
 const MCS_SYMS = [["^NSEI", "NIFTY 50"], ["^NSEBANK", "BANKNIFTY"], ["^CNXFIN", "FINNIFTY"], ["^BSESN", "SENSEX"], ["^NSEMDCP50", "MIDCPNIFTY"]];
 const mcsEl = (id) => document.getElementById(id);
@@ -57,6 +58,11 @@ function mcsShell() {
     <button type="button" class="mcs-tstep" data-step="-1" title="5 minutes earlier">◀ 5m</button>
     <button type="button" class="mcs-tstep" data-step="1" title="5 minutes later">5m ▶</button>
     <button type="button" class="mcs-trun" id="mcs-trun">▶ Run</button>
+    <span class="mcs-tsep"></span>
+    <button type="button" class="mcs-tplay" id="mcs-tplay" title="Replay the whole session 09:15 → 15:15, one 5-minute candle at a time">⏵ Play full session</button>
+    <button type="button" id="mcs-tstop" title="Stop the replay">⏹ Stop</button>
+    <label>Speed <select id="mcs-tspeed"><option value="1000">Fast (1s / candle)</option><option value="2000" selected>Normal (2s / candle)</option><option value="4000">Slow (4s / candle)</option></select></label>
+    <div class="mcs-tprog" id="mcs-tprog" title="Session progress 09:15 → 15:15"><i id="mcs-tprogbar"></i><span id="mcs-tprogtxt">09:15</span></div>
     <span class="mcs-tstat" id="mcs-tstat"></span>
   </div>
   <div class="mcs-top">
@@ -95,13 +101,16 @@ function mcsShell() {
   // ---- LIVE / TESTING mode ----
   root.querySelectorAll("#mcs-modes button").forEach((b) => (b.onclick = () => mcsSetMode(b.dataset.mode)));
   const sel = mcsEl("mcs-tupto");
-  if (sel) { const opts = []; for (let m = 9 * 60 + 20; m <= 15 * 60 + 15; m += 5) opts.push(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`); sel.innerHTML = opts.map((t) => `<option value="${t}"${t === "15:15" ? " selected" : ""}>${t === "15:15" ? "15:15 (full day)" : t}</option>`).join(""); sel.onchange = () => { MCS.test.upto = sel.value; mcsRefresh(true); }; }
+  if (sel) { const opts = []; for (let m = 9 * 60 + 20; m <= 15 * 60 + 15; m += 5) opts.push(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`); sel.innerHTML = opts.map((t) => `<option value="${t}"${t === "15:15" ? " selected" : ""}>${t === "15:15" ? "15:15 (full day)" : t}</option>`).join(""); sel.onchange = () => { mcsPlayStop(); MCS.test.upto = sel.value; mcsRefresh(true); }; }
   const dt = mcsEl("mcs-tdate");
-  if (dt) { dt.max = new Date(Date.now() + 19800000).toISOString().slice(0, 10); dt.onchange = () => { if (dt.value) { MCS.test.date = dt.value; MCS._fit = null; mcsRefresh(true); } }; }
-  root.querySelectorAll(".mcs-tstep").forEach((b) => (b.onclick = () => { const o = [...sel.options].map((x) => x.value); const i = Math.max(0, Math.min(o.length - 1, o.indexOf(MCS.test.upto) + Number(b.dataset.step))); MCS.test.upto = o[i]; sel.value = o[i]; mcsRefresh(true); }));
-  const run = mcsEl("mcs-trun"); if (run) run.onclick = () => mcsRefresh(true);
-  root.querySelectorAll("#mcs-syms .mcs-chip").forEach((b) => (b.onclick = () => { MCS.gen++; MCS.sym = b.dataset.sym; root.querySelectorAll("#mcs-syms .mcs-chip").forEach((x) => x.classList.toggle("on", x === b)); MCS.d = null; MCS.ss = null; MCS.ma = null; MCS.maAt = 0; MCS.optKey = null; MCS._fit = null; MCS.selStrike = null; mcsUnlockHeights(); mcsLoading(); mcsRefresh(true); }));
-  root.querySelectorAll("#mcs-tfs .mcs-tf").forEach((b) => (b.onclick = () => { MCS.gen++; MCS.tf = b.dataset.tf; root.querySelectorAll("#mcs-tfs .mcs-tf").forEach((x) => x.classList.toggle("on", x === b)); MCS._fit = null; mcsUnlockHeights(); mcsRefresh(true); }));
+  if (dt) { dt.max = new Date(Date.now() + 19800000).toISOString().slice(0, 10); dt.onchange = () => { if (dt.value) { mcsPlayStop(); MCS.test.date = dt.value; MCS._fit = null; mcsRefresh(true); } }; }
+  root.querySelectorAll(".mcs-tstep").forEach((b) => (b.onclick = () => { mcsPlayStop(); const o = [...sel.options].map((x) => x.value); const i = Math.max(0, Math.min(o.length - 1, o.indexOf(MCS.test.upto) + Number(b.dataset.step))); MCS.test.upto = o[i]; sel.value = o[i]; mcsRefresh(true); }));
+  const run = mcsEl("mcs-trun"); if (run) run.onclick = () => { mcsPlayStop(); mcsRefresh(true); };
+  const pl = mcsEl("mcs-tplay"); if (pl) pl.onclick = () => (MCS.play.on ? mcsPlayStop("Paused") : mcsPlayStart());
+  const stp = mcsEl("mcs-tstop"); if (stp) stp.onclick = () => mcsPlayStop("Stopped");
+  const spd = mcsEl("mcs-tspeed"); if (spd) spd.onchange = () => { MCS.play.speedMs = Number(spd.value) || 2000; };
+  root.querySelectorAll("#mcs-syms .mcs-chip").forEach((b) => (b.onclick = () => { mcsPlayStop(); MCS.gen++; MCS.sym = b.dataset.sym; root.querySelectorAll("#mcs-syms .mcs-chip").forEach((x) => x.classList.toggle("on", x === b)); MCS.d = null; MCS.ss = null; MCS.ma = null; MCS.maAt = 0; MCS.optKey = null; MCS._fit = null; MCS.selStrike = null; mcsUnlockHeights(); mcsLoading(); mcsRefresh(true); }));
+  root.querySelectorAll("#mcs-tfs .mcs-tf").forEach((b) => (b.onclick = () => { mcsPlayStop(); MCS.gen++; MCS.tf = b.dataset.tf; root.querySelectorAll("#mcs-tfs .mcs-tf").forEach((x) => x.classList.toggle("on", x === b)); MCS._fit = null; mcsUnlockHeights(); mcsRefresh(true); }));
   root.querySelectorAll("#mcs-toggles input").forEach((c) => (c.onchange = () => { MCS.show[c.dataset.k] = c.checked; mcsRenderChart(); }));
 }
 
@@ -1000,6 +1009,7 @@ function mcsPrevWeekday() { const d = new Date(Date.now() + 19800000); do { d.se
 function mcsSetMode(mode) {
   if (mode !== "LIVE" && mode !== "TEST") return;
   if (MCS.mode === mode) return;
+  mcsPlayStop();
   MCS.mode = mode; MCS.gen++;
   MCS.d = null; MCS.ma = null; MCS.maAt = 0; MCS.opt = { CE: null, PE: null }; MCS.optKey = null; MCS.ss = null; MCS._fit = null; MCS.selStrike = null; MCS.q = null;
   const root = mcsEl("mcs-root");
@@ -1015,10 +1025,13 @@ function mcsSetMode(mode) {
 }
 async function mcsRefreshTest(gen) {
   const sym = MCS.sym, tf = MCS.tf, date = MCS.test.date, upto = MCS.test.upto;
-  const st = mcsEl("mcs-tstat"); if (st) st.innerHTML = `⏳ Running ${mcsEsc(date)} as of ${mcsEsc(upto)}…`;
+  const st = mcsEl("mcs-tstat"); if (st && !MCS.play.on) st.innerHTML = `⏳ Running ${mcsEsc(date)} as of ${mcsEsc(upto)}…`;
+  mcsPlayProgress(upto);
   const full = upto === "15:15";
+  const hk = `${sym}|${tf}|${date}`;
+  const cachedH = MCS._hist.get(hk);
   const [h, ss] = await Promise.all([
-    fetchJSON(`/api/market-command?symbol=${encodeURIComponent(sym)}&interval=${tf}&date=${date}`, 60000).catch(() => null),
+    cachedH ? Promise.resolve(cachedH) : fetchJSON(`/api/market-command?symbol=${encodeURIComponent(sym)}&interval=${tf}&date=${date}`, 60000).then((x) => { if (x && !x.error && x.candles) { MCS._hist.set(hk, x); if (MCS._hist.size > 6) MCS._hist.delete(MCS._hist.keys().next().value); } return x; }).catch(() => null),
     fetchJSON(`/api/setup-signals?symbol=${encodeURIComponent(sym)}&date=${date}${full ? "" : "&upto=" + upto}`, 120000).catch(() => null),
   ]);
   if (gen !== MCS.gen || MCS.mode !== "TEST" || sym !== MCS.sym || tf !== MCS.tf || date !== MCS.test.date || upto !== MCS.test.upto) return;   // superseded
@@ -1043,6 +1056,56 @@ async function mcsRefreshTest(gen) {
   };
   MCS.ss = ss && !ss.error ? ss : { error: (ss && ss.error) || "Setup signals unavailable", symbol: sym };
   const nSig = ss && ss.today ? ss.today.signals.filter((x) => !x.blockedBy).length : 0;
-  if (st) st.innerHTML = ss && !ss.error ? `✅ ${mcsEsc(date)} as of ${mcsEsc(ss.upto)} · ${nSig} signal${nSig === 1 ? "" : "s"}` : `<span class="mcs-warn">${mcsEsc((ss && ss.error) || "Setup signals unavailable")}</span>`;
+  const totR = ss && ss.today ? ss.today.signals.filter((x) => !x.blockedBy && x.resultR != null).reduce((a, x) => a + x.resultR, 0) : 0;
+  if (st) st.innerHTML = ss && !ss.error ? `${MCS.play.on ? "⏵ Replaying" : "✅"} ${mcsEsc(date)} as of ${mcsEsc(ss.upto)} · ${nSig} signal${nSig === 1 ? "" : "s"}${nSig ? ` · ${totR >= 0 ? "+" : ""}${totR.toFixed(2)}R so far` : ""}` : `<span class="mcs-warn">${mcsEsc((ss && ss.error) || "Setup signals unavailable")}</span>`;
   mcsRenderAll();
+}
+
+
+// ---- Full-session replay (TESTING): 09:15 → 15:15, one closed 5m candle per step ----
+const MCS_SESSION_FIRST = "09:20", MCS_SESSION_LAST = "15:15";
+function mcsPlayProgress(upto) {
+  const toM = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+  const pct = Math.max(0, Math.min(100, ((toM(upto) - toM("09:15")) / (toM(MCS_SESSION_LAST) - toM("09:15"))) * 100));
+  const bar = mcsEl("mcs-tprogbar"), txt = mcsEl("mcs-tprogtxt");
+  if (bar) bar.style.width = pct.toFixed(1) + "%"; if (txt) txt.textContent = upto;
+}
+function mcsPlayUi() {
+  const b = mcsEl("mcs-tplay"); if (b) { b.textContent = MCS.play.on ? "⏸ Pause" : "⏵ Play full session"; b.classList.toggle("on", MCS.play.on); }
+  mcsEl("mcs-root")?.classList.toggle("mcs-playing", MCS.play.on);
+}
+function mcsPlayStop(why) {
+  if (!MCS.play.on) return;
+  MCS.play.on = false; MCS.play.token++; mcsPlayUi();
+  const st = mcsEl("mcs-tstat"); if (st && why) st.innerHTML = `${why === "Paused" ? "⏸" : "⏹"} ${why} at ${mcsEsc(MCS.test.upto)} — press ⏵ to ${why === "Paused" ? "resume" : "replay again"}`;
+}
+async function mcsPlayStart() {
+  if (MCS.mode !== "TEST" || MCS.play.on) return;
+  const sel = mcsEl("mcs-tupto"); if (!sel) return;
+  const opts = [...sel.options].map((x) => x.value);
+  if (MCS.test.upto === MCS_SESSION_LAST || opts.indexOf(MCS.test.upto) < 0) MCS.test.upto = MCS_SESSION_FIRST;   // start from the open
+  MCS.play.on = true; const token = ++MCS.play.token; mcsPlayUi();
+  while (MCS.play.on && MCS.play.token === token && MCS.mode === "TEST") {
+    sel.value = MCS.test.upto;
+    const t0 = Date.now();
+    await mcsRefreshAwait();
+    if (!MCS.play.on || MCS.play.token !== token || MCS.mode !== "TEST") return;
+    const i = opts.indexOf(MCS.test.upto);
+    if (i >= opts.length - 1) {   // reached 15:15 — session complete
+      MCS.play.on = false; mcsPlayUi();
+      const sigs = MCS.ss && MCS.ss.today ? MCS.ss.today.signals.filter((x) => !x.blockedBy) : [];
+      const tot = sigs.filter((x) => x.resultR != null).reduce((a, x) => a + x.resultR, 0);
+      const st = mcsEl("mcs-tstat"); if (st) st.innerHTML = `🏁 Session complete ${mcsEsc(MCS.test.date)} 09:15 → 15:15 · ${sigs.length} signal${sigs.length === 1 ? "" : "s"} · ${tot >= 0 ? "+" : ""}${tot.toFixed(2)}R (index points)`;
+      return;
+    }
+    await new Promise((r) => setTimeout(r, Math.max(0, MCS.play.speedMs - (Date.now() - t0))));
+    if (!MCS.play.on || MCS.play.token !== token) return;
+    MCS.test.upto = opts[i + 1];
+  }
+}
+// Await one refresh (waits for an in-flight one first so steps never overlap).
+async function mcsRefreshAwait() {
+  for (let n = 0; MCS.busy && n < 600; n++) await new Promise((r) => setTimeout(r, 50));
+  await mcsRefresh(true);
+  for (let n = 0; MCS.busy && n < 600; n++) await new Promise((r) => setTimeout(r, 50));
 }
