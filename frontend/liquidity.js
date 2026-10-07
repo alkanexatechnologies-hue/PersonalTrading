@@ -114,15 +114,28 @@ function renderLiquidityAnalysis(d) {
   const grid = (side) => {
     const rows = d.levels.filter((l) => l.side === side).sort((a, b) => side === "DOWNSIDE" ? b.price - a.price : a.price - b.price);
     if (!rows.length) return `<div class="lqa-empty">No ${side.toLowerCase()} levels yet (levels appear as they become known: previous day at 09:15, opening range at 09:20, 15M at 09:30).</div>`;
-    return `<div class="lqa-tscroll"><table class="lqa-t"><thead><tr><th>#</th><th>Level Type</th><th>Source</th><th class="r">Level Price</th><th class="r">Distance</th><th>Expected Reaction</th><th>Option Strike</th><th>Status</th></tr></thead><tbody>
+    return `<div class="lqa-tscroll"><table class="lqa-t"><thead><tr><th>#</th><th>Level Type</th><th class="r">Level Price</th><th>Time Taken</th><th>Status</th><th class="r">Distance</th><th>Expected Reaction</th><th>Option Strike</th><th>Source</th><th>Active Since</th></tr></thead><tbody>
       ${rows.map((l, i) => `<tr class="st-${LQA_ST_CLS[l.status] || ""}">
-        <td>${i + 1}</td><td><b>${lqaEsc(l.type)}</b></td><td class="lqa-src" title="${lqaEsc(l.sources.join("\n"))}">${lqaEsc(l.sources.map((s) => s.split(": ")[1] || s).join(" · "))}</td>
-        <td class="r"><b>${lqaN(l.price)}</b></td><td class="r ${l.distance != null && l.distance < 0 ? "dn" : ""}">${l.distance == null ? "—" : lqaN(l.distance)}${o.price ? ` <i>${lqaN(Math.abs(l.distance || 0) / o.price * 100)}%</i>` : ""}</td>
+        <td>${i + 1}</td><td><b>${lqaEsc(l.type)}</b></td><td class="r"><b>${lqaN(l.price)}</b></td>
+        <td>${l.event ? `<b class="lqa-time">${lqaEsc(l.event.time)}</b>` : l.status === "INVALIDATED" ? "gapped" : `<i>pending</i>`}</td>
+        <td><span class="lqa-st ${LQA_ST_CLS[l.status] || ""}">${lqaEsc(l.status)}</span></td>
+        <td class="r ${l.distance != null && l.distance < 0 ? "dn" : ""}">${l.distance == null ? "—" : lqaN(l.distance)}${o.price ? ` <i>${lqaN(Math.abs(l.distance || 0) / o.price * 100)}%</i>` : ""}</td>
         <td>${lqaEsc(lqaReaction(l.type, hist))}</td>
         <td>${l.strike != null ? lqaN(l.strike, 0) : "—"}${l.oi ? ` <i title="Open interest at this strike (latest OI snapshot)">CE ${lqaN((l.oi.ceOi || 0) / 1e5, 1)}L · PE ${lqaN((l.oi.peOi || 0) / 1e5, 1)}L</i>` : ""}</td>
-        <td><span class="lqa-st ${LQA_ST_CLS[l.status] || ""}">${lqaEsc(l.status)}</span></td></tr>`).join("")}
+        <td class="lqa-src" title="${lqaEsc(l.sources.join("\n"))}">${lqaEsc(l.sources.map((x) => x.split(": ")[1] || x).join(" · "))}</td>
+        <td>${lqaHm(l.activeFrom)}</td></tr>`).join("")}
       </tbody></table></div>`;
   };
+  // Morning-to-now summary: which liquidity the market has already taken, and what is still waiting.
+  const takenL = d.levels.filter((l) => l.event).sort((a, b) => a.takenAt - b.takenAt);
+  const pendL = d.levels.filter((l) => !l.event && l.status !== "INVALIDATED").sort((a, b) => Math.abs(a.distance ?? 1e9) - Math.abs(b.distance ?? 1e9));
+  const gapL = d.levels.filter((l) => l.status === "INVALIDATED");
+  const tchip = (l) => `<span class="lqa-chip taken" title="${lqaEsc(l.sources.join("\n"))}"><b>${lqaEsc(l.event.time)}</b> ${l.side === "DOWNSIDE" ? "↓" : "↑"} ${lqaEsc(l.type)} ${lqaN(l.price)} → <span class="${l.event.afterDirection === "UP" ? "up" : l.event.afterDirection === "DOWN" ? "dn" : ""}">${lqaEsc(l.event.afterDirection || "…")} ${l.event.pointsCaptured != null ? lqaS(l.event.pointsCaptured) + " pts" : ""}</span> <i>${lqaEsc(l.event.outcome)}</i></span>`;
+  const pchip = (l) => `<span class="lqa-chip pend" title="${lqaEsc(l.sources.join("\n"))}">${l.side === "DOWNSIDE" ? "↓" : "↑"} ${lqaEsc(l.type)} <b>${lqaN(l.price)}</b> <i>${l.distance != null ? lqaN(Math.abs(l.distance)) + " pts away" : ""}</i> <span class="lqa-st ${LQA_ST_CLS[l.status] || ""}">${lqaEsc(l.status)}</span></span>`;
+  const takeSummary = `<div class="lqa-takesum">
+      <div><div class="lqa-gh">✅ LIQUIDITY TAKEN TODAY (${takenL.length}) <i>in time order</i></div>${takenL.map(tchip).join("") || `<span class="lqa-na">None taken yet</span>`}</div>
+      <div><div class="lqa-gh">⏳ PENDING — NOT YET TAKEN (${pendL.length}) <i>nearest first</i></div>${pendL.map(pchip).join("") || `<span class="lqa-na">No pending levels</span>`}${gapL.length ? `<div class="lqa-small">Gapped through at the open (no sweep): ${gapL.map((l) => `${lqaEsc(l.type)} ${lqaN(l.price)}`).join(", ")}</div>` : ""}</div>
+    </div>`;
   const statusRows = d.levels.slice().sort((a, b) => (b.takenAt || 0) - (a.takenAt || 0) || a.price - b.price);
   const status = `<div class="lqa-tscroll"><table class="lqa-t"><thead><tr><th>Level</th><th class="r">Price</th><th>Current Status</th><th>Time Taken</th><th>Time to Liquidity</th><th>Direction After Take</th><th class="r">Points Moved</th><th>Outcome</th><th>Pattern</th></tr></thead><tbody>
     ${statusRows.map((l) => { const e = l.event; return `<tr class="st-${LQA_ST_CLS[l.status] || ""}"><td><b>${lqaEsc(l.type)}</b> <i>${l.side === "DOWNSIDE" ? "↓" : "↑"}</i></td><td class="r">${lqaN(l.price)}</td>
@@ -149,7 +162,8 @@ function renderLiquidityAnalysis(d) {
 
   document.getElementById("lqa-body").innerHTML = `
     <section class="lqa-sec"><div class="lqa-sh">MORNING MARKET CONTEXT <i>${lqaEsc(c ? c.headline : "")}</i></div><div class="lqa-cards">${ctx}</div></section>
-    <section class="lqa-sec"><div class="lqa-sh">TODAY'S LIQUIDITY LEVELS · ${lqaEsc(d.index)} · ${lqaEsc(d.tf)} <i>price ${lqaN(o.price)}</i></div>
+    <section class="lqa-sec"><div class="lqa-sh">TODAY'S LIQUIDITY LEVELS · ${lqaEsc(d.index)} · ${lqaEsc(d.tf)} <i>price ${lqaN(o.price)} · levels appear as they become known: previous day 09:15, opening range 09:20, 15M 09:30</i></div>
+      ${takeSummary}
       <div class="lqa-two"><div><div class="lqa-gh dn">▼ POTENTIAL DOWNSIDE LIQUIDITY / SUPPORT</div>${grid("DOWNSIDE")}</div>
       <div><div class="lqa-gh up">▲ POTENTIAL UPSIDE LIQUIDITY / RESISTANCE</div>${grid("UPSIDE")}</div></div></section>
     <section class="lqa-sec"><div class="lqa-sh">TODAY'S LIQUIDITY STATUS</div>${status}</section>
