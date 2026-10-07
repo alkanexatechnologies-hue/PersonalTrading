@@ -6494,3 +6494,53 @@ body.mcs-fullwidth .watchlist, body.mcs-fullwidth #watchlist { display: none !im
 .arb-bias-perm { font-size: 12px; font-weight: 800; color: #facc15; border: 1px solid rgba(250,204,21,.5); border-radius: 6px; padding: 2px 8px; }
 .arb-bias-inline { font-size: 12.5px; font-weight: 700; color: #cbd5e1; }
 .arb-bias-inline.up { color: #22c55e; } .arb-bias-inline.dn { color: #ef4444; } .arb-bias-inline.warn { color: #facc15; }
+
+/* ===================== MARKET SENTIMENT strip (Market Command) — context only ===================== */
+.mc2-sent { margin: 0 16px 8px; background: #0f1626; border: 1px solid #1c2537; border-radius: 12px; padding: 8px 14px; min-width: 0; color: #cbd5e1; font-size: 13px; }
+.mc2-sent[hidden] { display: none; }
+.sent-hd { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; cursor: pointer; min-height: 44px; min-width: 0; }
+.sent-title { font-size: 14px; font-weight: 800; color: #f1f5f9; }
+.sent-phase { font-size: 12px; font-weight: 800; padding: 3px 8px; border-radius: 6px; background: #1e293b; color: #e2e8f0; }
+.sent-headline { flex: 1 1 260px; min-width: 0; font-weight: 600; color: #e2e8f0; }
+.sent-upd { font-size: 12px; color: #94a3b8; }
+.sent-caret { font-size: 14px; color: #94a3b8; transition: transform .15s; }
+.mc2-sent:not(.open) .sent-caret { transform: rotate(-90deg); }
+.mc2-sent:not(.open) .sent-body { display: none; }
+.sent-body { display: flex; flex-direction: column; gap: 8px; padding-top: 6px; border-top: 1px solid #1c2537; margin-top: 4px; }
+.sent-row { display: flex; align-items: flex-start; gap: 8px 12px; min-width: 0; }
+.sent-lbl { flex: 0 0 170px; font-weight: 700; color: #f1f5f9; font-size: 13px; }
+.sent-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; flex: 1; align-items: center; }
+.sent-grp { font-size: 12px; color: #94a3b8; font-weight: 700; text-transform: uppercase; margin-left: 4px; }
+.sent-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 6px; background: #131c2e; border: 1px solid #1f2a40; white-space: nowrap; font-size: 12px; }
+.sent-chip.closed { opacity: .85; border-style: dashed; }
+.sent-chip.na { opacity: .5; }
+.sent-k { color: #94a3b8; }
+.sent-v { color: #e2e8f0; font-weight: 600; }
+.mc2-sent .up { color: #22c55e; } .mc2-sent .dn { color: #ef4444; }
+.sent-lean { font-style: normal; font-size: 12px; font-weight: 800; padding: 1px 6px; border-radius: 4px; background: #1e293b; color: #e2e8f0; }
+.sent-lean.up { background: rgba(34,197,94,.15); color: #22c55e; } .sent-lean.dn { background: rgba(239,68,68,.15); color: #ef4444; } .sent-lean.mx { color: #fbbf24; }
+.sent-idx.up { border-color: rgba(34,197,94,.4); } .sent-idx.dn { border-color: rgba(239,68,68,.4); }
+.sent-bias { font-style: normal; font-size: 12px; color: #fbbf24; }
+.sent-why { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; }
+.sent-pos { color: #86efac; } .sent-neg { color: #fca5a5; } .sent-ind { color: #cbd5e1; }
+.sent-policy { display: flex; flex-direction: column; gap: 4px; }
+.sent-policy .sent-lbl { flex: none; }
+.sent-cnt { font-weight: 500; font-size: 12px; color: #94a3b8; margin-left: 6px; }
+.sent-news { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 6px 8px; border-radius: 6px; background: #131c2e; color: #e2e8f0; text-decoration: none; min-height: 32px; border-left: 3px solid #334155; }
+.sent-news.up { border-left-color: #22c55e; } .sent-news.dn { border-left-color: #ef4444; }
+.sent-news:hover { background: #18233a; }
+.sent-nt { flex: 1 1 300px; min-width: 0; font-size: 13px; }
+.sent-src { font-size: 12px; color: #94a3b8; }
+.sent-tags { display: inline-flex; gap: 4px; }
+.sent-tag { font-style: normal; font-size: 12px; font-weight: 800; padding: 1px 6px; border-radius: 4px; }
+.sent-tag.rbi { background: rgba(59,130,246,.18); color: #93c5fd; } .sent-tag.gov { background: rgba(168,85,247,.18); color: #d8b4fe; }
+.sent-empty, .sent-note { font-size: 12px; color: #94a3b8; }
+@media (max-width: 768px) {
+  .mc2-sent { margin: 0 8px 8px; padding: 8px 10px; }
+  .sent-row { flex-direction: column; gap: 4px; }
+  .sent-lbl { flex: none; }
+  .sent-headline { flex-basis: 100%; }
+  .sent-nt { flex-basis: 100%; }
+  .sent-v { display: none; }            /* phones: name + % change only */
+  .sent-chip { padding: 4px 7px; }
+}

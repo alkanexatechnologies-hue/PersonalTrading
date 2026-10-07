@@ -5917,6 +5917,12 @@ function startMarketCommandLive() {
   // Live refresh: 5s while the market is open (fast, low-delay), 30s when closed
   // (data isn't changing, so avoid needless load). Backend caches absorb the rate:
   // candles refresh every ~5s, OI/liquidity serve from their 15s caches between hits.
+  // Market Sentiment strip (global / oil / India / RBI-policy) — 60s; the server caches it 60s.
+  loadMCSentiment();
+  if (!MC.sentTimer) MC.sentTimer = setInterval(() => {
+    const pn = document.getElementById("panel-marketcommand");
+    if (pn && pn.classList.contains("active")) loadMCSentiment();
+  }, 60000);
   MC._tick = 0;
   MC.timer = setInterval(() => {
     const pn = document.getElementById("panel-marketcommand");
@@ -17064,4 +17070,76 @@ function renderMAData(d) {
     row("Price Feed", f.price) + row("Volume Feed", f.volume) + row("OI Feed", f.oi) + row("VIX Feed", f.vix) + row("Option Chain", f.chain) +
     `<div class="ma-ds-row"><span>Last Update</span><b>${maEsc(f.lastUpdate || "—")}</b></div>` +
     `<div class="ma-ds-row"><span>Breakout detect</span><b class="${(f.breakoutDetection || "").indexOf("ACTIVE") >= 0 ? "up" : "down"}">${maEsc(f.breakoutDetection || "—")}</b></div>`;
+}
+
+
+// ==================== MARKET SENTIMENT strip (Market Command) ====================
+// Morning (before 09:15): overnight global cues — US close + futures, Asia, Europe,
+// crude, gold, rupee, dollar, US yields, VIX. Session: Indian market sentiment per
+// index (closed 5m candles, up to 15:15) + India VIX. Always: RBI / government-policy
+// headlines. CONTEXT ONLY — it never changes the FINAL DECISION.
+let _mcSentBusy = false;
+async function loadMCSentiment() {
+  if (_mcSentBusy) return;
+  _mcSentBusy = true;
+  try {
+    const r = await fetch("/api/market-sentiment-brief");
+    const d = await r.json();
+    if (d && !d.error) renderMCSentiment(d);
+  } catch { /* keep the last render */ }
+  finally { _mcSentBusy = false; }
+}
+// Default: expanded on tablet/desktop, collapsed on phones (the header still shows the headline).
+function mcSentOpen() {
+  let v = null; try { v = localStorage.getItem("mcSentOpen"); } catch { /* storage blocked */ }
+  return v == null ? window.innerWidth > 768 : v === "1";
+}
+function toggleMCSentiment() {
+  const el = document.getElementById("mc-sent"); if (!el) return;
+  const open = !el.classList.contains("open");
+  el.classList.toggle("open", open);
+  try { localStorage.setItem("mcSentOpen", open ? "1" : "0"); } catch { /* per-viewer convenience only */ }
+}
+function renderMCSentiment(d) {
+  const el = document.getElementById("mc-sent"); if (!el) return;
+  const E = mcboEsc;
+  const pct = (v) => v == null ? "—" : `${v >= 0 ? "+" : ""}${Number(v).toFixed(2)}%`;
+  const cls = (v) => v == null ? "" : v > 0.05 ? "up" : v < -0.05 ? "dn" : "";
+  const leanCls = (l) => l === "BULLISH" ? "up" : l === "BEARISH" ? "dn" : "mx";
+  const leanTxt = (l) => l === "BULLISH" ? "Bullish" : l === "BEARISH" ? "Bearish" : l === "MIXED" ? "Mixed" : "Neutral";
+  const fr = (q) => !q || q.freshness === "UNAVAILABLE" || q.freshness === "DISCONNECTED" ? " na" : q.freshness === "CLOSED" ? " closed" : "";
+  const chip = (q, name, invert) => {
+    if (!q) return "";
+    const v = q.changePct, c = v == null ? "" : invert ? (v > 0.05 ? "dn" : v < -0.05 ? "up" : "") : cls(v);
+    const title = `${q.label}: ${q.value != null ? mcboN(q.value) : "unavailable"} · ${q.freshness}${q.reason ? " — " + q.reason : ""}`;
+    return `<span class="sent-chip${fr(q)}" title="${E(title)}"><span class="sent-k">${E(name || q.label)}</span>${q.value != null ? `<b class="sent-v">${mcboN(q.value)}</b>` : ""}<b class="${c}">${q.value == null ? "N/A" : pct(v)}</b></span>`;
+  };
+  const g = d.global || {}, m = d.macro || {}, ind = d.india || {}, cues = g.cues || {};
+  const phaseTxt = { PRE_MARKET: "🌅 MORNING VIEW", LIVE: "🟢 LIVE SESSION", DAY_END: "🔔 DAY END 15:15", CLOSED: "🌙 MARKET CLOSED" }[d.phase] || d.phase;
+  const nm = { "S&P 500": "S&P", "NASDAQ": "Nasdaq", "Dow Jones": "Dow", "Hang Seng": "HSI", "Nikkei": "Nikkei", "Shanghai": "Shanghai", "Kospi": "Kospi", "Taiwan": "Taiwan", "FTSE": "FTSE", "DAX": "DAX", "CAC": "CAC" };
+  const usAsOf = (g.us || []).some((q) => q && q.freshness === "CLOSED") ? "close" : "live";
+  const globalRow = `<div class="sent-row"><span class="sent-lbl">🌍 Global <em class="sent-lean ${leanCls(cues.lean)}">${leanTxt(cues.lean)}</em></span><div class="sent-chips">
+      <span class="sent-grp">US ${usAsOf}</span>${(g.us || []).map((q) => chip(q, nm[q.label])).join("")}${chip(g.usFutures, "US Fut")}
+      <span class="sent-grp">Asia</span>${(g.asia || []).map((q) => chip(q, nm[q.label])).join("")}
+      <span class="sent-grp">Europe</span>${(g.europe || []).map((q) => chip(q, nm[q.label])).join("")}</div></div>`;
+  // Rising crude / USD-INR / DXY / yields / VIX are negative for Indian equities → red.
+  const macroRow = `<div class="sent-row"><span class="sent-lbl">🛢 Oil &amp; Macro</span><div class="sent-chips">
+      ${chip(m.brent, "Brent", true)}${chip(m.wti, "WTI", true)}${chip(m.usdinr, "USD/INR", true)}${chip(m.dxy, "DXY", true)}${chip(m.us10y, "US 10Y", true)}${chip(m.cboeVix, "CBOE VIX", true)}${chip(m.gold, "Gold")}</div></div>`;
+  const idxChip = (x) => `<span class="sent-chip sent-idx ${leanCls(x.lean)}" title="${E((x.reasons || []).join(" · ") + (x.bias ? " · " + x.bias.message : ""))}"><span class="sent-k">${E(x.label)}</span><b class="${cls(x.changePct)}">${pct(x.changePct)}</b><em class="sent-lean ${leanCls(x.lean)}">${leanTxt(x.lean)}</em>${x.bias && /SHIFT|WEAKENING/.test(x.bias.state) ? `<em class="sent-bias">${E(x.bias.state.replace(/_/g, " "))}</em>` : ""}</span>`;
+  const indiaLbl = d.phase === "PRE_MARKET" || d.phase === "CLOSED" ? "🇮🇳 India (last session)" : "🇮🇳 India";
+  const indiaRow = `<div class="sent-row"><span class="sent-lbl">${indiaLbl} <em class="sent-lean ${leanCls(ind.lean)}">${leanTxt(ind.lean)}</em></span><div class="sent-chips">
+      ${(ind.indices || []).map(idxChip).join("")}${ind.vix ? chip(ind.vix, "India VIX", true) : ""}</div></div>`;
+  const why = `<div class="sent-why">${(cues.positives || []).map((t) => `<span class="sent-pos">▲ ${E(t)}</span>`).join("")}${(cues.negatives || []).map((t) => `<span class="sent-neg">▼ ${E(t)}</span>`).join("")}${(ind.reasons || []).map((t) => `<span class="sent-ind">• ${E(t)}</span>`).join("")}</div>`;
+  const pol = (d.policy && d.policy.items) || [];
+  const safeLink = (u) => /^https?:\/\//i.test(u || "") ? u : "#";
+  const polRows = pol.slice(0, 5).map((n) => `<a class="sent-news ${n.sentiment === "positive" ? "up" : n.sentiment === "negative" ? "dn" : ""}" href="${E(safeLink(n.link))}" target="_blank" rel="noopener"><span class="sent-tags">${(n.tags || []).filter((t) => t === "RBI" || t === "Govt Policy").map((t) => `<em class="sent-tag ${t === "RBI" ? "rbi" : "gov"}">${t === "RBI" ? "RBI" : "GOVT"}</em>`).join("")}</span><span class="sent-nt">${E(n.title)}</span><span class="sent-src">${E(n.source)} · ${E(n.ago)}</span></a>`).join("");
+  const policyBlock = `<div class="sent-policy"><div class="sent-lbl">🏛 RBI &amp; Govt Policy <span class="sent-cnt">${d.policy ? `${d.policy.rbi} RBI · ${d.policy.govt} Govt (48h)` : ""}</span></div>${polRows || `<div class="sent-empty">No RBI / government-policy headlines in the last 48h.</div>`}</div>`;
+  const rows = d.phase === "LIVE" ? indiaRow + globalRow + macroRow : globalRow + macroRow + indiaRow;
+  const upd = new Date((d.ts + 19800) * 1000).toISOString().slice(11, 16);
+  el.innerHTML = `<div class="sent-hd" role="button" tabindex="0" onclick="toggleMCSentiment()" onkeydown="if(event.key==='Enter')toggleMCSentiment()">
+      <span class="sent-title">🌐 MARKET SENTIMENT</span><span class="sent-phase">${E(phaseTxt)}</span>
+      <span class="sent-headline">${E(d.headline)}</span><span class="sent-upd">${upd} IST</span><span class="sent-caret">▾</span></div>
+    <div class="sent-body">${rows}${why}${policyBlock}<div class="sent-note">${E(d.note)} Source: ${E(d.provider)}.</div></div>`;
+  if (!el.dataset.init) { el.classList.toggle("open", mcSentOpen()); el.dataset.init = "1"; }
+  el.hidden = false;
 }

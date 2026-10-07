@@ -5,8 +5,13 @@ import type { Quote, Freshness } from "./types";
 // Brent/WTI, gold, the CBOE VIX or global equity indices. Those come from a
 // PLUGGABLE external provider chosen by env:
 //
-//   MARKET_DATA_PROVIDER   (default "twelvedata")
-//   MARKET_DATA_API_KEY    (required — no key ⇒ every value is DATA UNAVAILABLE)
+//   MARKET_DATA_PROVIDER   ("twelvedata" | "yahoo"; default: twelvedata when a key
+//                          is set, otherwise the keyless Yahoo provider)
+//   MARKET_DATA_API_KEY    (Twelve Data key — with provider=twelvedata and no key
+//                          every value is DATA UNAVAILABLE)
+//
+// Yahoo (yahoo-finance2, already a dependency) needs no key. Like the rest of
+// this desk it is MARKET CONTEXT ONLY — it never feeds a trading decision.
 //
 // The key is read ONLY from the server environment. It is never hard-coded, never
 // sent to the browser, never logged, and never placed in an error/reason string.
@@ -21,37 +26,38 @@ export type MdKey =
   | "NIKKEI" | "HANGSENG" | "SHANGHAI" | "KOSPI" | "TAIWAN"
   | "FTSE" | "DAX" | "CAC";
 
-interface MdSpec { label: string; kind: "index" | "fx" | "commodity" | "macro"; twelvedata?: string; }
+interface MdSpec { label: string; kind: "index" | "fx" | "commodity" | "macro"; twelvedata?: string; yahoo?: string; }
 
 // Display label + Twelve Data symbol per instrument. A blank `twelvedata` means
 // "not mappable on this vendor" ⇒ UNAVAILABLE (we NEVER substitute a proxy — e.g.
 // GIFT NIFTY / US 10Y / US Futures are left unavailable unless the vendor has a
 // real symbol for them).
 export const MD_SPECS: Record<MdKey, MdSpec> = {
-  GIFTNIFTY: { label: "GIFT NIFTY", kind: "index", twelvedata: "" },
-  USDINR:    { label: "USDINR",     kind: "fx", twelvedata: "USD/INR" },
-  DXY:       { label: "DXY",        kind: "fx", twelvedata: "DXY" },
-  US10Y:     { label: "US 10Y",     kind: "macro", twelvedata: "" },
-  BRENT:     { label: "Brent Crude",kind: "commodity", twelvedata: "BRENT" },
-  WTI:       { label: "Crude (WTI)",kind: "commodity", twelvedata: "WTI/USD" },
-  GOLD:      { label: "Gold",       kind: "commodity", twelvedata: "XAU/USD" },
-  CBOEVIX:   { label: "VIX (CBOE)", kind: "index", twelvedata: "VIX" },
-  SPX:       { label: "S&P 500",    kind: "index", twelvedata: "GSPC" },
-  NASDAQ:    { label: "NASDAQ",     kind: "index", twelvedata: "IXIC" },
-  DOW:       { label: "Dow Jones",  kind: "index", twelvedata: "DJI" },
-  USFUT:     { label: "US Futures", kind: "index", twelvedata: "" },
-  NIKKEI:    { label: "Nikkei",     kind: "index", twelvedata: "N225" },
-  HANGSENG:  { label: "Hang Seng",  kind: "index", twelvedata: "HSI" },
-  SHANGHAI:  { label: "Shanghai",   kind: "index", twelvedata: "000001.SS" },
-  KOSPI:     { label: "Kospi",      kind: "index", twelvedata: "KS11" },
-  TAIWAN:    { label: "Taiwan",     kind: "index", twelvedata: "TWII" },
-  FTSE:      { label: "FTSE",       kind: "index", twelvedata: "FTSE" },
-  DAX:       { label: "DAX",        kind: "index", twelvedata: "GDAXI" },
-  CAC:       { label: "CAC",        kind: "index", twelvedata: "FCHI" },
+  GIFTNIFTY: { label: "GIFT NIFTY", kind: "index", twelvedata: "", yahoo: "" },
+  USDINR:    { label: "USDINR",     kind: "fx", twelvedata: "USD/INR", yahoo: "INR=X" },
+  DXY:       { label: "DXY",        kind: "fx", twelvedata: "DXY", yahoo: "DX-Y.NYB" },
+  US10Y:     { label: "US 10Y",     kind: "macro", twelvedata: "", yahoo: "^TNX" },
+  BRENT:     { label: "Brent Crude",kind: "commodity", twelvedata: "BRENT", yahoo: "BZ=F" },
+  WTI:       { label: "Crude (WTI)",kind: "commodity", twelvedata: "WTI/USD", yahoo: "CL=F" },
+  GOLD:      { label: "Gold",       kind: "commodity", twelvedata: "XAU/USD", yahoo: "GC=F" },
+  CBOEVIX:   { label: "VIX (CBOE)", kind: "index", twelvedata: "VIX", yahoo: "^VIX" },
+  SPX:       { label: "S&P 500",    kind: "index", twelvedata: "GSPC", yahoo: "^GSPC" },
+  NASDAQ:    { label: "NASDAQ",     kind: "index", twelvedata: "IXIC", yahoo: "^IXIC" },
+  DOW:       { label: "Dow Jones",  kind: "index", twelvedata: "DJI", yahoo: "^DJI" },
+  USFUT:     { label: "US Futures", kind: "index", twelvedata: "", yahoo: "ES=F" },
+  NIKKEI:    { label: "Nikkei",     kind: "index", twelvedata: "N225", yahoo: "^N225" },
+  HANGSENG:  { label: "Hang Seng",  kind: "index", twelvedata: "HSI", yahoo: "^HSI" },
+  SHANGHAI:  { label: "Shanghai",   kind: "index", twelvedata: "000001.SS", yahoo: "000001.SS" },
+  KOSPI:     { label: "Kospi",      kind: "index", twelvedata: "KS11", yahoo: "^KS11" },
+  TAIWAN:    { label: "Taiwan",     kind: "index", twelvedata: "TWII", yahoo: "^TWII" },
+  FTSE:      { label: "FTSE",       kind: "index", twelvedata: "FTSE", yahoo: "^FTSE" },
+  DAX:       { label: "DAX",        kind: "index", twelvedata: "GDAXI", yahoo: "^GDAXI" },
+  CAC:       { label: "CAC",        kind: "index", twelvedata: "FCHI", yahoo: "^FCHI" },
 };
 
-export function marketDataProviderName(): string { return process.env.MARKET_DATA_PROVIDER || "twelvedata"; }
-export function marketDataConfigured(): boolean { return !!(process.env.MARKET_DATA_API_KEY && process.env.MARKET_DATA_API_KEY.trim()); }
+const hasKey = (): boolean => !!(process.env.MARKET_DATA_API_KEY && process.env.MARKET_DATA_API_KEY.trim());
+export function marketDataProviderName(): string { return process.env.MARKET_DATA_PROVIDER || (hasKey() ? "twelvedata" : "yahoo"); }
+export function marketDataConfigured(): boolean { return marketDataProviderName() === "yahoo" || hasKey(); }
 
 // ---- Provider interface (UI/sentiment engine depend on THIS, not on the vendor) ----
 export interface MarketDataProvider {
@@ -200,11 +206,90 @@ export class TwelveDataProvider implements MarketDataProvider {
   }
 }
 
+// ---- Concrete provider: Yahoo (keyless) ----
+// One batched yf.quote() per refresh (the 60s cache above de-duplicates). Yahoo
+// marks quotes as delayed; marketState tells us whether the venue is trading.
+type YahooQuoteFn = (symbols: string[]) => Promise<any[]>;
+let _yfQuote: YahooQuoteFn | null = null;
+export function _setYahooQuoteForTests(f: YahooQuoteFn | null): void { _yfQuote = f; }
+async function yahooQuote(symbols: string[]): Promise<any[]> {
+  if (_yfQuote) return _yfQuote(symbols);
+  const { default: YahooFinance } = await import("yahoo-finance2");
+  const yf = new (YahooFinance as any)({ suppressNotices: ["yahooSurvey"], validation: { logErrors: false } });
+  const r = await yf.quote(symbols, { return: "array" });
+  return Array.isArray(r) ? r : [r];
+}
+
+export class YahooProvider implements MarketDataProvider {
+  name = "yahoo";
+  getFX(k: MdKey[]) { return this.getQuote(k); }
+  getCommodity(k: MdKey[]) { return this.getQuote(k); }
+  getIndex(k: MdKey[]) { return this.getQuote(k); }
+  getMacro(k: MdKey[]) { return this.getQuote(k); }
+
+  async healthCheck(): Promise<ProviderHealth> {
+    if (health.lastSuccessAt == null && !health.lastError) await this.getQuote(["GOLD"]).catch(() => null);
+    const ok = !health.disconnected && health.lastSuccessAt != null;
+    return { provider: this.name, configured: true, status: ok ? "LIVE" : "ERROR", lastSuccessAt: health.lastSuccessAt, lastError: health.lastError };
+  }
+
+  async getQuote(keys: MdKey[]): Promise<Record<string, Quote>> {
+    const out: Record<string, Quote> = {};
+    const mappable = keys.filter((k) => MD_SPECS[k].yahoo);
+    for (const k of keys) if (!MD_SPECS[k].yahoo) out[k] = unavailable(k, "symbol not supported by provider");
+    if (!mappable.length) return out;
+
+    const t0 = Date.now();
+    let rows: any[] = []; let errored = false;
+    try {
+      rows = await Promise.race([
+        yahooQuote(mappable.map((k) => MD_SPECS[k].yahoo!)),
+        new Promise<any[]>((_, rej) => setTimeout(() => rej(new Error("timeout")), 10_000).unref?.()),
+      ]);
+      health.lastSuccessAt = Math.floor(Date.now() / 1000); health.lastError = null; health.disconnected = false;
+    } catch (e: any) {
+      errored = true; health.disconnected = true; health.lastError = sanitize(e?.message || "request failed");
+    } finally {
+      reqLog.push({ at: Math.floor(Date.now() / 1000), n: mappable.length, ok: !errored, ms: Date.now() - t0, status: errored ? 0 : 200 });
+      if (reqLog.length > 50) reqLog.shift();
+    }
+
+    const receivedTs = Math.floor(Date.now() / 1000);
+    const bySym = new Map<string, any>();
+    for (const r of rows || []) if (r && r.symbol) bySym.set(String(r.symbol), r);
+    for (const k of mappable) {
+      if (errored) {
+        const lg = lastGood[k];
+        out[k] = lg ? { ...lg, freshness: "STALE", receivedTs, ageSec: lg.ts != null ? receivedTs - lg.ts : null, reason: "provider unavailable (showing last good)" }
+                    : unavailable(k, health.lastError || "provider unavailable", "DISCONNECTED");
+        continue;
+      }
+      const row = bySym.get(MD_SPECS[k].yahoo!);
+      if (!row) { out[k] = unavailable(k, "symbol not returned by provider"); continue; }
+      const value = num(row.regularMarketPrice);
+      if (value == null) { out[k] = unavailable(k, "no price in response"); continue; }
+      const t = row.regularMarketTime;
+      const tsSec = t instanceof Date ? Math.floor(t.getTime() / 1000) : (num(t) ?? null);
+      const ageSec = tsSec != null ? receivedTs - tsSec : null;
+      const state = String(row.marketState || "");
+      let freshness: Freshness;
+      if (state && state !== "REGULAR") freshness = "CLOSED";       // PRE/POST/CLOSED: last session's close
+      else if (ageSec != null && ageSec < 30 * 60) freshness = "DELAYED"; // Yahoo quotes are not real-time
+      else freshness = "STALE";
+      const qte: Quote = { key: k, label: MD_SPECS[k].label, value, change: num(row.regularMarketChange), changePct: num(row.regularMarketChangePercent),
+        ts: tsSec, receivedTs, ageSec, freshness, source: this.name, reason: freshness === "CLOSED" ? `market ${state.toLowerCase()} — last session` : null };
+      out[k] = qte; lastGood[k] = qte;
+    }
+    return out;
+  }
+}
+
 let _provider: MarketDataProvider | null = null;
 export function getMarketDataProvider(): MarketDataProvider {
-  if (_provider && _provider.name === marketDataProviderName()) return _provider;
-  // Only Twelve Data is implemented today; adding a vendor = add a class + a case here.
-  _provider = new TwelveDataProvider();
+  const name = marketDataProviderName();
+  if (_provider && _provider.name === name) return _provider;
+  // Adding a vendor = add a class + a case here.
+  _provider = name === "yahoo" ? new YahooProvider() : new TwelveDataProvider();
   return _provider;
 }
 
@@ -220,7 +305,7 @@ export function logMarketDataStartup(): void {
   /* eslint-disable no-console */
   console.log("External Market Data");
   console.log(`  Provider: ${marketDataProviderName()}`);
-  console.log(`  API Key: ${configured ? "CONFIGURED" : "NOT CONFIGURED"}`);
+  console.log(`  API Key: ${marketDataProviderName() === "yahoo" ? "not needed (keyless)" : configured ? "CONFIGURED" : "NOT CONFIGURED"}`);
   console.log(`  Status: ${configured ? "ready (health verified on first request)" : "DATA UNAVAILABLE until MARKET_DATA_API_KEY is set"}`);
 }
 

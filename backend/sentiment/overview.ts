@@ -99,11 +99,21 @@ async function quoteReal(sym: string, label: string, key: string, marketOpen: bo
       } catch { /* live quote unavailable → report UNAVAILABLE, do not show stale */ }
       return { key, label, value: null, change: null, changePct: null, ts: null, freshness: "UNAVAILABLE", source: null };
     }
-    // MARKET CLOSED → the previous session's close, clearly CLOSED, and only when
+    // MARKET CLOSED → the most recent session's close, clearly CLOSED, and only when
     // the candle is genuinely from the most recent session (not an old stale bar).
+    // After the close the daily bar for TODAY is often not published yet, so the
+    // last two daily bars would show YESTERDAY's change. The batched last price
+    // (closedLtp) tells which bar is the previous close: if it equals the last
+    // daily close, today's bar exists (compare with the bar before); otherwise
+    // the last daily bar IS the previous close.
     try {
       const c: any[] = await getProvider().getCandles(sym, "1d", 3);
       if (Array.isArray(c) && c.length) {
+        const ltp = _closedLtp.data[sym];
+        if (ltp != null && ltp > 0 && Math.abs(c[c.length - 1].close - ltp) >= 0.01) {
+          const pc = c[c.length - 1].close;
+          return mkQuote(key, label, ltp, round2(ltp - pc), round2((ltp - pc) / pc * 100), null, marketOpen);
+        }
         const last = c[c.length - 1], prev = c.length > 1 ? c[c.length - 2] : null;
         const price = last.close;
         const ageDays = last.time ? (Date.now() / 1000 - last.time) / 86400 : 999;
@@ -119,6 +129,21 @@ async function quoteReal(sym: string, label: string, key: string, marketOpen: bo
   // Only cache real values long; keep retrying an UNAVAILABLE sooner.
   _qCache.set(sym, { ts: built.value != null ? Date.now() : Date.now() - (ttl - 15_000), q: built });
   return built;
+}
+
+// One batched last-price call (ONE Dhan request) per 30 min while closed — see quoteReal.
+let _closedLtp: { at: number; data: Record<string, number> } = { at: 0, data: {} };
+async function refreshClosedLtp(syms: string[]): Promise<void> {
+  if (Date.now() - _closedLtp.at < Q_TTL_CLOSED) return;
+  const p: any = getProvider();
+  if (typeof p.getQuotes !== "function") return;
+  _closedLtp.at = Date.now();
+  try {
+    const qs: Record<string, any> = await qGate(() => p.getQuotes(syms));
+    const data: Record<string, number> = {};
+    for (const [s0, q0] of Object.entries(qs || {})) if (q0 && q0.price != null) data[s0] = q0.price;
+    _closedLtp = { at: Date.now(), data };
+  } catch { _closedLtp.at = Date.now() - Q_TTL_CLOSED + 60_000; /* retry in a minute */ }
 }
 
 export interface PremarketOverview {
@@ -141,6 +166,7 @@ export async function buildPremarketOverview(): Promise<PremarketOverview> {
   const marketOpen = marketOpenNow(now);
 
   // ---- Indian indices + VIX (REAL, Dhan) ----
+  if (!marketOpen) await refreshClosedLtp([...INDICES.map((i) => i.sym), ...LARGECAPS]);
   const idxQuotes = await Promise.all(INDICES.map((i) => quoteReal(i.sym, i.label, i.key, marketOpen)));
   const idxByKey: Record<string, Quote> = Object.fromEntries(idxQuotes.map((q) => [q.key, q]));
   let vixQuote: Quote = { key: "INDIA VIX", label: "INDIA VIX", value: null, change: null, changePct: null, ts: null, freshness: "UNAVAILABLE", source: null };

@@ -196,7 +196,8 @@ import { writeBaseline as writeStrategyBaseline, checkStrategyIntegrity } from "
 import { getMarketNews } from "../news/news";
 import { buildPremarketOverview } from "../sentiment/overview";
 import { todaySnapshots } from "../sentiment/snapshotStore";
-import { getMarketDataHealth } from "../sentiment/marketDataProvider";
+import { getMarketDataHealth, fetchMarketData, marketDataProviderName, MdKey } from "../sentiment/marketDataProvider";
+import { globalCues, indexSentiment, indiaSentiment, briefPhase, briefHeadline, SentimentBrief, IndexSentiment } from "../sentiment/brief";
 import fs from "fs";
 import path from "path";
 import {
@@ -8102,6 +8103,54 @@ router.get("/premarket/overview", async (_req: Request, res: Response) => {
   } catch (e: any) {
     res.json({ available: false, error: e?.message || "overview failed" });
   }
+});
+// Market Sentiment Brief for the Market Command strip — CONTEXT ONLY (never read by
+// the arbiter or the paper engine). Global/oil/FX come from the external provider
+// (keyless Yahoo by default, 60s cache, zero Dhan calls); Indian sentiment reuses the
+// shared 5m candle cache (the same keys Market Command already fills) + India VIX.
+const BRIEF_INDICES: { sym: string; label: string }[] = [
+  { sym: "^NSEI", label: "NIFTY" }, { sym: "^NSEBANK", label: "BANKNIFTY" }, { sym: "^CNXFIN", label: "FINNIFTY" }, { sym: "^BSESN", label: "SENSEX" },
+];
+async function buildSentimentBrief(): Promise<SentimentBrief> {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const phase = briefPhase(nowSec);
+  const keys: MdKey[] = ["USDINR","DXY","US10Y","BRENT","WTI","GOLD","CBOEVIX","SPX","NASDAQ","DOW","USFUT","NIKKEI","HANGSENG","SHANGHAI","KOSPI","TAIWAN","FTSE","DAX","CAC"];
+  const [md, vixRaw, news, ...idx] = await Promise.all([
+    fetchMarketData(keys).catch(() => ({} as Record<string, any>)),
+    cached("india-vix", 60_000, () => getIndiaVix()).catch(() => null),
+    cached("news-feed", 300_000, () => getMarketNews()).catch(() => null),
+    ...BRIEF_INDICES.map(async (b): Promise<IndexSentiment> => {
+      let cs: Candle[] = [];
+      try { cs = await withTimeout(getCandlesCached(b.sym, "5m"), 12_000, `brief ${b.sym}`) as Candle[]; }
+      catch { cs = (_cache.get(`c:${b.sym}:5m`)?.v as Candle[]) || []; }
+      const s = indexSentiment(findSymbolDef(b.sym)?.nseSymbol || b.label, b.label, cs, nowSec);
+      const d = latestDecision(s.index);
+      if (d?.bias && d.bias.state !== "NO_DATA") s.bias = { state: d.bias.state, message: d.bias.traderMessage };
+      return s;
+    }),
+  ]);
+  const v: any = vixRaw;
+  const vix = v && v.available && v.value != null
+    ? { key: "INDIA VIX", label: "India VIX", value: v.value, change: v.change ?? null, changePct: v.changePct ?? null, ts: v.ts ?? null, freshness: (isTradingTimeIST() ? "LIVE" : "CLOSED") as any, source: "DHAN" }
+    : null;
+  const cues = globalCues(md as any);
+  const india = indiaSentiment(idx as IndexSentiment[], vix);
+  const pol = ((news as any)?.policy || []) as any[];
+  const items = pol.slice(0, 8).map((n) => ({ title: n.title, source: n.source, ago: n.ago, publishedEpoch: n.publishedEpoch, tags: n.tags, sentiment: n.sentiment, link: n.link }));
+  const m = md as any;
+  return {
+    ts: nowSec, phase, headline: briefHeadline(phase, cues, india),
+    global: { us: [m.SPX, m.NASDAQ, m.DOW].filter(Boolean), usFutures: m.USFUT ?? null, asia: [m.NIKKEI, m.HANGSENG, m.SHANGHAI, m.KOSPI, m.TAIWAN].filter(Boolean), europe: [m.FTSE, m.DAX, m.CAC].filter(Boolean), cues },
+    macro: { brent: m.BRENT ?? null, wti: m.WTI ?? null, gold: m.GOLD ?? null, usdinr: m.USDINR ?? null, dxy: m.DXY ?? null, us10y: m.US10Y ?? null, cboeVix: m.CBOEVIX ?? null },
+    india,
+    policy: { items, rbi: pol.filter((n) => n.tags?.includes("RBI")).length, govt: pol.filter((n) => n.tags?.includes("Govt Policy")).length },
+    provider: marketDataProviderName(),
+    note: "Context only — this never changes a trade decision. Global quotes are delayed; GIFT NIFTY is not available from the provider.",
+  };
+}
+router.get("/market-sentiment-brief", requirePermission("oiAnalysis"), async (_req: Request, res: Response) => {
+  try { res.json(await cached("sentiment-brief", 60_000, () => buildSentimentBrief())); }
+  catch (e: any) { res.json({ error: e?.message || "sentiment brief failed" }); }
 });
 router.get("/premarket/timeline", async (_req: Request, res: Response) => {
   try { res.json({ slots: todaySnapshots() }); }

@@ -25,9 +25,10 @@ export interface NewsResult {
   asOf: number;
   items: NewsItem[];
   summary: { total: number; positive: number; negative: number; neutral: number; highImpact: number; bias: "Bullish" | "Bearish" | "Neutral" };
+  policy: NewsItem[];     // newest RBI / government-policy headlines (last 48h), drawn from ALL feeds
 }
 
-interface Feed { source: string; url: string; }
+interface Feed { source: string; url: string; policyOnly?: boolean; }
 
 const FEEDS: Feed[] = [
   { source: "ET Markets", url: "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms" },
@@ -35,6 +36,11 @@ const FEEDS: Feed[] = [
   { source: "Moneycontrol Mkts", url: "https://www.moneycontrol.com/rss/marketreports.xml" },
   { source: "Business Standard", url: "https://www.business-standard.com/rss/markets-106.rss" },
   { source: "LiveMint", url: "https://www.livemint.com/rss/markets" },
+  // Economy / policy desks — RBI and government-policy news rarely makes the markets feeds.
+  // policyOnly: they feed ONLY the `policy` list, never `items`/`summary` (summary.bias is
+  // read by the paper engine, so its inputs stay exactly the markets feeds).
+  { source: "ET Policy", url: "https://economictimes.indiatimes.com/news/economy/policy/rssfeeds/1106944246.cms", policyOnly: true },
+  { source: "LiveMint Economy", url: "https://www.livemint.com/rss/economy", policyOnly: true },
 ];
 
 // ---- sentiment + impact keyword lexicons (lowercase) ----
@@ -42,7 +48,9 @@ const POSITIVE = ["surge", "surges", "jump", "jumps", "rally", "rallies", "gain"
 const NEGATIVE = ["fall", "falls", "plunge", "plunges", "slump", "slumps", "crash", "crashes", "drop", "drops", "decline", "declines", "tumble", "tumbles", "slide", "sinks", "loss", "losses", "downgrade", "underperform", "bearish", "cut", "cuts", "miss", "misses", "probe", "fraud", "ban", "selloff", "sell-off", "weak", "warning", "default", "layoff", "52-week low", "record low", "down "];
 // Market-moving event tags -> impact = high
 const IMPACT_TAGS: Array<{ tag: string; kws: string[] }> = [
-  { tag: "RBI", kws: ["rbi", "repo rate", "monetary policy", "mpc"] },
+  { tag: "RBI", kws: ["rbi", "reserve bank", "repo rate", "monetary policy", " mpc "] },
+  { tag: "Govt Policy", kws: ["government", "govt", " centre ", "cabinet", "ministry", "finance minister", "sitharaman", "sebi", "gst council", "pli scheme",
+    "subsidy", "disinvestment", "excise duty", "customs duty", "import duty", "export duty", "export ban", "tariff", " policy", "regulation", "notification"] },
   { tag: "Fed", kws: ["fed", "fomc", "powell", "us federal reserve"] },
   { tag: "Inflation", kws: ["inflation", "cpi", "wpi"] },
   { tag: "GDP", kws: ["gdp", "growth rate"] },
@@ -127,22 +135,30 @@ const TTL_MS = 5 * 60_000;
 export async function getMarketNews(force = false): Promise<NewsResult> {
   if (!force && cache && Date.now() - cache.at < TTL_MS) return cache.data;
   const settled = await Promise.allSettled(FEEDS.map(fetchFeed));
-  const all: NewsItem[] = [];
-  for (const r of settled) if (r.status === "fulfilled") all.push(...r.value);
+  const all: NewsItem[] = [], policyAll: NewsItem[] = [];
+  settled.forEach((r, i) => { if (r.status === "fulfilled") { policyAll.push(...r.value); if (!FEEDS[i].policyOnly) all.push(...r.value); } });
   // dedupe by normalized title (keep the newest)
-  const seen = new Map<string, NewsItem>();
-  for (const it of all) {
-    const key = it.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 80);
-    const prev = seen.get(key);
-    if (!prev || it.publishedEpoch > prev.publishedEpoch) seen.set(key, it);
-  }
+  const dedupe = (list: NewsItem[]) => {
+    const m = new Map<string, NewsItem>();
+    for (const it of list) {
+      const key = it.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 80);
+      const prev = m.get(key);
+      if (!prev || it.publishedEpoch > prev.publishedEpoch) m.set(key, it);
+    }
+    return m;
+  };
+  const seen = dedupe(all);
   const items = [...seen.values()].sort((a, b) => b.publishedEpoch - a.publishedEpoch).slice(0, 40);
   const positive = items.filter((i) => i.sentiment === "positive").length;
   const negative = items.filter((i) => i.sentiment === "negative").length;
   const neutral = items.length - positive - negative;
   const highImpact = items.filter((i) => i.impact === "high").length;
   const bias = positive > negative * 1.3 ? "Bullish" : negative > positive * 1.3 ? "Bearish" : "Neutral";
-  const data: NewsResult = { asOf: Math.floor(Date.now() / 1000), items, summary: { total: items.length, positive, negative, neutral, highImpact, bias } };
+  const since = Math.floor(Date.now() / 1000) - 48 * 3600;
+  const policy = [...dedupe(policyAll).values()]
+    .filter((i) => i.publishedEpoch >= since && i.tags.some((t) => t === "RBI" || t === "Govt Policy"))
+    .sort((a, b) => b.publishedEpoch - a.publishedEpoch).slice(0, 12);
+  const data: NewsResult = { asOf: Math.floor(Date.now() / 1000), items, summary: { total: items.length, positive, negative, neutral, highImpact, bias }, policy };
   cache = { at: Date.now(), data };
   return data;
 }
