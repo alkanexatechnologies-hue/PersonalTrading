@@ -47,6 +47,14 @@ export const SETUP_CONFIG = {
   // Study (5 indices, build + unseen check period): range-day losses −60%, stop-loss rate down on both periods,
   // 43% fewer trades; better than no filter after option costs.
   chopEfficiencyMin: 0.20,
+  // chopMode "session" = efficiency since the open; "rolling" = over the last chopWindowBars candles.
+  // chopBreakOverride: a candle closing beyond the session's high (CE) / low (PE) so far may enter even when choppy.
+  chopMode: "session" as "session" | "rolling", chopWindowBars: 12, chopBreakOverride: false,
+  // S6 OPENING DRIVE (switch): after the first 5m candle, a candle closing beyond its high (CE) / low (PE) on the same
+  // side of VWAP, completed by 09:35, gives one trade; break entry, stop beyond the signal candle, room check.
+  s6Enabled: false, s6LastSignalMin: 9 * 60 + 35,
+  // PDH/PDL reversal exception (switch): a confirmed rejection at the Previous Day High / Low may trade against the VWAP side.
+  vwapGateExemptPdhPdl: false,
   // NIFTY reference points from the trader's original rule (logged for comparison only)
   refVwapPts: 30, refRoomPts: 40,
   // S5 EMA TREND (research-backed: EMA 9 trail best on both sides; trail only after +1R; book 50% at 1.5R)
@@ -62,7 +70,7 @@ const istDay = (t: number) => new Date((t + IST) * 1000).toISOString().slice(0, 
 const hm = (t: number) => new Date((t + IST) * 1000).toISOString().slice(11, 16);
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
-export type SetupId = "S3_LEVEL_REJECTION" | "S4_VWAP_PULLBACK" | "S5_EMA_TREND";
+export type SetupId = "S3_LEVEL_REJECTION" | "S4_VWAP_PULLBACK" | "S5_EMA_TREND" | "S6_OPENING_DRIVE";
 export type SignalStatus = "ENTRY_READY" | "ACTIVE" | "TARGET" | "STOP" | "TIME_EXIT" | "EOD_EXIT" | "EXTENDED" | "BLOCKED" | "TRAIL_EXIT" | "VWAP_EXIT" | "REJECTION_EXIT" | "NO_TRIGGER";
 export type WatchState = "APPROACHING" | "LEVEL_TEST" | "CONFIRMATION_PENDING" | "ACCEPTED";
 
@@ -123,6 +131,7 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
   let dirPend: "UP" | "DOWN" | "NEUTRAL" | null = null, dirPendN = 0;
   const run = (id: SetupId) => !opts.only || opts.only === id;   // replay can evaluate one setup in isolation
   const s5Count = { CE: 0, PE: 0 }; let s5LastBar = -99;
+  let s6Done = false;
 
   const roomTo = (side: "CE" | "PE", from: number, act: number, minDist: number) => {
     // next MAJOR level in the trade direction, at least minDist away
@@ -146,12 +155,22 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
   { let path = 0; const o0 = today[0].open;
     for (let j = 0; j < today.length; j++) {
       if (j > 0) path += Math.abs(today[j].close - today[j - 1].close);
-      const v = Math.abs(today[j].close - o0) / (path + Math.abs(today[0].close - o0) || 1);
+      let v = Math.abs(today[j].close - o0) / (path + Math.abs(today[0].close - o0) || 1);
+      if (C.chopMode === "rolling" && j >= C.chopWindowBars) {
+        let pw = 0; for (let q = j - C.chopWindowBars + 1; q <= j; q++) pw += Math.abs(today[q].close - today[q - 1].close);
+        v = Math.abs(today[j].close - today[j - C.chopWindowBars].close) / (pw || 1);
+      }
       effAt.set(today[j].time, v); effSeries.push({ time: hm(today[j].time + 300), value: r2(v), choppy: v < C.chopEfficiencyMin });
     } }
-  const chopBlock = (t: number): string | null => {
+  const chopBlock = (t: number, side?: "CE" | "PE"): string | null => {
     const v = effAt.get(t);
-    return C.chopEfficiencyMin > 0 && v != null && v < C.chopEfficiencyMin ? `Choppy day — efficiency ${r2(v)} < ${C.chopEfficiencyMin} (price has gone back and forth without net progress)` : null;
+    if (!(C.chopEfficiencyMin > 0 && v != null && v < C.chopEfficiencyMin)) return null;
+    if (C.chopBreakOverride && side) {   // breakout of the day's range after a choppy phase is allowed
+      const k = today.findIndex((x) => x.time === t);
+      if (k > 0) { const before = today.slice(0, k), cc = today[k];
+        if (side === "CE" ? cc.close > Math.max(...before.map((x) => x.high)) : cc.close < Math.min(...before.map((x) => x.low))) return null; }
+    }
+    return `Choppy day — efficiency ${r2(v)} < ${C.chopEfficiencyMin} (price has gone back and forth without net progress)`;
   };
   const push = (s: SetupSignal) => {
     const sc = today.find((x) => x.time === s.barTime);
@@ -268,10 +287,11 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
           const reg = opts.regimeAt ? opts.regimeAt(all.slice(0, i + 1)) : null;
           let block: string | null = null;
           if (context === "INTRADAY" && !major) block = "Minor level outside the morning window (needs a major level or an extreme move)";
-          if (!block) block = chopBlock(c.time);
+          if (!block) block = chopBlock(c.time, side);
           // VWAP gate: CE only on a 5m close above VWAP, PE only on a close below (same rule as S4 / S5)
           const vwC = VW[i];
-          if (!block && C.vwapGate && !(C.vwapGateExemptExtreme && context === "EXTREME") && vwC != null && (res ? c.close >= vwC : c.close <= vwC))
+          const pdhpdl = /Previous Day (High|Low)/.test(L.type) || L.sources.some((x) => /^Previous Day (High|Low)/.test(x));
+          if (!block && C.vwapGate && !(C.vwapGateExemptExtreme && context === "EXTREME") && !(C.vwapGateExemptPdhPdl && pdhpdl) && vwC != null && (res ? c.close >= vwC : c.close <= vwC))
             block = `VWAP gate — 5m close ${r2(c.close)} is ${c.close >= vwC ? "above" : "below"} VWAP ${r2(vwC)}; ${res ? "PE needs a close below VWAP" : "CE needs a close above VWAP"}`;
           // higher-timeframe permission: do not fade the 15M trend unless the move is extreme or the market is ranging
           if (!block && ((res && d15 === "UP") || (!res && d15 === "DOWN")) && context !== "EXTREME" && reg !== "RANGE")
@@ -342,7 +362,7 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
         const reg = opts.regimeAt ? opts.regimeAt(all.slice(0, i + 1)) : null;
         let block: string | null = null;
         if ((side === "CE" && d15 !== "UP") || (side === "PE" && d15 !== "DOWN")) block = `15M trend ${d15 ?? "n/a"} does not agree`;
-        if (!block) block = chopBlock(c.time);
+        if (!block) block = chopBlock(c.time, side);
         if (!block && reg === "RANGE") block = "Regime RANGE — VWAP extensions mean-revert";
         const dayMove = side === "CE" ? c.high - sessOpen : sessOpen - c.low;
         if (!block && dailyAtr != null && dayMove > C.extendedDailyAtr * dailyAtr) block = `EXTENDED — day move ${r2(dayMove)} pts > ${C.extendedDailyAtr}× daily ATR`;
@@ -407,7 +427,7 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
             let block: string | null = null;
             const dayMove = sg > 0 ? c.high - sessOpen : sessOpen - c.low;
             if (dailyAtr != null && dayMove > C.extendedDailyAtr * dailyAtr) block = `EXTENDED — day move ${r2(dayMove)} pts > ${C.extendedDailyAtr}× daily ATR`;
-            if (!block) block = chopBlock(c.time);
+            if (!block) block = chopBlock(c.time, side);
             if (!block && s5Count[side] >= C.s5MaxPerSide) block = `Max ${C.s5MaxPerSide} EMA-trend signals per side today`;
             if (!block && k - s5LastBar < 4) block = "Same pullback leg as the previous signal";
             if (!block && !cooled("S5_EMA_TREND")) block = `Cooldown ${C.slCooldownMin} min after a stop`;
@@ -445,6 +465,25 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
             push(sig);
           }
         }
+      }
+    }
+    // ---------------- S6: opening drive (switch) ----------------
+    if (C.s6Enabled && run("S6_OPENING_DRIVE") && k >= 1 && !s6Done && m + 5 <= C.s6LastSignalMin) {
+      const orb = today[0], vwO = VW[i];
+      const side: "CE" | "PE" | null = vwO != null && c.close > orb.high && c.close > vwO ? "CE" : vwO != null && c.close < orb.low && c.close < vwO ? "PE" : null;
+      if (side) {
+        s6Done = true;   // the first qualifying candle only — one opening-drive attempt per day
+        const sg = side === "CE" ? 1 : -1;
+        let block: string | null = chopBlock(c.time, side);
+        if (!block && openSig) block = "Another setup signal is still open";
+        const stop = sg > 0 ? c.low - C.stopBufferAtr * a : c.high + C.stopBufferAtr * a;
+        const pp = planFor(side, c.close, stop, c.time, a, C.minRoomR);
+        if (!block && pp.block) block = pp.block;
+        push({ id: `S6|${day}|${side}|${hm(tEnd)}`, setup: "S6_OPENING_DRIVE", label: "S6 Opening Drive", context: "OPENING", side, date: day,
+          barTime: c.time, time: hm(tEnd), level: null, blockedBy: block, plan: pp.plan,
+          evidence: [`First 5-min candle ${r2(orb.low)}–${r2(orb.high)}; the ${hm(tEnd)} candle closed ${sg > 0 ? "above" : "below"} it at ${r2(c.close)}`, `${sg > 0 ? "Above" : "Below"} VWAP ${r2(vwO as number)}`],
+          status: block ? "BLOCKED" : "ENTRY_READY", fillTime: null, exitTime: null, exitPrice: null, resultR: null,
+          metrics: { atr: r2(a), orHigh: orb.high, orLow: orb.low } });
       }
     }
   }
