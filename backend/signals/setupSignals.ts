@@ -48,7 +48,9 @@ export const SETUP_CONFIG = {
   // 43% fewer trades; better than no filter after option costs.
   chopEfficiencyMin: 0.20,
   // which chart the S3/S4/S5 trend gates read: "15m" = 15M EMA 9 vs 21 (default), "5m" = 5m EMA 9 vs 21 on closed candles
-  trendTf: "15m" as "15m" | "5m",
+  // "engulf" = trend flips UP when a green 5m candle closes above the previous red candle's open (covers its body) and DOWN on the mirror;
+  // "engulfHigh" = the same but the close must clear the previous candle's high / low
+  trendTf: "15m" as "15m" | "5m" | "engulf" | "engulfHigh",
   // chopMode "session" = efficiency since the open; "rolling" = over the last chopWindowBars candles.
   // chopBreakOverride: a candle closing beyond the session's high (CE) / low (PE) so far may enter even when choppy.
   chopMode: "session" as "session" | "rolling", chopWindowBars: 12, chopBreakOverride: false,
@@ -121,8 +123,19 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
   };
   const sessOpen = today[0].open;
   // trend used by the entry gates; the 5m version reads EMA 9 vs EMA 21 of the closed 5m candle at index i
-  const tfName = C.trendTf === "5m" ? "5m" : "15M";
+  const tfName = C.trendTf === "5m" ? "5m" : C.trendTf === "engulf" || C.trendTf === "engulfHigh" ? "5m engulfing" : "15M";
+  const engulfDir: (string | null)[] = [];
+  for (let j = 0, st: string | null = null; j < all.length; j++) {
+    const c = all[j], p = all[j - 1];
+    if (p) {
+      const hi = C.trendTf === "engulfHigh";
+      if (c.close > c.open && p.close < p.open && c.close > (hi ? p.high : p.open)) st = "UP";
+      else if (c.close < c.open && p.close > p.open && c.close < (hi ? p.low : p.open)) st = "DOWN";
+    }
+    engulfDir.push(st);
+  }
   const gateTrend = (i: number, tEnd: number): string | null => {
+    if (C.trendTf === "engulf" || C.trendTf === "engulfHigh") return engulfDir[i] ?? null;
     if (C.trendTf !== "5m") return dir15At(tEnd);
     const a = E9[i], b = E21[i];
     return a == null || b == null ? null : a > b ? "UP" : a < b ? "DOWN" : "FLAT";
