@@ -9031,12 +9031,20 @@ function renderMCDecision(d) {
   ].filter(Boolean).map((t) => `<span class="arb-feat">${mcboEsc(t)}</span>`).join("");
   const liveTxt = x.live && x.live.state && x.live.state !== "—" ? `<span class="arb-live">Forming candle: ${mcboEsc(x.live.state)} near ${mcboN(x.live.s2Trigger)} — context only, needs a CLOSE</span>` : "";
   box.hidden = false;
+  mcInitCollapsible(box, "mcDecOpen");
+  const bz = x.bias && x.bias.state !== "NO_DATA" && x.bias.state !== "MIXED" ? x.bias : null;
+  const biasChip = bz ? `<span class="arb-chip arb-bias-chip ${BIAS_CLS[bz.state] || ""}" title="${mcboEsc(bz.traderMessage)}">${/WEAKENING/.test(bz.state) ? "⚠" : /BEAR/.test(bz.state) ? "🔻" : "🔺"} ${mcboEsc(bz.state.replace(/_/g, " "))}${bz.allow && !bz.allow.CE ? " · No new CE" : ""}${bz.allow && !bz.allow.PE ? " · No new PE" : ""}</span>` : "";
+  const planChip = live && o && o.available ? `<span class="arb-chip arb-plan-chip">${mcboEsc(arbOptionText(o))} · Entry ₹${mcboN(o.entry)} · <span class="dn">SL ₹${mcboN(o.stopLoss)}</span> · <span class="up">T1 ₹${mcboN(o.target1)}</span> · R:R 1:${mcboN(o.netRR)}</span>` : "";
   box.innerHTML = `
     <div class="arb-row arb-head">
       <span class="arb-title">FINAL DECISION · ${mcboEsc(x.index)}</span>
       <span class="arb-action ${arbCls(x.finalAction)}">${ARB_LABEL[x.finalAction] || x.finalAction}</span>
-      <span class="arb-meta">${mcboEsc(x.timeframe)} candle ${arbHm(x.candleTime)} (closed) · ${mcboEsc(x.dataStatus)} · ${mcboEsc(x.sessionPhase)}${x.expiryDay ? " · EXPIRY DAY" : ""}</span>
+      <span class="arb-reason-inline" title="${mcboEsc(x.reason)}">${mcboEsc(x.reason)}</span>
+      ${planChip}${biasChip}${mcContextChip()}
+      <span class="arb-meta">${arbHm(x.candleTime)} · ${mcboEsc(x.dataStatus)}${x.expiryDay ? " · EXPIRY" : ""}</span>
+      <button type="button" class="mc-det-btn" onclick="mcToggleDetails('mc-decision','mcDecOpen')" aria-label="Show decision details"><span class="mc-det-open">Details ▾</span><span class="mc-det-close">Hide ▴</span></button>
     </div>
+    <div class="mc-details">
     <div class="arb-row arb-reason">${mcboEsc(x.reason)}</div>
     ${arbBiasRow(x)}
     <div class="arb-grid">
@@ -9054,7 +9062,36 @@ function renderMCDecision(d) {
     ${ev ? `<div class="arb-row arb-ev">Evidence: ${mcboEsc(ev.note)} <i>(${mcboEsc(ev.samples)} replay trades · ${mcboEsc(ev.source)})</i></div>` : ""}
     ${x.option && x.option.reason ? `<div class="arb-row arb-block">Option: ${mcboEsc(x.option.reason)}</div>` : ""}
     <div class="arb-row arb-cands">${cands}</div>
-    <div class="arb-row arb-feats"><span class="mcbo-k">Evidence only</span>${feats || "—"}${liveTxt}</div>`;
+    <div class="arb-row arb-feats"><span class="mcbo-k">Evidence only</span>${feats || "—"}${liveTxt}</div>
+    </div>`;
+}
+
+// Collapsible MC panels: one line by default so the CHART stays on screen; the
+// choice is remembered per panel (per-viewer convenience only).
+function mcInitCollapsible(box, key) {
+  if (box.dataset.colInit) return;
+  box.dataset.colInit = "1";
+  box.classList.add("mc-collapsible");
+  let open = false; try { open = localStorage.getItem(key) === "1"; } catch { /* storage blocked */ }
+  box.classList.toggle("open", open);
+}
+function mcToggleDetails(id, key) {
+  const box = el(id); if (!box) return;
+  const open = !box.classList.contains("open");
+  box.classList.toggle("open", open);
+  try { localStorage.setItem(key, open ? "1" : "0"); } catch { /* ignore */ }
+}
+// Market context (global markets, crude, rupee, RBI / govt policy) is read in the
+// background and shown only as ONE guidance chip; details are in its tooltip.
+function mcContextChip() {
+  const d = MC.sentBrief; if (!d || !d.global) return "";
+  const g = d.global.cues || {}, i = d.india || {};
+  const lean = (l) => l === "BULLISH" ? "Bullish" : l === "BEARISH" ? "Bearish" : l === "MIXED" ? "Mixed" : "Neutral";
+  const cls = g.lean === "BEARISH" ? "dn" : g.lean === "BULLISH" ? "up" : "";
+  const pol = (d.policy && d.policy.items) || [];
+  const tip = [d.headline, ...(g.negatives || []).map((t) => "▼ " + t), ...(g.positives || []).map((t) => "▲ " + t),
+    ...(i.reasons || []), ...(pol.slice(0, 3).map((n) => `[${(n.tags || []).includes("RBI") ? "RBI" : "GOVT"}] ${n.title}`))].join("\n");
+  return `<span class="arb-chip arb-ctx-chip" title="${mcboEsc(tip)}">🌐 Global <b class="${cls}">${lean(g.lean)}</b> · India <b>${lean(i.lean)}</b>${pol.length ? ` · RBI/Govt news ${pol.length}` : ""}</span>`;
 }
 
 // Compact banner for Option Terminal / Trade Execution — same decision, no recompute.
@@ -9130,6 +9167,7 @@ function renderMCBreakout(d) {
     sigLine = `<div class="mcbo-row mcbo-last"><span class="mcbo-k">S2 last signal</span><b class="${sig.dir === "BUY" ? "up" : "dn"}">${mcboAction(sig)}</b> ${mcboHm(sig.barTime)} · ${mcboEsc(p.triggerType)} ${mcboN(p.trigger)} · spot R:R 1:${mcboN(p.rr)} · ${mcboEsc(opt)}${sig.gateNote ? ` · <span class="mcbo-warn">${mcboEsc(sig.gateNote)}</span>` : ""}</div>`;
   }
   box.hidden = false;
+  mcInitCollapsible(box, "mcBoOpen");
   box.innerHTML = `
     <div class="mcbo-row mcbo-head">
       <span class="mcbo-title">🎯 S2 Breakout · ${mcboEsc(d.interval || "")} chart <i class="mcbo-evtag">evidence — the decision uses 5m</i></span>
@@ -9137,7 +9175,9 @@ function renderMCBreakout(d) {
       <span class="mcbo-dir ${b.direction === "BULLISH" ? "up" : b.direction === "BEARISH" ? "dn" : ""}">${mcboEsc(b.direction || "—")} BIAS · B ${b.buyScore ?? "—"} / S ${b.sellScore ?? "—"}</span>
       <span class="mcbo-data ${String(dataTag).toLowerCase().replace(/\s+/g, "-")}">${mcboEsc(dataTag)}</span>
       <span class="mcbo-time">${mcboEsc(L.iso || "")}</span>
+      <button type="button" class="mc-det-btn" onclick="mcToggleDetails('mc-bo','mcBoOpen')" aria-label="Show S2 breakout details"><span class="mc-det-open">Details ▾</span><span class="mc-det-close">Hide ▴</span></button>
     </div>
+    <div class="mc-details">
     <div class="mcbo-row mcbo-reason">${mcboEsc(L.reason)}</div>
     <div class="mcbo-row mcbo-chips">${chips}</div>
     <div class="mcbo-row mcbo-kv">
@@ -9148,7 +9188,8 @@ function renderMCBreakout(d) {
       <span><span class="mcbo-k">Extension</span> ${mcboEsc(L.extension)}</span>
     </div>
     ${L.rrBlockReason ? `<div class="mcbo-row mcbo-block">R:R BLOCKED — ${mcboEsc(L.rrBlockReason)}</div>` : ""}
-    ${sigLine}`;
+    ${sigLine}
+    </div>`;
 }
 
 // Chart markers for the session: actual signals (arrow + strike + R:R) and
@@ -17164,7 +17205,7 @@ async function loadMCSentiment() {
   try {
     const r = await fetch("/api/market-sentiment-brief");
     const d = await r.json();
-    if (d && !d.error) renderMCSentiment(d);
+    if (d && !d.error) { MC.sentBrief = d; const s = el("mc-sent"); if (s) s.hidden = true; }
   } catch { /* keep the last render */ }
   finally { _mcSentBusy = false; }
 }
