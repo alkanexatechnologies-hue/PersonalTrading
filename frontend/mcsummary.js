@@ -14,7 +14,7 @@
 const MCS = {
   sym: "^NSEI", tf: "5m", init: false, timer: null, busy: false,
   d: null, ma: null, q: null, opt: { CE: null, PE: null }, optKey: null,
-  chart: null, series: {}, ce: null, pe: null, show: { ema9: true, ema21: true, ema50: true, ema200: false, vwap: true, levels: true, bos: true, ob: true, vol: true, zones: true, ntz: true },
+  chart: null, series: {}, ce: null, pe: null, show: { ema9: true, ema21: true, ema50: true, ema200: false, vwap: true, levels: true, bos: true, ob: true, vol: true, zones: false, ntz: true },
   maAt: 0, optAt: 0, hmMode: "oiChg", hmSide: "CE", selStrike: null,   // null = follow the current ATM strike
 };
 const MCS_SYMS = [["^NSEI", "NIFTY 50"], ["^NSEBANK", "BANKNIFTY"], ["^CNXFIN", "FINNIFTY"], ["^BSESN", "SENSEX"], ["^NSEMDCP50", "MIDCPNIFTY"]];
@@ -132,20 +132,28 @@ function mcsUnlockHeights() { document.querySelectorAll("#mcs-root .mcs-card").f
 function mcsBuildChart() {
   const c = mcsEl("mcs-chart"); if (!c || typeof LightweightCharts === "undefined") return;
   if (MCS.chart) { try { MCS.chart.remove(); } catch (_) {} }
+  // Same chart as Market Command (TradingView dark theme, crosshair, scales, series colours).
   const ch = LightweightCharts.createChart(c, {
-    width: c.clientWidth, height: c.clientHeight || 380,
-    layout: { background: { type: "solid", color: "#0a0e17" }, textColor: "#b2b5be", fontSize: 11 },
+    width: c.clientWidth, height: c.clientHeight || 500,
+    layout: { background: { type: "solid", color: "#0a0e17" }, textColor: "#b2b5be", fontSize: 12 },
     grid: { vertLines: { color: "#141c2e" }, horzLines: { color: "#141c2e" } },
-    rightPriceScale: { borderColor: "#2a2e39", scaleMargins: { top: 0.06, bottom: 0.22 } },
-    timeScale: { borderColor: "#2a2e39", timeVisible: true, secondsVisible: false }, crosshair: { mode: 1 },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal, vertLine: { color: "#758696", width: 1, style: 3, labelBackgroundColor: "#2a2e39" }, horzLine: { color: "#758696", width: 1, style: 3, labelBackgroundColor: "#2a2e39" } },
+    rightPriceScale: { borderColor: "#2a2e39", scaleMargins: { top: 0.08, bottom: 0.28 } },
+    timeScale: { borderColor: "#2a2e39", timeVisible: true, secondsVisible: false, barSpacing: 12 },
   });
   MCS.chart = ch;
-  MCS.series.c = ch.addCandlestickSeries({ upColor: "#16c784", downColor: "#ea3943", borderVisible: false, wickUpColor: "#16c784", wickDownColor: "#ea3943" });
-  const ln = (col, st) => ch.addLineSeries({ color: col, lineWidth: 1, lineStyle: st || 0, priceLineVisible: false, lastValueVisible: false });
-  MCS.series.ema9 = ln("#f97316"); MCS.series.ema21 = ln("#facc15"); MCS.series.ema50 = ln("#6366f1"); MCS.series.ema200 = ln("#94a3b8"); MCS.series.vwap = ln("#22c55e", 2);
-  MCS.series.c.applyOptions({ title: "Current", priceLineColor: "#64748b" });
+  MCS.series.c = ch.addCandlestickSeries({ upColor: "#16c784", downColor: "#ea3943", borderVisible: false, wickUpColor: "#16c784", wickDownColor: "#ea3943", priceLineVisible: false });
+  const ln = (col, w, title) => ch.addLineSeries({ color: col, lineWidth: w, lineStyle: 0, priceLineVisible: false, lastValueVisible: !!title, title: title || "" });
+  MCS.series.ema9 = ln("#3b82f6", 1, "EMA 9"); MCS.series.ema21 = ln("#f0b90b", 1, "EMA 21"); MCS.series.ema50 = ln("#a855f7", 2, "EMA 50"); MCS.series.ema200 = ln("#e056a0", 2, ""); MCS.series.vwap = ln("#22c55e", 2, "VWAP");
   MCS.series.vol = ch.addHistogramSeries({ priceScaleId: "vol", priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false });
-  ch.priceScale("vol").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+  ch.priceScale("vol").applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
+  // Crosshair OHLC legend (as on Market Command): hovering a candle shows its O/H/L/C and time.
+  ch.subscribeCrosshairMove((param) => {
+    const cs = MCS.d?.candles; const o = mcsEl("mcs-ohlc"); if (!cs || !o) return;
+    if (!param || !param.time) { if (MCS._ohlcHtml) o.innerHTML = MCS._ohlcHtml; return; }
+    const x = cs.find((k) => mcsT(k.time) === param.time); if (!x) return;
+    o.innerHTML = `<span class="mcs-sub">${mcsIstDay(x.time).slice(5)} ${mcsHm(x.time)}</span> O <b>${mcsN(x.open)}</b> H <b>${mcsN(x.high)}</b> L <b>${mcsN(x.low)}</b> C <b class="${mcsCls(x.close - x.open)}">${mcsN(x.close)}</b> Vol <b>${mcsL(x.volume)}</b>`;
+  });
   MCS.series.lines = [];
   MCS.zones = mcsZoneLayer(c, ch, MCS.series.c);
   try { new ResizeObserver(() => ch.applyOptions({ width: c.clientWidth, height: c.clientHeight || 380 })).observe(c); } catch (_) {}
@@ -167,9 +175,19 @@ function mcsRenderChart() {
   const lad = mcsSpotLadder(d);
   const want = (l) => (l.kind === "bos" || l.kind === "choch" ? MCS.show.bos : l.kind === "ind" ? false : MCS.show.levels);
   // Same list as the Levels table; indicator lines (VWAP/EMA) are drawn as series, not price lines.
-  mcsLevelList(d).filter((l) => want(l) && inView(l.price)).forEach((l) => {
-    MCS.series.lines.push(MCS.series.c.createPriceLine({ price: l.price, color: l.color, lineWidth: 1, lineStyle: l.kind === "ladder" && l.side === "resistance" || l.kind === "ladder" && l.side === "support" ? 0 : 2, axisLabelVisible: true, title: l.chip }));
+  const drawn = mcsLevelList(d).filter((l) => want(l) && inView(l.price));
+  const nearest = drawn.reduce((b, l) => (b == null || Math.abs(l.price - d.spot) < Math.abs(b.price - d.spot) ? l : b), null);
+  drawn.forEach((l) => {
+    // Market Command style: walls solid; ORB / PDH-PDL / swing / pivots / day levels dashed; nearest level thicker with ◀.
+    const near = l === nearest;
+    const k = l.kind === "ladder" ? l.sub : l.kind;
+    const col = l.kind === "ladder" && typeof mcLevelColor === "function" ? mcLevelColor({ kind: l.sub, side: l.side }) : l.color;
+    const style = k === "orb" || k === "pdhl" || k === "swing" || k === "pivot" || k === "day" || k === "pdc" ? 2 : 0;
+    const short = l.kind === "ladder" ? l.chip.split(" ").slice(1).join(" ") : l.chip;
+    MCS.series.lines.push(MCS.series.c.createPriceLine({ price: l.price, color: col, lineWidth: near ? 2 : 1, lineStyle: style, axisLabelVisible: true, title: `${short} ${mcsN(l.price, 2)}${near ? " ◀" : ""}` }));
   });
+  // Current price: blue dashed line like Market Command.
+  if (d.spot != null) MCS.series.lines.push(MCS.series.c.createPriceLine({ price: d.spot, color: "#2962ff", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "" }));
   if (MCS.show.levels && lad.sl && inView(lad.sl.price)) MCS.series.lines.push(MCS.series.c.createPriceLine({ price: lad.sl.price, color: "#f97316", lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title: "SL" }));
   if (MCS.show.ob) (d.orderBlocks || []).filter((o) => inView(o.high) || inView(o.low)).slice(-3).forEach((o) => {
     const col = o.side === "Bullish" ? "rgba(22,199,132,.6)" : "rgba(234,57,67,.6)";
@@ -203,7 +221,7 @@ function mcsRenderChart() {
   mcsEl("mcs-chname").textContent = `${nm} ${MCS.tf === "60m" ? "1 Hour" : parseInt(MCS.tf, 10) + " Min"}`;
   // Day OHLC + change vs previous close (as in the design); last candle time for freshness.
   const ss = mcsSessionStats(); const dchg = ss && ss.prevClose != null ? ss.close - ss.prevClose : null;
-  mcsEl("mcs-ohlc").innerHTML = ss ? `O <b>${mcsN(ss.open)}</b> H <b>${mcsN(ss.high)}</b> L <b>${mcsN(ss.low)}</b> C <b class="${mcsCls(dchg)}">${mcsN(ss.close)}</b> <b class="${mcsCls(dchg)}">${dchg != null ? (dchg >= 0 ? "+" : "") + mcsN(dchg) + " (" + mcsPct((dchg / ss.prevClose) * 100) + ")" : ""}</b> <span class="mcs-sub">· last candle ${mcsHm(last.time)}</span>` : "";
+  mcsEl("mcs-ohlc").innerHTML = MCS._ohlcHtml = ss ? `O <b>${mcsN(ss.open)}</b> H <b>${mcsN(ss.high)}</b> L <b>${mcsN(ss.low)}</b> C <b class="${mcsCls(dchg)}">${mcsN(ss.close)}</b> <b class="${mcsCls(dchg)}">${dchg != null ? (dchg >= 0 ? "+" : "") + mcsN(dchg) + " (" + mcsPct((dchg / ss.prevClose) * 100) + ")" : ""}</b> <span class="mcs-sub">· last candle ${mcsHm(last.time)}</span>` : "";
 }
 
 function mcsSessionStats() {
