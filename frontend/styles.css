@@ -6778,3 +6778,19 @@ body.lqa-fullwidth .content { padding-left: 0; padding-right: 0; }
 @media (max-width: 900px) { .mcs-ssgrid { grid-template-columns: minmax(0, 1fr); } .mcs-sstoday { overflow-x: auto; } }
 .mcs-ssvb { font-size: 13px; margin: 0 0 6px; padding: 4px 8px; border-radius: 6px; background: #131c2e; border-left: 3px solid #64748b; }
 .mcs-ssvb.up { border-left-color: #22c55e; } .mcs-ssvb.up b { color: #22c55e; } .mcs-ssvb.dn { border-left-color: #ef4444; } .mcs-ssvb.dn b { color: #ef4444; }
+
+/* ===================== MC SUMMARY — LIVE / TESTING modes ===================== */
+.mcs-modes { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.mcs-modes button { min-height: 36px; padding: 4px 14px; border: 0; background: var(--panel-2, #131c2e); color: var(--text); font-weight: 800; font-size: 13px; cursor: pointer; }
+.mcs-modes button + button { border-left: 1px solid var(--border); }
+.mcs-modes button.on[data-mode="LIVE"] { background: #15803d; color: #fff; }
+.mcs-modes button.on[data-mode="TEST"] { background: #b45309; color: #fff; }
+.mcs-testbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 8px; padding: 8px 10px; border-radius: 8px; background: rgba(245,158,11,.10); border: 1px solid #f59e0b; color: #fde68a; font-size: 13px; }
+.mcs-testbar[hidden] { display: none; }
+.mcs-testbar input, .mcs-testbar select { min-height: 36px; font-size: 16px; padding: 2px 6px; background: #0f1626; color: #e2e8f0; border: 1px solid #334155; border-radius: 6px; }
+.mcs-testbar button { min-height: 36px; padding: 4px 10px; border-radius: 6px; border: 1px solid #f59e0b; background: #1f1a0e; color: #fde68a; font-weight: 700; cursor: pointer; }
+.mcs-testbar .mcs-trun { background: #b45309; color: #fff; }
+.mcs-tstat { font-weight: 700; }
+#mcs-root.mcs-testing .mcs-card { border-color: rgba(245,158,11,.45); }
+.mcs-testtag { display: inline-block; font-size: 12px; font-weight: 800; padding: 2px 8px; border-radius: 4px; background: #b45309; color: #fff; }
+.mcs-liveonly { padding: 14px; color: #fbbf24; font-size: 13px; text-align: center; }

@@ -8374,6 +8374,14 @@ async function setupOptionLeg(def: any, side: "CE" | "PE", plan: NonNullable<Set
       ltp: op.optionLtp, entry: op.entry, stopLoss: op.stopLoss, target: op.target1, rr: op.rr, netRR, costPerUnit, delta: op.delta, iv: op.iv, oi: op.oi, volume: op.volume, why: op.why, lotSize: lot };
   } catch (e: any) { return { available: false, reason: e?.message || "option leg failed" }; }
 }
+function setupRunDay(days: string[], ses: Map<string, Candle[]>, di: number, asOf: number, extra: LiqLevel[] | null): SessionResult & { levels: LiqLevel[] } {
+  const prior = days.slice(Math.max(0, di - 15), di).map((d) => ses.get(d)!);
+  const todayC = ses.get(days[di])!.filter((c) => c.time + 300 <= asOf);
+  const levels = extra ?? buildLevels(prior.slice(-6), todayC, asOf);
+  const dAtr = dailyAtrFrom5m(prior);
+  const r = evaluateSession(prior.slice(-5).flat(), todayC, levels, dAtr, asOf, { regimeAt: (upto) => regimeAt(upto.filter((c) => c.time + 300 <= asOf), dAtr).regime });
+  return { ...r, levels: levels.filter((l) => l.activeFrom <= asOf) };
+}
 async function buildSetupSignals(symbol: string) {
   const def = findSymbolDef(symbol); if (!def) throw new Error("unknown symbol");
   const nowSec = Math.floor(Date.now() / 1000), today = istDateStr();
@@ -8386,13 +8394,7 @@ async function buildSetupSignals(symbol: string) {
   if (days.length < 7) throw new Error("not enough candle history");
   const lastDay = days[days.length - 1], isToday = lastDay === today;
   const dayEnd = (d: string) => { const a = ses.get(d)!; return a[a.length - 1].time + 300; };
-  const runDay = (di: number, asOf: number, extra: LiqLevel[] | null): SessionResult => {
-    const prior = days.slice(Math.max(0, di - 15), di).map((d) => ses.get(d)!);
-    const todayC = ses.get(days[di])!.filter((c) => c.time + 300 <= asOf);
-    const levels = extra ?? buildLevels(prior.slice(-6), todayC, asOf);
-    const dAtr = dailyAtrFrom5m(prior);
-    return evaluateSession(prior.slice(-5).flat(), todayC, levels, dAtr, asOf, { regimeAt: (upto) => regimeAt(upto.filter((c) => c.time + 300 <= asOf), dAtr).regime });
-  };
+  const runDay = (di: number, asOf: number, extra: LiqLevel[] | null): SessionResult => setupRunDay(days, ses, di, asOf, extra);
   // Today: the Liquidity Analysis level set (includes the morning OI support / resistance).
   let todayLevels: LiqLevel[] | null = null;
   try {
@@ -8426,10 +8428,47 @@ async function buildSetupSignals(symbol: string) {
     ],
   };
 }
+// TESTING mode: re-run the same logic on a past date, as of a chosen time (closed candles
+// up to that time only — exactly what the screen would have shown live then).
+async function buildSetupSignalsForDate(symbol: string, date: string, uptoMin: number | null) {
+  const def = findSymbolDef(symbol); if (!def) throw new Error("unknown symbol");
+  const today = istDateStr();
+  if (date > today) throw new Error("Date is in the future");
+  const back = Math.min(85, Math.ceil((Date.parse(today + "T00:00:00Z") - Date.parse(date + "T00:00:00Z")) / 86400000) + 32);
+  const hist: Candle[] = await cached(`ss-hist5:${symbol}:${today}:${back}`, 6 * 3600_000, () => getProvider().getCandles(symbol, "5m", back) as Promise<Candle[]>);
+  let merged = hist;
+  if (date === today) {   // today: add the live 5m candles (the 6h history cache would miss recent bars)
+    let live: Candle[] = []; try { live = (await getCandlesCached(symbol, "5m")) as Candle[]; } catch { live = (_cache.get(`c:${symbol}:5m`)?.v as Candle[]) || []; }
+    const byT = new Map<number, Candle>(); for (const c of hist) byT.set(c.time, c); for (const c of live) byT.set(c.time, c);
+    merged = [...byT.values()].sort((a, b) => a.time - b.time);
+  }
+  const ses = sessionsOf(merged); const days = [...ses.keys()].sort();
+  const di = days.indexOf(date);
+  if (di < 0) throw new Error(`No market data for ${date} (holiday / weekend / outside the last ${back} days)`);
+  if (di < 7) throw new Error(`Not enough history before ${date} to build its levels — pick a later date`);
+  const dayC = ses.get(date)!, dayEndT = dayC[dayC.length - 1].time + 300;
+  const asOf = uptoMin == null ? dayEndT : Math.min(dayEndT, Math.floor(Date.parse(date + "T00:00:00Z") / 1000) - 19800 + uptoMin * 60);
+  const r = setupRunDay(days, ses, di, asOf, null);
+  const lv = (t: string) => r.levels.find((l) => l.type === t || l.sources.some((x) => x.startsWith(t + ":")))?.price ?? null;
+  return {
+    mode: "TEST", symbol, index: def.nseSymbol || def.name, name: def.name, date, isToday: false, asOf, upto: new Date((asOf + 19800) * 1000).toISOString().slice(11, 16),
+    dataStatus: "HISTORICAL", today: { ...r, signals: r.signals.map((x) => ({ ...x, option: { available: false, reason: "Testing mode — historical option prices are not available (index plan only)" } })) },
+    levelsForChart: { pdh: lv("Previous Day High"), pdl: lv("Previous Day Low"), pdc: lv("Previous Day Close"), orbHigh: lv("Opening Range High"), orbLow: lv("Opening Range Low") },
+    sessions: days.slice(7), config: SETUP_CONFIG,
+    notes: [`TESTING ${date} as of ${new Date((asOf + 19800) * 1000).toISOString().slice(11, 16)} — closed candles up to that time only; outcomes graded on candles up to that time.`, "Index-point plans only; no option prices for past dates."],
+  };
+}
 router.get("/setup-signals", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
   const symbol = LIQ_INDEX.includes(String(req.query.symbol)) ? String(req.query.symbol) : "^NSEI";
-  try { res.json(await cached(`setup-signals:${symbol}`, 30_000, () => buildSetupSignals(symbol))); }
-  catch (e: any) { res.json({ error: e?.message || "setup signals failed" }); }
+  const date = String(req.query.date || "");
+  try {
+    const um = /^(\d{2}):(\d{2})$/.exec(String(req.query.upto || ""));
+    const upto = um ? Number(um[1]) * 60 + Number(um[2]) : null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date) && (date !== istDateStr() || upto != null)) {
+      return res.json(await cached(`setup-test:${symbol}:${date}:${upto ?? "eod"}`, date === istDateStr() ? 30_000 : 10 * 60_000, () => buildSetupSignalsForDate(symbol, date, upto)));
+    }
+    res.json(await cached(`setup-signals:${symbol}`, 30_000, () => buildSetupSignals(symbol)));
+  } catch (e: any) { res.json({ error: e?.message || "setup signals failed" }); }
 });
 router.get("/market-sentiment-brief", requirePermission("oiAnalysis"), async (_req: Request, res: Response) => {
   try { res.json(await cached("sentiment-brief", 60_000, () => buildSentimentBrief())); }

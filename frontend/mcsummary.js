@@ -16,6 +16,8 @@ const MCS = {
   d: null, ma: null, q: null, opt: { CE: null, PE: null }, optKey: null,
   chart: null, series: {}, ce: null, pe: null, show: { ema9: true, ema21: true, ema50: true, ema200: false, vwap: true, levels: true, bos: true, ob: true, vol: true, zones: false, ntz: true },
   maAt: 0, optAt: 0, hmMode: "oiChg", hmSide: "CE", selStrike: null,   // null = follow the current ATM strike
+  // LIVE = today, auto-refresh. TEST = re-run the logic on a past date (as of a time); live refresh stops.
+  mode: "LIVE", gen: 0, test: { date: null, upto: "15:15" },
 };
 const MCS_SYMS = [["^NSEI", "NIFTY 50"], ["^NSEBANK", "BANKNIFTY"], ["^CNXFIN", "FINNIFTY"], ["^BSESN", "SENSEX"], ["^NSEMDCP50", "MIDCPNIFTY"]];
 const mcsEl = (id) => document.getElementById(id);
@@ -45,7 +47,17 @@ function mcsShell() {
   </div>
   <div class="mcs-bar">
     <div class="mcs-chips" id="mcs-syms">${MCS_SYMS.map(([s, n]) => `<button class="mcs-chip${s === MCS.sym ? " on" : ""}" data-sym="${s}">${n}</button>`).join("")}</div>
+    <div class="mcs-modes" id="mcs-modes"><button type="button" data-mode="LIVE" class="on">🟢 LIVE</button><button type="button" data-mode="TEST">🧪 TESTING</button></div>
     <div class="mcs-meta" id="mcs-meta"></div>
+  </div>
+  <div class="mcs-testbar" id="mcs-testbar" hidden>
+    <b>🧪 TESTING MODE</b> <span class="mcs-sub">re-run the logic on a past day — live updates are paused</span>
+    <label>Date <input type="date" id="mcs-tdate"></label>
+    <label>As of <select id="mcs-tupto"></select></label>
+    <button type="button" class="mcs-tstep" data-step="-1" title="5 minutes earlier">◀ 5m</button>
+    <button type="button" class="mcs-tstep" data-step="1" title="5 minutes later">5m ▶</button>
+    <button type="button" class="mcs-trun" id="mcs-trun">▶ Run</button>
+    <span class="mcs-tstat" id="mcs-tstat"></span>
   </div>
   <div class="mcs-top">
     <section class="mcs-card mcs-chartcard">
@@ -80,8 +92,16 @@ function mcsShell() {
   </div>
   <div class="mcs-foot">Data: existing Dhan connection (Market Command, Market Analysis, Option Terminal endpoints). Expected moves, delta/gamma projections and spike triggers are model estimates, not guarantees. Advisory only — no orders are placed.</div>`;
   mcsEl("mcs-back").onclick = () => { if (typeof switchTab === "function") switchTab("marketcommand"); };
-  root.querySelectorAll("#mcs-syms .mcs-chip").forEach((b) => (b.onclick = () => { MCS.sym = b.dataset.sym; root.querySelectorAll("#mcs-syms .mcs-chip").forEach((x) => x.classList.toggle("on", x === b)); MCS.d = null; MCS.ss = null; MCS.ma = null; MCS.maAt = 0; MCS.optKey = null; MCS._fit = null; MCS.selStrike = null; mcsUnlockHeights(); mcsLoading(); mcsRefresh(true); }));
-  root.querySelectorAll("#mcs-tfs .mcs-tf").forEach((b) => (b.onclick = () => { MCS.tf = b.dataset.tf; root.querySelectorAll("#mcs-tfs .mcs-tf").forEach((x) => x.classList.toggle("on", x === b)); MCS._fit = null; mcsUnlockHeights(); mcsRefresh(true); }));
+  // ---- LIVE / TESTING mode ----
+  root.querySelectorAll("#mcs-modes button").forEach((b) => (b.onclick = () => mcsSetMode(b.dataset.mode)));
+  const sel = mcsEl("mcs-tupto");
+  if (sel) { const opts = []; for (let m = 9 * 60 + 20; m <= 15 * 60 + 15; m += 5) opts.push(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`); sel.innerHTML = opts.map((t) => `<option value="${t}"${t === "15:15" ? " selected" : ""}>${t === "15:15" ? "15:15 (full day)" : t}</option>`).join(""); sel.onchange = () => { MCS.test.upto = sel.value; mcsRefresh(true); }; }
+  const dt = mcsEl("mcs-tdate");
+  if (dt) { dt.max = new Date(Date.now() + 19800000).toISOString().slice(0, 10); dt.onchange = () => { if (dt.value) { MCS.test.date = dt.value; MCS._fit = null; mcsRefresh(true); } }; }
+  root.querySelectorAll(".mcs-tstep").forEach((b) => (b.onclick = () => { const o = [...sel.options].map((x) => x.value); const i = Math.max(0, Math.min(o.length - 1, o.indexOf(MCS.test.upto) + Number(b.dataset.step))); MCS.test.upto = o[i]; sel.value = o[i]; mcsRefresh(true); }));
+  const run = mcsEl("mcs-trun"); if (run) run.onclick = () => mcsRefresh(true);
+  root.querySelectorAll("#mcs-syms .mcs-chip").forEach((b) => (b.onclick = () => { MCS.gen++; MCS.sym = b.dataset.sym; root.querySelectorAll("#mcs-syms .mcs-chip").forEach((x) => x.classList.toggle("on", x === b)); MCS.d = null; MCS.ss = null; MCS.ma = null; MCS.maAt = 0; MCS.optKey = null; MCS._fit = null; MCS.selStrike = null; mcsUnlockHeights(); mcsLoading(); mcsRefresh(true); }));
+  root.querySelectorAll("#mcs-tfs .mcs-tf").forEach((b) => (b.onclick = () => { MCS.gen++; MCS.tf = b.dataset.tf; root.querySelectorAll("#mcs-tfs .mcs-tf").forEach((x) => x.classList.toggle("on", x === b)); MCS._fit = null; mcsUnlockHeights(); mcsRefresh(true); }));
   root.querySelectorAll("#mcs-toggles input").forEach((c) => (c.onchange = () => { MCS.show[c.dataset.k] = c.checked; mcsRenderChart(); }));
 }
 
@@ -94,15 +114,15 @@ function mcsZoneLayer(host, ch, series) {
   host.style.position = "relative";
   const layer = document.createElement("div"); layer.className = "mcs-zones"; host.appendChild(layer);
   const z = { layer, ch, series, zones: [], raf: 0 };
-  const draw = () => { z.raf = 0; mcsDrawZones(z); };
-  z.redraw = () => { if (!z.raf) z.raf = requestAnimationFrame(draw); };
+  const draw = () => { z.raf = 0; if (!z.disposed) mcsDrawZones(z); };
+  z.redraw = () => { if (!z.raf && !z.disposed) z.raf = requestAnimationFrame(draw); };
   ch.timeScale().subscribeVisibleLogicalRangeChange(z.redraw);
   ch.subscribeCrosshairMove(z.redraw);
-  try { new ResizeObserver(z.redraw).observe(host); } catch (_) {}
+  try { z.ro = new ResizeObserver(z.redraw); z.ro.observe(host); } catch (_) {}
   return z;
 }
 function mcsDrawZones(z) {
-  if (!z || !z.layer) return;
+  if (!z || !z.layer || z.disposed) return;
   let w = 0; try { w = z.ch.timeScale().width(); } catch (_) {}
   z.layer.style.width = (w || z.layer.parentElement.clientWidth) + "px";
   z.layer.innerHTML = z.zones.map((b) => {
@@ -212,7 +232,7 @@ function mcsRenderChart() {
     });
   }
   try { MCS.series.c.setMarkers(mk.sort((a, b) => a.time - b.time)); } catch (_) {}
-  const key = MCS.sym + MCS.tf;
+  const key = MCS.sym + MCS.tf + MCS.mode + (MCS.mode === "TEST" ? MCS.test.date : "");
   if (MCS._fit !== key) {
     // Open on TODAY's session (as in the design); fall back to the last ~110 bars early in the day.
     const tday = mcsIstDay(cs[cs.length - 1].time), first = cs.findIndex((x) => mcsIstDay(x.time) === tday);
@@ -404,6 +424,13 @@ function mcsRenderFast() {
 
 function mcsRenderHeader() {
   const d = MCS.d, s = mcsSessionStats(); const q = mcsEl("mcs-quote");
+  if (MCS.mode === "TEST") {
+    const nm0 = MCS_SYMS.find((x) => x[0] === MCS.sym)?.[1] || MCS.sym;
+    if (q) q.innerHTML = `<b>${mcsEsc(nm0)}</b> <span class="mcs-testtag">🧪 TESTING ${mcsEsc(MCS.test.date || "")} · as of ${mcsEsc(MCS.ss?.upto || MCS.test.upto)}</span> ${d && s ? `<span class="mcs-px">${mcsN(d.spot)}</span> <span class="mcs-kv">Open <b>${mcsN(s.open)}</b></span><span class="mcs-kv">High <b>${mcsN(s.high)}</b></span><span class="mcs-kv">Low <b>${mcsN(s.low)}</b></span><span class="mcs-kv">Prev Close <b>${mcsN(s.prevClose)}</b></span>` : ""}`;
+    const tk = mcsEl("mcs-tickers"); if (tk) tk.innerHTML = "";
+    const m = mcsEl("mcs-meta"); if (m) m.innerHTML = `<span class="mcs-warn">Live refresh paused</span>`;
+    return;
+  }
   const nm = MCS_SYMS.find((x) => x[0] === MCS.sym)?.[1] || MCS.sym;
   if (q) {
     if (!d || !s) q.innerHTML = `<b>${mcsEsc(nm)}</b> ${UNAV}`;
@@ -505,7 +532,7 @@ function mcsRenderOpt(side) {
     const ln = (col, st) => ch.addLineSeries({ color: col, lineWidth: 1, lineStyle: st || 0, priceLineVisible: false, lastValueVisible: false });
     oc = MCS.oc[side] = { host, ch, cs, e9: ln("#f59e0b"), e21: ln("#22d3ee"), vw: ln("#22c55e", 2), lines: [], key: null };
     oc.zones = mcsZoneLayer(host, ch, cs);
-    try { new ResizeObserver(() => ch.applyOptions({ width: host.clientWidth, height: host.clientHeight || 250 })).observe(host); } catch (_) {}
+    try { oc.ro = new ResizeObserver(() => { if (!oc.disposed) ch.applyOptions({ width: host.clientWidth, height: host.clientHeight || 250 }); }); oc.ro.observe(host); } catch (_) {}
   }
   oc.cs.setData(cands.map((x) => ({ time: mcsT(x.time), open: x.open, high: x.high, low: x.low, close: x.close })));
   const ser = (arr) => cands.map((x, i) => (arr[i] != null ? { time: mcsT(x.time), value: arr[i] } : null)).filter(Boolean);
@@ -710,7 +737,21 @@ function mcsRenderAnalysis() {
     <div class="mcs-sub">Built only from this screen's live engine outputs (Market Command, Market Analysis, option candles). Rule-based read — not a prediction or probability. Advisory only; no orders.</div>`;
 }
 
+function mcsLiveOnly(id) {
+  const b = mcsEl(id); if (!b) return;
+  if (id === "mcs-optCE" || id === "mcs-optPE") {
+    // Dispose the option chart cleanly: stop its resize watcher and zone overlay first.
+    const side = id.slice(-2); const oc = MCS.oc && MCS.oc[side];
+    if (oc) { oc.disposed = true; try { oc.ro && oc.ro.disconnect(); } catch (_) {} if (oc.zones) { oc.zones.disposed = true; try { oc.zones.ro && oc.zones.ro.disconnect(); } catch (_) {} } try { oc.ch.remove(); } catch (_) {} MCS.oc[side] = null; }
+  }
+  b.innerHTML = `<div class="mcs-liveonly">🧪 Testing mode — this section needs live data (option chain, premiums, Greeks, Market Analysis) that does not exist for past dates. Switch to 🟢 LIVE to see it.</div>`;
+}
 function mcsRenderAll() {
+  if (MCS.mode === "TEST") {
+    mcsStable(() => { mcsRenderHeader(); mcsRenderChart(); mcsRenderLvTable(); mcsRenderKeyRow(); mcsRenderSetups();
+      ["mcs-optlv", "mcs-analysis", "mcs-fast", "mcs-strikes", "mcs-optCE", "mcs-optPE", "mcs-next5", "mcs-next15", "mcs-movers", "mcs-chain", "mcs-topmove", "mcs-cmd"].forEach(mcsLiveOnly); });
+    return;
+  }
   mcsStable(() => { mcsRenderHeader(); mcsRenderChart(); mcsRenderLvTable(); mcsRenderOptLv(); mcsRenderKeyRow(); mcsRenderSetups(); mcsRenderAnalysis(); mcsRenderLevels(); mcsRenderFast(); mcsRenderStrikes(); mcsRenderOpt("CE"); mcsRenderOpt("PE");
   mcsRenderNext(5); mcsRenderNext(15); mcsRenderMovers(); mcsRenderChain(); mcsRenderTopMove(); mcsRenderCmd(); });
 }
@@ -718,7 +759,8 @@ function mcsRenderAll() {
 async function mcsRefresh(force) {
   if (MCS.busy) { MCS._pending = true; return; }
   MCS.busy = true; MCS._pending = false;
-  const sym = MCS.sym, tf = MCS.tf;
+  const sym = MCS.sym, tf = MCS.tf, gen = MCS.gen;
+  if (MCS.mode === "TEST") { try { await mcsRefreshTest(gen); } catch (e) { console.error("[MCS test]", e); } finally { MCS.busy = false; if (MCS._pending) { MCS._pending = false; mcsRefresh(true); } } return; }
   try {
     const [d, q] = await Promise.all([
       fetchJSON(`/api/market-command?symbol=${encodeURIComponent(sym)}&interval=${tf}`, 45000).catch(() => null),
@@ -726,20 +768,20 @@ async function mcsRefresh(force) {
     ]);
     // Setup signals (your rejection / VWAP logic) — loaded alongside, never blocks the chart.
     fetchJSON(`/api/setup-signals?symbol=${encodeURIComponent(sym)}`, 45000).catch(() => null).then((ss) => {
-      if (sym !== MCS.sym) return;
+      if (sym !== MCS.sym || gen !== MCS.gen || MCS.mode !== "LIVE") return;
       if (ss && !ss.error) MCS.ss = ss; else if (!MCS.ss || MCS.ss.symbol !== sym) MCS.ss = { error: ss?.error || (ss?.disabled ? "Data paused (Data Control)" : "unavailable"), symbol: sym };
       mcsStable(() => { mcsRenderSetups(); mcsRenderChart(); });
     });
-    if (sym !== MCS.sym || tf !== MCS.tf) return;   // user switched — the pending reload picks up the new selection
+    if (sym !== MCS.sym || tf !== MCS.tf || gen !== MCS.gen || MCS.mode !== "LIVE") return;   // user switched (symbol / tf / mode) — never paint stale results
     if (d && !d.error) MCS.d = d; else if (!MCS.d) { const m = mcsEl("mcs-meta"); if (m) m.innerHTML = `<span class="mcs-warn">${mcsEsc(d?.error || "Market Command data unavailable")}</span>`; }
     if (q && q.quotes) MCS.q = q;
     mcsRenderAll();   // paint chart / levels / command as soon as Market Command data is in
     const maP = (force || Date.now() - MCS.maAt > 30_000)
       ? fetchJSON(`/api/market-analysis?symbol=${encodeURIComponent(sym)}`, 45000).catch(() => null).then((ma) => {
-          if (sym === MCS.sym && ma && !ma.error) { MCS.ma = ma; MCS.maAt = Date.now(); mcsStable(() => { mcsRenderChart(); mcsRenderAnalysis(); mcsRenderLevels(); mcsRenderFast(); mcsRenderStrikes(); mcsRenderNext(5); mcsRenderNext(15); mcsRenderMovers(); mcsRenderChain(); mcsRenderTopMove(); }); }
+          if (sym === MCS.sym && gen === MCS.gen && MCS.mode === "LIVE" && ma && !ma.error) { MCS.ma = ma; MCS.maAt = Date.now(); mcsStable(() => { mcsRenderChart(); mcsRenderAnalysis(); mcsRenderLevels(); mcsRenderFast(); mcsRenderStrikes(); mcsRenderNext(5); mcsRenderNext(15); mcsRenderMovers(); mcsRenderChain(); mcsRenderTopMove(); }); }
         })
       : Promise.resolve();
-    const optP = mcsLoadOptions(force).then(() => { if (sym === MCS.sym) mcsStable(() => { mcsRenderOpt("CE"); mcsRenderOpt("PE"); mcsRenderOptLv(); mcsRenderAnalysis(); }); });
+    const optP = mcsLoadOptions(force).then(() => { if (sym === MCS.sym && gen === MCS.gen && MCS.mode === "LIVE") mcsStable(() => { mcsRenderOpt("CE"); mcsRenderOpt("PE"); mcsRenderOptLv(); mcsRenderAnalysis(); }); });
     await Promise.all([maP, optP]);
   } catch (e) { console.error("[MCS]", e); }
   finally { MCS.busy = false; if (MCS._pending) { MCS._pending = false; mcsRefresh(true); } }
@@ -754,7 +796,7 @@ function initMcSummary() {
   }
   // Paint immediately from the payload Market Command already holds (same symbol, live,
   // same /api/market-command result — no extra fetch); the refresh below then updates it.
-  const seed = typeof MC !== "undefined" && !MC.replayDate ? MC.lastData : null;
+  const seed = MCS.mode === "LIVE" && typeof MC !== "undefined" && !MC.replayDate ? MC.lastData : null;
   if (seed && !seed.error && seed.symbol === MCS.sym && seed.candles?.length) {
     if (!MCS.d) { MCS.tf = MC.tf; document.querySelectorAll("#mcs-tfs .mcs-tf").forEach((x) => x.classList.toggle("on", x.dataset.tf === MCS.tf)); }
     if (MCS.tf === MC.tf && (!MCS.d || MCS.d.symbol !== MCS.sym)) { MCS.d = seed; mcsRenderAll(); }
@@ -765,6 +807,7 @@ function initMcSummary() {
   MCS.timer = setInterval(() => {
     const p = mcsEl("panel-mcsummary");
     if (!p || !p.classList.contains("active") || document.hidden) return;   // only while the Summary is on screen
+    if (MCS.mode !== "LIVE") return;                                       // TESTING mode: live refresh stopped
     mcsRefresh(false);
   }, 15000);
 }
@@ -919,13 +962,13 @@ function mcsRenderSetups() {
           ${o.reason ? `<div class="mcs-warn">⚠ ${mcsEsc(o.reason)} — option not valid, treat as WAIT</div>` : ""}${o.note ? `<div class="mcs-sub">${mcsEsc(o.note)}</div>` : ""}</div>`
       : `<div class="mcs-warn">Option: ${mcsEsc(o.reason || "unavailable")}</div>`;
     liveHtml = `<div class="mcs-sslive ${live.side === "CE" ? "ce" : "pe"}">
-      <div class="mcs-ssbig">${live.status === "ACTIVE" ? "IN TRADE · " : ""}BUY ${live.side}</div>
+      <div class="mcs-ssbig">${ss.mode === "TEST" ? `<span class="mcs-testtag">TEST ${mcsEsc(ss.upto)}</span> ` : ""}${live.status === "ACTIVE" ? "IN TRADE · " : ""}BUY ${live.side}</div>
       <div><b>${mcsEsc(live.label)}</b> <span class="mcs-sub">${live.time} ${live.level ? `· ${mcsEsc(live.level.type)} ${mcsN(live.level.price)}` : ""}</span></div>
       <div class="mcs-ssplan">Spot: entry ${p.entry != null ? mcsN(p.entry) : `next candle open (≈ ${mcsN(p.entryRef)})`} · SL <b class="mcs-dn">${mcsN(p.stop)}</b> · Target <b class="mcs-up">${mcsN(p.target)}</b> <span class="mcs-sub">(${mcsEsc(p.targetWhy || "")}, 1:${mcsN(p.rr)})</span></div>
       ${opt}
       <ul class="mcs-ssev">${live.evidence.map((e) => `<li>${mcsEsc(e)}</li>`).join("")}</ul></div>`;
   } else {
-    liveHtml = `<div class="mcs-sslive none"><div class="mcs-ssbig">WAIT</div><div class="mcs-sub">${ss.isToday ? "No setup signal is live right now." : `Market closed — showing ${mcsEsc(ss.date)}.`}</div>
+    liveHtml = `<div class="mcs-sslive none"><div class="mcs-ssbig">WAIT</div><div class="mcs-sub">${ss.mode === "TEST" ? `No signal open at ${mcsEsc(ss.upto)} on ${mcsEsc(ss.date)} (testing).` : ss.isToday ? "No setup signal is live right now." : `Market closed — showing ${mcsEsc(ss.date)}.`}</div>
       ${t.watch.length ? `<div class="mcs-sswatch">${t.watch.map((w) => `<span class="mcs-sswc ${w.state.toLowerCase()}" title="${mcsEsc(w.note)}">${mcsEsc(w.state.replace(/_/g, " "))} · ${mcsEsc(w.level)} ${mcsN(w.price)} <i>${w.side === "RESISTANCE" ? "res → PE" : "sup → CE"}</i></span>`).join("")}</div>` : `<div class="mcs-sub">No level being approached.</div>`}</div>`;
   }
   // --- today's list ---
@@ -944,6 +987,62 @@ function mcsRenderSetups() {
     <table class="mcs-tbl"><thead><tr><th>Setup</th><th class="r">Signals</th><th class="r">Win/Loss</th><th class="r">Win %</th><th class="r">Avg</th><th class="r">Total</th><th>By context</th></tr></thead><tbody>
     ${rpRow("S3_LEVEL_REJECTION", "S3 Level Rejection")}${rpRow("S4_VWAP_PULLBACK", "S4 VWAP Pullback")}</tbody></table>
     <div class="mcs-sub">Most common blocks: ${["S3_LEVEL_REJECTION", "S4_VWAP_PULLBACK"].map((k) => by[k] ? `${k.slice(0, 2)}: ${by[k].topBlocks.slice(0, 3).map(([r, n]) => `${mcsEsc(r)} (${n})`).join(", ")}` : "").filter(Boolean).join(" · ")}</div></div>`;
-  box.innerHTML = head + vbHtml + `<div class="mcs-ssgrid">${liveHtml}<div class="mcs-sstoday"><h5>Today's signals ${ss.isToday ? "" : `(${mcsEsc(ss.date)})`}</h5>${todayTbl}${blk}</div></div>${replayHtml}
+  box.innerHTML = head + vbHtml + `<div class="mcs-ssgrid">${liveHtml}<div class="mcs-sstoday"><h5>${ss.mode === "TEST" ? `Signals on ${mcsEsc(ss.date)} up to ${mcsEsc(ss.upto)}` : `Today's signals ${ss.isToday ? "" : `(${mcsEsc(ss.date)})`}`}</h5>${todayTbl}${blk}</div></div>${ss.mode === "TEST" ? "" : replayHtml}
     <div class="mcs-sub">${(ss.notes || []).map(mcsEsc).join(" · ")}</div>`;
+}
+
+
+// ===========================================================================
+// LIVE / TESTING modes. Switching bumps MCS.gen so any response still in flight
+// from the other mode is discarded; all cached data of the old mode is cleared.
+// ===========================================================================
+function mcsPrevWeekday() { const d = new Date(Date.now() + 19800000); do { d.setUTCDate(d.getUTCDate() - 1); } while (d.getUTCDay() === 0 || d.getUTCDay() === 6); return d.toISOString().slice(0, 10); }
+function mcsSetMode(mode) {
+  if (mode !== "LIVE" && mode !== "TEST") return;
+  if (MCS.mode === mode) return;
+  MCS.mode = mode; MCS.gen++;
+  MCS.d = null; MCS.ma = null; MCS.maAt = 0; MCS.opt = { CE: null, PE: null }; MCS.optKey = null; MCS.ss = null; MCS._fit = null; MCS.selStrike = null; MCS.q = null;
+  const root = mcsEl("mcs-root");
+  root.classList.toggle("mcs-testing", mode === "TEST");
+  root.querySelectorAll("#mcs-modes button").forEach((b) => b.classList.toggle("on", b.dataset.mode === mode));
+  const bar = mcsEl("mcs-testbar"); if (bar) bar.hidden = mode !== "TEST";
+  if (mode === "TEST") {
+    if (!MCS.test.date) MCS.test.date = mcsPrevWeekday();
+    const dt = mcsEl("mcs-tdate"); if (dt) dt.value = MCS.test.date;
+    const sel = mcsEl("mcs-tupto"); if (sel) sel.value = MCS.test.upto;
+  }
+  mcsUnlockHeights(); mcsLoading(); mcsRefresh(true);
+}
+async function mcsRefreshTest(gen) {
+  const sym = MCS.sym, tf = MCS.tf, date = MCS.test.date, upto = MCS.test.upto;
+  const st = mcsEl("mcs-tstat"); if (st) st.innerHTML = `⏳ Running ${mcsEsc(date)} as of ${mcsEsc(upto)}…`;
+  const full = upto === "15:15";
+  const [h, ss] = await Promise.all([
+    fetchJSON(`/api/market-command?symbol=${encodeURIComponent(sym)}&interval=${tf}&date=${date}`, 60000).catch(() => null),
+    fetchJSON(`/api/setup-signals?symbol=${encodeURIComponent(sym)}&date=${date}${full ? "" : "&upto=" + upto}`, 120000).catch(() => null),
+  ]);
+  if (gen !== MCS.gen || MCS.mode !== "TEST" || sym !== MCS.sym || tf !== MCS.tf || date !== MCS.test.date || upto !== MCS.test.upto) return;   // superseded
+  const err = (h && h.error) || (ss && ss.error) || (!h ? "Chart data unavailable" : null);
+  if (err && (!h || h.error)) { if (st) st.innerHTML = `<span class="mcs-warn">${mcsEsc(err)}</span>`; MCS.d = null; MCS.ss = ss && !ss.error ? ss : { error: err, symbol: sym }; mcsRenderAll(); return; }
+  // Cut everything at "as of" so nothing after that time is visible (no look-ahead on screen).
+  const asOf = ss && ss.asOf ? ss.asOf : null;
+  const tfSec = tf === "15m" ? 900 : tf === "30m" ? 1800 : tf === "60m" ? 3600 : 300;
+  const keep = h.candles.map((c) => asOf == null || c.time + tfSec <= asOf);
+  const candles = h.candles.filter((_, i) => keep[i]);
+  const ov = {}; for (const [k, arr] of Object.entries(h.overlays || {})) ov[k] = (arr || []).filter((_, i) => keep[i]);
+  const lastT = candles.length ? candles[candles.length - 1].time : 0;
+  const lfc = (ss && ss.levelsForChart) || {};
+  const sw = (h.structure?.swingPoints || []).filter((p) => p.time + tfSec <= (asOf ?? Infinity));
+  MCS.d = {
+    ...h, candles, overlays: ov, spot: candles.length ? candles[candles.length - 1].close : null,
+    structure: { ...(h.structure || {}), swingPoints: sw, bosEvents: (h.structure?.bosEvents || []).filter((b) => b.time <= lastT) },
+    bos: h.bos && h.bos.time <= lastT ? h.bos : null, sweep: null,
+    levels: { pdh: lfc.pdh, pdl: lfc.pdl, orbHigh: lfc.orbHigh, orbLow: lfc.orbLow },
+    oi: {}, optionMatrix: null, decision: null, command: {}, tradePlan: {}, marketView: {}, mtfDirection: {}, confirmationFlow: {}, orderBlocks: [],
+    syncHealth: { overall: "HISTORICAL" }, vix: null, vixEnvironment: null, dataStale: false,
+  };
+  MCS.ss = ss && !ss.error ? ss : { error: (ss && ss.error) || "Setup signals unavailable", symbol: sym };
+  const nSig = ss && ss.today ? ss.today.signals.filter((x) => !x.blockedBy).length : 0;
+  if (st) st.innerHTML = ss && !ss.error ? `✅ ${mcsEsc(date)} as of ${mcsEsc(ss.upto)} · ${nSig} signal${nSig === 1 ? "" : "s"}` : `<span class="mcs-warn">${mcsEsc((ss && ss.error) || "Setup signals unavailable")}</span>`;
+  mcsRenderAll();
 }
