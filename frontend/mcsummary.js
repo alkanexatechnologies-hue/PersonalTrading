@@ -969,7 +969,11 @@ function mcsRenderSetups() {
   const dirHtml = dr ? `<div class="mcs-ssdir ${dCls(dr.state)}">Direction (EMA): <b>${dr.state}</b>${dr.since ? ` since ${mcsEsc(dr.since)}` : ""} <span class="mcs-sub">${mcsEsc(dr.why)} · <b>${mcsEsc(fltTxt)}</b></span>
       ${evs.length ? `<div class="mcs-dirline">${evs.map((e) => `<span class="mcs-dirchip ${dCls(e.to)}" title="${mcsEsc(e.why)}">${mcsEsc(e.time)} → ${mcsEsc(e.to)}</span>`).join("")}</div>` : ""}</div>` : "";
   if (ss.mode !== "TEST") mcsDirAlert(ss.symbol, nm, evs);
-  const vbHtml = dirHtml + (vb ? `<div class="mcs-ssvb ${vb.bias === "BULLISH" ? "up" : vb.bias === "BEARISH" ? "dn" : ""}">VWAP bias: <b>${vb.bias}</b> <span class="mcs-sub">5m candle ${vb.time} closed ${mcsN(vb.close)} ${vb.bias === "BULLISH" ? "above" : vb.bias === "BEARISH" ? "below" : "at"} VWAP ${mcsN(vb.vwap)} · 15M trend ${mcsEsc(t.dir15 || "—")}</span></div>` : "");
+  const ef = t.efficiency;
+  const efHtml = ef ? `<div class="mcs-sseff ${ef.choppy ? "chop" : "ok"}">Day efficiency <b>${mcsN(ef.value, 2)}</b> <span class="mcs-sub">(${mcsEsc(ef.time)} · net move ÷ distance travelled since the open · checked every 5 min)</span>
+      <b class="mcs-effstate">${ef.choppy ? `⛔ CHOPPY — below ${(ss.config && ss.config.chopEfficiencyMin) || 0.2}: no new entries` : "✅ moving — entries allowed"}</b>
+      <span class="mcs-effbar" title="${mcsEsc(ef.series.map((p) => `${p.time} ${p.value}`).join("\n"))}">${ef.series.map((p) => `<i class="${p.choppy ? "c" : "o"}" style="height:${Math.max(2, Math.round(Math.min(1, p.value) * 18))}px"></i>`).join("")}</span></div>` : "";
+  const vbHtml = dirHtml + efHtml + (vb ? `<div class="mcs-ssvb ${vb.bias === "BULLISH" ? "up" : vb.bias === "BEARISH" ? "dn" : ""}">VWAP bias: <b>${vb.bias}</b> <span class="mcs-sub">5m candle ${vb.time} closed ${mcsN(vb.close)} ${vb.bias === "BULLISH" ? "above" : vb.bias === "BEARISH" ? "below" : "at"} VWAP ${mcsN(vb.vwap)} · 15M trend ${mcsEsc(t.dir15 || "—")}</span></div>` : "");
   const valid = t.signals.filter((x) => !x.blockedBy), blocked = t.signals.filter((x) => x.blockedBy);
   const live = valid.find((x) => x.status === "ENTRY_READY" || x.status === "ACTIVE");
   const setupName = (x) => ({ S3_LEVEL_REJECTION: "S3", S4_VWAP_PULLBACK: "S4", S5_EMA_TREND: "S5" }[x.setup] || x.setup);

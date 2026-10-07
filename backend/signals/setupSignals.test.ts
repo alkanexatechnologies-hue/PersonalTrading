@@ -197,3 +197,14 @@ test("break entry: a signal fills only when price breaks the signal candle's low
   const nt = evaluateSession(h, flat, [lvl("Previous Day High", 110, t0(D))], 30, flat[flat.length - 1].time + 300).signals.find((x) => x.setup === "S3_LEVEL_REJECTION")!;
   assert.equal(nt.status, "NO_TRIGGER");
 });
+
+test("day efficiency: a back-and-forth day is CHOPPY (< 0.20), a one-way day is not", () => {
+  const h = prior();
+  const chop = Array.from({ length: 24 }, (_, i) => { const p = 100 + (i % 2 ? 4 : -4); return bar(D, i, 100, Math.max(100, p) + 1, Math.min(100, p) - 1, p); });
+  const r1 = evaluateSession(h, chop, [], 60, chop[chop.length - 1].time + 300);
+  assert.ok(r1.efficiency!.value < 0.2 && r1.efficiency!.choppy, `choppy ${r1.efficiency!.value}`);
+  const trend = Array.from({ length: 24 }, (_, i) => bar(D, i, 100 + i * 2, 102 + i * 2 + 1, 99 + i * 2, 102 + i * 2));
+  const r2v = evaluateSession(h, trend, [], 60, trend[trend.length - 1].time + 300);
+  assert.ok(r2v.efficiency!.value > 0.5 && !r2v.efficiency!.choppy, `trend ${r2v.efficiency!.value}`);
+  assert.equal(r2v.efficiency!.series.length, 24, "one reading per closed candle");
+});

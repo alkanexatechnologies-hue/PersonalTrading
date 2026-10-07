@@ -42,6 +42,11 @@ export const SETUP_CONFIG = {
   entryMode: "break" as "open" | "break", breakBars: 2,
   // breakevenAtR > 0: once the trade has run that many R in favour, the stop moves to the entry price.
   breakevenAtR: 0,
+  // CHOPPY-DAY FILTER (adopted 08 Oct 2026): day efficiency = |close − session open| ÷ (distance travelled since the open),
+  // re-checked on every closed 5m candle. Below this value no NEW entry starts (open trades are managed as usual).
+  // Study (5 indices, build + unseen check period): range-day losses −60%, stop-loss rate down on both periods,
+  // 43% fewer trades; better than no filter after option costs.
+  chopEfficiencyMin: 0.20,
   // NIFTY reference points from the trader's original rule (logged for comparison only)
   refVwapPts: 30, refRoomPts: 40,
   // S5 EMA TREND (research-backed: EMA 9 trail best on both sides; trail only after +1R; book 50% at 1.5R)
@@ -73,8 +78,10 @@ export interface SetupSignal {
 }
 export interface WatchItem { level: string; price: number; side: "RESISTANCE" | "SUPPORT"; state: WatchState; since: string; note: string; }
 export interface DirectionEvent { time: string; from: string; to: string; why: string; }
+export interface EfficiencyPoint { time: string; value: number; choppy: boolean; }
 export interface SessionResult { date: string; signals: SetupSignal[]; watch: WatchItem[]; atr: number | null; vwap: number | null; dir15: string | null;
   direction: { state: "UP" | "DOWN" | "NEUTRAL"; since: string | null; why: string } | null; directionEvents: DirectionEvent[];
+  efficiency: { value: number; choppy: boolean; time: string; series: EfficiencyPoint[] } | null;
   vwapBias: { bias: "BULLISH" | "BEARISH" | "NEUTRAL"; close: number; vwap: number | null; time: string } | null; }
 
 const MAJOR_TYPES = new Set(["Previous Day High", "Previous Day Low", "OI Support", "OI Resistance", "Structure Support", "Structure Resistance", "Equal High", "Equal Low"]);
@@ -91,7 +98,7 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
   const all = [...hist, ...today];
   const off = hist.length;
   const A = atr(all, 14), E9 = ema(all.map((c) => c.close), 9), E21 = ema(all.map((c) => c.close), 21), E50 = ema(all.map((c) => c.close), 50), VW = vwap(all);
-  const out: SessionResult = { date: day, signals: [], watch: [], atr: null, vwap: null, dir15: null, vwapBias: null, direction: null, directionEvents: [] };
+  const out: SessionResult = { date: day, signals: [], watch: [], atr: null, vwap: null, dir15: null, vwapBias: null, direction: null, directionEvents: [], efficiency: null };
   if (today.length < 2) return out;
   // 15M trend from closed 15m candles (prior sessions + today)
   const sessDays = [...new Set(hist.map((c) => istDay(c.time)))].slice(-3);
@@ -134,9 +141,23 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
     const tgt = side === "CE" ? entryRef + 2 * risk : entryRef - 2 * risk;
     return { plan: { entryRef: r2(entryRef), entry: null, stop: r2(stop), target: r2(tgt), risk: r2(risk), reward: r2(2 * risk), rr: 2, targetWhy: "no major level in the way — 2R" }, block: null };
   };
+  // day efficiency per closed candle (exactly the studied formula)
+  const effSeries: EfficiencyPoint[] = []; const effAt = new Map<number, number>();
+  { let path = 0; const o0 = today[0].open;
+    for (let j = 0; j < today.length; j++) {
+      if (j > 0) path += Math.abs(today[j].close - today[j - 1].close);
+      const v = Math.abs(today[j].close - o0) / (path + Math.abs(today[0].close - o0) || 1);
+      effAt.set(today[j].time, v); effSeries.push({ time: hm(today[j].time + 300), value: r2(v), choppy: v < C.chopEfficiencyMin });
+    } }
+  const chopBlock = (t: number): string | null => {
+    const v = effAt.get(t);
+    return C.chopEfficiencyMin > 0 && v != null && v < C.chopEfficiencyMin ? `Choppy day — efficiency ${r2(v)} < ${C.chopEfficiencyMin} (price has gone back and forth without net progress)` : null;
+  };
   const push = (s: SetupSignal) => {
     const sc = today.find((x) => x.time === s.barTime);
     if (sc) { s.metrics.sigHigh = sc.high; s.metrics.sigLow = sc.low; }
+    const ev = effAt.get(s.barTime);
+    if (ev != null) s.metrics.efficiency = r2(ev);
     signals.push(s); if (!s.blockedBy) openSig = s;
   };
 
@@ -247,6 +268,7 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
           const reg = opts.regimeAt ? opts.regimeAt(all.slice(0, i + 1)) : null;
           let block: string | null = null;
           if (context === "INTRADAY" && !major) block = "Minor level outside the morning window (needs a major level or an extreme move)";
+          if (!block) block = chopBlock(c.time);
           // VWAP gate: CE only on a 5m close above VWAP, PE only on a close below (same rule as S4 / S5)
           const vwC = VW[i];
           if (!block && C.vwapGate && !(C.vwapGateExemptExtreme && context === "EXTREME") && vwC != null && (res ? c.close >= vwC : c.close <= vwC))
@@ -320,6 +342,7 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
         const reg = opts.regimeAt ? opts.regimeAt(all.slice(0, i + 1)) : null;
         let block: string | null = null;
         if ((side === "CE" && d15 !== "UP") || (side === "PE" && d15 !== "DOWN")) block = `15M trend ${d15 ?? "n/a"} does not agree`;
+        if (!block) block = chopBlock(c.time);
         if (!block && reg === "RANGE") block = "Regime RANGE — VWAP extensions mean-revert";
         const dayMove = side === "CE" ? c.high - sessOpen : sessOpen - c.low;
         if (!block && dailyAtr != null && dayMove > C.extendedDailyAtr * dailyAtr) block = `EXTENDED — day move ${r2(dayMove)} pts > ${C.extendedDailyAtr}× daily ATR`;
@@ -384,6 +407,7 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
             let block: string | null = null;
             const dayMove = sg > 0 ? c.high - sessOpen : sessOpen - c.low;
             if (dailyAtr != null && dayMove > C.extendedDailyAtr * dailyAtr) block = `EXTENDED — day move ${r2(dayMove)} pts > ${C.extendedDailyAtr}× daily ATR`;
+            if (!block) block = chopBlock(c.time);
             if (!block && s5Count[side] >= C.s5MaxPerSide) block = `Max ${C.s5MaxPerSide} EMA-trend signals per side today`;
             if (!block && k - s5LastBar < 4) block = "Same pullback leg as the previous signal";
             if (!block && !cooled("S5_EMA_TREND")) block = `Cooldown ${C.slCooldownMin} min after a stop`;
@@ -445,6 +469,7 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
   out.signals = signals.sort((a, b) => b.barTime - a.barTime);
   out.atr = r2(la); out.vwap = VW[off + today.length - 1] != null ? r2(VW[off + today.length - 1] as number) : null; out.dir15 = dir15At(last.time + 300);
   out.direction = { state: dirState, since: dirSince, why: dirWhy };
+  { const lastE = effSeries[effSeries.length - 1]; out.efficiency = lastE ? { value: lastE.value, choppy: lastE.choppy, time: lastE.time, series: effSeries } : null; }
   out.vwapBias = { bias: out.vwap == null ? "NEUTRAL" : last.close > out.vwap ? "BULLISH" : last.close < out.vwap ? "BEARISH" : "NEUTRAL", close: last.close, vwap: out.vwap, time: hm(last.time + 300) };
   return out;
 }

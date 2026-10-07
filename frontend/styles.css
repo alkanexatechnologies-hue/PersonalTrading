@@ -6837,3 +6837,9 @@ body.lqa-fullwidth .content { padding-left: 0; padding-right: 0; }
 .mcs-dirtoast { position: fixed; right: 16px; bottom: 16px; z-index: 10060; max-width: 420px; padding: 10px 40px 10px 12px; border-radius: 10px; background: #0f1626; border: 1px solid #64748b; color: #e2e8f0; font-size: 13px; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
 .mcs-dirtoast.up { border-color: #22c55e; } .mcs-dirtoast.dn { border-color: #ef4444; }
 .mcs-dirtoast button { position: absolute; top: 4px; right: 4px; min-width: 32px; min-height: 32px; background: transparent; border: 0; color: #e2e8f0; cursor: pointer; font-size: 16px; }
+/* day efficiency (choppy-day filter) */
+.mcs-sseff { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 13px; margin: 0 0 6px; padding: 4px 8px; border-radius: 6px; background: #131c2e; border-left: 3px solid #22c55e; }
+.mcs-sseff.chop { border-left-color: #f59e0b; }
+.mcs-sseff .mcs-effstate { margin-left: auto; } .mcs-sseff.chop .mcs-effstate { color: #fbbf24; } .mcs-sseff.ok .mcs-effstate { color: #86efac; }
+.mcs-effbar { display: inline-flex; align-items: flex-end; gap: 1px; height: 18px; cursor: help; }
+.mcs-effbar i { display: block; width: 3px; border-radius: 1px; } .mcs-effbar i.o { background: #22c55e; } .mcs-effbar i.c { background: #f59e0b; }
