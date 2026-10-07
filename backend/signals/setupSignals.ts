@@ -35,6 +35,9 @@ export const SETUP_CONFIG = {
   // NIFTY reference points from the trader's original rule (logged for comparison only)
   refVwapPts: 30, refRoomPts: 40,
   // S5 EMA TREND (research-backed: EMA 9 trail best on both sides; trail only after +1R; book 50% at 1.5R)
+  // Trend filter per index (trader's choice: best filter per index from the 20-session replay, 08 Oct 2026).
+  // notAgainst = no S5 trade when the 15M trend is against; slow5m = no trade when 5m EMA 21 vs EMA 50 is against; off = 15M only decides the exit.
+  s5TrendFilterByIndex: { NIFTY: "notAgainst", FINNIFTY: "notAgainst", BANKNIFTY: "slow5m", SENSEX: "off", MIDCPNIFTY: "off" } as Record<string, "off" | "notAgainst" | "agree" | "slow5m">,
   s5DistAtr: 0.9, s5DistPtsNifty: 20, s5DeadZoneAtr: 0.25, s5SlopeBars: 3, s5PullbackAtr: 0.2, s5BookR: 1.5, s5TrailAfterR: 1, s5MaxPerSide: 2,
 };
 const C = SETUP_CONFIG;
@@ -379,6 +382,7 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
                 `Stretched ${r2(stretch)} pts from VWAP in the last 6 candles (need ≥ ${r2(D)}${opts.s5DistPts ? " — your 20-pt NIFTY rule" : ` = ${C.s5DistAtr}× ATR`})`,
                 `Pullback to EMA 9 ${r2(e9)} held — close ${r2(c.close)} back ${sg > 0 ? "above" : "below"} it`,
                 `15M trend ${d15 ?? "n/a"} — ${(sg > 0 && d15 === "DOWN") || (sg < 0 && d15 === "UP") ? "against: whole position will be closed at 1.5R" : "with/neutral: 2nd half trails EMA 9"}`,
+                `Trend filter for this index: ${({ off: "none (15M only decides the exit)", notAgainst: "15M trend must not be against", agree: "15M trend must agree", slow5m: "5m EMA 21 vs EMA 50 must not be against" } as Record<string, string>)[opts.s5Trend15 || "off"]}`,
               ],
               status: block ? "BLOCKED" : "ENTRY_READY", fillTime: null, exitTime: null, exitPrice: null, resultR: null,
               metrics: { atr: r2(a), vwap: r2(vw), ema9: r2(e9), ema21: r2(e21), stretch: r2(stretch), dir15: d15 },

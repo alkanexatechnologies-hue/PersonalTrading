@@ -965,7 +965,8 @@ function mcsRenderSetups() {
   const vb = t.vwapBias;
   const dr = t.direction, evs = t.directionEvents || [];
   const dCls = (st) => (st === "UP" ? "up" : st === "DOWN" ? "dn" : "");
-  const dirHtml = dr ? `<div class="mcs-ssdir ${dCls(dr.state)}">Direction (EMA): <b>${dr.state}</b>${dr.since ? ` since ${mcsEsc(dr.since)}` : ""} <span class="mcs-sub">${mcsEsc(dr.why)}</span>
+  const fltTxt = { off: "S5 trend filter: none", notAgainst: "S5 trend filter: 15M must not be against", agree: "S5 trend filter: 15M must agree", slow5m: "S5 trend filter: 5m EMA 21 vs 50 must not be against" }[ss.s5Filter || "off"];
+  const dirHtml = dr ? `<div class="mcs-ssdir ${dCls(dr.state)}">Direction (EMA): <b>${dr.state}</b>${dr.since ? ` since ${mcsEsc(dr.since)}` : ""} <span class="mcs-sub">${mcsEsc(dr.why)} · <b>${mcsEsc(fltTxt)}</b></span>
       ${evs.length ? `<div class="mcs-dirline">${evs.map((e) => `<span class="mcs-dirchip ${dCls(e.to)}" title="${mcsEsc(e.why)}">${mcsEsc(e.time)} → ${mcsEsc(e.to)}</span>`).join("")}</div>` : ""}</div>` : "";
   if (ss.mode !== "TEST") mcsDirAlert(ss.symbol, nm, evs);
   const vbHtml = dirHtml + (vb ? `<div class="mcs-ssvb ${vb.bias === "BULLISH" ? "up" : vb.bias === "BEARISH" ? "dn" : ""}">VWAP bias: <b>${vb.bias}</b> <span class="mcs-sub">5m candle ${vb.time} closed ${mcsN(vb.close)} ${vb.bias === "BULLISH" ? "above" : vb.bias === "BEARISH" ? "below" : "at"} VWAP ${mcsN(vb.vwap)} · 15M trend ${mcsEsc(t.dir15 || "—")}</span></div>` : "");

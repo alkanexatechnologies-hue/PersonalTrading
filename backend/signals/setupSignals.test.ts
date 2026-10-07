@@ -171,3 +171,10 @@ test("S5: pullback entries in the up trend; once 50% is booked the result is ≥
     assert.equal(early!.plan!.stop, s.plan!.stop);
   }
 });
+
+import { SETUP_CONFIG } from "./setupSignals";
+test("S5 trend filter is configured per index (trader's choice)", () => {
+  const f = SETUP_CONFIG.s5TrendFilterByIndex;
+  assert.equal(f.NIFTY, "notAgainst"); assert.equal(f.FINNIFTY, "notAgainst");
+  assert.equal(f.BANKNIFTY, "slow5m"); assert.equal(f.SENSEX, "off");
+});

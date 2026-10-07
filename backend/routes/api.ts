@@ -8374,12 +8374,12 @@ async function setupOptionLeg(def: any, side: "CE" | "PE", plan: NonNullable<Set
       ltp: op.optionLtp, entry: op.entry, stopLoss: op.stopLoss, target: op.target1, rr: op.rr, netRR, costPerUnit, delta: op.delta, iv: op.iv, oi: op.oi, volume: op.volume, why: op.why, lotSize: lot };
   } catch (e: any) { return { available: false, reason: e?.message || "option leg failed" }; }
 }
-function setupRunDay(days: string[], ses: Map<string, Candle[]>, di: number, asOf: number, extra: LiqLevel[] | null, s5DistPts: number | null = null, only?: SetupSignal["setup"]): SessionResult & { levels: LiqLevel[] } {
+function setupRunDay(days: string[], ses: Map<string, Candle[]>, di: number, asOf: number, extra: LiqLevel[] | null, s5DistPts: number | null = null, only?: SetupSignal["setup"], s5Trend15: "off" | "notAgainst" | "agree" | "slow5m" = "off"): SessionResult & { levels: LiqLevel[] } {
   const prior = days.slice(Math.max(0, di - 15), di).map((d) => ses.get(d)!);
   const todayC = ses.get(days[di])!.filter((c) => c.time + 300 <= asOf);
   const levels = extra ?? buildLevels(prior.slice(-6), todayC, asOf);
   const dAtr = dailyAtrFrom5m(prior);
-  const r = evaluateSession(prior.slice(-5).flat(), todayC, levels, dAtr, asOf, { regimeAt: (upto) => regimeAt(upto.filter((c) => c.time + 300 <= asOf), dAtr).regime, s5DistPts, only });
+  const r = evaluateSession(prior.slice(-5).flat(), todayC, levels, dAtr, asOf, { regimeAt: (upto) => regimeAt(upto.filter((c) => c.time + 300 <= asOf), dAtr).regime, s5DistPts, only, s5Trend15 });
   return { ...r, levels: levels.filter((l) => l.activeFrom <= asOf) };
 }
 async function buildSetupSignals(symbol: string) {
@@ -8395,7 +8395,8 @@ async function buildSetupSignals(symbol: string) {
   const lastDay = days[days.length - 1], isToday = lastDay === today;
   const dayEnd = (d: string) => { const a = ses.get(d)!; return a[a.length - 1].time + 300; };
   const s5Pts = (def.nseSymbol || "") === "NIFTY" ? SETUP_CONFIG.s5DistPtsNifty : null;   // your 20-pt rule on NIFTY; 0.9× ATR elsewhere
-  const runDay = (di: number, asOf: number, extra: LiqLevel[] | null): SessionResult => setupRunDay(days, ses, di, asOf, extra, s5Pts);
+  const s5Flt = SETUP_CONFIG.s5TrendFilterByIndex[def.nseSymbol || ""] || "off";            // per-index S5 trend filter
+  const runDay = (di: number, asOf: number, extra: LiqLevel[] | null): SessionResult => setupRunDay(days, ses, di, asOf, extra, s5Pts, undefined, s5Flt);
   // Today: the Liquidity Analysis level set (includes the morning OI support / resistance).
   let todayLevels: LiqLevel[] | null = null;
   try {
@@ -8414,7 +8415,7 @@ async function buildSetupSignals(symbol: string) {
     const res: SessionResult[] = [];
     // Each setup replayed IN ISOLATION (one-trade-at-a-time would let one setup block another and mix the numbers).
     for (let di = Math.max(7, days.length - 21); di < days.length - 1; di++) {
-      const parts = (["S3_LEVEL_REJECTION", "S4_VWAP_PULLBACK", "S5_EMA_TREND"] as const).map((id) => setupRunDay(days, ses, di, dayEnd(days[di]), null, s5Pts, id));
+      const parts = (["S3_LEVEL_REJECTION", "S4_VWAP_PULLBACK", "S5_EMA_TREND"] as const).map((id) => setupRunDay(days, ses, di, dayEnd(days[di]), null, s5Pts, id, s5Flt));
       res.push({ ...parts[0], signals: parts.flatMap((p, j) => p.signals.filter((x) => x.setup === (["S3_LEVEL_REJECTION", "S4_VWAP_PULLBACK", "S5_EMA_TREND"] as const)[j])) });
     }
     const s = summarizeReplay(res);
@@ -8426,7 +8427,7 @@ async function buildSetupSignals(symbol: string) {
     symbol, index: def.nseSymbol || def.name, name: def.name, date: lastDay, isToday, asOf,
     dataStatus: !marketOpen ? "CLOSED" : lastLive != null && nowSec - (lastLive + 300) < 10 * 60 ? "LIVE" : "STALE",
     today: { ...cur, signals: cur.signals.map((s) => ({ ...s, option: legs[s.id] ?? null })) },
-    replay, config: SETUP_CONFIG,
+    replay, config: SETUP_CONFIG, s5Filter: s5Flt,
     notes: [
       "Advisory signals from your rejection / VWAP logic — the Market Command FINAL DECISION and the paper engine are unchanged.",
       "Closed 5m candles only; entry at the next candle's open; no new signal before 09:20 or after 14:00; exit by 15:15.",
@@ -8504,7 +8505,7 @@ async function buildSetupSignalsForDate(symbol: string, date: string, uptoMin: n
   if (di < 7) throw new Error(`Not enough history before ${date} to build its levels — pick a later date`);
   const dayC = ses.get(date)!, dayEndT = dayC[dayC.length - 1].time + 300;
   const asOf = uptoMin == null ? dayEndT : Math.min(dayEndT, Math.floor(Date.parse(date + "T00:00:00Z") / 1000) - 19800 + uptoMin * 60);
-  const r = setupRunDay(days, ses, di, asOf, null, (def.nseSymbol || "") === "NIFTY" ? SETUP_CONFIG.s5DistPtsNifty : null);
+  const r = setupRunDay(days, ses, di, asOf, null, (def.nseSymbol || "") === "NIFTY" ? SETUP_CONFIG.s5DistPtsNifty : null, undefined, SETUP_CONFIG.s5TrendFilterByIndex[def.nseSymbol || ""] || "off");
   // Full-day test run → analyse logic vs the day's real moves and record it in the test log.
   let analysis: any = null;
   const dayComplete = (() => { const m = new Date((dayC[dayC.length - 1].time + 19800) * 1000); return m.getUTCHours() * 60 + m.getUTCMinutes() >= 15 * 60 + 10; })();
@@ -8518,7 +8519,7 @@ async function buildSetupSignalsForDate(symbol: string, date: string, uptoMin: n
     mode: "TEST", symbol, index: def.nseSymbol || def.name, name: def.name, date, isToday: false, asOf, upto: new Date((asOf + 19800) * 1000).toISOString().slice(11, 16),
     dataStatus: "HISTORICAL", today: { ...r, signals: r.signals.map((x) => ({ ...x, option: { available: false, reason: "Testing mode — historical option prices are not available (index plan only)" } })) },
     levelsForChart: { pdh: lv("Previous Day High"), pdl: lv("Previous Day Low"), pdc: lv("Previous Day Close"), orbHigh: lv("Opening Range High"), orbLow: lv("Opening Range Low") },
-    sessions: days.slice(7), config: SETUP_CONFIG, analysis,
+    sessions: days.slice(7), config: SETUP_CONFIG, analysis, s5Filter: SETUP_CONFIG.s5TrendFilterByIndex[def.nseSymbol || ""] || "off",
     notes: [`TESTING ${date} as of ${new Date((asOf + 19800) * 1000).toISOString().slice(11, 16)} — closed candles up to that time only; outcomes graded on candles up to that time.`, "Index-point plans only; no option prices for past dates."],
   };
 }
