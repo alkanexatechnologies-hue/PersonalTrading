@@ -47,7 +47,7 @@ function mcsShell() {
     <div class="mcs-chips" id="mcs-syms">${MCS_SYMS.map(([s, n]) => `<button class="mcs-chip${s === MCS.sym ? " on" : ""}" data-sym="${s}">${n}</button>`).join("")}</div>
     <div class="mcs-meta" id="mcs-meta"></div>
   </div>
-  <div class="mcs-grid1">
+  <div class="mcs-top">
     <section class="mcs-card mcs-chartcard">
       <div class="mcs-chhead">
         <b id="mcs-chname">NIFTY 50 (Spot)</b><span class="mcs-sub" id="mcs-ohlc"></span>
@@ -56,8 +56,10 @@ function mcsShell() {
       <div class="mcs-toggles" id="mcs-toggles">${[["ema9", "EMA 9"], ["ema21", "EMA 21"], ["ema50", "EMA 50"], ["ema200", "EMA 200"], ["vwap", "VWAP"], ["bos", "BOS/CHoCH"], ["ob", "OB"], ["levels", "S/R + ORB + Liquidity"], ["zones", "S/R zones"], ["ntz", "No-Trade Zone"], ["vol", "Volume"]].map(([k, n]) => `<label class="mcs-tg"><input type="checkbox" data-k="${k}" ${MCS.show[k] ? "checked" : ""}> ${n}</label>`).join("")}</div>
       <div class="mcs-chart" id="mcs-chart"></div>
     </section>
-    <aside class="mcs-card mcs-levels" id="mcs-levels"></aside>
+    <section class="mcs-card mcs-lvtable" id="mcs-lvtable"></section>
+    <section class="mcs-card mcs-optlv" id="mcs-optlv"></section>
   </div>
+  <div class="mcs-keyrow" id="mcs-keyrow"></div>
   <section class="mcs-card mcs-analysis" id="mcs-analysis"></section>
   <section class="mcs-card mcs-fast" id="mcs-fast"></section>
   <div class="mcs-grid2">
@@ -140,7 +142,8 @@ function mcsBuildChart() {
   MCS.chart = ch;
   MCS.series.c = ch.addCandlestickSeries({ upColor: "#16c784", downColor: "#ea3943", borderVisible: false, wickUpColor: "#16c784", wickDownColor: "#ea3943" });
   const ln = (col, st) => ch.addLineSeries({ color: col, lineWidth: 1, lineStyle: st || 0, priceLineVisible: false, lastValueVisible: false });
-  MCS.series.ema9 = ln("#f59e0b"); MCS.series.ema21 = ln("#22d3ee"); MCS.series.ema50 = ln("#a78bfa"); MCS.series.ema200 = ln("#94a3b8"); MCS.series.vwap = ln("#22c55e", 2);
+  MCS.series.ema9 = ln("#f97316"); MCS.series.ema21 = ln("#facc15"); MCS.series.ema50 = ln("#6366f1"); MCS.series.ema200 = ln("#94a3b8"); MCS.series.vwap = ln("#22c55e", 2);
+  MCS.series.c.applyOptions({ title: "Current", priceLineColor: "#64748b" });
   MCS.series.vol = ch.addHistogramSeries({ priceScaleId: "vol", priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false });
   ch.priceScale("vol").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
   MCS.series.lines = [];
@@ -162,9 +165,10 @@ function mcsRenderChart() {
   const recent = cs.slice(-120); const lo = Math.min(...recent.map((x) => x.low)), hi = Math.max(...recent.map((x) => x.high)); const pad = (hi - lo) * 0.6;
   const inView = (p) => p != null && p >= lo - pad && p <= hi + pad;
   const lad = mcsSpotLadder(d);
-  const want = (l) => (l.kind === "bos" || l.kind === "choch" ? MCS.show.bos : MCS.show.levels);
-  [...lad.res, ...lad.sup].filter((l) => want(l) && inView(l.price)).forEach((l) => {
-    MCS.series.lines.push(MCS.series.c.createPriceLine({ price: l.price, color: l.side === "resistance" ? "#ea3943" : "#16c784", lineWidth: 1, lineStyle: l.kind === "orb" || l.kind === "pdhl" || l.kind === "swing" || l.kind === "pivot" ? 2 : 0, axisLabelVisible: true, title: `${l.tag} ${l.short}` }));
+  const want = (l) => (l.kind === "bos" || l.kind === "choch" ? MCS.show.bos : l.kind === "ind" ? false : MCS.show.levels);
+  // Same list as the Levels table; indicator lines (VWAP/EMA) are drawn as series, not price lines.
+  mcsLevelList(d).filter((l) => want(l) && inView(l.price)).forEach((l) => {
+    MCS.series.lines.push(MCS.series.c.createPriceLine({ price: l.price, color: l.color, lineWidth: 1, lineStyle: l.kind === "ladder" && l.side === "resistance" || l.kind === "ladder" && l.side === "support" ? 0 : 2, axisLabelVisible: true, title: l.chip }));
   });
   if (MCS.show.levels && lad.sl && inView(lad.sl.price)) MCS.series.lines.push(MCS.series.c.createPriceLine({ price: lad.sl.price, color: "#f97316", lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title: "SL" }));
   if (MCS.show.ob) (d.orderBlocks || []).filter((o) => inView(o.high) || inView(o.low)).slice(-3).forEach((o) => {
@@ -179,13 +183,27 @@ function mcsRenderChart() {
   if (MCS.show.ntz && ntz?.active && ntz.low != null && ntz.high != null) zones.push({ lo: ntz.low, hi: ntz.high, kind: "ntz", label: `NO TRADE ZONE ${mcsN(ntz.low)} – ${mcsN(ntz.high)}` });
   mcsSetZones(MCS.zones, zones);
   const mk = MCS.show.bos ? (d.structure?.bosEvents || []).map((b) => ({ time: mcsT(b.time), position: b.direction === "Bullish" ? "belowBar" : "aboveBar", color: b.direction === "Bullish" ? "#16c784" : "#ea3943", shape: b.stage === "Pre" ? "circle" : b.direction === "Bullish" ? "arrowUp" : "arrowDown", text: b.stage === "Pre" ? "BOS?" : "BOS" })) : [];
+  if (MCS.show.levels) {
+    const t0 = cs.length ? mcsIstDay(cs[cs.length - 1].time) : null;
+    (d.structure?.swingPoints || []).filter((p) => mcsIstDay(p.time) === t0 && cs.some((x) => x.time === p.time)).slice(-6).forEach((p) => {
+      const hi = p.type === "HH" || p.type === "LH";
+      mk.push({ time: mcsT(p.time), position: hi ? "aboveBar" : "belowBar", color: "#c084fc", shape: hi ? "arrowDown" : "arrowUp", text: `${hi ? "SW H" : "SW L"} ${mcsN(p.price, 0)}` });
+    });
+  }
   try { MCS.series.c.setMarkers(mk.sort((a, b) => a.time - b.time)); } catch (_) {}
   const key = MCS.sym + MCS.tf;
-  if (MCS._fit !== key) { MCS.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, cs.length - 110), to: cs.length + 2 }); MCS._fit = key; }
+  if (MCS._fit !== key) {
+    // Open on TODAY's session (as in the design); fall back to the last ~110 bars early in the day.
+    const tday = mcsIstDay(cs[cs.length - 1].time), first = cs.findIndex((x) => mcsIstDay(x.time) === tday);
+    const from = first >= 0 && cs.length - first >= 6 ? Math.max(0, first - 1) : Math.max(0, cs.length - 110);
+    MCS.chart.timeScale().setVisibleLogicalRange({ from, to: cs.length + 3 }); MCS._fit = key;
+  }
   const last = cs[cs.length - 1];
   const nm = MCS_SYMS.find((x) => x[0] === MCS.sym)?.[1] || MCS.sym;
-  mcsEl("mcs-chname").textContent = `${nm} (Spot) · ${MCS.tf === "60m" ? "1h" : MCS.tf}`;
-  mcsEl("mcs-ohlc").innerHTML = `O <b>${mcsN(last.open)}</b> H <b>${mcsN(last.high)}</b> L <b>${mcsN(last.low)}</b> C <b class="${mcsCls(last.close - last.open)}">${mcsN(last.close)}</b> · ${mcsHm(last.time)} · Vol ${mcsL(last.volume)}`;
+  mcsEl("mcs-chname").textContent = `${nm} ${MCS.tf === "60m" ? "1 Hour" : parseInt(MCS.tf, 10) + " Min"}`;
+  // Day OHLC + change vs previous close (as in the design); last candle time for freshness.
+  const ss = mcsSessionStats(); const dchg = ss && ss.prevClose != null ? ss.close - ss.prevClose : null;
+  mcsEl("mcs-ohlc").innerHTML = ss ? `O <b>${mcsN(ss.open)}</b> H <b>${mcsN(ss.high)}</b> L <b>${mcsN(ss.low)}</b> C <b class="${mcsCls(dchg)}">${mcsN(ss.close)}</b> <b class="${mcsCls(dchg)}">${dchg != null ? (dchg >= 0 ? "+" : "") + mcsN(dchg) + " (" + mcsPct((dchg / ss.prevClose) * 100) + ")" : ""}</b> <span class="mcs-sub">· last candle ${mcsHm(last.time)}</span>` : "";
 }
 
 function mcsSessionStats() {
@@ -267,7 +285,7 @@ function mcsPickStrike(k) {
   const atm = mcsAtm();
   MCS.selStrike = k === atm ? null : k; MCS._listScroll = null;
   mcsRenderStrikes(); mcsRenderOpt("CE"); mcsRenderOpt("PE"); mcsRenderChain();
-  mcsLoadOptions(true).then(() => mcsStable(() => { mcsRenderOpt("CE"); mcsRenderOpt("PE"); mcsRenderAnalysis(); }));
+  mcsLoadOptions(true).then(() => mcsStable(() => { mcsRenderOpt("CE"); mcsRenderOpt("PE"); mcsRenderOptLv(); mcsRenderAnalysis(); }));
 }
 function mcsRenderStrikes() {
   const box = mcsEl("mcs-strikes"); const m = MCS.d?.optionMatrix; if (!box) return;
@@ -672,7 +690,7 @@ function mcsRenderAnalysis() {
 }
 
 function mcsRenderAll() {
-  mcsStable(() => { mcsRenderHeader(); mcsRenderChart(); mcsRenderAnalysis(); mcsRenderLevels(); mcsRenderFast(); mcsRenderStrikes(); mcsRenderOpt("CE"); mcsRenderOpt("PE");
+  mcsStable(() => { mcsRenderHeader(); mcsRenderChart(); mcsRenderLvTable(); mcsRenderOptLv(); mcsRenderKeyRow(); mcsRenderAnalysis(); mcsRenderLevels(); mcsRenderFast(); mcsRenderStrikes(); mcsRenderOpt("CE"); mcsRenderOpt("PE");
   mcsRenderNext(5); mcsRenderNext(15); mcsRenderMovers(); mcsRenderChain(); mcsRenderTopMove(); mcsRenderCmd(); });
 }
 
@@ -694,7 +712,7 @@ async function mcsRefresh(force) {
           if (sym === MCS.sym && ma && !ma.error) { MCS.ma = ma; MCS.maAt = Date.now(); mcsStable(() => { mcsRenderChart(); mcsRenderAnalysis(); mcsRenderLevels(); mcsRenderFast(); mcsRenderStrikes(); mcsRenderNext(5); mcsRenderNext(15); mcsRenderMovers(); mcsRenderChain(); mcsRenderTopMove(); }); }
         })
       : Promise.resolve();
-    const optP = mcsLoadOptions(force).then(() => { if (sym === MCS.sym) mcsStable(() => { mcsRenderOpt("CE"); mcsRenderOpt("PE"); mcsRenderAnalysis(); }); });
+    const optP = mcsLoadOptions(force).then(() => { if (sym === MCS.sym) mcsStable(() => { mcsRenderOpt("CE"); mcsRenderOpt("PE"); mcsRenderOptLv(); mcsRenderAnalysis(); }); });
     await Promise.all([maP, optP]);
   } catch (e) { console.error("[MCS]", e); }
   finally { MCS.busy = false; if (MCS._pending) { MCS._pending = false; mcsRefresh(true); } }
@@ -722,4 +740,124 @@ function initMcSummary() {
     if (!p || !p.classList.contains("active") || document.hidden) return;   // only while the Summary is on screen
     mcsRefresh(false);
   }, 15000);
+}
+
+
+// ===========================================================================
+// TOP SECTION (design: chart · Levels in price order · Options) + key-level row.
+// One level list feeds the chart lines AND the table, so both always agree.
+// R#/S# numbering = the same ladder the analysis / next-5 / next-15 cards use;
+// indicator and session levels (VWAP, EMA, PDC, day high/low, system targets)
+// are listed unnumbered. Every value comes from the Market Command payload.
+// ===========================================================================
+const MCS_LV_COL = { resistance: "#ea3943", support: "#16c784", pdhl: "#64748b", orb: "#0ea5e9", swing: "#a855f7", bos: "#dc2626", choch: "#a855f7", sweep: "#f0b90b", pivot: "#94a3b8", vwap: "#22c55e", ema21: "#facc15", ema50: "#6366f1", day: "#0891b2", target: "#ea3943" };
+function mcsLevelList(d) {
+  if (!d || d.spot == null) return [];
+  const spot = d.spot, s = mcsSessionStats(), lad = mcsSpotLadder(d), ov = d.overlays || {};
+  const lastv = (a) => { if (!a) return null; for (let i = a.length - 1; i >= 0; i--) if (a[i] != null) return a[i]; return null; };
+  const out = [];
+  const colOf = (l) => (l.kind === "orb" || l.kind === "pdhl" || l.kind === "swing" || l.kind === "bos" || l.kind === "choch" || l.kind === "sweep" || l.kind === "pivot") ? MCS_LV_COL[l.kind] : MCS_LV_COL[l.side];
+  const pretty = (sh) => String(sh).replace(/^Piv /, "Pivot ").replace(/^Strong R$/, "Strong Resistance").replace(/^Strong S$/, "Strong Support").replace(/^R$/, "Resistance").replace(/^S$/, "Support");
+  for (const l of [...lad.res, ...lad.sup]) out.push({ kind: "ladder", sub: l.kind, side: l.side, price: l.price, chip: `${l.tag} ${l.short}`, name: `${l.tag} · ${pretty(l.short)}`, source: l.type, color: colOf(l) });
+  const near = (p) => out.some((x) => Math.abs(x.price - p) <= spot * 0.0002);
+  const add = (kind, name, chip, price, source, color) => { if (price == null || !isFinite(price) || near(price)) return; out.push({ kind, side: price > spot ? "resistance" : "support", price: Math.round(price * 100) / 100, chip, name, source, color }); };
+  if (s) { add("day", "Today High", "TH", s.high, "Today's high", MCS_LV_COL.day); add("day", "Today Low", "TL", s.low, "Today's low", MCS_LV_COL.day); add("pdc", "PDC", "PDC", s.prevClose, "Previous day close", MCS_LV_COL.pdhl); }
+  add("ind", "VWAP", "VWAP", lastv(ov.vwap), "VWAP (session)", MCS_LV_COL.vwap);
+  add("ind", "EMA 21", "EMA 21", lastv(ov.ema21), `EMA 21 (${MCS.tf})`, MCS_LV_COL.ema21);
+  add("ind", "EMA 50", "EMA 50", lastv(ov.ema50), `EMA 50 (${MCS.tf})`, MCS_LV_COL.ema50);
+  // System targets only while the arbiter has a live trade plan (never invented).
+  const x = d.decision, live = x && (x.finalAction === "BUY_CE" || x.finalAction === "BUY_PE" || x.finalAction === "HOLD") && x.plan;
+  if (live) { add("target", "Target 1", "T1", x.plan.target1, "System target (FINAL DECISION)", MCS_LV_COL.target); add("target", "Target 2", "T2", x.plan.target2, "System target (FINAL DECISION)", MCS_LV_COL.target); }
+  return out.sort((a, b) => b.price - a.price);
+}
+// ACTIVE / TESTED (touched today) / BROKEN (crossed since the open) — from today's real candles.
+function mcsLevelStatus(l, d) {
+  const cs = d.candles || []; if (!cs.length) return "—";
+  const t0 = mcsIstDay(cs[cs.length - 1].time), td = cs.filter((c) => mcsIstDay(c.time) === t0);
+  if (l.kind === "ind") return "LIVE";
+  if (l.kind === "day") return l.name === "Today High" ? "DAY HIGH" : "DAY LOW";
+  if (!td.length) return "ACTIVE";
+  const tol = d.spot * 0.0002, open = td[0].open;
+  if ((open - l.price) * (d.spot - l.price) < 0) return "BROKEN";
+  return td.some((c) => c.low <= l.price + tol && c.high >= l.price - tol) ? "TESTED" : "ACTIVE";
+}
+function mcsRenderLvTable() {
+  const box = mcsEl("mcs-lvtable"); const d = MCS.d; if (!box) return;
+  const nm = MCS_SYMS.find((x) => x[0] === MCS.sym)?.[1] || MCS.sym;
+  if (!d || d.spot == null) { box.innerHTML = `<h4>${mcsEsc(nm)} LEVELS (Price Order)</h4>${UNAV}`; return; }
+  const live = d.syncHealth?.overall || (d.dhanLive ? "LIVE" : "—");
+  const L = mcsLevelList(d), above = L.filter((l) => l.price > d.spot), below = L.filter((l) => l.price <= d.spot);
+  const row = (l, i) => { const st = mcsLevelStatus(l, d), dl = l.price - d.spot;
+    return `<tr><td>${i}</td><td><span class="mcs-chipl" style="background:${l.color}">${mcsEsc(l.name)}</span></td><td class="r"><b>${mcsN(l.price)}</b></td>
+      <td class="r ${dl > 0 ? "mcs-up" : "mcs-dn"}">${dl > 0 ? "+" : ""}${mcsN(dl)}</td><td class="mcs-src">${mcsEsc(l.source)}</td><td><span class="mcs-st ${st.toLowerCase().replace(/\s/g, "")}">${st}</span></td></tr>`; };
+  let n = 0;
+  box.innerHTML = `<h4>${mcsEsc(nm)} LEVELS <span class="mcs-sub">(Price Order)</span> <span class="mcs-live ${String(live).toLowerCase()}">● ${mcsEsc(live)}</span></h4>
+    <div class="mcs-tblwrap mcs-lvwrap"><table class="mcs-tbl mcs-lvt"><thead><tr><th>#</th><th>Level Type</th><th class="r">Price</th><th class="r">Δ from LTP</th><th>Source</th><th>Status</th></tr></thead><tbody>
+    ${above.map((l) => row(l, ++n)).join("")}
+    <tr class="mcs-cur"><td>${++n}</td><td><span class="mcs-chipl cur">CURRENT PRICE</span></td><td class="r"><b>${mcsN(d.spot)}</b></td><td class="r">—</td><td>—</td><td><span class="mcs-st cur">CURRENT</span></td></tr>
+    ${below.map((l) => row(l, ++n)).join("")}
+    </tbody></table></div>
+    <div class="mcs-sub">BROKEN = crossed since today's open · TESTED = touched today · R/S numbering = the same ladder the analysis below uses.</div>`;
+  const w = box.querySelector(".mcs-lvwrap"), cur = box.querySelector(".mcs-cur");
+  if (w && cur && MCS._lvCentered !== MCS.sym) { w.scrollTop = Math.max(0, cur.offsetTop - w.clientHeight / 2); MCS._lvCentered = MCS.sym; }
+}
+// Options panel: premium R/S of the selected (default ATM) strike's CE and PE from their own candles.
+function mcsRenderOptLv() {
+  const box = mcsEl("mcs-optlv"); const d = MCS.d; if (!box) return;
+  const nm = MCS_SYMS.find((x) => x[0] === MCS.sym)?.[1] || MCS.sym;
+  const m = d?.optionMatrix, k = mcsStrike(), atm = mcsAtm();
+  if (!m || !m.available || k == null) { box.innerHTML = `<h4>${mcsEsc(nm)} OPTIONS</h4>${UNAV}`; return; }
+  const key = `${MCS.sym}|${k}|${m.expiry}|${MCS.tf}`, ok = MCS.opt.key === key;
+  const lv = { CE: mcsOptLevels(ok ? MCS.opt.CE?.candles || [] : []), PE: mcsOptLevels(ok ? MCS.opt.PE?.candles || [] : []) };
+  const ladder = (side) => {
+    const o = lv[side]; if (o.ltp == null) return `<div class="mcs-sub">${ok && MCS.opt[side]?.error ? mcsEsc(MCS.opt[side].error) : "Loading premium candles…"}</div>`;
+    const res = o.res.slice(0, 3).reverse(), sup = o.sup.slice(0, 2);
+    return `<table class="mcs-tbl mcs-oplad"><thead><tr><th>Level</th><th class="r">Price</th></tr></thead><tbody>
+      ${res.map((l) => `<tr title="${mcsEsc(l.type)}"><td class="mcs-dn"><b>${l.tag}</b></td><td class="r">${mcsN(l.price)}</td></tr>`).join("")}
+      <tr class="mcs-cur"><td><b>Current</b></td><td class="r"><b>${mcsN(o.ltp)}</b></td></tr>
+      ${sup.map((l) => `<tr title="${mcsEsc(l.type)}"><td class="mcs-up"><b>${l.tag}</b></td><td class="r">${mcsN(l.price)}</td></tr>`).join("")}</tbody></table>`;
+  };
+  const detail = (side) => {
+    const o = lv[side]; if (o.ltp == null) return "";
+    const rows = [...o.res.slice(0, 2).reverse().map((l) => [l.tag, l.price, l.type, "mcs-dn"]), ["Current", o.ltp, "LTP (latest candle)", "cur"], ...o.sup.slice(0, 2).map((l) => [l.tag, l.price, l.type, "mcs-up"])];
+    return `<div class="mcs-opdet"><h5>${side} LEVELS <span class="mcs-sub">(${k === atm ? "ATM " : ""}${k})</span></h5><table class="mcs-tbl"><thead><tr><th>Type</th><th class="r">Price</th><th>Source</th></tr></thead><tbody>
+      ${rows.map(([t, p, src, c]) => `<tr class="${c === "cur" ? "mcs-cur" : ""}"><td class="${c === "cur" ? "" : c}"><b>${t}</b></td><td class="r">${mcsN(p)}</td><td class="mcs-src">${mcsEsc(src)}</td></tr>`).join("")}</tbody></table></div>`;
+  };
+  box.innerHTML = `<h4>${mcsEsc(nm)} OPTIONS <span class="mcs-sub">${k === atm ? "ATM" : "Strike"}: <b>${k}</b> · Expiry: <b>${mcsEsc(m.expiry || "—")}</b></span></h4>
+    <div class="mcs-op2"><div class="mcs-opcol ce"><div class="mcs-ophd ce">CALL (CE)</div>${ladder("CE")}</div><div class="mcs-opcol pe"><div class="mcs-ophd pe">PUT (PE)</div>${ladder("PE")}</div></div>
+    ${detail("CE")}${detail("PE")}
+    <div class="mcs-sub">Premium levels from each option's own candles (previous day, today, opening range, VWAP, swings). Pick another strike in the Option List below.</div>`;
+}
+// Bottom row: Today's key levels · Previous day · Structure · OI · Quick stats.
+function mcsRenderKeyRow() {
+  const box = mcsEl("mcs-keyrow"); const d = MCS.d; if (!box) return;
+  if (!d || d.spot == null) { box.innerHTML = ""; return; }
+  const s = mcsSessionStats() || {}, lv = d.levels || {}, oi = d.oi || {};
+  const px = (v) => (v == null ? null : typeof v === "number" ? v : v.strike ?? null);
+  const kv = (k, v, cls = "", extra = "") => `<div><span>${k}</span><b class="${cls}">${v == null ? "—" : typeof v === "number" ? mcsN(v) : v}</b>${extra}</div>`;
+  // Structure: latest swing high / low (today and before), equal highs/lows (two swings within 0.03%), last BOS.
+  const sw = d.structure?.swingPoints || [];
+  const swH = [...sw].reverse().find((p) => p.type === "HH" || p.type === "LH"), swL = [...sw].reverse().find((p) => p.type === "HL" || p.type === "LL");
+  const tol = d.spot * 0.0003;
+  // Equal high/low = two swing points within 0.03% that price has NOT traded through since (still resting liquidity).
+  const csAll = d.candles || [];
+  const eq = (hi) => { const pts = sw.filter((p) => (hi ? p.type === "HH" || p.type === "LH" : p.type === "HL" || p.type === "LL")).slice(-8);
+    for (let i = pts.length - 1; i > 0; i--) for (let j = i - 1; j >= 0; j--) {
+      if (Math.abs(pts[i].price - pts[j].price) > tol) continue;
+      const lvl = hi ? Math.max(pts[i].price, pts[j].price) : Math.min(pts[i].price, pts[j].price);
+      const later = csAll.filter((c) => c.time > pts[i].time);
+      if (later.every((c) => (hi ? c.high <= lvl : c.low >= lvl))) return lvl;
+    }
+    return null; };
+  const eqh = eq(true), eql = eq(false);
+  const atr = mcsAtr(d.candles || []);
+  const chg = s.prevClose != null ? d.spot - s.prevClose : null;
+  const card = (t, body) => `<section class="mcs-card mcs-kcard"><h4>${t}</h4><div class="mcs-kvs">${body}</div></section>`;
+  const sR = px(lv.strongResistance), sS = px(lv.strongSupport);
+  box.innerHTML =
+    card("TODAY'S KEY LEVELS", kv("Today High (TH)", s.high, "mcs-dn") + kv("Today Low (TL)", s.low, "mcs-up") + kv("Opening Range High", px(lv.orbHigh)) + kv("Opening Range Low", px(lv.orbLow))) +
+    card("PREVIOUS DAY LEVELS", kv("Previous Day High (PDH)", px(lv.pdh) ?? s.prevHigh, "mcs-dn") + kv("Previous Day Low (PDL)", px(lv.pdl) ?? s.prevLow, "mcs-up") + kv("Previous Close (PDC)", s.prevClose)) +
+    card("STRUCTURE LEVELS", kv("Swing High (SWH)", swH ? swH.price : null, "mcs-dn") + kv("Swing Low (SWL)", swL ? swL.price : null, "mcs-up") + kv("Equal High (EQH)", eqh ?? "none") + kv("Equal Low (EQL)", eql ?? "none") + kv("BOS Level", d.bos?.price ?? null, d.bos?.direction === "BULLISH" ? "mcs-up" : "mcs-dn", d.bos ? ` <em>${mcsEsc(d.bos.direction || "")} ${mcsEsc(d.bos.stage || "")}</em>` : "")) +
+    card("OI LEVELS", kv("OI Resistance", oi.resistance ?? null, "mcs-dn") + kv("OI Support", oi.support ?? null, "mcs-up") + kv("Max Call OI Strike", sR, "", lv.strongResistance?.oi ? ` <em>${mcsL(lv.strongResistance.oi)}</em>` : "") + kv("Max Put OI Strike", sS, "", lv.strongSupport?.oi ? ` <em>${mcsL(lv.strongSupport.oi)}</em>` : "") + kv("PCR", oi.pcr != null ? mcsN(oi.pcr) : null) + (oi.maxPain != null ? kv("Max Pain", oi.maxPain) : "")) +
+    card("QUICK STATS", kv("LTP", d.spot) + kv("Change", chg != null ? `${chg >= 0 ? "+" : ""}${mcsN(chg)} (${mcsPct((chg / s.prevClose) * 100)})` : null, mcsCls(chg)) + kv("Day Range", s.low != null ? `${mcsN(s.low)} – ${mcsN(s.high)}` : null) + kv("ATR (14)", atr != null ? mcsN(atr) : null) + kv("Volatility", d.vix?.available ? `${mcsEsc(d.vixEnvironment?.environment || "—")} · VIX ${mcsN(d.vix.value)}` : null));
 }

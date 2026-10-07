@@ -82,5 +82,16 @@ export async function fetchDhanCandles(
   const seen = new Set<number>();
   return chunks
     .filter((c) => (seen.has(c.time) ? false : (seen.add(c.time), true)))
+    .filter(inSessionIST)
     .sort((a, b) => a.time - b.time);
+}
+
+// After the close Dhan's intraday response carries one extra zero-volume bar
+// stamped with the CURRENT wall-clock time (e.g. 19:30 IST, OHLC = last price).
+// It is not a traded candle and skews indicators / charts, so intraday bars
+// outside the NSE/BSE session (09:15–15:30 IST) are dropped.
+export function inSessionIST(c: Candle): boolean {
+  const d = new Date((c.time + 19800) * 1000);
+  const m = d.getUTCHours() * 60 + d.getUTCMinutes();
+  return m >= 9 * 60 + 15 && m < 15 * 60 + 30;
 }

@@ -57,6 +57,7 @@ import { dhanOiAnalysis, dhanHasOptions, dhanZeroHero, dhanRateLimitStats, DhanP
 import { loadDhanConfig, saveDhanConfig, dhanConfigured, disconnectDhan, testDhanConnection } from "../data/dhanConfig";
 import { withDhanPriority } from "../data/dhanClient";
 import { installAsyncSafety, apiDeadline } from "./requestSafety";
+import { inSessionIST } from "../data/dhanHistorical";
 import { screenOn, jobOn, setDataControl, countRequest, dataControlStatus, DC_SCREENS } from "../dataControl/dataControl";
 // Universal Market Indicator — Test Lab V1 (research/audit only, fully isolated).
 import { runTest as runTestLab, availableHistory as testLabAvailableHistory } from "../testlab/runner";
@@ -438,7 +439,9 @@ function persistLastGoodCandles(ckey: string, v: any[]): void {
   try { const f = _lgFile(ckey); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify({ ts: Date.now(), v })); } catch { /* best-effort */ }
 }
 function loadLastGoodCandlesDisk(ckey: string): { ts: number; v: any[] } | null {
-  try { const o = JSON.parse(fs.readFileSync(_lgFile(ckey), "utf8")); return o && Array.isArray(o.v) ? o : null; } catch { return null; }
+  // Intraday files saved before the session filter may hold Dhan's post-close
+  // zero-volume bar (e.g. 19:30) — drop anything outside 09:15–15:30 IST.
+  try { const o = JSON.parse(fs.readFileSync(_lgFile(ckey), "utf8")); return o && Array.isArray(o.v) ? (/:1d$/.test(ckey) ? o : { ...o, v: o.v.filter(inSessionIST) }) : null; } catch { return null; }
 }
 const getDailyCached = (symbol: string, days = 40) =>
   cached(`d:${symbol}:${days}`, TTL_DAILY, () => {
