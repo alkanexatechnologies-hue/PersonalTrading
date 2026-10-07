@@ -35,6 +35,13 @@ export const SETUP_CONFIG = {
   vwapK: 2.0, roomM: 2.7, vwapHoldBars: 1, pullbackAtr: 0.2, extendedDailyAtr: 1.2, maxS4PerSide: 2,
   // execution / grading
   entrySlipAtr: 0.5, timeExitBars: 12,
+  // entryMode "open" = fill at the next candle's open; "break" = fill only when price breaks the signal candle's
+  // high (CE) / low (PE) within breakBars candles, else the signal is cancelled (NO_TRIGGER).
+  // Adopted 08 Oct 2026 (build + unseen check period): "break" cut stop-losses 48→39% / 49→44% with ~23% fewer trades
+  // and equal-or-better R on both periods. Breakeven at 1R did NOT hold on the check period → left off.
+  entryMode: "break" as "open" | "break", breakBars: 2,
+  // breakevenAtR > 0: once the trade has run that many R in favour, the stop moves to the entry price.
+  breakevenAtR: 0,
   // NIFTY reference points from the trader's original rule (logged for comparison only)
   refVwapPts: 30, refRoomPts: 40,
   // S5 EMA TREND (research-backed: EMA 9 trail best on both sides; trail only after +1R; book 50% at 1.5R)
@@ -51,7 +58,7 @@ const hm = (t: number) => new Date((t + IST) * 1000).toISOString().slice(11, 16)
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
 export type SetupId = "S3_LEVEL_REJECTION" | "S4_VWAP_PULLBACK" | "S5_EMA_TREND";
-export type SignalStatus = "ENTRY_READY" | "ACTIVE" | "TARGET" | "STOP" | "TIME_EXIT" | "EOD_EXIT" | "EXTENDED" | "BLOCKED" | "TRAIL_EXIT" | "VWAP_EXIT" | "REJECTION_EXIT";
+export type SignalStatus = "ENTRY_READY" | "ACTIVE" | "TARGET" | "STOP" | "TIME_EXIT" | "EOD_EXIT" | "EXTENDED" | "BLOCKED" | "TRAIL_EXIT" | "VWAP_EXIT" | "REJECTION_EXIT" | "NO_TRIGGER";
 export type WatchState = "APPROACHING" | "LEVEL_TEST" | "CONFIRMATION_PENDING" | "ACCEPTED";
 
 export interface SetupSignal {
@@ -127,7 +134,11 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
     const tgt = side === "CE" ? entryRef + 2 * risk : entryRef - 2 * risk;
     return { plan: { entryRef: r2(entryRef), entry: null, stop: r2(stop), target: r2(tgt), risk: r2(risk), reward: r2(2 * risk), rr: 2, targetWhy: "no major level in the way — 2R" }, block: null };
   };
-  const push = (s: SetupSignal) => { signals.push(s); if (!s.blockedBy) openSig = s; };
+  const push = (s: SetupSignal) => {
+    const sc = today.find((x) => x.time === s.barTime);
+    if (sc) { s.metrics.sigHigh = sc.high; s.metrics.sigLow = sc.low; }
+    signals.push(s); if (!s.blockedBy) openSig = s;
+  };
 
   for (let k = 0; k < today.length; k++) {
     const i = off + k, c = today[k], a = A[i] ?? (c.high - c.low), m = istMin(c.time), tEnd = c.time + 300;
@@ -135,12 +146,22 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
     if (openSig) {
       const s = openSig as SetupSignal;
       if (s.status === "ENTRY_READY") {
-        // fill at this bar's open unless price already ran away (no chase)
-        const p = s.plan!;
-        const slip = s.side === "CE" ? c.open - p.entryRef : p.entryRef - c.open;
-        if (slip > C.entrySlipAtr * a) { s.status = "EXTENDED"; s.metrics.slipPts = r2(slip); openSig = null; }
+        const p = s.plan!, sgE = s.side === "CE" ? 1 : -1;
+        let fillPx: number | null = c.open;
+        if (C.entryMode === "break") {
+          // wait for a break of the signal candle's high (CE) / low (PE); cancel if the stop is hit first or it times out
+          const trig = Number(sgE > 0 ? s.metrics.sigHigh : s.metrics.sigLow);
+          const waited = Math.round((c.time - s.barTime) / 300);
+          const hit = sgE > 0 ? c.high > trig : c.low < trig;
+          const stopFirst = sgE > 0 ? c.low <= p.stop && c.open < trig : c.high >= p.stop && c.open > trig;
+          if (hit && !stopFirst) fillPx = sgE > 0 ? Math.max(c.open, trig) : Math.min(c.open, trig);
+          else { fillPx = null; if (stopFirst || waited >= C.breakBars) { s.status = "NO_TRIGGER"; s.metrics.noTrigger = stopFirst ? "stop hit before the break" : `no break within ${C.breakBars} candles`; openSig = null; } }
+        }
+        const slip = fillPx == null ? 0 : sgE * (fillPx - p.entryRef);
+        if (fillPx == null) { /* still waiting for the break, or cancelled */ }
+        else if (slip > C.entrySlipAtr * a) { s.status = "EXTENDED"; s.metrics.slipPts = r2(slip); openSig = null; }
         else {
-          s.status = "ACTIVE"; p.entry = c.open; s.fillTime = c.time; p.risk = r2(Math.abs(p.entry - p.stop));
+          s.status = "ACTIVE"; p.entry = fillPx; s.fillTime = c.time; p.risk = r2(Math.abs(p.entry - p.stop));
           if (s.setup === "S5_EMA_TREND") { p.book = r2(s.side === "CE" ? p.entry + C.s5BookR * p.risk : p.entry - C.s5BookR * p.risk); p.target = p.book; }
         }
       }
@@ -158,6 +179,7 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
         if (sg * (p.stop - (sg > 0 ? c.low : c.high)) >= 0) finish("STOP", p.stop);
         else {
           if (sg * ((sg > 0 ? c.high : c.low) - p.entry!) >= C.s5TrailAfterR * risk) mt.r1 = 1;
+          if (C.breakevenAtR > 0 && !mt.be && sg * ((sg > 0 ? c.high : c.low) - p.entry!) >= C.breakevenAtR * risk) { mt.be = 1; p.stop = p.entry!; }
           if (!mt.booked && p.book != null && sg * ((sg > 0 ? c.high : c.low) - p.book) >= 0) {
             const d15 = dir15At(tEnd);
             if ((s.side === "CE" && d15 === "DOWN") || (s.side === "PE" && d15 === "UP")) { mt.fullAtBook = `15M ${d15} — whole position closed at 1.5R`; finish("TARGET", p.book, true); }
@@ -179,6 +201,7 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
         else if (hitT) close("TARGET", p.target);
         else if (held >= C.timeExitBars) close("TIME_EXIT", c.close);
         else if (m + 5 >= C.dayEndMin) close("EOD_EXIT", c.close);
+        else if (C.breakevenAtR > 0 && !s.metrics.be && (s.side === "CE" ? c.high - p.entry! : p.entry! - c.low) >= C.breakevenAtR * p.risk) { s.metrics.be = 1; p.stop = p.entry!; }
       }
     }
     const inWindow = m >= C.firstEntryMin - 5 && m + 5 <= C.lastEntryMin;   // signal candle may close 09:20..14:00
@@ -505,7 +528,7 @@ export function analyzeMoves(hist: Candle[], today: Candle[], signals: SetupSign
     const tS = today[L.s].time, tE = today[L.e].time, barsN = L.e - L.s + 1;
     const early = tS + Math.max(2, Math.ceil(barsN / 3)) * 300;
     const inLeg = (s: SetupSignal) => s.barTime >= tS - 2 * 300 && s.barTime <= tE;
-    const valid = signals.filter((s) => !s.blockedBy && s.status !== "EXTENDED");
+    const valid = signals.filter((s) => !s.blockedBy && s.status !== "EXTENDED" && s.status !== "NO_TRIGGER");
     const same = valid.filter((s) => s.side === side && inLeg(s)).sort((x, y) => x.barTime - y.barTime);
     const blocked = signals.filter((s) => s.blockedBy && s.side === side && inLeg(s));
     const against = valid.filter((s) => s.side !== side && inLeg(s));

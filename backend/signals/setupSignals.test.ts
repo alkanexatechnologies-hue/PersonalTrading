@@ -43,7 +43,7 @@ test("resistance rejection → BUY PE only after the confirming candle (no look-
   const full = evaluateSession(h, day, L, 30, day[day.length - 1].time + 300).signals.find((x) => x.setup === "S3_LEVEL_REJECTION")!;
   assert.equal(full.time, s!.time);
   assert.equal(full.plan!.stop, s!.plan!.stop);
-  assert.ok(["TARGET", "STOP", "TIME_EXIT", "EOD_EXIT", "ACTIVE"].includes(full.status));
+  assert.ok(["TARGET", "STOP", "TIME_EXIT", "EOD_EXIT", "ACTIVE", "NO_TRIGGER"].includes(full.status));
 });
 
 test("failed breakdown (1 close below support, then a strong close back) → BUY CE", () => {
@@ -185,4 +185,15 @@ test("VWAP gate: a PE rejection whose confirming close is ABOVE VWAP does not st
   const s = evaluateSession(h, day.slice(0, 8), [lvl("Previous Day High", 110, t0(D))], 30, day[7].time + 300).signals.find((x) => x.setup === "S3_LEVEL_REJECTION");
   assert.ok(s, "setup recognised");
   assert.match(s!.blockedBy || "", /VWAP gate/);
+});
+
+test("break entry: a signal fills only when price breaks the signal candle's low (PE), else NO_TRIGGER", () => {
+  const h = prior(), day = rejectionDay();
+  const full = evaluateSession(h, day, [lvl("Previous Day High", 110, t0(D))], 30, day[day.length - 1].time + 300).signals.find((x) => x.setup === "S3_LEVEL_REJECTION")!;
+  assert.ok(full.status !== "ENTRY_READY");
+  if (full.status !== "NO_TRIGGER") assert.ok(full.plan!.entry! <= Number(full.metrics.sigLow), "PE filled at/below the signal candle's low");
+  // a flat day after the signal never breaks the low → cancelled
+  const flat = [...day.slice(0, 8), ...[8, 9, 10].map((j) => bar(D, j, 99, 100, 98.5, 99.5))];
+  const nt = evaluateSession(h, flat, [lvl("Previous Day High", 110, t0(D))], 30, flat[flat.length - 1].time + 300).signals.find((x) => x.setup === "S3_LEVEL_REJECTION")!;
+  assert.equal(nt.status, "NO_TRIGGER");
 });

@@ -973,7 +973,7 @@ function mcsRenderSetups() {
   const valid = t.signals.filter((x) => !x.blockedBy), blocked = t.signals.filter((x) => x.blockedBy);
   const live = valid.find((x) => x.status === "ENTRY_READY" || x.status === "ACTIVE");
   const setupName = (x) => ({ S3_LEVEL_REJECTION: "S3", S4_VWAP_PULLBACK: "S4", S5_EMA_TREND: "S5" }[x.setup] || x.setup);
-  const stCls = (st) => ({ TARGET: "win", STOP: "loss", TIME_EXIT: "flat", EOD_EXIT: "flat", ACTIVE: "act", ENTRY_READY: "act", EXTENDED: "flat", BLOCKED: "blk" }[st] || "");
+  const stCls = (st) => ({ TARGET: "win", STOP: "loss", TIME_EXIT: "flat", EOD_EXIT: "flat", ACTIVE: "act", ENTRY_READY: "act", EXTENDED: "flat", NO_TRIGGER: "flat", BLOCKED: "blk" }[st] || "");
   // --- live box ---
   let liveHtml;
   if (live) {
@@ -986,7 +986,7 @@ function mcsRenderSetups() {
     liveHtml = `<div class="mcs-sslive ${live.side === "CE" ? "ce" : "pe"}">
       <div class="mcs-ssbig">${ss.mode === "TEST" ? `<span class="mcs-testtag">TEST ${mcsEsc(ss.upto)}</span> ` : ""}${live.status === "ACTIVE" ? "IN TRADE · " : ""}BUY ${live.side}</div>
       <div><b>${mcsEsc(live.label)}</b> <span class="mcs-sub">${live.time} ${live.level ? `· ${mcsEsc(live.level.type)} ${mcsN(live.level.price)}` : ""}</span></div>
-      <div class="mcs-ssplan">Spot: entry ${p.entry != null ? mcsN(p.entry) : `next candle open (≈ ${mcsN(p.entryRef)})`} · SL <b class="mcs-dn">${mcsN(p.stop)}</b> · Target <b class="mcs-up">${mcsN(p.target)}</b> <span class="mcs-sub">(${mcsEsc(p.targetWhy || "")}, 1:${mcsN(p.rr)})</span></div>
+      <div class="mcs-ssplan">Spot: entry ${p.entry != null ? mcsN(p.entry) : (live.metrics && live.metrics.sigHigh != null ? `on a break ${live.side === "CE" ? "above " + mcsN(live.metrics.sigHigh) : "below " + mcsN(live.metrics.sigLow)} (within 2 candles, else cancelled)` : `next candle open (≈ ${mcsN(p.entryRef)})`)} · SL <b class="mcs-dn">${mcsN(p.stop)}</b> · Target <b class="mcs-up">${mcsN(p.target)}</b> <span class="mcs-sub">(${mcsEsc(p.targetWhy || "")}, 1:${mcsN(p.rr)})</span></div>
       ${p.book != null ? `<div class="mcs-ssplan">Book <b>50% at ${mcsN(p.book)}</b> (1.5R) · rest trails <b>EMA 9</b> after +1R${p.finalTarget != null ? ` · final target ${mcsN(p.finalTarget)}` : ""}${live.metrics && live.metrics.booked ? ` · <b class="mcs-up">✅ 50% booked ${mcsEsc(live.metrics.bookTime || "")}</b>` : ""}</div>` : ""}
       ${opt}
       <ul class="mcs-ssev">${live.evidence.map((e) => `<li>${mcsEsc(e)}</li>`).join("")}</ul></div>`;
