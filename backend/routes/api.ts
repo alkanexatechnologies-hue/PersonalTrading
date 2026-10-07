@@ -203,7 +203,7 @@ import { getMarketDataHealth, fetchMarketData, marketDataProviderName, MdKey } f
 import { globalCues, indexSentiment, indiaSentiment, briefPhase, briefHeadline, SentimentBrief, IndexSentiment } from "../sentiment/brief";
 import { sessionsOf, analyseDay, aggregate, buildLevels, LiqEvent, LiqLevel } from "../liquidity/liquidityTake";
 import { evaluateSession, dailyAtrFrom5m, summarizeReplay, analyzeMoves, SETUP_CONFIG, SetupSignal, SessionResult } from "../signals/setupSignals";
-import { runLabStrategy, pdhPdlLevels, swingLevels, oiLevels, LAB_CONFIG, type LabTrade } from "../signals/strategyLab";
+import { runLabStrategy, pdhPdlLevels, swingLevels, oiLevels, LAB_CONFIG, LAB_OVERRIDES, type LabTrade } from "../signals/strategyLab";
 import { regimeAt } from "../decision/regime";
 import { buildOptionPlan } from "../signals/breakoutOption";
 import { tradeFriction } from "../paper/engine";
@@ -8429,9 +8429,9 @@ function buildLab(symbol: string, days: string[], ses: Map<string, Candle[]>, di
   return {
     strategies: LAB_STRATS.map((s) => ({ ...s, trades: today[s.id] || [], record: record.byStrategy[s.id] })),
     recordWindow: { sessions: record.sessions, from: record.from, to: record.to },
-    config: LAB_CONFIG,
+    config: LAB_CONFIG, overrides: LAB_OVERRIDES,
     notes: ["Separate strategies — they do not change the Setup Signals rules above. Paper / study only.",
-      "Reversal = price comes into the level, wicks it and closes back (green at support / red at resistance); entry on the break of that candle within 2 candles; stop beyond the last 3 candles; target 1.5R; exit 15:15.",
+      "Reversal = price comes into the level, wicks it and closes back (green at support / red at resistance); entry on the break of that candle within 2 candles; stop beyond the last 3 candles; target 1.5R; exit 15:15. PDH/PDL: signals until 14:30, wick up to 1 ATR through the level, target 2R.",
       "OI levels = max put OI (support) / max call OI (resistance) from the previous day's last option-chain snapshot. Record after costs = total R − 0.15R per trade."],
   };
 }

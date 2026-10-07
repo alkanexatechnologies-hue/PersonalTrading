@@ -8,7 +8,7 @@
 //     and the candle closes back ABOVE the level, green, in its upper half.
 //   resistance (PE): the mirror.
 // Entry = break of the trigger candle (high for CE / low for PE) within the next 2 candles.
-// Stop = extreme of the last 3 candles ± 0.1 ATR. Target = 1.5R. Anything open exits at 15:15.
+// Stop = extreme of the last 3 candles ± 0.1 ATR. Target = 1.5R (PDH/PDL: 2R, see LAB_OVERRIDES). Anything open exits at 15:15.
 import type { Candle } from "../types";
 import { atr } from "../indicators";
 
@@ -26,6 +26,13 @@ export const LAB_CONFIG = {
   maxPerLevel: 2, swingBars: 3,
 };
 const L = LAB_CONFIG;
+// Per-strategy settings on top of LAB_CONFIG.
+// PDH/PDL (set 08 Oct 2026): signals until 14:30, wick up to 1 ATR through the level, 2R target —
+// on 15 + 15 days × 5 indices this was +5.8R / +6.4R after costs (vs +0.3R / −2.5R with the defaults).
+export const LAB_OVERRIDES: Partial<Record<LabStrategyId, Partial<typeof LAB_CONFIG>>> = {
+  PDH_PDL: { lastSignalMin: 14 * 60 + 30, maxPierceAtr: 1, targetR: 2 },
+};
+export const labConfigFor = (id: LabStrategyId) => ({ ...LAB_CONFIG, ...(LAB_OVERRIDES[id] || {}) });
 
 const istMin = (t: number) => { const d = new Date((t + 19800) * 1000); return d.getUTCHours() * 60 + d.getUTCMinutes(); };
 const hm = (t: number) => { const m = istMin(t); return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`; };
@@ -63,6 +70,7 @@ export function oiLevels(snap: { support?: number | null; resistance?: number | 
 // Runs one strategy over a session. `hist` = earlier candles (for ATR warm-up), `asOf` = only
 // candles that closed by this time are used (live / replay safe).
 export function runLabStrategy(strategy: LabStrategyId, hist: Candle[], today: Candle[], levels: LabLevel[], asOf: number): LabTrade[] {
+  const L = labConfigFor(strategy);
   const day = today.filter((c) => c.time + 300 <= asOf);
   if (day.length < 2) return [];
   const all = [...hist, ...day], off = hist.length, A = atr(all, 14);

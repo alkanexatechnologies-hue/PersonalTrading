@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Candle } from "../types";
-import { runLabStrategy, pdhPdlLevels, swingLevels, oiLevels } from "./strategyLab";
+import { runLabStrategy, pdhPdlLevels, swingLevels, oiLevels, labConfigFor } from "./strategyLab";
 
 // 09:15 IST on 2026-10-07 in epoch seconds
 const T0 = Date.UTC(2026, 9, 7, 3, 45) / 1000;
@@ -18,7 +18,7 @@ test("PDL reversal: wick into PDL, green close back above → CE that hits targe
   today.push(bar(7, 104.5, 105, 99.5, 103.5));                                   // wicks PDL 100, closes back above, green? (open 104.5 > close) → no
   today.push(bar(8, 101, 104.8, 99.8, 104.2));                                   // wick to 99.8, green close 104.2 in upper half → signal
   today.push(bar(9, 104.2, 105.5, 103.9, 105.2));                                // breaks 104.8 → entry
-  for (let k = 10; k < 20; k++) today.push(bar(k, 105 + (k - 10), 107 + (k - 10), 104.5 + (k - 10), 106.5 + (k - 10)));
+  for (let k = 10; k < 30; k++) today.push(bar(k, 105 + (k - 10), 107 + (k - 10), 104.5 + (k - 10), 106.5 + (k - 10)));
   const lv = pdhPdlLevels(prev, today);
   assert.equal(lv.find((l) => l.name === "PDL")!.price, 100);
   const tr = runLabStrategy("PDH_PDL", hist, today, lv, today[today.length - 1].time + 300);
@@ -27,7 +27,7 @@ test("PDL reversal: wick into PDL, green close back above → CE that hits targe
   assert.equal(tr[0].signalTime, "10:00");
   assert.equal(tr[0].entry, 104.8);
   assert.equal(tr[0].status, "TARGET");
-  assert.equal(tr[0].resultR, 1.5);
+  assert.equal(tr[0].resultR, 2);   // PDH/PDL uses a 2R target
 });
 
 test("no look-ahead: as of the signal candle the trade is only WAITING", () => {
@@ -48,6 +48,12 @@ test("swing levels become usable only after the confirming candles close", () =>
   assert.equal(sw.length, 1);
   assert.equal(sw[0].price, 15);
   assert.equal(sw[0].from, today[4].time + 300);
+});
+
+test("PDH/PDL settings: until 14:30, wick up to 1 ATR, 2R; other strategies keep the defaults", () => {
+  const p = labConfigFor("PDH_PDL"), sw = labConfigFor("SWING");
+  assert.equal(p.lastSignalMin, 870); assert.equal(p.maxPierceAtr, 1); assert.equal(p.targetR, 2);
+  assert.equal(sw.lastSignalMin, 840); assert.equal(sw.maxPierceAtr, 0.6); assert.equal(sw.targetR, 1.5);
 });
 
 test("OI levels: none without a snapshot", () => {
