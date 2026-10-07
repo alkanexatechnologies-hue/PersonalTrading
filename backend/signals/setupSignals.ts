@@ -73,11 +73,11 @@ export const isMajor = (l: LiqLevel) => MAJOR_TYPES.has(l.type) || l.sources.len
  * `levels` = levels known for today (each used only from its activeFrom);
  * `dailyAtr` = ATR of daily ranges as of yesterday.
  */
-export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLevel[], dailyAtr: number | null, nowSec: number, opts: { regimeAt?: (upto: Candle[]) => string | null; s5DistPts?: number | null; only?: SetupId; s5Trend15?: "off" | "notAgainst" | "agree" } = {}): SessionResult {
+export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLevel[], dailyAtr: number | null, nowSec: number, opts: { regimeAt?: (upto: Candle[]) => string | null; s5DistPts?: number | null; only?: SetupId; s5Trend15?: "off" | "notAgainst" | "agree" | "slow5m" } = {}): SessionResult {
   const day = today.length ? istDay(today[0].time) : "";
   const all = [...hist, ...today];
   const off = hist.length;
-  const A = atr(all, 14), E9 = ema(all.map((c) => c.close), 9), E21 = ema(all.map((c) => c.close), 21), VW = vwap(all);
+  const A = atr(all, 14), E9 = ema(all.map((c) => c.close), 9), E21 = ema(all.map((c) => c.close), 21), E50 = ema(all.map((c) => c.close), 50), VW = vwap(all);
   const out: SessionResult = { date: day, signals: [], watch: [], atr: null, vwap: null, dir15: null, vwapBias: null, direction: null, directionEvents: [] };
   if (today.length < 2) return out;
   // 15M trend from closed 15m candles (prior sessions + today)
@@ -360,6 +360,8 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
               const t15 = dir15At(tEnd), want = sg > 0 ? "UP" : "DOWN", against = sg > 0 ? "DOWN" : "UP";
               if (opts.s5Trend15 === "notAgainst" && t15 === against) block = `15M trend ${t15} is against`;
               if (opts.s5Trend15 === "agree" && t15 !== want) block = `15M trend ${t15 ?? "n/a"} does not agree`;
+              // slower 5-minute trend instead of 15M: EMA 21 vs EMA 50 on the 5m chart
+              if (opts.s5Trend15 === "slow5m" && E50[i] != null && (sg > 0 ? e21 < (E50[i] as number) : e21 > (E50[i] as number))) block = `5m EMA 21 ${sg > 0 ? "below" : "above"} EMA 50 (slower 5m trend against)`;
             }
             const prev = today[Math.max(0, k - 1)];
             const stop = sg > 0 ? Math.min(c.low, prev.low) - C.stopBufferAtr * a : Math.max(c.high, prev.high) + C.stopBufferAtr * a;
