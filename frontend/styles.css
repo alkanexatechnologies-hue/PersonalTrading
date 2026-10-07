@@ -6801,3 +6801,30 @@ body.lqa-fullwidth .content { padding-left: 0; padding-right: 0; }
 .mcs-tprog { position: relative; width: 180px; height: 22px; border-radius: 11px; background: #0f1626; border: 1px solid #334155; overflow: hidden; }
 .mcs-tprog i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: linear-gradient(90deg, #b45309, #f59e0b); transition: width .3s; }
 .mcs-tprog span { position: relative; display: block; text-align: center; font-size: 12px; font-weight: 800; line-height: 20px; color: #fff; }
+
+/* ===================== MC SUMMARY — test log / logic vs market ===================== */
+.mcs-moves { border-top: 1px solid var(--border); padding-top: 6px; margin-top: 6px; }
+.mcs-moves h5 { margin: 0 0 4px; font-size: 13px; }
+.mcs-vchips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.mcs-vchip { display: inline-flex; gap: 4px; align-items: center; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 6px; background: #1e293b; color: #e2e8f0; white-space: nowrap; }
+.mcs-vchip i { font-style: normal; color: var(--muted); font-weight: 500; }
+.mcs-vchip.win { background: rgba(22,163,74,.2); color: #86efac; } .mcs-vchip.loss { background: rgba(220,38,38,.2); color: #fca5a5; }
+.mcs-vchip.blk { background: rgba(245,158,11,.2); color: #fde68a; } .mcs-vchip.flat { background: rgba(96,165,250,.18); color: #bfdbfe; }
+.mcs-movetbl td, .mcs-movetbl th { font-size: 12px; padding: 4px 6px; vertical-align: top; }
+.mcs-movetbl .r { text-align: right; } .mcs-movetbl i { font-style: normal; color: var(--muted); }
+.mcs-testlog[hidden] { display: none; }
+.mcs-testlog h4 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.mcs-testlog h4 .mcs-seg { margin-left: auto; }
+.mcs-logagg { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
+.mcs-logagg > div { background: #131c2e; border: 1px solid #1f2a40; border-radius: 8px; padding: 6px 8px; display: flex; flex-direction: column; gap: 2px; }
+.mcs-logagg span { font-size: 12px; color: var(--muted); } .mcs-logagg b { font-size: 16px; } .mcs-logagg i { font-style: normal; font-size: 12px; color: var(--muted); }
+.mcs-logwhy { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; margin-bottom: 8px; font-size: 13px; }
+.mcs-logwhy > div { background: #131c2e; border: 1px solid #1f2a40; border-radius: 8px; padding: 6px 10px; }
+.mcs-logwhy ol { margin: 4px 0 0 18px; padding: 0; }
+.mcs-logtbl { max-height: 520px; overflow-y: auto; }
+.mcs-logrow { cursor: pointer; } .mcs-logrow:hover td { background: rgba(255,255,255,.03); }
+.mcs-logrow .r { text-align: right; }
+.mcs-vmini { display: inline-block; min-width: 22px; text-align: center; margin-right: 3px; padding: 1px 4px; border-radius: 4px; font-size: 12px; font-weight: 800; background: #1e293b; }
+.mcs-vmini.win { background: rgba(22,163,74,.3); } .mcs-vmini.loss { background: rgba(220,38,38,.3); } .mcs-vmini.blk { background: rgba(245,158,11,.3); } .mcs-vmini.flat { background: rgba(96,165,250,.25); }
+@media (max-width: 1300px) { .mcs-logagg { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .mcs-logwhy { grid-template-columns: minmax(0, 1fr); } .mcs-logagg { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

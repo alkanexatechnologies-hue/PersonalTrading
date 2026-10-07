@@ -324,3 +324,81 @@ export function summarizeReplay(results: SessionResult[]): ReplaySummary {
 }
 
 export { istDay as setupIstDay, istMin as setupIstMin, hm as setupHm };
+
+// ============================ Test log analysis: logic vs what the market did ============================
+// Significant moves are found with a zig-zag on the session's closed 5m candles
+// (a swing ends when price reverses ≥ revAtr × ATR from its extreme); a move counts
+// when it travels ≥ minAtr × ATR. Each move is then compared with the signals:
+//   CAUGHT     a valid same-direction signal fired near the start (≤ 1/3 of the move)
+//   LATE       a valid same-direction signal fired later in the move
+//   BLOCKED    the logic saw a same-direction setup but a filter said WAIT (reasons listed)
+//   WRONG_SIDE a valid signal AGAINST the move fired during it
+//   MISSED     the logic saw nothing — context (nearest level, VWAP side) is recorded
+//   OUTSIDE    the move happened when the rules allow no entry (before 09:20 / after 14:00)
+// This is analysis of a finished day (uses the whole day by design); it never feeds a signal.
+export interface MarketMove {
+  startTime: string; endTime: string; dir: "UP" | "DOWN"; from: number; to: number; pts: number; atrX: number; bars: number;
+  verdict: "CAUGHT" | "LATE" | "BLOCKED" | "WRONG_SIDE" | "MISSED" | "OUTSIDE"; detail: string;
+  signalId: string | null; resultR: number | null; blockReasons: string[]; context: string;
+}
+export interface MoveAnalysis { moves: MarketMove[]; summary: Record<string, number>; blockReasons: Record<string, number>; losses: { time: string; setup: string; side: string; context: string; level: string | null; why: string }[]; config: { revAtr: number; minAtr: number }; }
+export function analyzeMoves(hist: Candle[], today: Candle[], signals: SetupSignal[], levels: LiqLevel[], opt = { revAtr: 1.5, minAtr: 2.5 }): MoveAnalysis {
+  const out: MoveAnalysis = { moves: [], summary: { moves: 0, CAUGHT: 0, LATE: 0, BLOCKED: 0, WRONG_SIDE: 0, MISSED: 0, OUTSIDE: 0 }, blockReasons: {}, losses: [], config: opt };
+  if (today.length < 6) return out;
+  const all = [...hist, ...today], off = hist.length, A = atr(all, 14), VW = vwap(all);
+  const aAt = (k: number) => A[off + k] ?? (today[k].high - today[k].low);
+  // zig-zag
+  const legs: { s: number; sp: number; e: number; ep: number; dir: 1 | -1 }[] = [];
+  let dir: 0 | 1 | -1 = 0, sIdx = 0, sPx = today[0].open, eIdx = 0, ePx = today[0].open, hiI = 0, loI = 0;
+  for (let k = 0; k < today.length; k++) {
+    const c = today[k], thr = opt.revAtr * aAt(k);
+    if (dir === 0) {
+      // ">=" / "<=": on a flat base the move starts at the LAST equal extreme, not the first
+      if (c.high >= today[hiI].high) hiI = k; if (c.low <= today[loI].low) loI = k;
+      if (today[hiI].high - today[loI].low >= thr) {
+        if (hiI > loI) { dir = 1; sIdx = loI; sPx = today[loI].low; eIdx = hiI; ePx = today[hiI].high; }
+        else { dir = -1; sIdx = hiI; sPx = today[hiI].high; eIdx = loI; ePx = today[loI].low; }
+      }
+      continue;
+    }
+    if (dir === 1) {
+      if (c.high >= ePx) { ePx = c.high; eIdx = k; }
+      else if (ePx - c.low >= thr) { legs.push({ s: sIdx, sp: sPx, e: eIdx, ep: ePx, dir: 1 }); dir = -1; sIdx = eIdx; sPx = ePx; eIdx = k; ePx = c.low; }
+    } else {
+      if (c.low <= ePx) { ePx = c.low; eIdx = k; }
+      else if (c.high - ePx >= thr) { legs.push({ s: sIdx, sp: sPx, e: eIdx, ep: ePx, dir: -1 }); dir = 1; sIdx = eIdx; sPx = ePx; eIdx = k; ePx = c.high; }
+    }
+  }
+  if (dir !== 0) legs.push({ s: sIdx, sp: sPx, e: eIdx, ep: ePx, dir });
+  for (const L of legs) {
+    const a = aAt(L.s), pts = Math.abs(L.ep - L.sp);
+    if (pts < opt.minAtr * a) continue;
+    const side = L.dir === 1 ? "CE" : "PE";
+    const tS = today[L.s].time, tE = today[L.e].time, barsN = L.e - L.s + 1;
+    const early = tS + Math.max(2, Math.ceil(barsN / 3)) * 300;
+    const inLeg = (s: SetupSignal) => s.barTime >= tS - 2 * 300 && s.barTime <= tE;
+    const valid = signals.filter((s) => !s.blockedBy && s.status !== "EXTENDED");
+    const same = valid.filter((s) => s.side === side && inLeg(s)).sort((x, y) => x.barTime - y.barTime);
+    const blocked = signals.filter((s) => s.blockedBy && s.side === side && inLeg(s));
+    const against = valid.filter((s) => s.side !== side && inLeg(s));
+    // context at the move's start: nearest level (≤ 0.5 ATR), VWAP side
+    const startPx = L.sp, vw = VW[off + L.s];
+    const near = levels.filter((l) => l.activeFrom <= tS && Math.abs(l.price - startPx) <= 0.5 * a).sort((x, y) => Math.abs(x.price - startPx) - Math.abs(y.price - startPx))[0];
+    const context = `${near ? `started at ${near.type} ${r2(near.price)}` : "started away from any mapped level"}; price ${vw != null ? (today[L.s].close >= vw ? "above" : "below") + " VWAP" : "vs VWAP n/a"}`;
+    let verdict: MarketMove["verdict"], detail: string, sig: SetupSignal | null = null;
+    if (same.length && same[0].barTime <= early) { verdict = "CAUGHT"; sig = same[0]; detail = `${sig.setup.slice(0, 2)} ${side} at ${sig.time} (${sig.status}${sig.resultR != null ? ` ${sig.resultR > 0 ? "+" : ""}${sig.resultR}R` : ""})`; }
+    else if (same.length) { verdict = "LATE"; sig = same[0]; detail = `${sig.setup.slice(0, 2)} ${side} only at ${sig.time} — ${Math.round((sig.barTime - tS) / 300)} candles into the move (${sig.status}${sig.resultR != null ? ` ${sig.resultR > 0 ? "+" : ""}${sig.resultR}R` : ""})`; }
+    else if (blocked.length) { verdict = "BLOCKED"; detail = `setup seen ${blocked.length}× but blocked`; }
+    else if (against.length) { verdict = "WRONG_SIDE"; sig = against[0]; detail = `${sig.setup.slice(0, 2)} ${sig.side} at ${sig.time} against the move (${sig.status}${sig.resultR != null ? ` ${sig.resultR}R` : ""})`; }
+    else if (istMin(tE) + 5 <= C.firstEntryMin + 5 || istMin(tS) >= C.lastEntryMin) { verdict = "OUTSIDE"; detail = istMin(tS) >= C.lastEntryMin ? "started after 14:00 — no new entries allowed by the rules" : "finished before 09:25 — before the first allowed entry"; }
+    else { verdict = "MISSED"; detail = "no setup recognised by the logic"; }
+    const reasons = [...new Set(blocked.map((s) => (s.blockedBy as string).replace(/\b\d{3,}(\.\d+)?\b|\b\d+\.\d+\b/g, "#").split(" — ")[0].trim()))];
+    if (verdict === "BLOCKED") for (const r of reasons) out.blockReasons[r] = (out.blockReasons[r] || 0) + 1;
+    out.moves.push({ startTime: hm(tS), endTime: hm(tE + 300), dir: L.dir === 1 ? "UP" : "DOWN", from: r2(L.sp), to: r2(L.ep), pts: r2(pts), atrX: r2(pts / a), bars: barsN,
+      verdict, detail, signalId: sig ? sig.id : null, resultR: sig ? sig.resultR : null, blockReasons: reasons, context });
+    out.summary[verdict]++; out.summary.moves++;
+  }
+  for (const s of signals) if (!s.blockedBy && s.status === "STOP") out.losses.push({ time: s.time, setup: s.setup.slice(0, 2), side: s.side, context: s.context, level: s.level ? `${s.level.type} ${s.level.price}` : null,
+    why: `stopped at ${s.exitPrice}; 15M ${s.metrics.dir15 ?? "n/a"}${s.metrics.regime ? `, regime ${s.metrics.regime}` : ""}` });
+  return out;
+}

@@ -113,3 +113,24 @@ test("VWAP bias (trader's rule): the last 5m close above VWAP = BULLISH, below =
   const dn = [bar(D, 0, 100, 101, 97, 98), bar(D, 1, 98, 99, 95, 96), bar(D, 2, 96, 97, 93, 94)];
   assert.equal(evaluateSession(h, dn, [], 60, dn[2].time + 300).vwapBias!.bias, "BEARISH");
 });
+
+import { analyzeMoves, type SetupSignal } from "./setupSignals";
+test("logic vs market: a big move is CAUGHT / BLOCKED / MISSED depending on the signals", () => {
+  const h = prior();
+  // flat, then a strong 40-pt rally (≈ 4× ATR of ~10), then flat
+  const c: Candle[] = [];
+  for (let i = 0; i < 10; i++) c.push(bar(D, i, 100, 102, 98, 100));
+  for (let i = 10; i < 20; i++) { const p = 100 + (i - 9) * 4; c.push(bar(D, i, p - 4, p + 1, p - 5, p)); }
+  for (let i = 20; i < 30; i++) c.push(bar(D, i, 140, 141, 136, 138));
+  const sig = (over: Partial<SetupSignal>): SetupSignal => ({ id: "x", setup: "S3_LEVEL_REJECTION", label: "", context: "MORNING", side: "CE", date: D, barTime: c[10].time, time: "10:10",
+    level: null, evidence: [], blockedBy: null, plan: null, status: "TARGET", fillTime: null, exitTime: null, exitPrice: null, resultR: 1.5, metrics: {}, ...over });
+  const none = analyzeMoves(h, c, [], []);
+  assert.ok(none.summary.moves >= 1);
+  assert.equal(none.moves.find((m) => m.dir === "UP")!.verdict, "MISSED");
+  assert.equal(analyzeMoves(h, c, [sig({})], []).moves.find((m) => m.dir === "UP")!.verdict, "CAUGHT");
+  const b = analyzeMoves(h, c, [sig({ blockedBy: "15M trend DOWN — this is more likely a pullback than a reversal", status: "BLOCKED", resultR: null })], []);
+  const up = b.moves.find((m) => m.dir === "UP")!;
+  assert.equal(up.verdict, "BLOCKED");
+  assert.match(up.blockReasons.join(" "), /15M trend DOWN/);
+  assert.equal(analyzeMoves(h, c, [sig({ side: "PE", resultR: -1, status: "STOP" })], []).moves.find((m) => m.dir === "UP")!.verdict, "WRONG_SIDE");
+});

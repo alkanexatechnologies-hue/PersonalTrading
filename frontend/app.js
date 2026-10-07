@@ -15480,7 +15480,7 @@ const DC_ROUTE_OWNER = {
   "market-sentiment-brief": "marketcommand", "oi-command": "oicommand", "top-picks": "toppicks", "option-top-pick": "toppicks",
   "liquidity-status": "liquiditystatus", "oi-analysis": "oianalysis", "oi-chain": "oianalysis", "premarket": "premarket",
   "today-movers": "todaymovers", "bull-rank": "bullrank", "big-move": "bigmove", "testlab": "testlab", "move-timing": "movetiming",
-  "backtest-dhan": "dhanbacktest", "liquidity-analysis": "liquidityanalysis", "setup-signals": "mcsummary", "strategy-replay": "stratreplay", "qa": "strategylab", "ai-paper": "aip",
+  "backtest-dhan": "dhanbacktest", "liquidity-analysis": "liquidityanalysis", "setup-signals": "mcsummary", "setup-test-log": "mcsummary", "strategy-replay": "stratreplay", "qa": "strategylab", "ai-paper": "aip",
 };
 function dcActiveTab() {
   const t = document.querySelector("#tabs .tab.active");

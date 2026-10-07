@@ -202,7 +202,7 @@ import { todaySnapshots } from "../sentiment/snapshotStore";
 import { getMarketDataHealth, fetchMarketData, marketDataProviderName, MdKey } from "../sentiment/marketDataProvider";
 import { globalCues, indexSentiment, indiaSentiment, briefPhase, briefHeadline, SentimentBrief, IndexSentiment } from "../sentiment/brief";
 import { sessionsOf, analyseDay, aggregate, buildLevels, LiqEvent, LiqLevel } from "../liquidity/liquidityTake";
-import { evaluateSession, dailyAtrFrom5m, summarizeReplay, SETUP_CONFIG, SetupSignal, SessionResult } from "../signals/setupSignals";
+import { evaluateSession, dailyAtrFrom5m, summarizeReplay, analyzeMoves, SETUP_CONFIG, SetupSignal, SessionResult } from "../signals/setupSignals";
 import { regimeAt } from "../decision/regime";
 import { buildOptionPlan } from "../signals/breakoutOption";
 import { tradeFriction } from "../paper/engine";
@@ -8428,6 +8428,57 @@ async function buildSetupSignals(symbol: string) {
     ],
   };
 }
+// ---- Daily TEST LOG: one entry per index + date (latest run), for "where does the logic not fit the market" ----
+const SETUP_TEST_LOG = path.join(process.cwd(), "data", "setup-tests", "log.jsonl");
+const setupCfgVersion = () => { let h = 0; const t = JSON.stringify(SETUP_CONFIG); for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0; return (h >>> 0).toString(16); };
+function readSetupTestLog(): any[] { try { return fs.readFileSync(SETUP_TEST_LOG, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } }
+function recordSetupTest(def: any, date: string, signals: SetupSignal[], analysis: any) {
+  try {
+    const valid = signals.filter((x) => !x.blockedBy && x.status !== "EXTENDED");
+    const graded = valid.filter((x) => x.resultR != null);
+    const entry = {
+      id: `${def.symbol}|${date}`, symbol: def.symbol, index: def.nseSymbol || def.name, date, ranAt: Math.floor(Date.now() / 1000), configVersion: setupCfgVersion(),
+      signals: valid.map((x) => ({ time: x.time, setup: x.setup.slice(0, 2), context: x.context, side: x.side, level: x.level ? `${x.level.type} ${x.level.price}` : "VWAP pullback", status: x.status, resultR: x.resultR })),
+      blockedCount: signals.length - valid.length,
+      totals: { signals: valid.length, wins: graded.filter((x) => (x.resultR as number) > 0.05).length, losses: graded.filter((x) => (x.resultR as number) < -0.05).length, totalR: Math.round(graded.reduce((a, x) => a + (x.resultR as number), 0) * 100) / 100 },
+      analysis,
+    };
+    const all = readSetupTestLog().filter((e) => e.id !== entry.id);
+    all.push(entry);
+    all.sort((a, b) => (a.date === b.date ? String(a.symbol).localeCompare(b.symbol) : a.date < b.date ? -1 : 1));
+    fs.mkdirSync(path.dirname(SETUP_TEST_LOG), { recursive: true });
+    fs.writeFileSync(SETUP_TEST_LOG, all.map((e) => JSON.stringify(e)).join("\n") + "\n");
+  } catch (e: any) { console.warn("[setup-test-log] write failed:", e?.message || e); }
+}
+router.get("/setup-test-log", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
+  const sym = req.query.symbol ? String(req.query.symbol) : null;
+  const rows = readSetupTestLog().filter((e) => !sym || e.symbol === sym).sort((a, b) => (a.date === b.date ? 0 : a.date < b.date ? 1 : -1));
+  if (String(req.query.format) === "csv") {
+    const q = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const lines = ["date,index,kind,time,end,direction,points,atrX,verdict_or_status,detail,result_R,block_reasons,context"];
+    for (const e of rows) {
+      for (const m of e.analysis?.moves || []) lines.push([e.date, e.index, "MOVE", m.startTime, m.endTime, m.dir, m.pts, m.atrX, m.verdict, m.detail, m.resultR ?? "", (m.blockReasons || []).join(" | "), m.context].map(q).join(","));
+      for (const x of e.signals || []) lines.push([e.date, e.index, "SIGNAL", x.time, "", x.side, "", "", x.status, `${x.setup} ${x.context} · ${x.level}`, x.resultR ?? "", "", ""].map(q).join(","));
+    }
+    res.setHeader("Content-Type", "text/csv"); res.setHeader("Content-Disposition", `attachment; filename="setup-test-log${sym ? "-" + sym.replace(/\W/g, "") : ""}.csv"`);
+    return res.send(lines.join("\n"));
+  }
+  // Aggregate: where the logic fails most across all logged days.
+  const agg: any = { days: rows.length, signals: 0, wins: 0, losses: 0, totalR: 0, moves: 0, CAUGHT: 0, LATE: 0, BLOCKED: 0, WRONG_SIDE: 0, MISSED: 0, OUTSIDE: 0, blockReasons: {} as Record<string, number>, missedContexts: {} as Record<string, number> };
+  for (const e of rows) {
+    agg.signals += e.totals.signals; agg.wins += e.totals.wins; agg.losses += e.totals.losses; agg.totalR = Math.round((agg.totalR + e.totals.totalR) * 100) / 100;
+    const sm = e.analysis?.summary || {}; for (const k of ["moves", "CAUGHT", "LATE", "BLOCKED", "WRONG_SIDE", "MISSED", "OUTSIDE"]) agg[k] += sm[k] || 0;
+    for (const [r, n] of Object.entries(e.analysis?.blockReasons || {})) agg.blockReasons[r] = (agg.blockReasons[r] || 0) + (n as number);
+    for (const m of e.analysis?.moves || []) if (m.verdict === "MISSED") { const k = m.context.split(";")[0].replace(/[\d.]+$/, "").trim(); agg.missedContexts[k] = (agg.missedContexts[k] || 0) + 1; }
+  }
+  res.json({ entries: rows, aggregate: agg, configVersion: setupCfgVersion() });
+});
+router.delete("/setup-test-log", requireAdmin, (req: Request, res: Response) => {
+  const sym = req.query.symbol ? String(req.query.symbol) : null;
+  try { const keep = sym ? readSetupTestLog().filter((e) => e.symbol !== sym) : []; fs.mkdirSync(path.dirname(SETUP_TEST_LOG), { recursive: true }); fs.writeFileSync(SETUP_TEST_LOG, keep.map((e) => JSON.stringify(e)).join("\n") + (keep.length ? "\n" : "")); res.json({ ok: true, remaining: keep.length }); }
+  catch (e: any) { res.status(500).json({ error: e?.message || "clear failed" }); }
+});
+
 // TESTING mode: re-run the same logic on a past date, as of a chosen time (closed candles
 // up to that time only — exactly what the screen would have shown live then).
 async function buildSetupSignalsForDate(symbol: string, date: string, uptoMin: number | null) {
@@ -8449,12 +8500,20 @@ async function buildSetupSignalsForDate(symbol: string, date: string, uptoMin: n
   const dayC = ses.get(date)!, dayEndT = dayC[dayC.length - 1].time + 300;
   const asOf = uptoMin == null ? dayEndT : Math.min(dayEndT, Math.floor(Date.parse(date + "T00:00:00Z") / 1000) - 19800 + uptoMin * 60);
   const r = setupRunDay(days, ses, di, asOf, null);
+  // Full-day test run → analyse logic vs the day's real moves and record it in the test log.
+  let analysis: any = null;
+  const dayComplete = (() => { const m = new Date((dayC[dayC.length - 1].time + 19800) * 1000); return m.getUTCHours() * 60 + m.getUTCMinutes() >= 15 * 60 + 10; })();
+  if (asOf >= dayEndT && dayComplete) {
+    const prior = days.slice(Math.max(0, di - 15), di).map((d) => ses.get(d)!);
+    analysis = analyzeMoves(prior.slice(-5).flat(), dayC, r.signals, r.levels);
+    recordSetupTest(def, date, r.signals, analysis);
+  }
   const lv = (t: string) => r.levels.find((l) => l.type === t || l.sources.some((x) => x.startsWith(t + ":")))?.price ?? null;
   return {
     mode: "TEST", symbol, index: def.nseSymbol || def.name, name: def.name, date, isToday: false, asOf, upto: new Date((asOf + 19800) * 1000).toISOString().slice(11, 16),
     dataStatus: "HISTORICAL", today: { ...r, signals: r.signals.map((x) => ({ ...x, option: { available: false, reason: "Testing mode — historical option prices are not available (index plan only)" } })) },
     levelsForChart: { pdh: lv("Previous Day High"), pdl: lv("Previous Day Low"), pdc: lv("Previous Day Close"), orbHigh: lv("Opening Range High"), orbLow: lv("Opening Range Low") },
-    sessions: days.slice(7), config: SETUP_CONFIG,
+    sessions: days.slice(7), config: SETUP_CONFIG, analysis,
     notes: [`TESTING ${date} as of ${new Date((asOf + 19800) * 1000).toISOString().slice(11, 16)} — closed candles up to that time only; outcomes graded on candles up to that time.`, "Index-point plans only; no option prices for past dates."],
   };
 }
@@ -8465,6 +8524,7 @@ router.get("/setup-signals", requirePermission("oiAnalysis"), async (req: Reques
     const um = /^(\d{2}):(\d{2})$/.exec(String(req.query.upto || ""));
     const upto = um ? Number(um[1]) * 60 + Number(um[2]) : null;
     if (/^\d{4}-\d{2}-\d{2}$/.test(date) && (date !== istDateStr() || upto != null)) {
+      // TESTING mode (also today when a time is given). 15:15 = the full day.
       return res.json(await cached(`setup-test:${symbol}:${date}:${upto ?? "eod"}`, date === istDateStr() ? 30_000 : 10 * 60_000, () => buildSetupSignalsForDate(symbol, date, upto)));
     }
     res.json(await cached(`setup-signals:${symbol}`, 30_000, () => buildSetupSignals(symbol)));

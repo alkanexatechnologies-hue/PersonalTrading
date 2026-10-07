@@ -79,6 +79,7 @@ function mcsShell() {
   </div>
   <div class="mcs-keyrow" id="mcs-keyrow"></div>
   <section class="mcs-card mcs-setups" id="mcs-setups"></section>
+  <section class="mcs-card mcs-testlog" id="mcs-testlog" hidden></section>
   <section class="mcs-card mcs-analysis" id="mcs-analysis"></section>
   <section class="mcs-card mcs-fast" id="mcs-fast"></section>
   <div class="mcs-grid2">
@@ -996,7 +997,9 @@ function mcsRenderSetups() {
     <table class="mcs-tbl"><thead><tr><th>Setup</th><th class="r">Signals</th><th class="r">Win/Loss</th><th class="r">Win %</th><th class="r">Avg</th><th class="r">Total</th><th>By context</th></tr></thead><tbody>
     ${rpRow("S3_LEVEL_REJECTION", "S3 Level Rejection")}${rpRow("S4_VWAP_PULLBACK", "S4 VWAP Pullback")}</tbody></table>
     <div class="mcs-sub">Most common blocks: ${["S3_LEVEL_REJECTION", "S4_VWAP_PULLBACK"].map((k) => by[k] ? `${k.slice(0, 2)}: ${by[k].topBlocks.slice(0, 3).map(([r, n]) => `${mcsEsc(r)} (${n})`).join(", ")}` : "").filter(Boolean).join(" · ")}</div></div>`;
-  box.innerHTML = head + vbHtml + `<div class="mcs-ssgrid">${liveHtml}<div class="mcs-sstoday"><h5>${ss.mode === "TEST" ? `Signals on ${mcsEsc(ss.date)} up to ${mcsEsc(ss.upto)}` : `Today's signals ${ss.isToday ? "" : `(${mcsEsc(ss.date)})`}`}</h5>${todayTbl}${blk}</div></div>${ss.mode === "TEST" ? "" : replayHtml}
+  const an = ss.mode === "TEST" ? ss.analysis : null;
+  const anHtml = an ? mcsMovesHtml(an, `Logic vs market — ${mcsEsc(ss.date)} (full day)`) : ss.mode === "TEST" ? `<div class="mcs-sub">Logic-vs-market analysis appears when the run reaches 15:15 (full day).</div>` : "";
+  box.innerHTML = head + vbHtml + `<div class="mcs-ssgrid">${liveHtml}<div class="mcs-sstoday"><h5>${ss.mode === "TEST" ? `Signals on ${mcsEsc(ss.date)} up to ${mcsEsc(ss.upto)}` : `Today's signals ${ss.isToday ? "" : `(${mcsEsc(ss.date)})`}`}</h5>${todayTbl}${blk}</div></div>${ss.mode === "TEST" ? anHtml : replayHtml}
     <div class="mcs-sub">${(ss.notes || []).map(mcsEsc).join(" · ")}</div>`;
 }
 
@@ -1016,6 +1019,7 @@ function mcsSetMode(mode) {
   root.classList.toggle("mcs-testing", mode === "TEST");
   root.querySelectorAll("#mcs-modes button").forEach((b) => b.classList.toggle("on", b.dataset.mode === mode));
   const bar = mcsEl("mcs-testbar"); if (bar) bar.hidden = mode !== "TEST";
+  const lg = mcsEl("mcs-testlog"); if (lg) { lg.hidden = mode !== "TEST"; if (mode === "TEST") mcsLoadTestLog(); }
   if (mode === "TEST") {
     if (!MCS.test.date) MCS.test.date = mcsPrevWeekday();
     const dt = mcsEl("mcs-tdate"); if (dt) dt.value = MCS.test.date;
@@ -1027,7 +1031,7 @@ async function mcsRefreshTest(gen) {
   const sym = MCS.sym, tf = MCS.tf, date = MCS.test.date, upto = MCS.test.upto;
   const st = mcsEl("mcs-tstat"); if (st && !MCS.play.on) st.innerHTML = `⏳ Running ${mcsEsc(date)} as of ${mcsEsc(upto)}…`;
   mcsPlayProgress(upto);
-  const full = upto === "15:15";
+  const full = false;   // always send the time; 15:15 = full day (also lets a finished "today" be tested and logged)
   const hk = `${sym}|${tf}|${date}`;
   const cachedH = MCS._hist.get(hk);
   const [h, ss] = await Promise.all([
@@ -1056,6 +1060,7 @@ async function mcsRefreshTest(gen) {
   };
   MCS.ss = ss && !ss.error ? ss : { error: (ss && ss.error) || "Setup signals unavailable", symbol: sym };
   const nSig = ss && ss.today ? ss.today.signals.filter((x) => !x.blockedBy).length : 0;
+  if (upto === "15:15" && ss && ss.analysis) mcsLoadTestLog();   // a full-day run was just logged
   const totR = ss && ss.today ? ss.today.signals.filter((x) => !x.blockedBy && x.resultR != null).reduce((a, x) => a + x.resultR, 0) : 0;
   if (st) st.innerHTML = ss && !ss.error ? `${MCS.play.on ? "⏵ Replaying" : "✅"} ${mcsEsc(date)} as of ${mcsEsc(ss.upto)} · ${nSig} signal${nSig === 1 ? "" : "s"}${nSig ? ` · ${totR >= 0 ? "+" : ""}${totR.toFixed(2)}R so far` : ""}` : `<span class="mcs-warn">${mcsEsc((ss && ss.error) || "Setup signals unavailable")}</span>`;
   mcsRenderAll();
@@ -1108,4 +1113,81 @@ async function mcsRefreshAwait() {
   for (let n = 0; MCS.busy && n < 600; n++) await new Promise((r) => setTimeout(r, 50));
   await mcsRefresh(true);
   for (let n = 0; MCS.busy && n < 600; n++) await new Promise((r) => setTimeout(r, 50));
+}
+
+
+// ===========================================================================
+// TEST LOG — every full-day test run is recorded on the server (one entry per
+// index + date). Shows where the logic did not fit the market: moves it caught,
+// was late on, blocked (and why), traded against, or missed entirely.
+// ===========================================================================
+const MCS_VERDICT = { CAUGHT: ["✅ Caught", "win"], LATE: ["⏱ Late", "flat"], BLOCKED: ["⛔ Blocked", "blk"], WRONG_SIDE: ["↔ Wrong side", "loss"], MISSED: ["❌ Missed", "loss"], OUTSIDE: ["🕘 Outside entry window", "flat"] };
+function mcsMovesHtml(an, title) {
+  const sm = an.summary || {}, n = sm.moves || 0;
+  const pct = (k) => (n ? Math.round(((sm[k] || 0) / n) * 100) : 0);
+  const chips = ["CAUGHT", "LATE", "BLOCKED", "WRONG_SIDE", "MISSED", "OUTSIDE"].map((k) => `<span class="mcs-vchip ${MCS_VERDICT[k][1]}">${MCS_VERDICT[k][0]} <b>${sm[k] || 0}</b> <i>${pct(k)}%</i></span>`).join("");
+  const rows = (an.moves || []).map((m) => `<tr class="v-${m.verdict.toLowerCase()}"><td>${m.startTime}–${m.endTime}</td><td class="${m.dir === "UP" ? "mcs-up" : "mcs-dn"}"><b>${m.dir === "UP" ? "▲ UP" : "▼ DOWN"}</b></td>
+    <td class="r">${mcsN(m.pts, 1)} <i>(${mcsN(m.atrX, 1)}× ATR)</i></td><td><span class="mcs-vchip ${MCS_VERDICT[m.verdict][1]}">${MCS_VERDICT[m.verdict][0]}</span></td>
+    <td>${mcsEsc(m.detail)}${m.blockReasons && m.blockReasons.length ? `<div class="mcs-sub">why: ${m.blockReasons.map(mcsEsc).join(" · ")}</div>` : ""}</td><td class="mcs-sub">${mcsEsc(m.context)}</td></tr>`).join("");
+  const losses = (an.losses || []).map((l) => `<li>${l.time} ${l.setup} ${l.side} (${mcsEsc(l.context)}) ${l.level ? "at " + mcsEsc(l.level) : ""} — ${mcsEsc(l.why)}</li>`).join("");
+  return `<div class="mcs-moves"><h5>${title} <span class="mcs-sub">${n} significant move${n === 1 ? "" : "s"} (≥ ${an.config?.minAtr ?? 2.5}× ATR)</span></h5>
+    <div class="mcs-vchips">${chips}</div>
+    ${n ? `<div class="mcs-tblwrap"><table class="mcs-tbl mcs-movetbl"><thead><tr><th>Move</th><th>Dir</th><th class="r">Size</th><th>Verdict</th><th>What the logic did</th><th>Where it started</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="mcs-sub">No significant move on this day.</div>`}
+    ${losses ? `<div class="mcs-sub" style="margin-top:4px"><b>Losing signals:</b></div><ul class="mcs-ssev">${losses}</ul>` : ""}</div>`;
+}
+async function mcsLoadTestLog() {
+  const box = mcsEl("mcs-testlog"); if (!box || MCS.mode !== "TEST") return;
+  const scope = MCS.logScope || "index";
+  const gen = MCS.gen;
+  let d = null;
+  try { d = await fetchJSON(`/api/setup-test-log${scope === "index" ? `?symbol=${encodeURIComponent(MCS.sym)}` : ""}`, 20000); } catch (_) { d = null; }
+  if (gen !== MCS.gen || MCS.mode !== "TEST") return;
+  MCS.testLog = d; mcsRenderTestLog();
+}
+function mcsRenderTestLog() {
+  const box = mcsEl("mcs-testlog"); if (!box) return;
+  const d = MCS.testLog, scope = MCS.logScope || "index";
+  const nm = MCS_SYMS.find((x) => x[0] === MCS.sym)?.[1] || MCS.sym;
+  const head = `<h4>📒 TEST LOG — where the logic did not fit the market
+    <span class="mcs-seg"><button type="button" class="${scope === "index" ? "on" : ""}" data-scope="index">${mcsEsc(nm)}</button><button type="button" class="${scope === "all" ? "on" : ""}" data-scope="all">All indices</button></span>
+    <a class="mcs-back" href="/api/setup-test-log?format=csv${scope === "index" ? `&symbol=${encodeURIComponent(MCS.sym)}` : ""}" download onclick="return mcsCsv(this)">⬇ CSV</a>
+    <button type="button" class="mcs-back" id="mcs-logclear">🗑 Clear</button></h4>`;
+  if (!d || d.error) { box.innerHTML = head + `<div class="mcs-na">${mcsEsc(d?.error || "Test log unavailable")}</div>`; mcsWireLog(); return; }
+  const a = d.aggregate || {}, n = a.moves || 0, pct = (k) => (n ? Math.round(((a[k] || 0) / n) * 100) : 0);
+  const reasons = Object.entries(a.blockReasons || {}).sort((x, y) => y[1] - x[1]).slice(0, 6);
+  const missed = Object.entries(a.missedContexts || {}).sort((x, y) => y[1] - x[1]).slice(0, 5);
+  const summary = d.entries.length ? `<div class="mcs-logagg">
+      <div><span>Days tested</span><b>${a.days}</b></div>
+      <div><span>Signals</span><b>${a.signals}</b> <i>W ${a.wins} / L ${a.losses}</i></div>
+      <div><span>Total</span><b class="${mcsCls(a.totalR)}">${a.totalR > 0 ? "+" : ""}${mcsN(a.totalR, 2)}R</b></div>
+      <div><span>Market moves</span><b>${n}</b></div>
+      ${["CAUGHT", "LATE", "BLOCKED", "WRONG_SIDE", "MISSED", "OUTSIDE"].map((k) => `<div><span>${MCS_VERDICT[k][0]}</span><b>${a[k] || 0}</b> <i>${pct(k)}%</i></div>`).join("")}
+    </div>
+    <div class="mcs-logwhy"><div><b>Most common reasons a move was BLOCKED</b>${reasons.length ? `<ol>${reasons.map(([r, c]) => `<li>${mcsEsc(r)} — <b>${c}</b></li>`).join("")}</ol>` : `<div class="mcs-sub">none</div>`}</div>
+      <div><b>Where MISSED moves started</b>${missed.length ? `<ol>${missed.map(([r, c]) => `<li>${mcsEsc(r)} — <b>${c}</b></li>`).join("")}</ol>` : `<div class="mcs-sub">none</div>`}</div></div>` : `<div class="mcs-sub">No test runs logged yet — run a date to 15:15 (Run at 15:15, or Play full session) and it is logged here automatically.</div>`;
+  const rows = d.entries.map((e, i) => { const sm = e.analysis?.summary || {}; return `<tr class="mcs-logrow" data-i="${i}"><td><b>${mcsEsc(e.date)}</b></td><td>${mcsEsc(e.index)}</td><td class="r">${e.totals.signals}</td><td class="r">${e.totals.wins}/${e.totals.losses}</td>
+      <td class="r ${mcsCls(e.totals.totalR)}">${e.totals.totalR > 0 ? "+" : ""}${mcsN(e.totals.totalR, 2)}R</td><td class="r">${sm.moves ?? 0}</td>
+      <td>${["CAUGHT", "LATE", "BLOCKED", "WRONG_SIDE", "MISSED", "OUTSIDE"].map((k) => `<span class="mcs-vmini ${MCS_VERDICT[k][1]}" title="${MCS_VERDICT[k][0]}">${sm[k] || 0}</span>`).join("")}</td>
+      <td class="mcs-sub">${new Date((e.ranAt + 19800) * 1000).toISOString().slice(0, 16).replace("T", " ")}</td><td>▸</td></tr>
+      <tr class="mcs-logdet" data-for="${i}" hidden><td colspan="9">${e.analysis ? mcsMovesHtml(e.analysis, `${mcsEsc(e.index)} ${mcsEsc(e.date)}`) : ""}
+        ${e.signals.length ? `<div class="mcs-sub"><b>Signals:</b> ${e.signals.map((x) => `${x.time} ${x.setup} ${x.side} ${mcsEsc(x.level)} → ${x.status}${x.resultR != null ? ` ${x.resultR > 0 ? "+" : ""}${x.resultR}R` : ""}`).join(" · ")}</div>` : ""}</td></tr>`; }).join("");
+  box.innerHTML = head + summary + (d.entries.length ? `<div class="mcs-tblwrap mcs-logtbl"><table class="mcs-tbl"><thead><tr><th>Date</th><th>Index</th><th class="r">Signals</th><th class="r">W/L</th><th class="r">Result</th><th class="r">Moves</th><th>✅ ⏱ ⛔ ↔ ❌ 🕘</th><th>Tested at</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : "");
+  mcsWireLog();
+}
+function mcsWireLog() {
+  const box = mcsEl("mcs-testlog"); if (!box) return;
+  box.querySelectorAll("[data-scope]").forEach((b) => (b.onclick = () => { MCS.logScope = b.dataset.scope; mcsLoadTestLog(); }));
+  box.querySelectorAll(".mcs-logrow").forEach((tr) => (tr.onclick = () => { const det = box.querySelector(`.mcs-logdet[data-for="${tr.dataset.i}"]`); if (det) { det.hidden = !det.hidden; tr.lastElementChild.textContent = det.hidden ? "▸" : "▾"; } }));
+  const clr = mcsEl("mcs-logclear");
+  if (clr) clr.onclick = async () => {
+    const scope = MCS.logScope || "index"; const nm = MCS_SYMS.find((x) => x[0] === MCS.sym)?.[1] || MCS.sym;
+    if (!confirm(`Clear the test log for ${scope === "index" ? nm : "ALL indices"}?`)) return;
+    try { const r = await fetch(`/api/setup-test-log${scope === "index" ? `?symbol=${encodeURIComponent(MCS.sym)}` : ""}`, { method: "DELETE" }); if (!r.ok) alert(r.status === 403 ? "Only admin can clear the log." : "Clear failed"); } catch (_) {}
+    mcsLoadTestLog();
+  };
+}
+// CSV download with the session token (a plain link would not carry the Authorization header).
+function mcsCsv(a) {
+  fetch(a.getAttribute("href")).then((r) => r.blob()).then((b) => { const u = URL.createObjectURL(b); const x = document.createElement("a"); x.href = u; x.download = "setup-test-log.csv"; document.body.appendChild(x); x.click(); x.remove(); setTimeout(() => URL.revokeObjectURL(u), 2000); }).catch(() => alert("Download failed"));
+  return false;
 }
