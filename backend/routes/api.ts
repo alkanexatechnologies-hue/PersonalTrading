@@ -60,6 +60,9 @@ import { withDhanPriority } from "../data/dhanClient";
 import { runTest as runTestLab, availableHistory as testLabAvailableHistory } from "../testlab/runner";
 import { writeReviewPackage as writeTestLabPackage } from "../testlab/exporter";
 import { defaultConfig as testLabDefaultConfig } from "../testlab/config";
+import { buildBreakout, BREAKOUT_VERSION } from "../signals/breakoutService";
+import { getDecision, latestDecision, ledgerFor, DecisionDeps, IndexDef } from "../decision/service";
+import { Decision } from "../decision/types";
 import { runHtf as runTestLabHtf } from "../testlab/htfRunner";
 import { abcComparison as htfAbc, timingDiagnostic as htfTiming, perCandleAudit as htfPerCandle } from "../testlab/htfAudit";
 import type { IndexKey as TLIndexKey, TfKey as TLTfKey, RunResult as TLRunResult, AuditRow as TLAuditRow } from "../testlab/types";
@@ -244,7 +247,7 @@ if (AUDIT_ENABLED) {
 // context makes the gate in dhanClient.ts dispatch their option-chain/quote/
 // candle calls before the LOW-priority scanner backlog, so the terminal stays
 // live even while scanners churn. Everything else stays LOW (the default).
-const HIGH_PRIORITY_API = /^\/(market-command|market-analysis|option-candles|option-structure)\b/;
+const HIGH_PRIORITY_API = /^\/(market-command|market-analysis|option-candles|option-structure|mc-summary)\b/;
 router.use((req: Request, _res: Response, next: NextFunction) => {
   if (HIGH_PRIORITY_API.test(req.path)) withDhanPriority("high", async () => next());
   else next();
@@ -437,6 +440,15 @@ function oiRequiresDhan(def: SymbolDef): OiAnalysis {
     disclaimer: "Live option data (OI / greeks / strikes) is sourced exclusively from Dhan.",
   };
 }
+// A saved after-hours OI snapshot is only trusted if it is recent (< 20h — covers
+// 15:30 close to next 09:15 open) and its expiry has not already passed.
+const _afterHoursOiTry = new Map<string, number>();
+function oiSnapshotFresh(oi: any): boolean {
+  if (!oi || !oi.available) return false;
+  if (oi.expiry && String(oi.expiry) < istDateStr()) return false;
+  const asOf = Number(oi.asOf) || 0;
+  return asOf > 0 && Date.now() - asOf * 1000 < 20 * 3600_000;
+}
 async function liveOptionOi(def: SymbolDef): Promise<OiAnalysis> {
   const feed = syncSessionProvider();
   const gp = dhanProviderForOi();
@@ -448,6 +460,19 @@ async function liveOptionOi(def: SymbolDef): Promise<OiAnalysis> {
     return oi;
   }
   const disk = loadLastOiJson(def.symbol);
+  if (gp && !oiSnapshotFresh(disk) && Date.now() - (_afterHoursOiTry.get(def.symbol) || 0) > 5 * 60_000) {
+    // Saved snapshot is from an older session (or its expiry has passed): pull the
+    // closing chain once from Dhan and save it, so after-hours screens show the
+    // LAST session's options instead of a days-old chain.
+    _afterHoursOiTry.set(def.symbol, Date.now());
+    try {
+      const oi = await withTimeout(dhanOiAnalysis(def), 15_000, `dhan OI after-hours ${def.symbol}`);
+      if (oi && oi.available) {
+        try { saveLastOiJson(def.symbol, oi); } catch { /* best-effort */ }
+        return { ...oi, message: oi.message || "After hours: last session OI" };
+      }
+    } catch { /* fall back to the saved snapshot */ }
+  }
   if (disk && disk.available) return { ...disk, message: disk.message || "After hours: last saved OI" };
   return {
     ...oiRequiresDhan(def),
@@ -524,9 +549,9 @@ const getOiCached = async (def: SymbolDef): Promise<OiAnalysis> => {
   const key = `oi:${def.symbol}`;
   if (!isMarketOpenIST()) {
     const disk = loadLastOiJson(def.symbol);
-    if (disk && disk.available) return disk;
+    if (oiSnapshotFresh(disk)) return disk as OiAnalysis;
     const lg = _lastGoodOi.get(key);
-    if (lg) return markOiLastGood(lg.v);
+    if (lg && oiSnapshotFresh(lg.v)) return markOiLastGood(lg.v);
   }
   const hit = _cache.get(key);
   if (hit && Date.now() - hit.ts < TTL_OI && oiHasPremiums(hit.v)) return hit.v as OiAnalysis;
@@ -1066,6 +1091,33 @@ function quoteLastGoodFresh(sym: string): any | null {
   if (!lg || Date.now() - lg.ts > LAST_GOOD_QUOTE_MAX_MS) return null;
   return lg.v;
 }
+// After the close, Dhan's /marketfeed/ohlc reports ohlc.close = today's close, so
+// price - close = 0 and every quote shows +0.00%. When the market is closed and a
+// quote's change is exactly 0, recompute it against the PRIOR session's daily close.
+// Daily bars are fetched in the background (cached per symbol per IST day) so
+// /quotes never waits on history; the next poll picks the value up.
+const _closedPrevClose = new Map<string, { day: string; prevClose: number | null }>();
+function fixClosedMarketChange(quotes: Record<string, any>) {
+  const day = istDateStr();
+  for (const [sym, q] of Object.entries(quotes)) {
+    if (!q || q.price == null || q.changePercent !== 0) continue;
+    const known = _closedPrevClose.get(sym);
+    if (known && known.day === day) {
+      if (known.prevClose) quotes[sym] = { ...q, changePercent: Math.round(((q.price - known.prevClose) / known.prevClose) * 10000) / 100 };
+      continue;
+    }
+    _closedPrevClose.set(sym, { day, prevClose: null });   // mark in-flight; one fetch per symbol per day
+    getDailyCached(sym, 10).then((daily: any[]) => {
+      const n = daily?.length || 0;
+      if (n < 2) return;
+      // If the last daily bar is the session the price belongs to, the prior close
+      // is the bar before it; if daily data lags a session, the last bar is it.
+      const last = daily[n - 1];
+      const prevClose = Math.abs(last.close - q.price) < 0.01 ? daily[n - 2].close : last.close;
+      if (prevClose > 0) _closedPrevClose.set(sym, { day, prevClose });
+    }).catch(() => { _closedPrevClose.delete(sym); });
+  }
+}
 router.get("/quotes", async (req: Request, res: Response) => {
   const symbols = String(req.query.symbols || "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 60);
   const quotes: Record<string, any> = {};
@@ -1085,6 +1137,7 @@ router.get("/quotes", async (req: Request, res: Response) => {
     for (const sym of symbols) {
       quotes[sym] = quoteLastGoodFresh(sym) ? lgMeta(sym) : null;
     }
+    if (!marketOpen) fixClosedMarketChange(quotes);
     return res.json({ ts: Math.floor(Date.now() / 1000), marketOpen, quotes, feed: dhanHealthNow() });
   }
   // Serve each symbol from its 3s per-symbol cache (`liveq:<sym>`) where fresh;
@@ -1133,6 +1186,7 @@ router.get("/quotes", async (req: Request, res: Response) => {
       for (const sym of misses) quotes[sym] = quoteLastGoodFresh(sym) ? lgMeta(sym) : null;
     }
   }
+  if (!marketOpen) fixClosedMarketChange(quotes);
   res.json({ ts: Math.floor(Date.now() / 1000), marketOpen, quotes, feed: dhanHealthNow() });
 });
 
@@ -4371,6 +4425,98 @@ router.get("/oi-command", requirePermission("oiAnalysis"), async (req: Request, 
 // Aggregates: candles + indicator overlays, Order Block detection,
 // the existing OI Command pipeline, Liquidity Status, and the
 // Master Trade Selector arbiter — all from a single poll.
+// ============================ Unified Arbiter wiring ============================
+function indexDefOf(def: SymbolDef): IndexDef {
+  return { index: def.nseSymbol || def.symbol, symbol: def.symbol, name: def.name, nseSymbol: def.nseSymbol || def.symbol, lotSize: def.lotSize ?? null };
+}
+const decisionDeps: DecisionDeps = {
+  getCandles5: (sym) => getCandlesCached(sym, "5m") as any,
+  getDailyAtr: async (sym) => { const d = await getDailyCached(sym, 40); return last(atr(d as any, 14)); },
+  getChain: async (sym) => { const d = findSymbolDef(sym); return d ? (await getOiCached(d)) as OiAnalysis : null; },
+  chainIsStale: (oi) => !oi || !oi.available || oiServedFromLastGood(oi),
+  dhanOn: () => !!(syncSessionProvider().dhanOn),
+  marketOpen: () => isTradingTimeIST(),
+  lookupOption: (u, t, k, e) => lookupDhanOption(u, t, k, e) as any,
+  // Next-expiry chain — fetched only when the arbiter is about to trade and the
+  // nearest expiry is < 2 days away (≈ once a day at most), cached 60s.
+  getNextExpiryChain: async (sym) => {
+    const def = findSymbolDef(sym);
+    if (!def) return null;
+    return cached(`arb-next-exp:${sym}`, 60_000, async () => {
+      const ch: any = await withTimeout(dhanChainForExpiry(def, 1), 15_000, `next-expiry chain ${sym}`);
+      if (!ch || !ch.available || !Array.isArray(ch.strikes) || !ch.strikes.length) return null;
+      let ai = 0; ch.strikes.forEach((x: any, i: number) => { if (Math.abs(x.strike - ch.spot) < Math.abs(ch.strikes[ai].strike - ch.spot)) ai = i; });
+      return { symbol: def.symbol, nseSymbol: def.nseSymbol, available: true, underlying: ch.spot, expiry: ch.expiry,
+        topStrikes: ch.strikes.slice(Math.max(0, ai - 12), ai + 13) } as unknown as OiAnalysis;
+    });
+  },
+  // Evidence-only features (read from existing caches — never trigger a trade).
+  features: async (sym) => {
+    const f: Record<string, any> = {};
+    const em = _cache.get("early-moves")?.v as any;
+    const a = em?.moves?.find((m: any) => m.symbol === sym);
+    f.earlyMoveA = a ? { direction: a.direction, stage: a.stage, score: a.earlyScore } : null;
+    const oc = _cache.get(`oi-command:${sym}`)?.v as any;
+    f.oi = oc ? { direction: oc.oiDirection, verdict: oc.oiVerdict, score: oc.oiMoveScore, pcr: oc.pcr ?? null } : null;
+    return f;
+  },
+};
+const ARBITER_INDEXES = () => DEFAULT_SYMBOLS.filter((d) => d.type === "index" && d.fno);
+
+/** Overwrites the legacy command block with the arbiter's single decision. */
+function arbiterCommand(d: Decision | null, legacy: any): any {
+  if (!d) return { ...legacy, arbiter: false };
+  const buy = d.finalAction === "BUY_CE" || d.finalAction === "BUY_PE";
+  const live = buy || d.finalAction === "HOLD";
+  const o = live ? d.option : null;
+  const { entry, stopLoss, target1, target2, optionType, strike, optionLtp, spotSL, spotT1, spotT2, finalAction, finalReason, ...rest } = legacy;
+  return {
+    ...rest,
+    arbiter: true,
+    finalAction: buy ? "TAKE" : d.finalAction,                 // TAKE only when the arbiter says BUY_CE / BUY_PE
+    finalReason: d.reason,
+    direction: d.direction,
+    entry: o?.entry ?? null, stopLoss: o?.stopLoss ?? null, target1: o?.target1 ?? null, target2: o?.target2 ?? null,
+    optionType: live ? (d.finalAction === "BUY_PE" || d.direction === "BEARISH" ? "PE" : "CE") : "—",
+    strike: o?.strike ?? null, optionLtp: o?.ltp ?? null,
+    spotSL: live ? d.plan?.stopLoss ?? null : null, spotT1: live ? d.plan?.target1 ?? null : null, spotT2: live ? d.plan?.target2 ?? null : null,
+    legacyOiPlan: { note: "OI recommendation — research evidence only, NOT a trade", finalAction, finalReason, entry, stopLoss, target1, target2, optionType, strike, optionLtp, spotSL, spotT1, spotT2 },
+  };
+}
+
+// The single decision for one index (all screens + paper read this).
+router.get("/decision", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
+  if (!def || def.type !== "index") return res.status(400).json({ error: "Index symbol required" });
+  try { res.json(await getDecision(indexDefOf(def), decisionDeps)); } catch (e: any) { res.json({ error: e?.message || "decision failed" }); }
+});
+// Observation ledger (decisions, exits, graded outcomes) for one index and IST date.
+router.get("/decision-ledger", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
+  const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : istDateStr();
+  if (!def) return res.status(400).json({ error: "symbol required" });
+  const rows = ledgerFor(indexDefOf(def).index, day);
+  res.json({ date: day, index: indexDefOf(def).index, decisions: rows.filter((r) => r.type === "decision").length,
+    signals: rows.filter((r) => r.type === "decision" && (r.finalAction === "BUY_CE" || r.finalAction === "BUY_PE")),
+    exits: rows.filter((r) => r.type === "exit"), outcomes: rows.filter((r) => r.type === "outcome") });
+});
+// Live observation: evaluate every index once per closed candle during market hours,
+// even when no screen is open, so the ledger records what the arbiter would do.
+let _arbiterBusy = false;
+const _arbiterObserver = setInterval(async () => {
+  // ARBITER_OBSERVER=off pauses this unattended poll (it adds Dhan option-chain
+  // load). Decisions are still made whenever a screen or the paper engine asks.
+  if (process.env.ARBITER_OBSERVER === "off" || _arbiterBusy || !isTradingTimeIST()) return;
+  _arbiterBusy = true;
+  // Zero extra Dhan calls: only indices whose 5m candles AND option chain are already
+  // freshly cached (by a screen or the paper engine) are decided here; the others are
+  // decided when a screen or the paper engine asks.
+  const fresh = (k: string, ms: number) => { const h = _cache.get(k); return !!h && Date.now() - h.ts < ms; };
+  try { for (const d of ARBITER_INDEXES()) { if (!fresh(`c:${d.symbol}:5m`, 60_000) || !fresh(`oi:${d.symbol}`, 120_000)) continue; try { await getDecision(indexDefOf(d), decisionDeps); } catch { /* next */ } } }
+  finally { _arbiterBusy = false; }
+}, 30_000);
+if (typeof (_arbiterObserver as any).unref === "function") (_arbiterObserver as any).unref();
+
 router.get("/market-command", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
   const symbol = String(req.query.symbol || "^NSEI");
   const interval = parseInterval(req.query.interval) as Interval;
@@ -4535,7 +4681,10 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
     const confirmations: { label: string; passed: boolean }[] = [];
     confirmations.push({ label: "OI Direction", passed: oiDirection !== "FLAT" });
     confirmations.push({ label: "Order Block", passed: !!(obValid && obInRange) });
-    confirmations.push({ label: "Market Structure", passed: ms.currentStructure !== "Ranging" });
+    // Direction-AWARE (bug fix): structure / VWAP / EMA must agree with the OI
+    // direction — previously any non-ranging structure (even the opposite one) passed.
+    const oiBull = (oiData?.oiDirection || "FLAT") === "UP", oiBear = (oiData?.oiDirection || "FLAT") === "DOWN";
+    confirmations.push({ label: "Market Structure", passed: (oiBull && ms.currentStructure === "Bullish") || (oiBear && ms.currentStructure === "Bearish") });
     // Master Trade Selector is intentionally NOT a confirmation in this flow (removed
     // per the new MARKET DIRECTION → PRICE ACTION → STRUCTURE → ENTRY → OPTION → ACTION
     // sequence). arbVerdict is still exposed for reference but never gates WAIT/TRADE.
@@ -4543,12 +4692,12 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
 
     const emaConf = ls?.structure;
     if (emaConf) {
-      confirmations.push({ label: "VWAP Aligned", passed: emaConf.vwapStatus === "Above+Rising" || emaConf.vwapStatus === "Below+Falling" });
-      confirmations.push({ label: "EMA Structure", passed: emaConf.emaStructure === "Strong Bullish" || emaConf.emaStructure === "Strong Bearish" });
+      confirmations.push({ label: "VWAP Aligned", passed: (oiBull && emaConf.vwapStatus === "Above+Rising") || (oiBear && emaConf.vwapStatus === "Below+Falling") });
+      confirmations.push({ label: "EMA Structure", passed: (oiBull && emaConf.emaStructure === "Strong Bullish") || (oiBear && emaConf.emaStructure === "Strong Bearish") });
     } else {
       // Candle-derived VWAP confirmation (also works in replay where liquidity
       // status is unavailable): price is decisively on one side of VWAP.
-      confirmations.push({ label: "VWAP Aligned", passed: ms.vwapStatus !== "At" });
+      confirmations.push({ label: "VWAP Aligned", passed: (oiBull && ms.vwapStatus === "Above") || (oiBear && ms.vwapStatus === "Below") });
     }
 
     const allConfirmed = confirmations.every((c) => c.passed);
@@ -5048,10 +5197,45 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
     journey.sort((a, b) => a.time - b.time);
     const marketJourney = journey.slice(-12);
 
+    // ---- ADDITIVE: Breakout Engine (direction from indicators, trigger from S/R,
+    // structural SL/target, R:R, option leg). Reuses these candles + this chain
+    // snapshot; never changes any field above.
+    let breakout: any = null;
+    if (interval !== "1d") {
+      try {
+        breakout = await buildBreakout({
+          candles, intervalSec, isHistorical, nowSec, marketOpen: isMarketOpenIST(), def, symbol, interval,
+          oiChain: skipOi ? null : oiChain, chainPending: viewChart,
+          chainStale: dataStale || (!!oiChain && oiServedFromLastGood(oiChain)),
+          dataStatus: String(syncHealth.overall),
+        });
+      } catch (e: any) { breakout = { available: false, version: BREAKOUT_VERSION, error: e?.message || "breakout engine failed" }; }
+    }
+
+    // ---- THE ARBITER: the single source of truth for the trading decision. ----
+    // Canonical 5m closed-candle decision (independent of the chart timeframe).
+    // The command block below is OVERWRITTEN from it; the OI recommendation is
+    // kept only as labelled research evidence (legacyOiPlan).
+    let decision: Decision | null = null;
+    if (!isHistorical && def.type === "index") {
+      try { decision = await getDecision(indexDefOf(def), decisionDeps); } catch (e: any) { decision = null; }
+    }
+
     res.json({
       available: true,
       symbol, name: def.name, interval, spot: Math.round(spot * 100) / 100,
       marketJourney,
+      decision,
+      // Today's arbiter BUY decisions + exits for this index (chart markers).
+      decisionHistory: decision ? (() => {
+        const rows = ledgerFor(decision.index, istDateStr());
+        return {
+          signals: rows.filter((r) => r.type === "decision" && (r.finalAction === "BUY_CE" || r.finalAction === "BUY_PE"))
+            .map((r) => ({ key: r.key, candleTime: r.candleTime, finalAction: r.finalAction, plan: r.plan, option: r.option, setupLabel: r.setupLabel, trigger: r.trigger, reason: r.reason })),
+          exits: rows.filter((r) => r.type === "exit").map((r) => ({ key: r.key, time: r.time, reason: r.reason, R: r.R })),
+        };
+      })() : null,
+      breakout,
       asOf: nowSec, lastCandleTime: lastTime,
       historical: isHistorical,
       asOfDate: isHistorical ? dateParam : null,
@@ -5219,8 +5403,8 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       // Live option-strike analysis (read-only; never overrides Master/engine)
       strikeAnalysis,
 
-      // Command panel data
-      command: {
+      // Command panel data — AUTHORITATIVE fields come from the arbiter decision.
+      command: arbiterCommand(decision, {
         finalAction: effectiveAction,
         finalReason: effectiveWaitReason || finalReason,
         direction: isHistorical ? techDirection : (oiDirection === "UP" ? "BULLISH" : oiDirection === "DOWN" ? "BEARISH" : "NEUTRAL"),
@@ -5245,7 +5429,7 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
         spotSL: spotSL != null ? Math.round(spotSL * 100) / 100 : null,
         spotT1: spotT1 != null ? Math.round(spotT1 * 100) / 100 : null,
         spotT2: spotT2 != null ? Math.round(spotT2 * 100) / 100 : null,
-      },
+      }),
 
       // Master Trade Selector summary
       masterSelector: ext?.arbitration ? {
@@ -8083,19 +8267,34 @@ function paperDeps(force = false): TickDeps {
       }
     },
     // PART 1: index options (directional CE/PE on NIFTY/BANKNIFTY/FINNIFTY/MIDCAP).
+    // PART 1: index options come ONLY from the Unified Arbiter (single source of
+    // truth). The OI Command is evidence; it no longer opens index trades.
     getIndexOptionIdeas: async (): Promise<OptionIdea[]> => {
-      const defs = DEFAULT_SYMBOLS.filter((d) => d.type === "index" && d.fno);
       const out: OptionIdea[] = [];
-      for (const def of defs) {
+      for (const def of ARBITER_INDEXES()) {
         try {
-          const grid = await buildOiCommand(def);
-          const oiIdea = oiGridToIdea(def, grid, "directional");
-          if (oiIdea) out.push(oiIdea);
-          // Index directional paper follows OI Command only (1h bulletin + OI TAKE).
-          // No 4-layer fallback — that used to open the opposite side of the OI tab.
+          const d = await getDecision(indexDefOf(def), decisionDeps);
+          if ((d.finalAction !== "BUY_CE" && d.finalAction !== "BUY_PE") || !d.option || !d.plan || !d.option.available) continue;
+          const o = d.option, p = d.plan;
+          const dte = o.expiry ? Math.max(0, Math.round((Date.parse(o.expiry + "T10:00:00Z") - Date.now()) / 86400000)) : null;
+          out.push({
+            symbol: def.symbol, name: def.name, direction: d.finalAction === "BUY_CE" ? "Bullish" : "Bearish", optionType: o.side,
+            strike: o.strike!, premium: o.entry!, premiumTarget: o.target1!, premiumStop: o.stopLoss!,
+            spot: p.entry, spotTarget: p.target1, spotStop: p.stopLoss, lotSize: def.lotSize ?? 0,
+            expectedMovePct: Math.round((p.reward / p.entry) * 10000) / 100,
+            confidence: 75, // neutral sizing scale only — the arbiter decides with evidence, not confidence
+            thetaPctPerDay: 0, dte, strikeReason: `ARBITER:${d.key}`,
+            timeframe: "5m", horizon: `${d.setupLabel} · ${d.regime ?? "—"}`,
+          });
         } catch { /* skip */ }
       }
-      return out.sort((a, b) => b.confidence * b.expectedMovePct - a.confidence * a.expectedMovePct);
+      return out;
+    },
+    getArbiterDecision: async (sym: string) => {
+      const def = findSymbolDef(sym);
+      if (!def || def.type !== "index") return null;
+      const d = await getDecision(indexDefOf(def), decisionDeps);
+      return { key: d.key, finalAction: d.finalAction, reason: d.reason, option: d.option ? { strike: d.option.strike, side: d.option.side } : null };
     },
     // PART 2: stock options (safety-gated hourly scan, ranked by clean-move + conviction).
     getStockOptionIdeas: async (): Promise<OptionIdea[]> => {
@@ -9851,6 +10050,69 @@ router.get("/testlab/runs", requirePermission("backtesting"), (_req: Request, re
     win: j.result?.metrics?.winRate ?? null, trades: j.result?.metrics?.totalTrades ?? null,
   }));
   res.json({ runs });
+});
+
+// ---- MARKET COMMAND SUMMARY: full option chain for one expiry + leg validation ----
+// /api/mc-summary/chain?symbol=^NSEI&exp=0&ce=22500&pe=22450
+// Same Dhan option-chain call as the OI chain (dhanChainForExpiry → shared
+// dhanFetch client, token and rate-limit gate — no new connection). Returns every
+// strike with LTP, prior close, OI, OI change, volume, IV and greeks, plus the
+// expiry list. When ce/pe strikes are passed, each leg's security_id from the
+// chain is checked against the instrument master (index + expiry + strike + type)
+// so a strike can never show another contract's data. Nothing is fabricated:
+// missing fields are null.
+router.get("/mc-summary/chain", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  const provider = getProvider();
+  if (provider.name !== "dhan") return res.json({ available: false, message: "Option chain needs the Dhan feed." });
+  const def = findSymbolDef(String(req.query.symbol || ""));
+  if (!def || !def.fno || !def.nseSymbol) return res.status(400).json({ error: "Valid F&O index required" });
+  const exp = Math.max(0, Math.min(6, Number(req.query.exp) || 0));
+  const open = isMarketOpenIST();
+  const key = `mcs-chain:${def.symbol}:${exp}`;
+  try {
+    const ch: any = await cached(key, open ? 5_000 : 60_000, () => dhanChainForExpiry(def, exp));
+    if (!ch || !ch.available) return res.json({ available: false, symbol: def.symbol, name: def.name, message: ch?.message || "chain unavailable" });
+    const fetchedAt = Date.now() - (cacheAgeMs(key) ?? 0);
+    let atm = ch.strikes[0].strike;
+    for (const s of ch.strikes) if (Math.abs(s.strike - ch.spot) < Math.abs(atm - ch.spot)) atm = s.strike;
+    const leg = (s: any, side: "ce" | "pe") => {
+      const ltp = s[side + "Ltp"], prev = s[side + "PrevClose"];
+      return {
+        secId: s[side + "SecId"] ?? null, ltp, prevClose: prev ?? null,
+        chg: ltp != null && prev != null ? Math.round((ltp - prev) * 100) / 100 : null,
+        chgPct: ltp != null && prev ? Math.round(((ltp - prev) / prev) * 10000) / 100 : null,
+        oi: s[side + "Oi"] ?? null, oiChg: s[side + "Chg"] ?? null, vol: s[side + "Vol"] ?? null,
+        iv: s[side + "Iv"] ?? null, delta: s[side + "Delta"] ?? null, gamma: s[side + "Gamma"] ?? null,
+        theta: s[side + "Theta"] ?? null, vega: s[side + "Vega"] ?? null,
+      };
+    };
+    const rows = ch.strikes.map((s: any) => ({ strike: s.strike, ce: leg(s, "ce"), pe: leg(s, "pe") }));
+    // Leg validation: chain security_id must equal the instrument master's id for
+    // the same index + expiry + strike + option type.
+    const legs: Record<string, any> = {};
+    for (const type of ["CE", "PE"] as const) {
+      const q = req.query[type.toLowerCase()];
+      if (q == null || q === "") continue;
+      const strike = Number(q);
+      const row = rows.find((r: any) => r.strike === strike);
+      const chainSecId = row ? row[type === "CE" ? "ce" : "pe"].secId : null;
+      let masterSecId: string | null = null;
+      try { const m = await lookupDhanOption(def.nseSymbol, type, strike, ch.expiry); masterSecId = m ? String(m.securityId) : null; } catch { masterSecId = null; }
+      legs[type] = {
+        index: def.nseSymbol, expiry: ch.expiry, strike, type, chainSecId, masterSecId,
+        valid: !!(row && chainSecId && masterSecId && chainSecId === masterSecId),
+        reason: !row ? "strike not in chain" : !chainSecId ? "chain has no security_id" : !masterSecId ? "not in instrument master" : chainSecId !== masterSecId ? "security_id mismatch" : "verified",
+      };
+    }
+    res.json({
+      available: true, symbol: def.symbol, name: def.name, underlying: def.nseSymbol, strikeStep: def.strikeStep ?? null,
+      expiries: ch.expiries, expiry: ch.expiry, expiryIdx: ch.expiryIdx, spot: ch.spot, atmStrike: atm,
+      fetchedAt, marketOpen: open, rows, legs,
+    });
+  } catch (e: any) {
+    let feed: any = null; try { feed = dhanHealthNow(); } catch { /* ignore */ }
+    res.json({ available: false, error: e?.message || "chain failed", feed });
+  }
 });
 
 export default router;

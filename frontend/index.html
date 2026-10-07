@@ -7,7 +7,7 @@
          under the home indicator. Android ignores it harmlessly. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>BC Data Status</title>
-    <link rel="stylesheet" href="styles.css?v=20261004-testlab5" />
+    <link rel="stylesheet" href="styles.css?v=20261007-bias1" />
     <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   </head>
   <body class="oi-focus">
@@ -494,6 +494,7 @@
           <button class="tab tab-primary" data-tab="optionterminal" data-group="marketcommand">📈 Option Terminal</button>
           <button class="tab tab-primary" data-tab="oianalysis" data-group="marketcommand">🔬 OI Analysis</button>
           <button class="tab tab-primary" data-tab="tradeexec" data-group="marketcommand">🧾 Trade Execution</button>
+          <button class="tab tab-primary" data-tab="mcsummary" data-group="marketcommand">🧭 MC Summary</button>
           <!-- AI Paper Desk screens (own desk; each tab is permission-gated server-side) -->
           <button class="tab tab-primary" data-tab="aipdash" data-group="aipaper">🤖 Dashboard</button>
           <button class="tab" data-tab="aipanalysis" data-group="aipaper">🧠 AI Market Analysis</button>
@@ -1565,6 +1566,7 @@
               <button class="mc2-replay" id="mc-open-optionterminal" title="Open the CE/PE Option Terminal for this index">📈 Option Terminal</button>
               <button class="mc2-replay" id="mc-open-oianalysis" title="Open the OI Analysis screen for this index">🔬 OI Analysis</button>
               <button class="mc2-replay" id="mc-open-tradeexec" title="Open the Trade & Levels / Trade Execution screen">🧾 Trade Execution</button>
+              <button class="mc2-replay mc2-summary-btn" id="mc-open-mcsummary" title="Open the Market Command Summary for this index">📋 MARKET COMMAND SUMMARY</button>
               <div class="mc2-status">
                 <span class="mc-live-dot" id="mc-live-dot"></span>
                 <span id="mc-live-label">Dhan Connected</span>
@@ -1611,6 +1613,10 @@
               </div>
             </div>
 
+            <!-- ===== BREAKOUT ENGINE: bias (why) → S/R trigger → confirmation → executable plan ===== -->
+            <div class="mc2-decision" id="mc-decision" hidden></div>
+            <div class="mc2-bo" id="mc-bo" hidden></div>
+
             <!-- ===== MAIN: chart + right column ===== -->
             <div class="mc2-main">
               <div class="mc2-chart-area">
@@ -1650,6 +1656,7 @@
                       <label class="mc-tog"><input type="checkbox" id="mc-tog-bos" checked><span class="mc-tog-dot" style="background:#a855f7"></span>BOS / CHoCH</label>
                       <label class="mc-tog"><input type="checkbox" id="mc-tog-liq" checked><span class="mc-tog-dot" style="background:#f0b90b"></span>Liquidity</label>
                       <label class="mc-tog"><input type="checkbox" id="mc-tog-orb"><span class="mc-tog-dot" style="background:#38bdf8"></span>Opening Range</label>
+                      <label class="mc-tog"><input type="checkbox" id="mc-tog-trade" checked><span class="mc-tog-dot" style="background:#facc15"></span>Trade Plan</label>
                     </div>
                   </div>
                 </div>
@@ -1809,8 +1816,10 @@
         <!-- Market Option Selection: driven by the same index + snapshot as Market
              Command. CE + PE premium charts are the primary focus. All data is the
              live Dhan snapshot; nothing is fabricated. -->
+        <div class="tab-panel" id="panel-mcsummary"><div class="mcs-wrap" id="mcs-root"></div></div>
         <div class="tab-panel" id="panel-optionterminal">
           <div class="ot-wrap">
+            <div class="arb-banner" id="ot-arbiter" hidden></div>
             <div class="ot-topbar">
               <div class="ot-brand"><span class="ot-logo">📈</span> Option Terminal <span class="ot-muted" style="font-weight:500">· CE / PE premium · Market Option Selection</span></div>
               <span class="ot-datasrc" id="ot-datasrc" title="Where the Option Terminal's premium candles / levels come from">Source: —</span>
@@ -2142,6 +2151,7 @@
 
         <div class="tab-panel" id="panel-tradeexec">
           <div class="te-wrap">
+            <div class="arb-banner" id="te-arbiter" hidden></div>
             <div class="te-top">
               <div class="te-brand"><span class="te-logo">📈</span><div><div class="te-title">Market Command — Trade &amp; Levels</div><div class="te-sub">Analyze · Identify · Trade Smarter</div></div></div>
               <div class="te-idx" id="te-idx-btns">
@@ -2527,6 +2537,7 @@
       </div>
     </div>
 
-    <script src="app.js?v=20261004-testlab5"></script>
+    <script src="app.js?v=20261007-bias1"></script>
+    <script src="mcsummary.js?v=20261007-mcsummary1"></script>
   </body>
 </html>

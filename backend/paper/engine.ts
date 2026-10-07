@@ -219,6 +219,9 @@ export interface TickDeps {
   nowEpoch: number;
   getSpot: (symbol: string) => Promise<number | null>;
   getIndexOptionIdeas: () => Promise<OptionIdea[]>;
+  // Unified Arbiter: the single decision for an index. When provided, NO index
+  // option may open unless it matches this decision (BUY_CE / BUY_PE, same side).
+  getArbiterDecision?: (symbol: string) => Promise<{ key: string; finalAction: string; reason: string; option?: { strike: number | null; side: string } | null } | null>;
   getStockOptionIdeas: () => Promise<OptionIdea[]>;
   getStockIntradayIdeas: () => Promise<IntradayIdea[]>;
   getOiBias?: (symbol: string) => Promise<string | null>;
@@ -293,7 +296,7 @@ const MAX_TRADES_PER_DAY = 999; // no daily directional quota — quality gate o
 const THROTTLE_SEC = 90; // same-symbol spam guard only
 const WIN_PROB_MIN_DIR = 52; // calibrated win% required (realistic, not 90% marketing)
 const WIN_PROB_MIN_SCALP = 54;
-const EOD_FLATTEN_MIN = 15 * 60 + 25; // square-off near close; entries allowed until then
+const EOD_FLATTEN_MIN = 15 * 60 + 15; // trader's day ends 15:15 IST (user rule) — square-off; no entries after
 // Confirmation floor: only take setups with Direction Score / Scalp Score >= this.
 const CONFIRM_FLOOR = 72; // skip weak “maybe” buys — win-win only
 const RISK_PER_TRADE = 0.01; // 1% of that pool per trade
@@ -952,6 +955,19 @@ export function globalOneTradeLock(s: PaperState, symbol?: string): boolean {
 // Try to open one option position; returns "OPENED" or a Hindi skip reason.
 async function tryOpenOption(s: PaperState, deps: TickDeps, idea: OptionIdea, kind: PoolKind, requireClean: boolean, rivalScalp?: OptionIdea | null): Promise<string> {
   const r2v = (n: number) => Math.round(n * 100) / 100;
+  // ---- Unified Arbiter gate (single source of truth for INDEX options) ----
+  // Arbiter-sourced ideas carry strikeReason "ARBITER:<decision key>". Any other
+  // index-option idea (OI, scalp, …) is refused: it would be a second decision maker.
+  const fromArbiter = (idea.strikeReason || "").startsWith("ARBITER:");
+  if (kind === "indexOption" && deps.getArbiterDecision) {
+    let dec: Awaited<ReturnType<NonNullable<TickDeps["getArbiterDecision"]>>> = null;
+    try { dec = await deps.getArbiterDecision(idea.symbol); } catch { dec = null; }
+    const want = idea.optionType === "CE" ? "BUY_CE" : "BUY_PE";
+    if (!dec) return "Arbiter: no decision available — no index entry";
+    if (dec.finalAction !== want) return `Arbiter: ${dec.finalAction} — ${dec.reason}`;
+    if (!fromArbiter) return `Arbiter decides index options — ${idea.scalp ? "scalp" : "OI"} idea ignored (decision ${dec.key})`;
+    if (idea.strikeReason !== `ARBITER:${dec.key}`) return `Arbiter decision changed (${dec.key}) — stale idea skipped`;
+  }
   // Scalps are excluded from scaling (fast in/out, rupee-capped — doesn't fit
   // "add-on requires improved confirmation"), so they keep the strict lock.
   if (idea.scalp) {
@@ -966,18 +982,18 @@ async function tryOpenOption(s: PaperState, deps: TickDeps, idea: OptionIdea, ki
     const cd = stopOutCooldownCheck(s.stopOutCooldown, idea.symbol, deps.nowEpoch);
     if (cd.blocked) return `cooldown — ${idea.symbol} में stop-out के बाद ${cd.remainMin} min बाकी (re-entry रुका)`;
   }
-  if (idea.dte != null && idea.dte <= 1 && (idea.confidence ?? 0) < 80) return `expiry के करीब (dte=${idea.dte}) — conf ${idea.confidence ?? 0}<80 चाहिए`;
-  if (requireClean && idea.cleanRating != null && idea.cleanRating < CLEAN_MIN) return `underlying choppy (clean ${idea.cleanRating}<${CLEAN_MIN})`;
+  if (!fromArbiter && idea.dte != null && idea.dte <= 1 && (idea.confidence ?? 0) < 80) return `expiry के करीब (dte=${idea.dte}) — conf ${idea.confidence ?? 0}<80 चाहिए`;
+  if (!fromArbiter && requireClean && idea.cleanRating != null && idea.cleanRating < CLEAN_MIN) return `underlying choppy (clean ${idea.cleanRating}<${CLEAN_MIN})`;
   const oiMod = (idea.strikeReason || "").startsWith("OI-");
   const confNeed = oiMod ? 55 : CONFIRM_FLOOR;
-  if ((idea.confidence ?? 0) < confNeed) return `confidence कम (${idea.confidence ?? 0}<${confNeed} floor)`;
+  if (!fromArbiter && (idea.confidence ?? 0) < confNeed) return `confidence कम (${idea.confidence ?? 0}<${confNeed} floor)`;
   // Phase 1.1: regime protection now applies to EVERY option idea — scalp and
   // OI-tagged ideas used to bypass this check entirely (the "!oiMod && !idea.scalp"
   // guard that used to live here), which meant a Compressed/flat market could still
   // take scalp or OI-driven trades with no regime veto at all. "Compressed" is the
   // MarketRegimeEngine's flat/coiled state — the direct successor to the old
   // ADX<18 "Range" read this check used before Phase 1.1 unified the classifiers.
-  if (deps.getRegime) {
+  if (deps.getRegime && !fromArbiter) {
     try { const rg = await deps.getRegime(idea.symbol); if (rg && rg.regime === "Compressed") return `regime=Compressed (flat/coiled market — theta risk में buy नहीं)`; } catch { /* ignore */ }
   }
   // Phase 2.2 (RiskEngine): Risk Radar was previously display-only, attached to
@@ -1004,7 +1020,7 @@ async function tryOpenOption(s: PaperState, deps: TickDeps, idea: OptionIdea, ki
   // applies to EVERY option idea (index/stock/scalp) — blocks only when EMA
   // confluence or Momentum Burst ACTIVELY OPPOSES idea.direction. A Neutral/
   // flat read on either signal never blocks (per the "flat = neutral" decision).
-  if (deps.getConfluenceVeto) {
+  if (deps.getConfluenceVeto && !fromArbiter) {
     try {
       const cv = await deps.getConfluenceVeto(idea.symbol, idea.direction);
       if (cv?.blocked) return `Master Selector confluence: ${cv.reason} (entry रोका गया)`;
@@ -1017,7 +1033,7 @@ async function tryOpenOption(s: PaperState, deps: TickDeps, idea: OptionIdea, ki
   // inside wallReaction). When getExtInputs is absent the engine runs exactly as
   // before (old sizing + hard heat-cap block).
   let extDecision: ExtDecision | null = null;
-  if (deps.getExtInputs && isOption(kind) && !idea.scalp) {
+  if (deps.getExtInputs && isOption(kind) && !idea.scalp && !fromArbiter) {
     let inp: ExtInputs | null = null;
     try { inp = await deps.getExtInputs(idea); } catch { inp = null; }
     if (inp) {
@@ -1111,7 +1127,8 @@ async function tryOpenOption(s: PaperState, deps: TickDeps, idea: OptionIdea, ki
   // otherwise use the original calibrated estimate. The floor gate is unchanged.
   const winP = extDecision ? extDecision.finalScore : calibratedWinProb({ scalp: idea.scalp, confidence: idea.confidence, netRR, strikeReason: idea.strikeReason });
   const winFloor = idea.scalp ? WIN_PROB_MIN_SCALP : WIN_PROB_MIN_DIR;
-  if (winP < winFloor) return `win-prob ${winP}% < ${winFloor}% (realistic edge नहीं — skip)`;
+  // Arbiter ideas: the arbiter's evidence/EV gate replaces this confidence-derived estimate.
+  if (!fromArbiter && winP < winFloor) return `win-prob ${winP}% < ${winFloor}% (realistic edge नहीं — skip)`;
   const tradeRisk = (idea.premium - idea.premiumStop) * qty;
   // Capital-guard ENFORCEMENT (Step 8): under the extension the 6% heat cap is
   // ADVISORY — the number is surfaced via riskComment, not a hard block. The MATH
@@ -1409,7 +1426,7 @@ async function tickPaperImpl(deps: TickDeps): Promise<any> {
     else {
       try {
         const ideas = await deps.getIndexOptionIdeas();
-        if (!ideas.length) check.notes.push("कोई index option idea नहीं (OI TAKE + 1h bulletin नहीं)");
+        if (!ideas.length) check.notes.push(deps.getArbiterDecision ? "Index options: Arbiter final decision is not BUY_CE / BUY_PE (see Market Command FINAL DECISION)" : "कोई index option idea नहीं (OI TAKE + 1h bulletin नहीं)");
         for (const idea of ideas) {
           const scaleCandidate = s.open.some((p) => p.kind === "indexOption" && !p.scalp && p.symbol === idea.symbol);
           if (!scaleCandidate) {

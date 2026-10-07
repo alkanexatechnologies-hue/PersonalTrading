@@ -81,7 +81,7 @@ async function init() {
   if (el("ls-symbol")) el("ls-symbol").addEventListener("change", loadLiquidityStatusScreen);
   if (el("ls-scan-refresh")) el("ls-scan-refresh").addEventListener("click", loadLiquidityMovers);
   setTimeout(() => { if (isMarketOpen() || isFeedWindow()) loadTopOpportunities(); }, 4000);
-  setInterval(() => { if ((isMarketOpen() || isFeedWindow()) && !document.body.classList.contains("mc-fullwidth")) loadTopOpportunities(); }, 60 * 1000);
+  setInterval(() => { if ((isMarketOpen() || isFeedWindow()) && !onTradingFullscreen()) loadTopOpportunities(); }, 60 * 1000);
   setTimeout(loadSmartNews, 2500);
   setInterval(loadSmartNews, 5 * 60 * 1000);
   startLiveTicker();
@@ -1000,9 +1000,16 @@ async function loadWatchlistScan() {
   finally { watchScanBusy = false; }
 }
 
+// Full-screen trading views hide the watchlist sidebar. Its 60s refresh fires ~20
+// slow per-stock /api/signal calls that occupy all 6 browser connections for
+// 20–30s, so those screens' own live refreshes time out and keep showing old data.
+const TRADING_FULLSCREEN = ["mc-fullwidth", "ot-fullwidth", "te-fullwidth", "oia-fullwidth", "mcs-fullwidth", "ma-fullwidth"];
+function onTradingFullscreen() { return TRADING_FULLSCREEN.some((c) => document.body.classList.contains(c)); }
+
 // Auto-refresh watchlist prices/signals every 60s while the market is open.
 function startWatchlistAutoRefresh() {
   setInterval(() => {
+    if (onTradingFullscreen()) return; // watchlist hidden — don't starve the screen's own refresh
     loadIndexDesk();
     if (isMarketOpen() || isFeedWindow()) { loadWatchlistBadges(); loadWatchlistScan(); }
   }, 60 * 1000);
@@ -1927,6 +1934,9 @@ function switchTab(name) {
   // OI Analysis — read-only OI desk (full-width), follows Market Command's index.
   document.body.classList.toggle("oia-fullwidth", name === "oianalysis");
   if (name === "oianalysis") { initOiAnalysis(); syncOIAFromMC(); startOiAnalysisLive(); }
+  // Market Command Summary — one-screen summary (full-width), opened from Market Command.
+  document.body.classList.toggle("mcs-fullwidth", name === "mcsummary");
+  if (name === "mcsummary" && typeof initMcSummary === "function") initMcSummary();
   // Market Analysis — composite read-only analysis desk (full-width).
   document.body.classList.toggle("ma-fullwidth", name === "marketanalysis");
   if (name === "marketanalysis") { initMarketAnalysis(); startMarketAnalysisLive(); }
@@ -5663,7 +5673,7 @@ const MC = {
   sym: "^NSEI", tf: "15m", chart: null, candleSeries: null,
   ema9Series: null, ema21Series: null, ema50Series: null, vwapSeries: null,
   obMarkers: [], _levelLines: [], _overlaySig: null, _obSig: null, _indSig: null, priceLine: null, timer: null, loading: false, lastData: null,
-  show: { vwap: true, ema21: true, ema50: true, ema9: false, ema200: true, ob: true, vol: true, levels: true, bos: true, liq: true, orb: false },
+  show: { vwap: true, ema21: true, ema50: true, ema9: false, ema200: true, ob: true, vol: true, levels: true, bos: true, liq: true, orb: false, trade: true },
   replayDate: null, // yyyy-mm-dd when replaying a past session; null = live
 };
 
@@ -5708,11 +5718,11 @@ function initMarketCommand() {
 
   // Wire indicator toggles. "levels"/"bos"/"liq"/"orb" govern the Important-Levels
   // drawing → a full chart redraw; the EMA/VWAP/Volume overlays just re-apply.
-  ["vwap", "ema21", "ema50", "ema9", "ema200", "ob", "vol", "levels", "bos", "liq", "orb"].forEach((k) => {
+  ["vwap", "ema21", "ema50", "ema9", "ema200", "ob", "vol", "levels", "bos", "liq", "orb", "trade"].forEach((k) => {
     const cb = el("mc-tog-" + k);
     if (cb) cb.addEventListener("change", () => {
       MC.show[k] = cb.checked;
-      if ((k === "levels" || k === "bos" || k === "liq" || k === "orb") && MC.lastData) renderMCChart(MC.lastData);
+      if ((k === "levels" || k === "bos" || k === "liq" || k === "orb" || k === "trade") && MC.lastData) renderMCChart(MC.lastData);
       else applyMCOverlays();
     });
   });
@@ -5723,6 +5733,7 @@ function initMarketCommand() {
   el("mc-open-optionterminal")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("optionterminal"); });
   el("mc-open-oianalysis")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("oianalysis"); });
   el("mc-open-tradeexec")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("tradeexec"); });
+  el("mc-open-mcsummary")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("mcsummary"); });
 
   // Wire fullscreen
   const fsBtn = el("mc-fullscreen");
@@ -5837,6 +5848,7 @@ function initMarketCommand() {
   // so the chart is never affected. Feature-gated by the payload having fakeMove*.
   try {
     ensureMCFakeOverlay(container);
+    ensureMCBoTag(container);
     MC.chart.timeScale().subscribeVisibleTimeRangeChange(() => scheduleMCFakeReposition());
     if (typeof ResizeObserver !== "undefined") {
       MC._fakeRO = new ResizeObserver(() => scheduleMCFakeReposition());
@@ -5891,7 +5903,7 @@ function ensureMCFakeOverlay(container) {
 // rAF-throttled reposition — collapses a burst of pan/zoom events into one paint.
 function scheduleMCFakeReposition() {
   if (MC._fakeRaf) return;
-  MC._fakeRaf = requestAnimationFrame(() => { MC._fakeRaf = 0; positionMCFakeOverlay(); });
+  MC._fakeRaf = requestAnimationFrame(() => { MC._fakeRaf = 0; positionMCFakeOverlay(); positionMCBoTag(); });
 }
 
 function startMarketCommandLive() {
@@ -6830,6 +6842,7 @@ function teLevelClass(r) {
 }
 
 function renderTE(d) {
+  renderArbiterBanner("te-arbiter", d);
   TE._day = d.asOf ? teDay(d.asOf) : null;
   // stats
   teEl("te-name").textContent = d.name || "—";
@@ -7385,6 +7398,7 @@ function otRenderHourlyLevels() {
 }
 
 function renderOptionTerminal(d) {
+  renderArbiterBanner("ot-arbiter", d);
   const m = d.optionMatrix;
   OT._stale = !!(d.snapshot && d.snapshot.stale) || !!d.dataStale;
   // ---- spot + intraday change ----
@@ -7765,6 +7779,8 @@ async function loadMarketCommand(chartOnly = false) {
       _de.textContent = "📅 " + (d.asOfDate ? d.asOfDate : mcSessionDate(_lt)) + (d.historical ? " · REPLAY" : " · LIVE");
     }
     renderMCChart(d);
+    renderMCDecision(d);  // THE ARBITER — single final decision (dominant)
+    renderMCBreakout(d);  // S2 Breakout strip — evidence only
     renderMCTopStats(d);
     renderMCIndexCards(); // refresh the India VIX card as soon as the snapshot arrives
     renderMCCommand(d);
@@ -7851,9 +7867,9 @@ function renderMCEarly(d) {
   box.className = "mc-early" + (em.watch ? " watch" : em.label === "TIMEFRAME CONFLICT" ? " conflict" : "");
   const seq = [em.emaReaction, em.liquidity, em.candleBehaviour, em.nextCandle, `BOS: ${em.bosStatus}`].filter(Boolean).join(" · ");
   box.innerHTML =
-    `<span class="em-label">${em.emoji} ${em.watch ? "EARLY MOVE WATCH — " : ""}${em.label}</span>` +
+    `<span class="em-label">${em.emoji} EVIDENCE · ${em.watch ? "EARLY MOVE WATCH — " : ""}${em.label}</span>` +
     `<span class="em-seq">${em.timeframe} · ${em.context} context · ${seq}</span>` +
-    `<span class="em-action">${em.action}</span>` +
+    `<span class="em-action">Evidence only — FINAL DECISION: ${d.decision ? (ARB_LABEL[d.decision.finalAction] || d.decision.finalAction) : "—"}</span>` +
     `<span class="em-conf">evidence ${em.confidence}%</span>`;
 }
 
@@ -8890,6 +8906,10 @@ function renderMCChart(d) {
     }
   });
 
+  // Breakout Engine signals / blocked breakouts (gated by the Trade Plan toggle).
+  markers.push(...mcboMarkers(d));
+  markers.sort((a, b) => a.time - b.time);
+
   // Anti-flicker: only tear down + rebuild the level price-lines and markers when
   // the set actually changed. On an unchanged poll (very common — levels update
   // slowly) nothing is recreated, so the lines/markers stay perfectly still.
@@ -8912,6 +8932,8 @@ function renderMCChart(d) {
     MC.candleSeries.setMarkers(markers);
   }
   renderMCLevelsLegend(d);
+  applyMCBreakoutLines(d);
+  positionMCBoTag();
 
   // Frame the recent ~120 bars on first render / symbol / timeframe switch only.
   const viewKey = MC.sym + ":" + MC.tf;
@@ -8919,6 +8941,321 @@ function renderMCChart(d) {
     MC.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, N - showBars), to: N + 2 });
     MC._fitKey = viewKey;
   }
+}
+
+// ===================== UNIFIED ARBITER — FINAL DECISION (presentation only) =====================
+// d.decision is the ONE decision per index per closed 5m candle (backend/decision).
+// Everything else on the screen (OI, Early Move, Breakout strip) is evidence.
+const ARB_LABEL = { BUY_CE: "BUY CE", BUY_PE: "BUY PE", WAIT: "WAIT", HOLD: "HOLD", AVOID: "AVOID" };
+const arbCls = (a) => a === "BUY_CE" ? "buy" : a === "BUY_PE" ? "sell" : a === "HOLD" ? "hold" : a === "AVOID" ? "avoid" : "wait";
+const arbHm = (t) => t ? new Date((t + 19800) * 1000).toISOString().slice(11, 16) : "—";
+
+function arbOptionText(o) {
+  if (!o || o.strike == null) return "—";
+  return `${o.strike} ${o.side}${o.expiry ? " · " + o.expiry : ""}`;
+}
+
+// ---- Market Bias Shift (trader alert) ----
+const BIAS_CLS = { BULLISH_CONTEXT: "up", SHIFT_BULLISH: "up", BULLISH_LEG: "up", BEARISH_CONTEXT: "dn", SHIFT_BEARISH: "dn", BEARISH_LEG: "dn", BULLISH_WEAKENING: "warn", BEARISH_WEAKENING: "warn" };
+const BIAS_ALERT = { BULLISH_WEAKENING: 1, BEARISH_WEAKENING: 1, SHIFT_BEARISH: 1, SHIFT_BULLISH: 1 };
+function arbBiasRow(x) {
+  const b = x && x.bias;
+  if (!b || b.state === "NO_DATA") return "";
+  const label = b.state.replace(/_/g, " ");
+  return `<div class="arb-row arb-bias ${BIAS_CLS[b.state] || ""}"><span class="arb-bias-tag">MARKET BIAS · ${mcboEsc(label)}</span><span class="arb-bias-msg">${mcboEsc(b.traderMessage)}</span>${b.allow && (!b.allow.CE || !b.allow.PE) ? `<span class="arb-bias-perm">${!b.allow.CE ? "No new CE" : ""}${!b.allow.CE && !b.allow.PE ? " · " : ""}${!b.allow.PE ? "No new PE" : ""}</span>` : ""}</div>`;
+}
+// Pop-up + optional sound/notification when an index's bias state changes to a
+// warning or a confirmed shift (once per index per state change).
+const _biasSeen = {};
+function arbBiasAlert(x) {
+  const b = x && x.bias;
+  if (!b || !BIAS_ALERT[b.state]) { if (b && x) _biasSeen[x.index] = b.state + "|" + b.since; return; }
+  const key = b.state + "|" + b.since;
+  if (_biasSeen[x.index] === key) return;
+  const first = !(x.index in _biasSeen);
+  _biasSeen[x.index] = key;
+  if (first && b.since && Date.now() / 1000 - b.since > 15 * 60) return;   // don't replay an old state on page load
+  let wrap = el("early-toast-wrap");
+  if (!wrap) { wrap = document.createElement("div"); wrap.id = "early-toast-wrap"; document.body.appendChild(wrap); }
+  const t = document.createElement("div");
+  const up = b.state === "SHIFT_BULLISH" || b.state === "BEARISH_WEAKENING";
+  t.className = "early-toast " + (up ? "up" : "down");
+  t.innerHTML = `<div class="et-head">${b.state.startsWith("SHIFT") ? (up ? "🔺" : "🔻") : "⚠"} ${mcboEsc(x.index)} · MARKET BIAS · ${mcboEsc(b.state.replace(/_/g, " "))}</div><div class="et-msg">${mcboEsc(b.traderMessage)}</div><div class="et-sub">Context alert — the FINAL DECISION still needs a qualified setup</div>`;
+  t.addEventListener("click", () => t.remove());
+  wrap.appendChild(t);
+  setTimeout(() => { t.classList.add("fade"); setTimeout(() => t.remove(), 600); }, 20000);
+  if (state.alerts && state.alerts.notify) {
+    try { beep(); } catch (_) {}
+    try { if ("Notification" in window && Notification.permission === "granted") new Notification(`${x.index}: ${b.state.replace(/_/g, " ")}`, { body: b.traderMessage }); } catch (_) {}
+  }
+}
+
+function renderMCDecision(d) {
+  const box = el("mc-decision");
+  if (!box) return;
+  const x = d && d.decision;
+  if (!x) {
+    box.hidden = !(d && !d.historical);
+    if (!box.hidden) box.innerHTML = `<div class="arb-row"><span class="arb-title">FINAL DECISION</span><span class="arb-action wait">—</span><span class="arb-reason">Arbiter decision unavailable for this view</span></div>`;
+    return;
+  }
+  const p = x.plan, o = x.option, ev = x.evidence;
+  arbBiasAlert(x);
+  const live = x.finalAction === "BUY_CE" || x.finalAction === "BUY_PE" || x.finalAction === "HOLD";
+  const cell = (k, v, cls = "") => `<div class="arb-cell"><span>${mcboEsc(k)}</span><b class="${cls}">${v == null || v === "" ? "—" : mcboEsc(v)}</b></div>`;
+  const cands = (x.candidates || []).map((c) => `<span class="arb-cand ${c.production ? "prod" : "ev"}" title="${mcboEsc((c.evidence || []).join(" · "))}">${c.setup === "S1_MOMENTUM" ? "S1" : "S2"} ${mcboEsc(c.label)} · ${mcboEsc(c.direction)} · <b>${mcboEsc(c.state)}</b>${c.production ? "" : " · evidence only"}${c.blockReason ? " — " + mcboEsc(c.blockReason) : ""}</span>`).join("");
+  const f = x.features || {};
+  const feats = [
+    d.earlyMove && d.earlyMove.label ? `Early Move (B): ${d.earlyMove.label}` : null,
+    f.earlyMoveA ? `Early Move (A): ${f.earlyMoveA.direction} ${f.earlyMoveA.stage}` : null,
+    f.oi ? `OI: ${f.oi.verdict || f.oi.direction} (score ${f.oi.score ?? "—"})` : (d.oi && d.oi.direction ? `OI: ${d.oi.direction}` : null),
+    d.breakout && d.breakout.latest ? `Breakout (S2): ${d.breakout.latest.state}` : null,
+  ].filter(Boolean).map((t) => `<span class="arb-feat">${mcboEsc(t)}</span>`).join("");
+  const liveTxt = x.live && x.live.state && x.live.state !== "—" ? `<span class="arb-live">Forming candle: ${mcboEsc(x.live.state)} near ${mcboN(x.live.s2Trigger)} — context only, needs a CLOSE</span>` : "";
+  box.hidden = false;
+  box.innerHTML = `
+    <div class="arb-row arb-head">
+      <span class="arb-title">FINAL DECISION · ${mcboEsc(x.index)}</span>
+      <span class="arb-action ${arbCls(x.finalAction)}">${ARB_LABEL[x.finalAction] || x.finalAction}</span>
+      <span class="arb-meta">${mcboEsc(x.timeframe)} candle ${arbHm(x.candleTime)} (closed) · ${mcboEsc(x.dataStatus)} · ${mcboEsc(x.sessionPhase)}${x.expiryDay ? " · EXPIRY DAY" : ""}</span>
+    </div>
+    <div class="arb-row arb-reason">${mcboEsc(x.reason)}</div>
+    ${arbBiasRow(x)}
+    <div class="arb-grid">
+      ${cell("Regime", x.regime)}${cell("Direction", x.direction, x.direction === "BULLISH" ? "up" : x.direction === "BEARISH" ? "dn" : "")}
+      ${cell("Setup", x.setupLabel)}${cell("State", x.setupState)}
+      ${cell("Trigger", x.trigger && x.trigger.level != null ? `${mcboN(x.trigger.level)} ${x.trigger.label || ""}` : null)}
+      ${cell("Invalidation", x.invalidation != null ? mcboN(x.invalidation) : null)}
+      ${cell("Entry (spot)", p ? mcboN(p.entry) : null)}${cell("SL (spot)", p ? mcboN(p.stopLoss) : null, "dn")}
+      ${cell("Target 1", p ? mcboN(p.target1) : null, "up")}${cell("Target 2", p && p.target2 != null ? mcboN(p.target2) : null, "up")}
+      ${cell("Spot R:R", p ? "1:" + mcboN(p.rr) : null)}
+      ${cell("Option", live || o ? arbOptionText(o) : null)}
+      ${cell("Option entry", o && o.entry != null ? "₹" + mcboN(o.entry) : null)}${cell("Option SL", o && o.stopLoss != null ? "₹" + mcboN(o.stopLoss) : null, "dn")}
+      ${cell("Option target", o && o.target1 != null ? "₹" + mcboN(o.target1) : null, "up")}${cell("Option R:R (net)", o && o.netRR != null ? "1:" + mcboN(o.netRR) : null)}
+    </div>
+    ${ev ? `<div class="arb-row arb-ev">Evidence: ${mcboEsc(ev.note)} <i>(${mcboEsc(ev.samples)} replay trades · ${mcboEsc(ev.source)})</i></div>` : ""}
+    ${x.option && x.option.reason ? `<div class="arb-row arb-block">Option: ${mcboEsc(x.option.reason)}</div>` : ""}
+    <div class="arb-row arb-cands">${cands}</div>
+    <div class="arb-row arb-feats"><span class="mcbo-k">Evidence only</span>${feats || "—"}${liveTxt}</div>`;
+}
+
+// Compact banner for Option Terminal / Trade Execution — same decision, no recompute.
+function renderArbiterBanner(id, d) {
+  const box = el(id);
+  if (!box) return;
+  const x = d && d.decision;
+  if (!x) { box.hidden = true; return; }
+  const o = x.option;
+  const live = x.finalAction === "BUY_CE" || x.finalAction === "BUY_PE" || x.finalAction === "HOLD";
+  box.hidden = false;
+  box.innerHTML = `<span class="arb-action ${arbCls(x.finalAction)}">${ARB_LABEL[x.finalAction] || x.finalAction}</span>
+    <span class="arb-bn-txt">${x.bias && x.bias.state !== "NO_DATA" ? `<span class="arb-bias-inline ${BIAS_CLS[x.bias.state] || ""}">${mcboEsc(x.bias.traderMessage)}</span><br>` : ""}<b>FINAL DECISION · ${mcboEsc(x.index)} · ${arbHm(x.candleTime)} (5m closed)</b> — ${mcboEsc(x.reason)}${live && o ? ` · ${mcboEsc(arbOptionText(o))} entry ₹${mcboN(o.entry)} SL ₹${mcboN(o.stopLoss)} T1 ₹${mcboN(o.target1)} R:R 1:${mcboN(o.netRR)}` : ""}</span>`;
+}
+
+// The chart's trade plan (lines + tag) follows the ARBITER: the open HOLD, else
+// the latest BUY decision of the session. Shape matches the breakout tag renderer.
+function arbActiveSignal(d) {
+  const x = d && d.decision;
+  const hist = (d && d.decisionHistory && d.decisionHistory.signals) || [];
+  let src = null;
+  if (x && (x.finalAction === "BUY_CE" || x.finalAction === "BUY_PE" || x.finalAction === "HOLD") && x.plan) {
+    src = { candleTime: x.hold ? x.hold.since : x.candleTime, finalAction: x.finalAction === "HOLD" ? (x.direction === "BEARISH" ? "BUY_PE" : "BUY_CE") : x.finalAction, plan: x.plan, option: x.option, setupLabel: x.setupLabel, trigger: x.trigger, reason: x.reason };
+  } else if (hist.length) src = hist[hist.length - 1];
+  if (!src || !src.plan) return null;
+  const o = src.option;
+  const p = src.plan;
+  return {
+    barTime: src.candleTime, iso: arbHm(src.candleTime) + " IST", dir: src.finalAction === "BUY_PE" ? "SELL" : "BUY",
+    plan: { ...p, trigger: src.trigger && src.trigger.level != null ? src.trigger.level : p.entry, triggerLabel: (src.trigger && src.trigger.label) || "", triggerType: src.setupLabel || "ARBITER", target2Reason: null },
+    option: o ? { available: !!o.available, strike: o.strike, side: o.side, expiry: o.expiry, securityId: o.securityId, optionLtp: o.ltp, entry: o.entry, stopLoss: o.stopLoss, target1: o.target1, target2: o.target2, risk: o.risk, reward: o.reward, rr: o.netRR, reason: o.reason } : null,
+    buyScore: "—", sellScore: "—", executable: true, optionSource: "ARBITER", gateNote: null,
+  };
+}
+
+// ===================== BREAKOUT ENGINE (presentation only) =====================
+// Renders d.breakout from /api/market-command: the bias with WHY (per-check
+// PASS/FAIL), the S/R trigger, confirmation, and — only for an actual BUY/SELL —
+// the full trade plan on the chart (marker + Entry/SL/T1/T2/Trigger lines + tag).
+// Every number comes from the payload; a missing value is shown as N/A.
+const mcboEsc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const mcboN = (v, d = 2) => (v == null || !isFinite(Number(v)) ? "N/A" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: d }));
+const mcboStateCls = (s) => s === "BUY" ? "buy" : s === "SELL" ? "sell" : s === "HOLD" ? "hold"
+  : (s === "BUY CONFIRMED" || s === "SELL CONFIRMED") ? "conf" : s === "AVOID" ? "avoid" : s === "NO EDGE" ? "none" : "wait";
+const mcboHm = (t) => new Date((t + 19800) * 1000).toISOString().slice(11, 16);
+// Option side shown to the trader: a bearish signal is executed by BUYING a PE.
+const mcboAction = (s) => s.dir === "BUY" ? "BUY CE" : "BUY PE";
+
+// The signal whose plan is drawn: the latest one of the session.
+function mcboActiveSignal(bo) {
+  const sigs = (bo && bo.signals) || [];
+  return sigs.length ? sigs[sigs.length - 1] : null;
+}
+
+function renderMCBreakout(d) {
+  const box = el("mc-bo");
+  if (!box) return;
+  const bo = d && d.breakout;
+  if (!bo || !bo.available || !bo.latest) {
+    box.hidden = !(bo && bo.error);
+    if (bo && bo.error) box.innerHTML = `<div class="mcbo-row"><span class="mcbo-state avoid">ENGINE ERROR</span><span class="mcbo-reason">${mcboEsc(bo.error)}</span></div>`;
+    return;
+  }
+  const L = bo.latest, b = L.bias || {};
+  const st = L.state;
+  const dataTag = bo.dataStatus === "HISTORICAL" ? "REPLAY" : bo.live ? (bo.dataStatus || "LIVE") : "MARKET CLOSED";
+  const chips = (b.checks || []).map((c) => `<span class="mcbo-chip ${c.pass ? "pass" : "fail"}" title="${mcboEsc(c.detail)}">${mcboEsc(c.name)} <b>${c.pass ? "PASS" : "FAIL"}</b></span>`).join("");
+  const sig = mcboActiveSignal(bo);
+  let sigLine = "";
+  if (sig) {
+    const p = sig.plan, o = sig.option;
+    const opt = o && o.available ? `${o.strike} ${o.side} @ ₹${mcboN(o.entry)} · R:R 1:${mcboN(o.rr)}` : `option ${sig.optionSource === "NOT RECORDED" ? "not recorded" : "N/A"}`;
+    sigLine = `<div class="mcbo-row mcbo-last"><span class="mcbo-k">S2 last signal</span><b class="${sig.dir === "BUY" ? "up" : "dn"}">${mcboAction(sig)}</b> ${mcboHm(sig.barTime)} · ${mcboEsc(p.triggerType)} ${mcboN(p.trigger)} · spot R:R 1:${mcboN(p.rr)} · ${mcboEsc(opt)}${sig.gateNote ? ` · <span class="mcbo-warn">${mcboEsc(sig.gateNote)}</span>` : ""}</div>`;
+  }
+  box.hidden = false;
+  box.innerHTML = `
+    <div class="mcbo-row mcbo-head">
+      <span class="mcbo-title">🎯 S2 Breakout · ${mcboEsc(d.interval || "")} chart <i class="mcbo-evtag">evidence — the decision uses 5m</i></span>
+      <span class="mcbo-state ${mcboStateCls(st)}">${mcboEsc(st)}</span>
+      <span class="mcbo-dir ${b.direction === "BULLISH" ? "up" : b.direction === "BEARISH" ? "dn" : ""}">${mcboEsc(b.direction || "—")} BIAS · B ${b.buyScore ?? "—"} / S ${b.sellScore ?? "—"}</span>
+      <span class="mcbo-data ${String(dataTag).toLowerCase().replace(/\s+/g, "-")}">${mcboEsc(dataTag)}</span>
+      <span class="mcbo-time">${mcboEsc(L.iso || "")}</span>
+    </div>
+    <div class="mcbo-row mcbo-reason">${mcboEsc(L.reason)}</div>
+    <div class="mcbo-row mcbo-chips">${chips}</div>
+    <div class="mcbo-row mcbo-kv">
+      <span><span class="mcbo-k">Trigger</span> ${L.triggerLevel != null ? `${mcboN(L.triggerLevel)} <i>${mcboEsc(L.triggerLabel || "")}</i>` : "—"}</span>
+      <span><span class="mcbo-k">Support</span> ${L.support ? `${mcboN(L.support.price)} <i>${mcboEsc(L.support.label)}</i>` : "—"}</span>
+      <span><span class="mcbo-k">Resistance</span> ${L.resistance ? `${mcboN(L.resistance.price)} <i>${mcboEsc(L.resistance.label)}</i>` : "—"}</span>
+      <span><span class="mcbo-k">Breakout</span> ${mcboEsc(L.breakoutStatus)} · ${mcboEsc(L.confirmation)}</span>
+      <span><span class="mcbo-k">Extension</span> ${mcboEsc(L.extension)}</span>
+    </div>
+    ${L.rrBlockReason ? `<div class="mcbo-row mcbo-block">R:R BLOCKED — ${mcboEsc(L.rrBlockReason)}</div>` : ""}
+    ${sigLine}`;
+}
+
+// Chart markers for the session: actual signals (arrow + strike + R:R) and
+// confirmed-but-not-executable breakouts (small circle). Appended to the
+// existing marker array so the anti-flicker signature covers them.
+function mcboMarkers(d) {
+  const out = [];
+  const bo = d && d.breakout;
+  if (!MC.show.trade) return out;
+  if (!bo || !bo.available) { const h = d.decisionHistory || {}; (h.signals || []).forEach((x) => { const buy = x.finalAction === "BUY_CE"; out.push({ time: x.candleTime, position: buy ? "belowBar" : "aboveBar", color: buy ? "#16c784" : "#ea3943", shape: buy ? "arrowUp" : "arrowDown", text: buy ? "BUY CE" : "BUY PE" }); }); return out; }
+  (bo.blocked || []).slice(-8).forEach((x) => {
+    out.push({ time: x.time, position: x.dir === "BUY" ? "belowBar" : "aboveBar", color: "rgba(148,163,184,.75)", shape: "circle", text: x.state === "WAIT FOR PULLBACK" ? "EXT" : "R:R✕" });
+  });
+  // S2 signals are EVIDENCE only (grey) — the arbiter decides.
+  (bo.signals || []).forEach((s) => {
+    out.push({ time: s.barTime, position: s.dir === "BUY" ? "belowBar" : "aboveBar", color: "rgba(148,163,184,.85)", shape: "circle", text: `S2 ${s.dir === "BUY" ? "▲" : "▼"}` });
+  });
+  // Arbiter decisions (the only BUY CE / BUY PE arrows) + their closed-candle exits.
+  const h = d.decisionHistory || {};
+  (h.signals || []).forEach((x) => {
+    const buy = x.finalAction === "BUY_CE";
+    out.push({ time: x.candleTime, position: buy ? "belowBar" : "aboveBar", color: buy ? "#16c784" : "#ea3943", shape: buy ? "arrowUp" : "arrowDown",
+      text: `${buy ? "BUY CE" : "BUY PE"}${x.option && x.option.strike != null ? " " + x.option.strike : ""}${x.option && x.option.netRR != null ? " · 1:" + Number(x.option.netRR).toFixed(2) : ""}` });
+  });
+  (h.exits || []).forEach((x) => out.push({ time: x.time, position: "aboveBar", color: x.R > 0 ? "#22c55e" : "#f87171", shape: "square", text: `EXIT ${x.reason} ${x.R > 0 ? "+" : ""}${x.R}R` }));
+  return out;
+}
+
+// Entry / SL / T1 / T2 / Trigger price lines for the active signal (spot levels —
+// the chart is the underlying). Rebuilt only when the plan changes.
+function applyMCBreakoutLines(d) {
+  if (!MC.candleSeries) return;
+  const sig = MC.show.trade ? arbActiveSignal(d) : null;   // the ARBITER's plan, never S2's
+  const p = sig ? sig.plan : null;
+  const sig2 = p ? JSON.stringify([sig.barTime, p.entry, p.stopLoss, p.target1, p.target2, p.trigger]) : "";
+  if (MC._boSig === sig2) return;
+  MC._boSig = sig2;
+  (MC._boLines || []).forEach((pl) => { try { MC.candleSeries.removePriceLine(pl); } catch {} });
+  MC._boLines = [];
+  if (!p) return;
+  const add = (price, color, style, title, width = 1) => {
+    if (price == null) return;
+    try { MC._boLines.push(MC.candleSeries.createPriceLine({ price, color, lineWidth: width, lineStyle: style, axisLabelVisible: true, title })); } catch {}
+  };
+  add(p.target2, "#22c55e", 2, "TARGET 2");
+  add(p.target1, "#22c55e", 0, "TARGET 1", 2);
+  add(p.entry, "#facc15", 0, `ENTRY ${sig.dir === "BUY" ? "CE" : "PE"}`, 2);
+  if (p.trigger != null && p.trigger !== p.entry) add(p.trigger, "#38bdf8", 1, "TRIGGER");
+  add(p.stopLoss, "#ef4444", 0, "STOP LOSS", 2);
+}
+
+// ---- Trade-plan tag attached to the signal candle (HTML layer over the chart) ----
+function ensureMCBoTag(container) {
+  if (MC.boTag || !container) return MC.boTag;
+  const tag = document.createElement("div");
+  tag.className = "mcbo-tag";
+  tag.id = "mcbo-tag";
+  tag.hidden = true;
+  tag.addEventListener("click", () => { MC._boTagOpen = !mcboTagOpen(); positionMCBoTag(); });
+  container.appendChild(tag);
+  MC.boTag = tag;
+  return tag;
+}
+// Collapsed to a one-line chip on phones until tapped; expanded elsewhere.
+function mcboTagOpen() { return MC._boTagOpen != null ? MC._boTagOpen : !(window.matchMedia && window.matchMedia("(max-width: 640px)").matches); }
+
+function mcboTagHtml(d, s) {
+  const p = s.plan, o = s.option, buy = s.dir === "BUY";
+  const head = `${mcboAction(s)}${o && o.strike != null ? ` · ${o.strike} ${o.side}` : ""} · R:R 1:${Number(o && o.available && o.rr != null ? o.rr : p.rr).toFixed(2)}`;
+  if (!mcboTagOpen()) return `<div class="mcbo-tag-hd ${buy ? "up" : "dn"}">${mcboEsc(head)} <span class="mcbo-tag-tg">▸</span></div>`;
+  const optOk = o && o.available;
+  const optRows = optOk
+    ? `<div><span>Strike</span><b>${mcboEsc(o.strike + " " + o.side)}</b></div>
+       <div><span>Expiry</span><b>${mcboEsc(o.expiry || "N/A")}</b></div>
+       <div><span>Security ID</span><b>${mcboEsc(o.securityId || "N/A")}</b></div>
+       <div><span>Option LTP</span><b>₹${mcboN(o.optionLtp)}</b></div>
+       <div><span>Entry</span><b>₹${mcboN(o.entry)}</b></div>
+       <div><span>SL</span><b class="dn">₹${mcboN(o.stopLoss)}</b></div>
+       <div><span>Target 1</span><b class="up">₹${mcboN(o.target1)}</b></div>
+       <div><span>Target 2</span><b class="up">${o.target2 != null ? "₹" + mcboN(o.target2) : "N/A"}</b></div>
+       <div><span>Risk / Reward</span><b>₹${mcboN(o.risk)} / ₹${mcboN(o.reward)}</b></div>
+       <div><span>R:R</span><b>1:${mcboN(o.rr)}</b></div>`
+    : `<div class="mcbo-tag-na">Option: N/A — ${mcboEsc((o && o.reason) || s.gateNote || "no option data")}</div>`;
+  const status = s.executable ? `<div class="mcbo-tag-ok">EXECUTABLE (advisory — no order placed)</div>`
+    : `<div class="mcbo-tag-warn">${mcboEsc(s.gateNote || "Not executable")}</div>`;
+  return `<div class="mcbo-tag-hd ${buy ? "up" : "dn"}">${mcboEsc(mcboAction(s))} <span class="mcbo-tag-tg">▾</span></div>
+    <div class="mcbo-tag-grid">
+      <div><span>Index</span><b>${mcboEsc(d.name || d.symbol)}</b></div>
+      <div><span>Spot entry</span><b>${mcboN(p.entry)}</b></div>
+      ${optRows}
+      <div class="mcbo-tag-sep"></div>
+      <div><span>Spot SL</span><b class="dn">${mcboN(p.stopLoss)}</b></div>
+      <div><span>Spot T1 / T2</span><b class="up">${mcboN(p.target1)} / ${p.target2 != null ? mcboN(p.target2) : "N/A"}</b></div>
+      <div><span>Spot risk / reward</span><b>${mcboN(p.risk)} / ${mcboN(p.reward)} pts</b></div>
+      <div><span>Spot R:R</span><b>1:${mcboN(p.rr)}</b></div>
+      <div class="mcbo-wide"><span>Trigger</span><b>${mcboN(p.trigger)} ${mcboEsc(p.triggerLabel)} — ${mcboEsc(p.triggerType)}</b></div>
+      <div class="mcbo-wide mcbo-why"><span>SL: ${mcboEsc(p.slReason)}</span><span>Target: ${mcboEsc(p.targetReason)}${p.target2Reason ? " · T2 " + mcboEsc(p.target2Reason) : ""}</span></div>
+      <div><span>Direction</span><b class="${buy ? "up" : "dn"}">${buy ? "BULLISH" : "BEARISH"}</b></div>
+      <div><span>Score</span><b>B ${s.buyScore} / S ${s.sellScore}</b></div>
+      <div class="mcbo-wide"><span>Time</span><b>${mcboEsc(s.iso)}</b></div>
+    </div>${status}`;
+}
+
+function positionMCBoTag() {
+  const tag = MC.boTag;
+  if (!tag) return;
+  const d = MC.lastData;
+  const s = MC.show.trade ? arbActiveSignal(d) : null;
+  if (!s || !MC.chart || !MC.candleSeries) { tag.hidden = true; return; }
+  try {
+    const key = JSON.stringify([s.barTime, s.optionSource, s.executable, mcboTagOpen(), s.option && s.option.entry]);
+    if (MC._boTagKey !== key) { tag.innerHTML = mcboTagHtml(d, s); MC._boTagKey = key; }
+    tag.hidden = false;
+    const host = tag.parentElement, W = host.clientWidth, H = host.clientHeight;
+    const x = MC.chart.timeScale().timeToCoordinate(s.barTime);
+    const y = MC.candleSeries.priceToCoordinate(s.plan.entry);
+    tag.classList.toggle("collapsed", !mcboTagOpen());
+    const tw = tag.offsetWidth, th = tag.offsetHeight;
+    const out = x == null || y == null || x < 0 || x > W || y < 0 || y > H;                  // candle / entry scrolled out of view
+    tag.classList.toggle("docked", out);
+    if (out) { tag.style.left = "8px"; tag.style.top = "8px"; return; }
+    let left = x + 14; if (left + tw > W - 70) left = Math.max(4, x - tw - 14);              // keep clear of the price axis
+    let top = y - th / 2; top = Math.max(4, Math.min(H - th - 4, top));
+    tag.style.left = left + "px"; tag.style.top = top + "px";
+  } catch { tag.hidden = true; }
 }
 
 // ---------- Important Levels: curate from EXISTING engine outputs (read-only) ----------
@@ -9103,7 +9440,7 @@ function renderMCCommand(d) {
     const labelEl = el("mc-action-label");
     const badgeEl = el("mc-action-badge");
     if (arrowEl) arrowEl.textContent = isPartial ? "⋯" : isReplay ? (isBull ? "▲" : isBear ? "▼" : "◆") : isTake ? (isBull ? "▲" : "▼") : cmd.finalAction === "NO TRADE" ? "✕" : "◆";
-    if (labelEl) labelEl.textContent = isPartial ? "LOADING…" : isReplay ? cmd.direction : isTake ? (isBull ? "BUY (CALL)" : "SELL (PUT)") : cmd.finalAction;
+    if (labelEl) labelEl.textContent = isPartial ? "LOADING…" : isReplay ? cmd.direction : isTake ? (isBull ? "BUY CE" : "BUY PE") : cmd.finalAction;
     if (badgeEl) badgeEl.textContent = isPartial ? "OI" : isReplay ? "REPLAY" : isTake ? cmd.direction : cmd.finalAction === "WAIT" ? "PENDING" : "";
   }
 
@@ -9174,7 +9511,7 @@ function renderMCCommand(d) {
     const isTake = cmd.finalAction === "TAKE";
     const isBull = cmd.direction === "BULLISH";
     faEl.className = "mc-final-action " + (isPartial || isReplay ? "wait" : isTake ? (isBull ? "take" : "sell") : cmd.finalAction === "NO TRADE" ? "sell" : "wait");
-    faLabel.textContent = isPartial ? "LOADING LIVE DATA…" : isReplay ? "HISTORICAL REPLAY" : isTake ? (isBull ? "EXECUTE BUY" : "EXECUTE SELL") : cmd.finalAction === "WAIT" ? "WAIT FOR SETUP" : cmd.finalAction;
+    faLabel.textContent = isPartial ? "LOADING LIVE DATA…" : isReplay ? "HISTORICAL REPLAY" : isTake ? (isBull ? "EXECUTE BUY CE" : "EXECUTE BUY PE") : cmd.finalAction === "WAIT" ? "WAIT FOR SETUP" : cmd.finalAction;
   }
   if (faReason) faReason.textContent = isPartial ? "Chart ready — fetching OI & signals…" : (cmd.finalReason || "");
 
@@ -14686,7 +15023,7 @@ function showEarlyToast(m) {
   }
   const t = document.createElement("div");
   t.className = "early-toast " + (m.direction === "up" ? "up" : "down");
-  t.innerHTML = `<div class="et-head">⚡ EARLY MOVE — ${m.stage === "Igniting" ? "IGNITING" : "EARLY"}</div>
+  t.innerHTML = `<div class="et-head">⚡ WATCH · EARLY MOVE — ${m.stage === "Igniting" ? "IGNITING" : "EARLY"} <span class="et-ev">evidence, not a trade — see FINAL DECISION</span></div>
     <div class="et-msg">${m.message}</div>
     <div class="et-sub">score ${m.earlyScore} · ${m.optionType} side · tap to open</div>`;
   t.addEventListener("click", () => { openStock(m.symbol); t.remove(); });
@@ -16373,7 +16710,7 @@ async function loadMarketAnalysis() {
   if (!MA.lastData && !MA._shownLoading) { MA._shownLoading = true; maShowMAError("Loading market analysis…"); }
   try {
     const url = `/api/market-analysis?symbol=${encodeURIComponent(MA.sym)}&interval=${MA.tf}&strikeRange=${MA.range}`;
-    const d = await fetchJSON(url, 12000);
+    const d = await fetchJSON(url, 25000);   // same patience as Option Terminal / Trade Execution
     if (d && d.available) {
       MA.lastData = d; MA._errStreak = 0; renderMarketAnalysis(d);
       // On first load / index change, centre every table on the ATM strike.

@@ -378,6 +378,10 @@ export async function dhanChainForExpiry(def: SymbolDef, expiryOffset = 0): Prom
         // gamma/vega if the feed carries them (Dhan greeks object) — else null.
         ceGamma: nOrNull(ce.greeks?.gamma), peGamma: nOrNull(pe.greeks?.gamma),
         ceVega: nOrNull(ce.greeks?.vega), peVega: nOrNull(pe.greeks?.vega),
+        // Contract identity + prior close (additive): lets callers verify the leg
+        // against the instrument master and compute a real day change.
+        ceSecId: ce.security_id != null ? String(ce.security_id) : null, peSecId: pe.security_id != null ? String(pe.security_id) : null,
+        cePrevClose: ltpOrNull(ce.previous_close_price), pePrevClose: ltpOrNull(pe.previous_close_price),
       };
     }).filter((s: any) => s.strike > 0).sort((a: any, b: any) => a.strike - b.strike);
 
