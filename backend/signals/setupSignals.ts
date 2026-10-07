@@ -73,7 +73,7 @@ export const isMajor = (l: LiqLevel) => MAJOR_TYPES.has(l.type) || l.sources.len
  * `levels` = levels known for today (each used only from its activeFrom);
  * `dailyAtr` = ATR of daily ranges as of yesterday.
  */
-export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLevel[], dailyAtr: number | null, nowSec: number, opts: { regimeAt?: (upto: Candle[]) => string | null; s5DistPts?: number | null; only?: SetupId } = {}): SessionResult {
+export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLevel[], dailyAtr: number | null, nowSec: number, opts: { regimeAt?: (upto: Candle[]) => string | null; s5DistPts?: number | null; only?: SetupId; s5Trend15?: "off" | "notAgainst" | "agree" } = {}): SessionResult {
   const day = today.length ? istDay(today[0].time) : "";
   const all = [...hist, ...today];
   const off = hist.length;
@@ -355,6 +355,12 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
             if (!block && k - s5LastBar < 4) block = "Same pullback leg as the previous signal";
             if (!block && !cooled("S5_EMA_TREND")) block = `Cooldown ${C.slCooldownMin} min after a stop`;
             if (!block && openSig) block = "Another setup signal is still open";
+            // optional 15M filter (research switch; default off = 15M only decides the exit)
+            if (!block && opts.s5Trend15 && opts.s5Trend15 !== "off") {
+              const t15 = dir15At(tEnd), want = sg > 0 ? "UP" : "DOWN", against = sg > 0 ? "DOWN" : "UP";
+              if (opts.s5Trend15 === "notAgainst" && t15 === against) block = `15M trend ${t15} is against`;
+              if (opts.s5Trend15 === "agree" && t15 !== want) block = `15M trend ${t15 ?? "n/a"} does not agree`;
+            }
             const prev = today[Math.max(0, k - 1)];
             const stop = sg > 0 ? Math.min(c.low, prev.low) - C.stopBufferAtr * a : Math.max(c.high, prev.high) + C.stopBufferAtr * a;
             const pp = planFor(side, c.close, stop, c.time, a, C.minRoomR);
