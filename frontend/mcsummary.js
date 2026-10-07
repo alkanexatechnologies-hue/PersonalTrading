@@ -241,6 +241,10 @@ function mcsRenderChart() {
   const mk = MCS.show.bos ? (d.structure?.bosEvents || []).map((b) => ({ time: mcsT(b.time), position: b.direction === "Bullish" ? "belowBar" : "aboveBar", color: b.direction === "Bullish" ? "#16c784" : "#ea3943", shape: b.stage === "Pre" ? "circle" : b.direction === "Bullish" ? "arrowUp" : "arrowDown", text: b.stage === "Pre" ? "BOS?" : "BOS" })) : [];
   const ssig = MCS.ss && MCS.ss.symbol === MCS.sym && MCS.ss.today ? MCS.ss.today.signals.filter((x) => !x.blockedBy) : [];
   if (MCS.tf === "5m") for (const x of ssig) if (cs.some((k) => k.time === x.barTime)) mk.push({ time: mcsT(x.barTime), position: x.side === "CE" ? "belowBar" : "aboveBar", color: x.side === "CE" ? "#22c55e" : "#ef4444", shape: x.side === "CE" ? "arrowUp" : "arrowDown", text: `${{ S3_LEVEL_REJECTION: "S3", S4_VWAP_PULLBACK: "S4", S5_EMA_TREND: "S5" }[x.setup] || ""} ${x.side}` });
+  // independent live strategies (Strategies card): LIQ = Liquidity PDH/PDL, VW = VWAP strategy
+  const labS = MCS.ss && MCS.ss.symbol === MCS.sym && MCS.ss.lab && MCS.ss.lab.strategies ? MCS.ss.lab.strategies.filter((s) => s.live) : [];
+  if (MCS.tf === "5m") for (const s of labS) for (const x of s.trades) if (x.barTime && x.status !== "NO_TRIGGER" && cs.some((k) => k.time === x.barTime))
+    mk.push({ time: mcsT(x.barTime), position: x.side === "CE" ? "belowBar" : "aboveBar", color: x.side === "CE" ? "#38bdf8" : "#f472b6", shape: x.side === "CE" ? "arrowUp" : "arrowDown", text: `${s.id === "PDH_PDL" ? "LIQ" : "VW"} ${x.side}${x.resultR != null ? ` ${x.resultR > 0 ? "+" : ""}${mcsN(x.resultR, 1)}R` : ""}` });
   if (MCS.show.levels) {
     const t0 = cs.length ? mcsIstDay(cs[cs.length - 1].time) : null;
     (d.structure?.swingPoints || []).filter((p) => mcsIstDay(p.time) === t0 && cs.some((x) => x.time === p.time)).slice(-6).forEach((p) => {
@@ -993,6 +997,12 @@ function mcsRenderLab() {
     <div class="mcs-sub">${(lab.notes || []).map(mcsEsc).join(" ")}</div>`;
   if (live) mcsLabAlert(ss.symbol, MCS_SYMS.find((x) => x[0] === MCS.sym)?.[1] || MCS.sym, lab);
 }
+// "· Liquidity 2 (+1.0R) · VWAP 0" for the testing status line
+function mcsLabStatus(ss) {
+  const st = ss && ss.lab && ss.lab.strategies ? ss.lab.strategies.filter((s) => s.live) : [];
+  return st.map((s) => { const tr = s.trades.filter((t) => t.status !== "NO_TRIGGER"), r = tr.reduce((a, t) => a + (t.resultR || 0), 0);
+    return ` · ${s.id === "PDH_PDL" ? "Liquidity" : "VWAP"} ${tr.length}${tr.length ? ` (${r >= 0 ? "+" : ""}${r.toFixed(1)}R)` : ""}`; }).join("");
+}
 // Alerts (LIVE only): a new signal from a live strategy, or a trade-able liquidity level just SWEPT.
 function mcsLabAlert(sym, nm, lab) {
   MCS._labSeen = MCS._labSeen || {};
@@ -1075,7 +1085,7 @@ function mcsRenderSetups() {
     ${rpRow("S3_LEVEL_REJECTION", "S3 Level Rejection")}${rpRow("S4_VWAP_PULLBACK", "S4 VWAP Pullback")}${rpRow("S5_EMA_TREND", "S5 EMA Trend")}</tbody></table>
     <div class="mcs-sub">Most common blocks: ${["S3_LEVEL_REJECTION", "S4_VWAP_PULLBACK", "S5_EMA_TREND"].map((k) => by[k] ? `${k.slice(0, 2)}: ${by[k].topBlocks.slice(0, 3).map(([r, n]) => `${mcsEsc(r)} (${n})`).join(", ")}` : "").filter(Boolean).join(" · ")}</div></div>`;
   const an = ss.mode === "TEST" ? ss.analysis : null;
-  const anHtml = an ? mcsMovesHtml(an, `Logic vs market — ${mcsEsc(ss.date)} (full day)`) : ss.mode === "TEST" ? `<div class="mcs-sub">Logic-vs-market analysis appears when the run reaches 15:15 (full day).</div>` : "";
+  const anHtml = an ? mcsMovesHtml(an, `Logic vs market — ${mcsEsc(ss.date)} (full day)`, ss.lab && ss.lab.strategies) : ss.mode === "TEST" ? `<div class="mcs-sub">Logic-vs-market analysis appears when the run reaches 15:15 (full day).</div>` : "";
   box.innerHTML = head + vbHtml + `<div class="mcs-ssgrid">${liveHtml}<div class="mcs-sstoday"><h5>${ss.mode === "TEST" ? `Signals on ${mcsEsc(ss.date)} up to ${mcsEsc(ss.upto)}` : `Today's signals ${ss.isToday ? "" : `(${mcsEsc(ss.date)})`}`}</h5>${todayTbl}${blk}</div></div>${ss.mode === "TEST" ? anHtml : replayHtml}
     <div class="mcs-sub">${(ss.notes || []).map(mcsEsc).join(" · ")}</div>`;
 }
@@ -1139,7 +1149,7 @@ async function mcsRefreshTest(gen) {
   const nSig = ss && ss.today ? ss.today.signals.filter((x) => !x.blockedBy).length : 0;
   if (upto === "15:15" && ss && ss.analysis) mcsLoadTestLog();   // a full-day run was just logged
   const totR = ss && ss.today ? ss.today.signals.filter((x) => !x.blockedBy && x.resultR != null).reduce((a, x) => a + x.resultR, 0) : 0;
-  if (st) st.innerHTML = ss && !ss.error ? `${MCS.play.on ? "⏵ Replaying" : "✅"} ${mcsEsc(date)} as of ${mcsEsc(ss.upto)} · ${nSig} signal${nSig === 1 ? "" : "s"}${nSig ? ` · ${totR >= 0 ? "+" : ""}${totR.toFixed(2)}R so far` : ""}` : `<span class="mcs-warn">${mcsEsc((ss && ss.error) || "Setup signals unavailable")}</span>`;
+  if (st) st.innerHTML = ss && !ss.error ? `${MCS.play.on ? "⏵ Replaying" : "✅"} ${mcsEsc(date)} as of ${mcsEsc(ss.upto)} · ${nSig} signal${nSig === 1 ? "" : "s"}${nSig ? ` · ${totR >= 0 ? "+" : ""}${totR.toFixed(2)}R so far` : ""} (Setup Signals)${mcsLabStatus(ss)}` : `<span class="mcs-warn">${mcsEsc((ss && ss.error) || "Setup signals unavailable")}</span>`;
   mcsRenderAll();
 }
 
@@ -1199,17 +1209,23 @@ async function mcsRefreshAwait() {
 // was late on, blocked (and why), traded against, or missed entirely.
 // ===========================================================================
 const MCS_VERDICT = { CAUGHT: ["✅ Caught", "win"], LATE: ["⏱ Late", "flat"], BLOCKED: ["⛔ Blocked", "blk"], WRONG_SIDE: ["↔ Wrong side", "loss"], MISSED: ["❌ Missed", "loss"], OUTSIDE: ["🕘 Outside entry window", "flat"] };
-function mcsMovesHtml(an, title) {
+function mcsMovesHtml(an, title, labStrats) {
+  // which independent strategy (Liquidity / VWAP) traded in the move's direction while it ran
+  const hmM = (s) => { const [h, m] = String(s).split(":").map(Number); return h * 60 + m; };
+  const labLive = (labStrats || []).filter((s) => s.live);
+  const labFor = (m) => labLive.flatMap((s) => s.trades.filter((t) => t.status !== "NO_TRIGGER" && (t.side === "CE") === (m.dir === "UP")
+      && hmM(t.signalTime) >= hmM(m.startTime) - 10 && hmM(t.signalTime) <= hmM(m.endTime))
+    .map((t) => `<span class="mcs-labhit ${t.resultR > 0 ? "up" : t.resultR < 0 ? "dn" : ""}">${s.id === "PDH_PDL" ? "Liquidity" : "VWAP"} ${t.side} ${mcsEsc(t.signalTime)}${t.resultR != null ? ` ${t.resultR > 0 ? "+" : ""}${mcsN(t.resultR, 1)}R` : ` ${mcsEsc(t.status)}`}</span>`)).join(" ") || `<span class="mcs-sub">—</span>`;
   const sm = an.summary || {}, n = sm.moves || 0;
   const pct = (k) => (n ? Math.round(((sm[k] || 0) / n) * 100) : 0);
   const chips = ["CAUGHT", "LATE", "BLOCKED", "WRONG_SIDE", "MISSED", "OUTSIDE"].map((k) => `<span class="mcs-vchip ${MCS_VERDICT[k][1]}">${MCS_VERDICT[k][0]} <b>${sm[k] || 0}</b> <i>${pct(k)}%</i></span>`).join("");
   const rows = (an.moves || []).map((m) => `<tr class="v-${m.verdict.toLowerCase()}"><td>${m.startTime}–${m.endTime}</td><td class="${m.dir === "UP" ? "mcs-up" : "mcs-dn"}"><b>${m.dir === "UP" ? "▲ UP" : "▼ DOWN"}</b></td>
     <td class="r">${mcsN(m.pts, 1)} <i>(${mcsN(m.atrX, 1)}× ATR)</i></td><td><span class="mcs-vchip ${MCS_VERDICT[m.verdict][1]}">${MCS_VERDICT[m.verdict][0]}</span></td>
-    <td>${mcsEsc(m.detail)}${m.blockReasons && m.blockReasons.length ? `<div class="mcs-sub">why: ${m.blockReasons.map(mcsEsc).join(" · ")}</div>` : ""}</td><td class="mcs-sub">${mcsEsc(m.context)}</td></tr>`).join("");
+    <td>${mcsEsc(m.detail)}${m.blockReasons && m.blockReasons.length ? `<div class="mcs-sub">why: ${m.blockReasons.map(mcsEsc).join(" · ")}</div>` : ""}</td>${labStrats ? `<td>${labFor(m)}</td>` : ""}<td class="mcs-sub">${mcsEsc(m.context)}</td></tr>`).join("");
   const losses = (an.losses || []).map((l) => `<li>${l.time} ${l.setup} ${l.side} (${mcsEsc(l.context)}) ${l.level ? "at " + mcsEsc(l.level) : ""} — ${mcsEsc(l.why)}</li>`).join("");
   return `<div class="mcs-moves"><h5>${title} <span class="mcs-sub">${n} significant move${n === 1 ? "" : "s"} (≥ ${an.config?.minAtr ?? 2.5}× ATR)</span></h5>
     <div class="mcs-vchips">${chips}</div>
-    ${n ? `<div class="mcs-tblwrap"><table class="mcs-tbl mcs-movetbl"><thead><tr><th>Move</th><th>Dir</th><th class="r">Size</th><th>Verdict</th><th>What the logic did</th><th>Where it started</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="mcs-sub">No significant move on this day.</div>`}
+    ${n ? `<div class="mcs-tblwrap"><table class="mcs-tbl mcs-movetbl"><thead><tr><th>Move</th><th>Dir</th><th class="r">Size</th><th>Verdict</th><th>What the logic did</th>${labStrats ? "<th>Strategies (Liquidity / VWAP)</th>" : ""}<th>Where it started</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="mcs-sub">No significant move on this day.</div>`}
     ${losses ? `<div class="mcs-sub" style="margin-top:4px"><b>Losing signals:</b></div><ul class="mcs-ssev">${losses}</ul>` : ""}</div>`;
 }
 async function mcsLoadTestLog() {

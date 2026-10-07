@@ -6862,6 +6862,8 @@ body.lqa-fullwidth .content { padding-left: 0; padding-right: 0; }
 .mcs-labstudy { margin: 4px 0 6px; font-size: 12px; }
 .mcs-labstudy summary { cursor: pointer; color: #94a3b8; min-height: 32px; line-height: 32px; }
 .mcs-labtoast { bottom: 96px; }
+.mcs-labhit { display: inline-block; white-space: nowrap; font-size: 12px; font-weight: 600; padding: 1px 6px; border-radius: 4px; background: #1e293b; }
+.mcs-labhit.up { color: #22c55e; } .mcs-labhit.dn { color: #ef4444; }
 .mcs-sseff .mcs-effstate { margin-left: auto; } .mcs-sseff.chop .mcs-effstate { color: #fbbf24; } .mcs-sseff.ok .mcs-effstate { color: #86efac; }
 .mcs-effbar { display: inline-flex; align-items: flex-end; gap: 1px; height: 18px; cursor: help; }
 .mcs-effbar i { display: block; width: 3px; border-radius: 1px; } .mcs-effbar i.o { background: #22c55e; } .mcs-effbar i.c { background: #f59e0b; }

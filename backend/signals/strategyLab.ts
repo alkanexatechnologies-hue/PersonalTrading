@@ -16,7 +16,7 @@ export type LabStrategyId = "PDH_PDL" | "SWING" | "OI_SR";
 export interface LabLevel { price: number; kind: "SUPPORT" | "RESISTANCE"; name: string; from: number /* usable from this candle time */ }
 export interface LabTrade {
   strategy: LabStrategyId; side: "CE" | "PE"; level: string; levelPrice: number;
-  signalTime: string; trigger: number; entryTime: string | null; entry: number | null; stop: number; target: number | null;
+  signalTime: string; barTime: number; trigger: number; entryTime: string | null; entry: number | null; stop: number; target: number | null;
   status: "WAITING" | "OPEN" | "TARGET" | "STOP" | "TIME_EXIT" | "NO_TRIGGER"; exitTime: string | null; resultR: number | null;
 }
 
@@ -114,7 +114,7 @@ export function runLabStrategy(strategy: LabStrategyId, hist: Candle[], today: C
       const last3 = all.slice(Math.max(0, i - 2), i + 1);
       const stop = sg > 0 ? Math.min(...last3.map((x) => x.low)) - L.stopBufferAtr * a : Math.max(...last3.map((x) => x.high)) + L.stopBufferAtr * a;
       const trig = sg > 0 ? c.high : c.low;
-      const t: LabTrade = { strategy, side: sg > 0 ? "CE" : "PE", level: lv.name, levelPrice: Math.round(p * 100) / 100, signalTime: hm(c.time + 300), trigger: Math.round(trig * 100) / 100,
+      const t: LabTrade = { strategy, side: sg > 0 ? "CE" : "PE", level: lv.name, levelPrice: Math.round(p * 100) / 100, signalTime: hm(c.time + 300), barTime: c.time, trigger: Math.round(trig * 100) / 100,
         entryTime: null, entry: null, stop: Math.round(stop * 100) / 100, target: Math.round((trig + sg * L.targetR * Math.abs(trig - stop)) * 100) / 100, status: "WAITING", exitTime: null, resultR: null };
       trades.push(t); used.set(lv.name, (used.get(lv.name) || 0) + 1);
       open = Object.assign(t, { _k: k, _risk: 0, _sg: sg, _trig: sg > 0 ? c.high : c.low });

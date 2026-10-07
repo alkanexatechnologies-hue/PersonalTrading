@@ -8405,7 +8405,7 @@ function labRunDay(symbol: string, days: string[], ses: Map<string, Candle[]>, d
   const hist = days.slice(Math.max(0, di - 3), di).flatMap((x) => ses.get(x)!);
   const s4 = setupRunDay(days, ses, di, asOf, null, s5Pts, "S4_VWAP_PULLBACK").signals
     .filter((x) => x.setup === "S4_VWAP_PULLBACK" && !x.blockedBy && x.plan)
-    .map((x): LabTrade => ({ strategy: "VWAP" as any, side: x.side, level: "VWAP", levelPrice: x.plan!.entryRef, signalTime: x.time, trigger: x.plan!.entryRef,
+    .map((x): LabTrade => ({ strategy: "VWAP" as any, side: x.side, level: "VWAP", levelPrice: x.plan!.entryRef, signalTime: x.time, barTime: x.barTime, trigger: x.plan!.entryRef,
       entryTime: x.plan!.entry != null ? x.time : null, entry: x.plan!.entry ?? null, stop: x.plan!.stop, target: x.plan!.target,
       status: (["TARGET", "STOP", "NO_TRIGGER"].includes(x.status) ? x.status : x.resultR != null ? "TIME_EXIT" : x.status === "ACTIVE" ? "OPEN" : "WAITING") as LabTrade["status"], exitTime: null, resultR: x.resultR ?? null }));
   return {
