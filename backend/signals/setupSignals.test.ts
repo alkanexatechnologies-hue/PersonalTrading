@@ -134,3 +134,40 @@ test("logic vs market: a big move is CAUGHT / BLOCKED / MISSED depending on the 
   assert.match(up.blockReasons.join(" "), /15M trend DOWN/);
   assert.equal(analyzeMoves(h, c, [sig({ side: "PE", resultR: -1, status: "STOP" })], []).moves.find((m) => m.dir === "UP")!.verdict, "WRONG_SIDE");
 });
+
+// A trending day: rally with shallow pullbacks every 4th candle, then a drop below VWAP.
+function trendDay(): Candle[] {
+  const c: Candle[] = []; let p = 100;
+  for (let i = 0; i < 50; i++) {
+    const pull = i % 4 === 3;
+    const o = p, cl = pull ? p - 1.5 : p + 3;
+    c.push(bar(D, i, o, Math.max(o, cl) + (pull ? 0.5 : 1), Math.min(o, cl) - (pull ? 3.5 : 0.5), cl));
+    if (pull) { const n = c.length - 1; c[n] = { ...c[n], open: o - 2, low: o - 14, close: o + 1, high: o + 1.5 }; p = o + 1; } else p = cl;   // dips to EMA 9 (~12 pts behind), closes green above it
+  }
+  for (let i = 50; i < 70; i++) { p -= 6; c.push(bar(D, i, p + 6, p + 7, p - 1, p)); }
+  return c;
+}
+test("S5: direction turns UP on the rally (alert event) and DOWN/NEUTRAL after the drop", () => {
+  const h = prior("2026-10-05", 100), c = trendDay();
+  const r = evaluateSession(h, c, [], 200, c[c.length - 1].time + 300, { s5DistPts: 20 });
+  const ev = r.directionEvents.map((e) => e.to);
+  assert.ok(ev.includes("UP"), ev.join(","));
+  assert.ok(ev.indexOf("UP") < Math.max(ev.lastIndexOf("DOWN"), ev.lastIndexOf("NEUTRAL")), "turns away from UP after the drop");
+  assert.ok(r.directionEvents.every((e) => /VWAP/.test(e.why)));
+  assert.notEqual(r.direction!.state, "UP");
+});
+test("S5: pullback entries in the up trend; once 50% is booked the result is ≥ +0.25R; no look-ahead", () => {
+  const h = prior("2026-10-05", 100), c = trendDay();
+  const full = evaluateSession(h, c, [], 200, c[c.length - 1].time + 300, { s5DistPts: 20 });
+  const s5 = full.signals.filter((x) => x.setup === "S5_EMA_TREND" && !x.blockedBy);
+  assert.ok(s5.length >= 1, "at least one S5 signal");
+  for (const s of s5) {
+    assert.equal(s.side, "CE");
+    if (s.metrics.booked && s.resultR != null) assert.ok(s.resultR >= 0.25 - 1e-9, `booked trade result ${s.resultR}`);
+    // same signal exists, with the same plan, when the session is cut at its candle
+    const cut = c.filter((x) => x.time <= s.barTime);
+    const early = evaluateSession(h, cut, [], 200, s.barTime + 300, { s5DistPts: 20 }).signals.find((x) => x.id === s.id);
+    assert.ok(early, "signal visible at its own candle");
+    assert.equal(early!.plan!.stop, s.plan!.stop);
+  }
+});

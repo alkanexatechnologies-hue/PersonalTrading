@@ -8374,12 +8374,12 @@ async function setupOptionLeg(def: any, side: "CE" | "PE", plan: NonNullable<Set
       ltp: op.optionLtp, entry: op.entry, stopLoss: op.stopLoss, target: op.target1, rr: op.rr, netRR, costPerUnit, delta: op.delta, iv: op.iv, oi: op.oi, volume: op.volume, why: op.why, lotSize: lot };
   } catch (e: any) { return { available: false, reason: e?.message || "option leg failed" }; }
 }
-function setupRunDay(days: string[], ses: Map<string, Candle[]>, di: number, asOf: number, extra: LiqLevel[] | null): SessionResult & { levels: LiqLevel[] } {
+function setupRunDay(days: string[], ses: Map<string, Candle[]>, di: number, asOf: number, extra: LiqLevel[] | null, s5DistPts: number | null = null, only?: SetupSignal["setup"]): SessionResult & { levels: LiqLevel[] } {
   const prior = days.slice(Math.max(0, di - 15), di).map((d) => ses.get(d)!);
   const todayC = ses.get(days[di])!.filter((c) => c.time + 300 <= asOf);
   const levels = extra ?? buildLevels(prior.slice(-6), todayC, asOf);
   const dAtr = dailyAtrFrom5m(prior);
-  const r = evaluateSession(prior.slice(-5).flat(), todayC, levels, dAtr, asOf, { regimeAt: (upto) => regimeAt(upto.filter((c) => c.time + 300 <= asOf), dAtr).regime });
+  const r = evaluateSession(prior.slice(-5).flat(), todayC, levels, dAtr, asOf, { regimeAt: (upto) => regimeAt(upto.filter((c) => c.time + 300 <= asOf), dAtr).regime, s5DistPts, only });
   return { ...r, levels: levels.filter((l) => l.activeFrom <= asOf) };
 }
 async function buildSetupSignals(symbol: string) {
@@ -8394,7 +8394,8 @@ async function buildSetupSignals(symbol: string) {
   if (days.length < 7) throw new Error("not enough candle history");
   const lastDay = days[days.length - 1], isToday = lastDay === today;
   const dayEnd = (d: string) => { const a = ses.get(d)!; return a[a.length - 1].time + 300; };
-  const runDay = (di: number, asOf: number, extra: LiqLevel[] | null): SessionResult => setupRunDay(days, ses, di, asOf, extra);
+  const s5Pts = (def.nseSymbol || "") === "NIFTY" ? SETUP_CONFIG.s5DistPtsNifty : null;   // your 20-pt rule on NIFTY; 0.9× ATR elsewhere
+  const runDay = (di: number, asOf: number, extra: LiqLevel[] | null): SessionResult => setupRunDay(days, ses, di, asOf, extra, s5Pts);
   // Today: the Liquidity Analysis level set (includes the morning OI support / resistance).
   let todayLevels: LiqLevel[] | null = null;
   try {
@@ -8411,7 +8412,11 @@ async function buildSetupSignals(symbol: string) {
   // 20-session replay (completed sessions; cached for the day).
   const replay = await cached(`setup-replay:${symbol}:${lastDay}`, 6 * 3600_000, async () => {
     const res: SessionResult[] = [];
-    for (let di = Math.max(7, days.length - 21); di < days.length - 1; di++) res.push(runDay(di, dayEnd(days[di]), null));
+    // Each setup replayed IN ISOLATION (one-trade-at-a-time would let one setup block another and mix the numbers).
+    for (let di = Math.max(7, days.length - 21); di < days.length - 1; di++) {
+      const parts = (["S3_LEVEL_REJECTION", "S4_VWAP_PULLBACK", "S5_EMA_TREND"] as const).map((id) => setupRunDay(days, ses, di, dayEnd(days[di]), null, s5Pts, id));
+      res.push({ ...parts[0], signals: parts.flatMap((p, j) => p.signals.filter((x) => x.setup === (["S3_LEVEL_REJECTION", "S4_VWAP_PULLBACK", "S5_EMA_TREND"] as const)[j])) });
+    }
     const s = summarizeReplay(res);
     return { ...s, recent: res.flatMap((r) => r.signals.filter((x) => !x.blockedBy)).sort((a, b) => b.barTime - a.barTime).slice(0, 40) };
   });
@@ -8438,7 +8443,7 @@ function recordSetupTest(def: any, date: string, signals: SetupSignal[], analysi
     const graded = valid.filter((x) => x.resultR != null);
     const entry = {
       id: `${def.symbol}|${date}`, symbol: def.symbol, index: def.nseSymbol || def.name, date, ranAt: Math.floor(Date.now() / 1000), configVersion: setupCfgVersion(),
-      signals: valid.map((x) => ({ time: x.time, setup: x.setup.slice(0, 2), context: x.context, side: x.side, level: x.level ? `${x.level.type} ${x.level.price}` : "VWAP pullback", status: x.status, resultR: x.resultR })),
+      signals: valid.map((x) => ({ time: x.time, setup: x.setup.slice(0, 2), context: x.context, side: x.side, level: x.level ? `${x.level.type} ${x.level.price}` : x.setup === "S5_EMA_TREND" ? "EMA 9 trend pullback" : "VWAP pullback", status: x.status, resultR: x.resultR })),
       blockedCount: signals.length - valid.length,
       totals: { signals: valid.length, wins: graded.filter((x) => (x.resultR as number) > 0.05).length, losses: graded.filter((x) => (x.resultR as number) < -0.05).length, totalR: Math.round(graded.reduce((a, x) => a + (x.resultR as number), 0) * 100) / 100 },
       analysis,
@@ -8499,7 +8504,7 @@ async function buildSetupSignalsForDate(symbol: string, date: string, uptoMin: n
   if (di < 7) throw new Error(`Not enough history before ${date} to build its levels — pick a later date`);
   const dayC = ses.get(date)!, dayEndT = dayC[dayC.length - 1].time + 300;
   const asOf = uptoMin == null ? dayEndT : Math.min(dayEndT, Math.floor(Date.parse(date + "T00:00:00Z") / 1000) - 19800 + uptoMin * 60);
-  const r = setupRunDay(days, ses, di, asOf, null);
+  const r = setupRunDay(days, ses, di, asOf, null, (def.nseSymbol || "") === "NIFTY" ? SETUP_CONFIG.s5DistPtsNifty : null);
   // Full-day test run → analyse logic vs the day's real moves and record it in the test log.
   let analysis: any = null;
   const dayComplete = (() => { const m = new Date((dayC[dayC.length - 1].time + 19800) * 1000); return m.getUTCHours() * 60 + m.getUTCMinutes() >= 15 * 60 + 10; })();

@@ -239,7 +239,7 @@ function mcsRenderChart() {
   mcsSetZones(MCS.zones, zones);
   const mk = MCS.show.bos ? (d.structure?.bosEvents || []).map((b) => ({ time: mcsT(b.time), position: b.direction === "Bullish" ? "belowBar" : "aboveBar", color: b.direction === "Bullish" ? "#16c784" : "#ea3943", shape: b.stage === "Pre" ? "circle" : b.direction === "Bullish" ? "arrowUp" : "arrowDown", text: b.stage === "Pre" ? "BOS?" : "BOS" })) : [];
   const ssig = MCS.ss && MCS.ss.symbol === MCS.sym && MCS.ss.today ? MCS.ss.today.signals.filter((x) => !x.blockedBy) : [];
-  if (MCS.tf === "5m") for (const x of ssig) if (cs.some((k) => k.time === x.barTime)) mk.push({ time: mcsT(x.barTime), position: x.side === "CE" ? "belowBar" : "aboveBar", color: x.side === "CE" ? "#22c55e" : "#ef4444", shape: x.side === "CE" ? "arrowUp" : "arrowDown", text: `${x.setup === "S3_LEVEL_REJECTION" ? "S3" : "S4"} ${x.side}` });
+  if (MCS.tf === "5m") for (const x of ssig) if (cs.some((k) => k.time === x.barTime)) mk.push({ time: mcsT(x.barTime), position: x.side === "CE" ? "belowBar" : "aboveBar", color: x.side === "CE" ? "#22c55e" : "#ef4444", shape: x.side === "CE" ? "arrowUp" : "arrowDown", text: `${{ S3_LEVEL_REJECTION: "S3", S4_VWAP_PULLBACK: "S4", S5_EMA_TREND: "S5" }[x.setup] || ""} ${x.side}` });
   if (MCS.show.levels) {
     const t0 = cs.length ? mcsIstDay(cs[cs.length - 1].time) : null;
     (d.structure?.swingPoints || []).filter((p) => mcsIstDay(p.time) === t0 && cs.some((x) => x.time === p.time)).slice(-6).forEach((p) => {
@@ -957,16 +957,21 @@ function mcsRenderKeyRow() {
 function mcsRenderSetups() {
   const box = mcsEl("mcs-setups"); if (!box) return;
   const ss = MCS.ss, nm = MCS_SYMS.find((x) => x[0] === MCS.sym)?.[1] || MCS.sym;
-  const head = `<h4>🎯 SETUP SIGNALS — ${mcsEsc(nm)} <span class="mcs-sub">your rejection &amp; VWAP logic · S3 Level Rejection (Setup 1 morning / Setup 2 extreme) · S4 VWAP Trend Pullback (Setup 3)</span>
+  const head = `<h4>🎯 SETUP SIGNALS — ${mcsEsc(nm)} <span class="mcs-sub">your rejection &amp; VWAP logic · S3 Level Rejection (Setup 1 morning / Setup 2 extreme) · S4 VWAP Trend Pullback (Setup 3) · S5 EMA Trend</span>
     <span class="mcs-ssadv">Advisory — the FINAL DECISION and paper engine are unchanged</span></h4>`;
   if (!ss || ss.symbol !== MCS.sym) { box.innerHTML = head + `<div class="mcs-sub">Loading setup signals…</div>`; return; }
   if (ss.error) { box.innerHTML = head + `<div class="mcs-na">${mcsEsc(ss.error)}</div>`; return; }
   const t = ss.today || { signals: [], watch: [] };
   const vb = t.vwapBias;
-  const vbHtml = vb ? `<div class="mcs-ssvb ${vb.bias === "BULLISH" ? "up" : vb.bias === "BEARISH" ? "dn" : ""}">VWAP bias: <b>${vb.bias}</b> <span class="mcs-sub">5m candle ${vb.time} closed ${mcsN(vb.close)} ${vb.bias === "BULLISH" ? "above" : vb.bias === "BEARISH" ? "below" : "at"} VWAP ${mcsN(vb.vwap)} · 15M trend ${mcsEsc(t.dir15 || "—")}</span></div>` : "";
+  const dr = t.direction, evs = t.directionEvents || [];
+  const dCls = (st) => (st === "UP" ? "up" : st === "DOWN" ? "dn" : "");
+  const dirHtml = dr ? `<div class="mcs-ssdir ${dCls(dr.state)}">Direction (EMA): <b>${dr.state}</b>${dr.since ? ` since ${mcsEsc(dr.since)}` : ""} <span class="mcs-sub">${mcsEsc(dr.why)}</span>
+      ${evs.length ? `<div class="mcs-dirline">${evs.map((e) => `<span class="mcs-dirchip ${dCls(e.to)}" title="${mcsEsc(e.why)}">${mcsEsc(e.time)} → ${mcsEsc(e.to)}</span>`).join("")}</div>` : ""}</div>` : "";
+  if (ss.mode !== "TEST") mcsDirAlert(ss.symbol, nm, evs);
+  const vbHtml = dirHtml + (vb ? `<div class="mcs-ssvb ${vb.bias === "BULLISH" ? "up" : vb.bias === "BEARISH" ? "dn" : ""}">VWAP bias: <b>${vb.bias}</b> <span class="mcs-sub">5m candle ${vb.time} closed ${mcsN(vb.close)} ${vb.bias === "BULLISH" ? "above" : vb.bias === "BEARISH" ? "below" : "at"} VWAP ${mcsN(vb.vwap)} · 15M trend ${mcsEsc(t.dir15 || "—")}</span></div>` : "");
   const valid = t.signals.filter((x) => !x.blockedBy), blocked = t.signals.filter((x) => x.blockedBy);
   const live = valid.find((x) => x.status === "ENTRY_READY" || x.status === "ACTIVE");
-  const setupName = (x) => (x.setup === "S3_LEVEL_REJECTION" ? "S3" : "S4");
+  const setupName = (x) => ({ S3_LEVEL_REJECTION: "S3", S4_VWAP_PULLBACK: "S4", S5_EMA_TREND: "S5" }[x.setup] || x.setup);
   const stCls = (st) => ({ TARGET: "win", STOP: "loss", TIME_EXIT: "flat", EOD_EXIT: "flat", ACTIVE: "act", ENTRY_READY: "act", EXTENDED: "flat", BLOCKED: "blk" }[st] || "");
   // --- live box ---
   let liveHtml;
@@ -981,6 +986,7 @@ function mcsRenderSetups() {
       <div class="mcs-ssbig">${ss.mode === "TEST" ? `<span class="mcs-testtag">TEST ${mcsEsc(ss.upto)}</span> ` : ""}${live.status === "ACTIVE" ? "IN TRADE · " : ""}BUY ${live.side}</div>
       <div><b>${mcsEsc(live.label)}</b> <span class="mcs-sub">${live.time} ${live.level ? `· ${mcsEsc(live.level.type)} ${mcsN(live.level.price)}` : ""}</span></div>
       <div class="mcs-ssplan">Spot: entry ${p.entry != null ? mcsN(p.entry) : `next candle open (≈ ${mcsN(p.entryRef)})`} · SL <b class="mcs-dn">${mcsN(p.stop)}</b> · Target <b class="mcs-up">${mcsN(p.target)}</b> <span class="mcs-sub">(${mcsEsc(p.targetWhy || "")}, 1:${mcsN(p.rr)})</span></div>
+      ${p.book != null ? `<div class="mcs-ssplan">Book <b>50% at ${mcsN(p.book)}</b> (1.5R) · rest trails <b>EMA 9</b> after +1R${p.finalTarget != null ? ` · final target ${mcsN(p.finalTarget)}` : ""}${live.metrics && live.metrics.booked ? ` · <b class="mcs-up">✅ 50% booked ${mcsEsc(live.metrics.bookTime || "")}</b>` : ""}</div>` : ""}
       ${opt}
       <ul class="mcs-ssev">${live.evidence.map((e) => `<li>${mcsEsc(e)}</li>`).join("")}</ul></div>`;
   } else {
@@ -988,9 +994,10 @@ function mcsRenderSetups() {
       ${t.watch.length ? `<div class="mcs-sswatch">${t.watch.map((w) => `<span class="mcs-sswc ${w.state.toLowerCase()}" title="${mcsEsc(w.note)}">${mcsEsc(w.state.replace(/_/g, " "))} · ${mcsEsc(w.level)} ${mcsN(w.price)} <i>${w.side === "RESISTANCE" ? "res → PE" : "sup → CE"}</i></span>`).join("")}</div>` : `<div class="mcs-sub">No level being approached.</div>`}</div>`;
   }
   // --- today's list ---
-  const row = (x) => `<tr class="${stCls(x.status)}"><td>${x.time}</td><td>${setupName(x)} <i>${mcsEsc(x.context)}</i></td><td class="${x.side === "CE" ? "mcs-up" : "mcs-dn"}"><b>${x.side}</b></td>
-    <td>${x.level ? `${mcsEsc(x.level.type)} ${mcsN(x.level.price)}` : "VWAP pullback"}</td><td class="r">${x.plan ? mcsN(x.plan.entry ?? x.plan.entryRef) : "—"}</td><td class="r">${x.plan ? mcsN(x.plan.stop) : "—"}</td><td class="r">${x.plan ? mcsN(x.plan.target) : "—"}</td>
-    <td><span class="mcs-ssst ${stCls(x.status)}">${mcsEsc(x.status.replace("_", " "))}</span></td><td class="r ${mcsCls(x.resultR)}">${x.resultR != null ? (x.resultR > 0 ? "+" : "") + mcsN(x.resultR, 2) + "R" : "—"}</td></tr>`;
+  const resCls = (x) => (x.resultR != null ? (x.resultR > 0.05 ? "win" : x.resultR < -0.05 ? "loss" : "flat") : stCls(x.status));
+  const row = (x) => `<tr class="${resCls(x)}"><td>${x.time}</td><td>${setupName(x)} <i>${mcsEsc(x.context)}</i></td><td class="${x.side === "CE" ? "mcs-up" : "mcs-dn"}"><b>${x.side}</b></td>
+    <td>${x.level ? `${mcsEsc(x.level.type)} ${mcsN(x.level.price)}` : x.setup === "S5_EMA_TREND" ? "EMA 9 trend pullback" : "VWAP pullback"}</td><td class="r">${x.plan ? mcsN(x.plan.entry ?? x.plan.entryRef) : "—"}</td><td class="r">${x.plan ? mcsN(x.plan.stop) : "—"}</td><td class="r">${x.plan ? mcsN(x.plan.target) : "—"}</td>
+    <td><span class="mcs-ssst ${resCls(x)}">${mcsEsc(x.status.replace("_", " "))}</span>${x.metrics && x.metrics.booked ? ' <i class="mcs-sub">50% booked</i>' : ""}</td><td class="r ${mcsCls(x.resultR)}">${x.resultR != null ? (x.resultR > 0 ? "+" : "") + mcsN(x.resultR, 2) + "R" : "—"}</td></tr>`;
   const todayTbl = valid.length ? `<table class="mcs-tbl mcs-sstbl"><thead><tr><th>Time</th><th>Setup</th><th>Side</th><th>Level</th><th class="r">Entry</th><th class="r">SL</th><th class="r">Target</th><th>Status</th><th class="r">Result</th></tr></thead><tbody>${valid.map(row).join("")}</tbody></table>` : `<div class="mcs-sub">No valid signal today.</div>`;
   const blk = blocked.length ? `<details class="mcs-ssblk"><summary>Blocked today (${blocked.length}) — why the logic said WAIT</summary><table class="mcs-tbl"><tbody>${blocked.slice(0, 40).map((x) => `<tr><td>${x.time}</td><td>${setupName(x)}</td><td>${x.side}</td><td>${x.level ? mcsEsc(x.level.type) + " " + mcsN(x.level.price) : "VWAP"}</td><td class="mcs-src" style="max-width:none">${mcsEsc(x.blockedBy)}</td></tr>`).join("")}</tbody></table></details>` : "";
   // --- replay ---
@@ -1001,8 +1008,8 @@ function mcsRenderSetups() {
       <td class="mcs-src" style="max-width:none">${Object.entries(v.byContext).map(([c, x]) => `${mcsEsc(c)} ${x.n} (${x.avgR > 0 ? "+" : ""}${mcsN(x.avgR, 2)}R)`).join(" · ")}</td></tr>`; };
   const replayHtml = `<div class="mcs-ssrp"><h5>Last ${rp.sessions || 0} sessions — how this logic would have done <span class="mcs-sub">${mcsEsc(rp.note || "")}</span></h5>
     <table class="mcs-tbl"><thead><tr><th>Setup</th><th class="r">Signals</th><th class="r">Win/Loss</th><th class="r">Win %</th><th class="r">Avg</th><th class="r">Total</th><th>By context</th></tr></thead><tbody>
-    ${rpRow("S3_LEVEL_REJECTION", "S3 Level Rejection")}${rpRow("S4_VWAP_PULLBACK", "S4 VWAP Pullback")}</tbody></table>
-    <div class="mcs-sub">Most common blocks: ${["S3_LEVEL_REJECTION", "S4_VWAP_PULLBACK"].map((k) => by[k] ? `${k.slice(0, 2)}: ${by[k].topBlocks.slice(0, 3).map(([r, n]) => `${mcsEsc(r)} (${n})`).join(", ")}` : "").filter(Boolean).join(" · ")}</div></div>`;
+    ${rpRow("S3_LEVEL_REJECTION", "S3 Level Rejection")}${rpRow("S4_VWAP_PULLBACK", "S4 VWAP Pullback")}${rpRow("S5_EMA_TREND", "S5 EMA Trend")}</tbody></table>
+    <div class="mcs-sub">Most common blocks: ${["S3_LEVEL_REJECTION", "S4_VWAP_PULLBACK", "S5_EMA_TREND"].map((k) => by[k] ? `${k.slice(0, 2)}: ${by[k].topBlocks.slice(0, 3).map(([r, n]) => `${mcsEsc(r)} (${n})`).join(", ")}` : "").filter(Boolean).join(" · ")}</div></div>`;
   const an = ss.mode === "TEST" ? ss.analysis : null;
   const anHtml = an ? mcsMovesHtml(an, `Logic vs market — ${mcsEsc(ss.date)} (full day)`) : ss.mode === "TEST" ? `<div class="mcs-sub">Logic-vs-market analysis appears when the run reaches 15:15 (full day).</div>` : "";
   box.innerHTML = head + vbHtml + `<div class="mcs-ssgrid">${liveHtml}<div class="mcs-sstoday"><h5>${ss.mode === "TEST" ? `Signals on ${mcsEsc(ss.date)} up to ${mcsEsc(ss.upto)}` : `Today's signals ${ss.isToday ? "" : `(${mcsEsc(ss.date)})`}`}</h5>${todayTbl}${blk}</div></div>${ss.mode === "TEST" ? anHtml : replayHtml}
@@ -1196,4 +1203,19 @@ function mcsWireLog() {
 function mcsCsv(a) {
   fetch(a.getAttribute("href")).then((r) => r.blob()).then((b) => { const u = URL.createObjectURL(b); const x = document.createElement("a"); x.href = u; x.download = "setup-test-log.csv"; document.body.appendChild(x); x.click(); x.remove(); setTimeout(() => URL.revokeObjectURL(u), 2000); }).catch(() => alert("Download failed"));
   return false;
+}
+
+
+// LIVE: pop an alert when the EMA direction changes (once per change; not on first load).
+function mcsDirAlert(sym, nm, evs) {
+  MCS._dirSeen = MCS._dirSeen || {};
+  const last = evs.length ? evs[evs.length - 1] : null, key = last ? `${last.time}|${last.to}` : "none";
+  const seen = MCS._dirSeen[sym];
+  MCS._dirSeen[sym] = key;
+  if (seen === undefined || !last || seen === key) return;          // first load / no change
+  let t = document.getElementById("mcs-dirtoast");
+  if (!t) { t = document.createElement("div"); t.id = "mcs-dirtoast"; t.className = "mcs-dirtoast"; t.setAttribute("role", "alert"); document.body.appendChild(t); }
+  t.className = "mcs-dirtoast " + (last.to === "UP" ? "up" : last.to === "DOWN" ? "dn" : "");
+  t.innerHTML = `<b>${mcsEsc(nm)} direction changed: ${mcsEsc(last.from)} → ${mcsEsc(last.to)}</b><div>${mcsEsc(last.time)} · ${mcsEsc(last.why)}</div><button type="button" onclick="this.parentElement.remove()" aria-label="Close">✕</button>`;
+  clearTimeout(MCS._dirToastT); MCS._dirToastT = setTimeout(() => t && t.remove(), 20000);
 }

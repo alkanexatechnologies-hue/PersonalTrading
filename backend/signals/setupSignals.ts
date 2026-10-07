@@ -34,6 +34,8 @@ export const SETUP_CONFIG = {
   entrySlipAtr: 0.5, timeExitBars: 12,
   // NIFTY reference points from the trader's original rule (logged for comparison only)
   refVwapPts: 30, refRoomPts: 40,
+  // S5 EMA TREND (research-backed: EMA 9 trail best on both sides; trail only after +1R; book 50% at 1.5R)
+  s5DistAtr: 0.9, s5DistPtsNifty: 20, s5DeadZoneAtr: 0.25, s5SlopeBars: 3, s5PullbackAtr: 0.2, s5BookR: 1.5, s5TrailAfterR: 1, s5MaxPerSide: 2,
 };
 const C = SETUP_CONFIG;
 const IST = 19800;
@@ -42,8 +44,8 @@ const istDay = (t: number) => new Date((t + IST) * 1000).toISOString().slice(0, 
 const hm = (t: number) => new Date((t + IST) * 1000).toISOString().slice(11, 16);
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
-export type SetupId = "S3_LEVEL_REJECTION" | "S4_VWAP_PULLBACK";
-export type SignalStatus = "ENTRY_READY" | "ACTIVE" | "TARGET" | "STOP" | "TIME_EXIT" | "EOD_EXIT" | "EXTENDED" | "BLOCKED";
+export type SetupId = "S3_LEVEL_REJECTION" | "S4_VWAP_PULLBACK" | "S5_EMA_TREND";
+export type SignalStatus = "ENTRY_READY" | "ACTIVE" | "TARGET" | "STOP" | "TIME_EXIT" | "EOD_EXIT" | "EXTENDED" | "BLOCKED" | "TRAIL_EXIT" | "VWAP_EXIT" | "REJECTION_EXIT";
 export type WatchState = "APPROACHING" | "LEVEL_TEST" | "CONFIRMATION_PENDING" | "ACCEPTED";
 
 export interface SetupSignal {
@@ -51,12 +53,15 @@ export interface SetupSignal {
   barTime: number; time: string;                        // the candle that completed the setup (closed)
   level: { type: string; price: number; sources: string[]; major: boolean } | null;
   evidence: string[]; blockedBy: string | null;
-  plan: { entryRef: number; entry: number | null; stop: number; target: number; risk: number; reward: number; rr: number; targetWhy: string } | null;
+  plan: { entryRef: number; entry: number | null; stop: number; target: number; risk: number; reward: number; rr: number; targetWhy: string;
+    book?: number | null; finalTarget?: number | null; trail?: string } | null;
   status: SignalStatus; fillTime: number | null; exitTime: number | null; exitPrice: number | null; resultR: number | null;
   metrics: Record<string, number | string | null>;
 }
 export interface WatchItem { level: string; price: number; side: "RESISTANCE" | "SUPPORT"; state: WatchState; since: string; note: string; }
+export interface DirectionEvent { time: string; from: string; to: string; why: string; }
 export interface SessionResult { date: string; signals: SetupSignal[]; watch: WatchItem[]; atr: number | null; vwap: number | null; dir15: string | null;
+  direction: { state: "UP" | "DOWN" | "NEUTRAL"; since: string | null; why: string } | null; directionEvents: DirectionEvent[];
   vwapBias: { bias: "BULLISH" | "BEARISH" | "NEUTRAL"; close: number; vwap: number | null; time: string } | null; }
 
 const MAJOR_TYPES = new Set(["Previous Day High", "Previous Day Low", "OI Support", "OI Resistance", "Structure Support", "Structure Resistance", "Equal High", "Equal Low"]);
@@ -68,12 +73,12 @@ export const isMajor = (l: LiqLevel) => MAJOR_TYPES.has(l.type) || l.sources.len
  * `levels` = levels known for today (each used only from its activeFrom);
  * `dailyAtr` = ATR of daily ranges as of yesterday.
  */
-export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLevel[], dailyAtr: number | null, nowSec: number, opts: { regimeAt?: (upto: Candle[]) => string | null } = {}): SessionResult {
+export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLevel[], dailyAtr: number | null, nowSec: number, opts: { regimeAt?: (upto: Candle[]) => string | null; s5DistPts?: number | null; only?: SetupId } = {}): SessionResult {
   const day = today.length ? istDay(today[0].time) : "";
   const all = [...hist, ...today];
   const off = hist.length;
-  const A = atr(all, 14), E9 = ema(all.map((c) => c.close), 9), VW = vwap(all);
-  const out: SessionResult = { date: day, signals: [], watch: [], atr: null, vwap: null, dir15: null, vwapBias: null };
+  const A = atr(all, 14), E9 = ema(all.map((c) => c.close), 9), E21 = ema(all.map((c) => c.close), 21), VW = vwap(all);
+  const out: SessionResult = { date: day, signals: [], watch: [], atr: null, vwap: null, dir15: null, vwapBias: null, direction: null, directionEvents: [] };
   if (today.length < 2) return out;
   // 15M trend from closed 15m candles (prior sessions + today)
   const sessDays = [...new Set(hist.map((c) => istDay(c.time)))].slice(-3);
@@ -92,6 +97,12 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
   let openSig: SetupSignal | null = null;
   const lastStopAt: Record<string, number> = {};
   const s4Count = { CE: 0, PE: 0 }; let s4LastBar = -99, s4ExtHi = -Infinity, s4ExtLo = Infinity;
+  // S5 EMA direction state (checked every closed candle) + its entries
+  let dirState: "UP" | "DOWN" | "NEUTRAL" = "NEUTRAL", dirSince: string | null = null, dirWhy = "";
+  // a new direction must hold for 2 consecutive closed candles before it counts (stops flip-flop alerts)
+  let dirPend: "UP" | "DOWN" | "NEUTRAL" | null = null, dirPendN = 0;
+  const run = (id: SetupId) => !opts.only || opts.only === id;   // replay can evaluate one setup in isolation
+  const s5Count = { CE: 0, PE: 0 }; let s5LastBar = -99;
 
   const roomTo = (side: "CE" | "PE", from: number, act: number, minDist: number) => {
     // next MAJOR level in the trade direction, at least minDist away
@@ -122,9 +133,38 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
         const p = s.plan!;
         const slip = s.side === "CE" ? c.open - p.entryRef : p.entryRef - c.open;
         if (slip > C.entrySlipAtr * a) { s.status = "EXTENDED"; s.metrics.slipPts = r2(slip); openSig = null; }
-        else { s.status = "ACTIVE"; p.entry = c.open; s.fillTime = c.time; p.risk = r2(Math.abs(p.entry - p.stop)); }
+        else {
+          s.status = "ACTIVE"; p.entry = c.open; s.fillTime = c.time; p.risk = r2(Math.abs(p.entry - p.stop));
+          if (s.setup === "S5_EMA_TREND") { p.book = r2(s.side === "CE" ? p.entry + C.s5BookR * p.risk : p.entry - C.s5BookR * p.risk); p.target = p.book; }
+        }
       }
-      if (openSig && (openSig as SetupSignal).status === "ACTIVE") {
+      if (openSig && (openSig as SetupSignal).status === "ACTIVE" && s.setup === "S5_EMA_TREND") {
+        // S5: stop → book 50% at 1.5R (full exit there if 15M is against) → after +1R trail with a close beyond EMA 9;
+        // close back across VWAP or the day end exits; reaching the final major level exits all.
+        const p = s.plan!, sg = s.side === "CE" ? 1 : -1, risk = Math.max(0.01, p.risk), mt = s.metrics;
+        const finish = (st: SignalStatus, px: number, full = false) => {
+          const restR = (sg * (px - p.entry!)) / risk;
+          s.status = st; s.exitTime = tEnd; s.exitPrice = r2(px);
+          s.resultR = r2(mt.booked && !full ? 0.5 * C.s5BookR + 0.5 * restR : restR);
+          openSig = null; if (st === "STOP" && !mt.booked) lastStopAt[s.setup] = tEnd;
+        };
+        const e9 = E9[i], vwNow = VW[i];
+        if (sg * (p.stop - (sg > 0 ? c.low : c.high)) >= 0) finish("STOP", p.stop);
+        else {
+          if (sg * ((sg > 0 ? c.high : c.low) - p.entry!) >= C.s5TrailAfterR * risk) mt.r1 = 1;
+          if (!mt.booked && p.book != null && sg * ((sg > 0 ? c.high : c.low) - p.book) >= 0) {
+            const d15 = dir15At(tEnd);
+            if ((s.side === "CE" && d15 === "DOWN") || (s.side === "PE" && d15 === "UP")) { mt.fullAtBook = `15M ${d15} — whole position closed at 1.5R`; finish("TARGET", p.book, true); }
+            else { mt.booked = 1; mt.bookTime = hm(tEnd); }
+          }
+          if (openSig) {
+            if (p.finalTarget != null && sg * ((sg > 0 ? c.high : c.low) - p.finalTarget) >= 0) finish("TARGET", p.finalTarget);
+            else if (mt.r1 && e9 != null && sg * (c.close - e9) < 0) finish("TRAIL_EXIT", c.close);
+            else if (vwNow != null && sg * (c.close - vwNow) < 0) finish("VWAP_EXIT", c.close);
+            else if (m + 5 >= C.dayEndMin) finish("EOD_EXIT", c.close);
+          }
+        }
+      } else if (openSig && (openSig as SetupSignal).status === "ACTIVE") {
         const p = s.plan!, held = Math.round((c.time - (s.fillTime as number)) / 300);
         const hitS = s.side === "CE" ? c.low <= p.stop : c.high >= p.stop;
         const hitT = s.side === "CE" ? c.high >= p.target : c.low <= p.target;
@@ -141,7 +181,7 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
     const z = Math.max(0.5, C.zoneAtr * a);
 
     // ---------------- S3: level rejection ----------------
-    for (const L of levels) {
+    for (const L of (run("S3_LEVEL_REJECTION") || run("S5_EMA_TREND") ? levels : [])) {
       if (L.activeFrom > c.time) continue;
       const key = `${L.type}|${L.price}`;
       let st = lvState.get(key);
@@ -209,6 +249,7 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
             metrics: { atr: r2(a), zone: r2(z), wick: r2(res ? r.high - Math.max(r.open, r.close) : Math.min(r.open, r.close) - r.low), penetration: r2(res ? r.high - lvl : lvl - r.low), dir15: d15, regime: reg, moveIn: r2(moveIn), sessRange: r2(sessExt) },
           };
           if (!block) { st.fired++; st.lastFire = tEnd; }
+          if (!run("S3_LEVEL_REJECTION")) { if (!block) { st.fired--; } sig.blockedBy = sig.blockedBy || "S3 not evaluated (isolated replay)"; sig.status = "BLOCKED"; }   // still visible to S5's rejection exit
           push(sig);
           continue;
         }
@@ -230,7 +271,7 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
 
     // ---------------- S4: VWAP trend pullback (after 09:45) ----------------
     const vw = VW[i], e9 = E9[i];
-    if (vw != null && e9 != null && m + 5 > C.vwapStartMin && inWindow) {
+    if (run("S4_VWAP_PULLBACK") && vw != null && e9 != null && m + 5 > C.vwapStartMin && inWindow) {
       const hold = today.slice(Math.max(0, k - C.vwapHoldBars + 1), k + 1);
       const up = hold.length >= C.vwapHoldBars && hold.every((x, j) => x.close > (VW[i - (hold.length - 1 - j)] ?? Infinity));
       const dn = hold.length >= C.vwapHoldBars && hold.every((x, j) => x.close < (VW[i - (hold.length - 1 - j)] ?? -Infinity));
@@ -274,6 +315,72 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
         push(sig);
       }
     }
+    // ---------------- S5: EMA trend (direction state every candle + pullback entry) ----------------
+    {
+      const e9 = E9[i], e21 = E21[i], e21p = E21[i - C.s5SlopeBars], vw = VW[i];
+      if (e9 != null && e21 != null && vw != null) {
+        const rising = e21p != null && e21 > e21p, falling = e21p != null && e21 < e21p;
+        const dz = C.s5DeadZoneAtr * a;
+        let st: "UP" | "DOWN" | "NEUTRAL";
+        if (c.close - vw >= dz && e9 > e21 && rising) st = "UP";
+        else if (vw - c.close >= dz && e9 < e21 && falling) st = "DOWN";
+        else if (dirState === "UP" && c.close > vw && e9 > e21) st = "UP";         // hold the state inside the dead zone
+        else if (dirState === "DOWN" && c.close < vw && e9 < e21) st = "DOWN";
+        else st = "NEUTRAL";
+        const why = `close ${r2(c.close)} ${c.close >= vw ? "above" : "below"} VWAP ${r2(vw)} · EMA 9 ${e9 > e21 ? ">" : "<"} EMA 21 · EMA 21 ${rising ? "rising" : falling ? "falling" : "flat"}`;
+        if (st !== dirState) {
+          if (st === dirPend) dirPendN++; else { dirPend = st; dirPendN = 1; }
+          if (dirPendN >= 2) { out.directionEvents.push({ time: hm(tEnd), from: dirState, to: st, why: `${why} (2 closes)` }); dirState = st; dirSince = hm(tEnd); dirPend = null; dirPendN = 0; }
+        } else { dirPend = null; dirPendN = 0; }
+        dirWhy = why;
+        // rejection at a major level while an S5 trade is open → exit all (same rejection rules as S3)
+        const os = openSig as SetupSignal | null;
+        if (os && os.setup === "S5_EMA_TREND" && os.status === "ACTIVE") {
+          const rej = signals.find((x) => x.setup === "S3_LEVEL_REJECTION" && x.barTime === c.time && x.side !== os.side && x.level?.major);
+          if (rej) { const p = os.plan!, sg = os.side === "CE" ? 1 : -1, restR = (sg * (c.close - p.entry!)) / Math.max(0.01, p.risk);
+            os.status = "REJECTION_EXIT"; os.exitTime = tEnd; os.exitPrice = r2(c.close); os.resultR = r2(os.metrics.booked ? 0.5 * C.s5BookR + 0.5 * restR : restR); os.metrics.exitWhy = `rejection at ${rej.level!.type} ${rej.level!.price}`; openSig = null; }
+        }
+        if (run("S5_EMA_TREND") && inWindow && (dirState === "UP" || dirState === "DOWN")) {
+          const side: "CE" | "PE" = dirState === "UP" ? "CE" : "PE", sg = side === "CE" ? 1 : -1;
+          const D = opts.s5DistPts ?? C.s5DistAtr * a;
+          const back = today.slice(Math.max(0, k - 6), k + 1);
+          const stretch = Math.max(...back.map((x, j) => { const v = VW[i - (back.length - 1 - j)] ?? vw; return sg > 0 ? x.high - v : v - x.low; }));
+          const pull = sg > 0 ? c.low <= e9 + C.s5PullbackAtr * a && c.close > e9 && c.close > c.open && c.close > vw
+                              : c.high >= e9 - C.s5PullbackAtr * a && c.close < e9 && c.close < c.open && c.close < vw;
+          if (stretch >= D && pull) {
+            let block: string | null = null;
+            const dayMove = sg > 0 ? c.high - sessOpen : sessOpen - c.low;
+            if (dailyAtr != null && dayMove > C.extendedDailyAtr * dailyAtr) block = `EXTENDED — day move ${r2(dayMove)} pts > ${C.extendedDailyAtr}× daily ATR`;
+            if (!block && s5Count[side] >= C.s5MaxPerSide) block = `Max ${C.s5MaxPerSide} EMA-trend signals per side today`;
+            if (!block && k - s5LastBar < 4) block = "Same pullback leg as the previous signal";
+            if (!block && !cooled("S5_EMA_TREND")) block = `Cooldown ${C.slCooldownMin} min after a stop`;
+            if (!block && openSig) block = "Another setup signal is still open";
+            const prev = today[Math.max(0, k - 1)];
+            const stop = sg > 0 ? Math.min(c.low, prev.low) - C.stopBufferAtr * a : Math.max(c.high, prev.high) + C.stopBufferAtr * a;
+            const pp = planFor(side, c.close, stop, c.time, a, C.minRoomR);
+            if (!block && pp.block) block = pp.block;
+            const d15 = dir15At(tEnd);
+            let plan: SetupSignal["plan"] = pp.plan;
+            if (plan) plan = { ...plan, book: r2(plan.entryRef + sg * C.s5BookR * plan.risk), finalTarget: plan.targetWhy.startsWith("next major") ? plan.target : null, trail: "EMA 9 after +1R",
+              target: r2(plan.entryRef + sg * C.s5BookR * plan.risk), targetWhy: plan.targetWhy.startsWith("next major") ? `book 50% at 1.5R, rest trails EMA 9 up to ${plan.targetWhy.replace("next major level: ", "")} ${plan.target}` : "book 50% at 1.5R, rest trails EMA 9" };
+            const sig: SetupSignal = {
+              id: `S5|${day}|${side}|${hm(tEnd)}`, setup: "S5_EMA_TREND", label: "S5 EMA Trend (VWAP + EMA 9 pullback)", context: `DIRECTION ${dirState}`, side, date: day,
+              barTime: c.time, time: hm(tEnd), level: null, blockedBy: block, plan,
+              evidence: [
+                `Direction ${dirState} since ${dirSince}: ${why}`,
+                `Stretched ${r2(stretch)} pts from VWAP in the last 6 candles (need ≥ ${r2(D)}${opts.s5DistPts ? " — your 20-pt NIFTY rule" : ` = ${C.s5DistAtr}× ATR`})`,
+                `Pullback to EMA 9 ${r2(e9)} held — close ${r2(c.close)} back ${sg > 0 ? "above" : "below"} it`,
+                `15M trend ${d15 ?? "n/a"} — ${(sg > 0 && d15 === "DOWN") || (sg < 0 && d15 === "UP") ? "against: whole position will be closed at 1.5R" : "with/neutral: 2nd half trails EMA 9"}`,
+              ],
+              status: block ? "BLOCKED" : "ENTRY_READY", fillTime: null, exitTime: null, exitPrice: null, resultR: null,
+              metrics: { atr: r2(a), vwap: r2(vw), ema9: r2(e9), ema21: r2(e21), stretch: r2(stretch), dir15: d15 },
+            };
+            if (!block) { s5Count[side]++; s5LastBar = k; }
+            push(sig);
+          }
+        }
+      }
+    }
   }
   // Opposite signals confirmed on the SAME candle → both blocked (conflict = WAIT).
   const byBar = new Map<number, SetupSignal[]>();
@@ -295,6 +402,7 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
   }
   out.signals = signals.sort((a, b) => b.barTime - a.barTime);
   out.atr = r2(la); out.vwap = VW[off + today.length - 1] != null ? r2(VW[off + today.length - 1] as number) : null; out.dir15 = dir15At(last.time + 300);
+  out.direction = { state: dirState, since: dirSince, why: dirWhy };
   out.vwapBias = { bias: out.vwap == null ? "NEUTRAL" : last.close > out.vwap ? "BULLISH" : last.close < out.vwap ? "BEARISH" : "NEUTRAL", close: last.close, vwap: out.vwap, time: hm(last.time + 300) };
   return out;
 }
@@ -313,6 +421,7 @@ export function summarizeReplay(results: SessionResult[]): ReplaySummary {
   const by: ReplaySummary["bySetup"] = {};
   for (const r of results) for (const s of r.signals) {
     const b = (by[s.setup] ||= { signals: 0, wins: 0, losses: 0, flat: 0, avgR: null, totalR: 0, byContext: {}, blocked: 0, topBlocks: [] });
+    if (s.blockedBy === "S3 not evaluated (isolated replay)") continue;
     if (s.blockedBy) { b.blocked++; const key = s.blockedBy.replace(/\b\d{3,}(\.\d+)?\b|\b\d+\.\d+\b/g, "#").split(" — ")[0].replace(/\s+/g, " ").trim().slice(0, 48); const t = b.topBlocks.find((x) => x[0] === key); if (t) t[1]++; else b.topBlocks.push([key, 1]); continue; }
     if (s.resultR == null) continue;
     b.signals++; b.totalR = r2(b.totalR + s.resultR);
