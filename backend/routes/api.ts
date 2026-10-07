@@ -57,6 +57,7 @@ import { dhanOiAnalysis, dhanHasOptions, dhanZeroHero, dhanRateLimitStats, DhanP
 import { loadDhanConfig, saveDhanConfig, dhanConfigured, disconnectDhan, testDhanConnection } from "../data/dhanConfig";
 import { withDhanPriority } from "../data/dhanClient";
 import { installAsyncSafety, apiDeadline } from "./requestSafety";
+import { screenOn, jobOn, setDataControl, countRequest, dataControlStatus, DC_SCREENS } from "../dataControl/dataControl";
 // Universal Market Indicator — Test Lab V1 (research/audit only, fully isolated).
 import { runTest as runTestLab, availableHistory as testLabAvailableHistory } from "../testlab/runner";
 import { writeReviewPackage as writeTestLabPackage } from "../testlab/exporter";
@@ -276,6 +277,37 @@ router.use((req: Request, res: Response, next) => {
   if (PUBLIC_API_PATHS.has(req.path)) return next();
   if (validateSession(bearerToken(req))) return next();
   res.status(401).json({ error: "Unauthorized. Please log in." });
+});
+
+// ---- Data Control: the browser tags every request with the screen it is for
+// (X-NSA-Screen). A screen switched OFF in Data Control gets 503 {disabled:true}
+// (the browser normally doesn't even send it). Login/session/settings routes are
+// never blocked so Data Control itself can always be reached.
+const DC_ALWAYS_ALLOWED = /^\/(data-control|login|session|logout|connection|connect|feed|symbols|compliance|admin|auth|dhan|groww|telegram)\b/;
+router.use((req: Request, res: Response, next: NextFunction) => {
+  const screen = String(req.get("x-nsa-screen") || "").slice(0, 40);
+  if (DC_ALWAYS_ALLOWED.test(req.path)) return next();
+  if (screen && !screenOn(screen)) {
+    countRequest(screen, true);
+    return res.status(503).json({ disabled: true, screen, error: `Data paused for this screen (Data Control)` });
+  }
+  countRequest(screen || "other:" + (req.path.split("/")[1] || ""), false);
+  next();
+});
+router.get("/data-control", (_req: Request, res: Response) => { res.json(dataControlStatus()); });
+router.post("/data-control", requireAdmin, (req: Request, res: Response) => {
+  const b = req.body || {};
+  if (b.preset === "all-on" || b.preset === "trading-focus") {
+    const keep = new Set(["marketcommand", "optionterminal", "tradeexec", "mcsummary", "w-status"]);
+    for (const s of DC_SCREENS) setDataControl("screen", s.key, b.preset === "all-on" || keep.has(s.key), false);
+    setDataControl("screen", "marketcommand", true);   // persists once
+    return res.json(dataControlStatus());
+  }
+  const kind = b.kind === "job" ? "job" : "screen";
+  if (typeof b.key !== "string" || typeof b.enabled !== "boolean") return res.status(400).json({ error: "key and enabled required" });
+  if (!setDataControl(kind, b.key, b.enabled)) return res.status(400).json({ error: `unknown ${kind} ${b.key}` });
+  console.log(`[data-control] ${kind} ${b.key} → ${b.enabled ? "ON" : "OFF"}`);
+  res.json(dataControlStatus());
 });
 
 // ---- Admin/permission gates (backend enforcement — never trust the frontend
@@ -4514,7 +4546,7 @@ let _arbiterBusy = false;
 const _arbiterObserver = setInterval(async () => {
   // ARBITER_OBSERVER=off pauses this unattended poll (it adds Dhan option-chain
   // load). Decisions are still made whenever a screen or the paper engine asks.
-  if (process.env.ARBITER_OBSERVER === "off" || _arbiterBusy || !isTradingTimeIST()) return;
+  if (process.env.ARBITER_OBSERVER === "off" || _arbiterBusy || !isTradingTimeIST() || !jobOn("arbiterObserver")) return;
   _arbiterBusy = true;
   // Zero extra Dhan calls: only indices whose 5m candles AND option chain are already
   // freshly cached (by a screen or the paper engine) are decided here; the others are
@@ -5575,7 +5607,7 @@ async function tradeMonitorTick(): Promise<void> {
     }
   } catch { /* best-effort */ } finally { _tradeMonitorRunning = false; }
 }
-const _tradeMonitorTimer = setInterval(() => { tradeMonitorTick().catch(() => {}); }, 60_000);
+const _tradeMonitorTimer = setInterval(() => { if (jobOn("tradeMonitor")) tradeMonitorTick().catch(() => {}); }, 60_000);
 // Don't keep the process alive just for this timer (so tests/CLI can exit cleanly).
 if (typeof (_tradeMonitorTimer as any).unref === "function") (_tradeMonitorTimer as any).unref();
 
@@ -5901,7 +5933,7 @@ async function orbAutoLogTick(): Promise<void> {
     }
   } catch { /* best-effort */ } finally { _orbAutoRunning = false; }
 }
-const _orbAutoTimer = setInterval(() => { orbAutoLogTick().catch(() => {}); }, 60_000);
+const _orbAutoTimer = setInterval(() => { if (jobOn("orbAuto")) orbAutoLogTick().catch(() => {}); }, 60_000);
 if (typeof (_orbAutoTimer as any).unref === "function") (_orbAutoTimer as any).unref();
 
 // ===================== VWAP + 20 EMA Trend Continuation — GENERIC (all indices) =====================
@@ -8967,7 +8999,7 @@ export function startHourlyScheduler() {
   setInterval(() => { maybeRotateForNewDay().catch(() => {}); }, 60_000);
   setInterval(async () => {
     try {
-      if (!isTradingTimeIST()) return;
+      if (!isTradingTimeIST() || !jobOn("hourlyScan")) return;
       const slot = istSlot();
       if (!HOURLY_SLOTS.includes(slot)) return;
       const key = `${istDateStr()} ${slot}`;
@@ -8985,7 +9017,7 @@ export function startHourlyScheduler() {
   // Autonomous paper-trading tick every 5 minutes during market hours.
   let paperBusy = false;
   setInterval(async () => {
-    if (paperBusy || !isTradingTimeIST()) return;
+    if (paperBusy || !isTradingTimeIST() || !jobOn("paperEngine")) return;
     paperBusy = true;
     try {
       await tickPaper(paperDeps(false));
@@ -9000,7 +9032,7 @@ export function startHourlyScheduler() {
   // handle exits). Still simulated — no live Groww orders.
   let oiScalpBusy = false;
   setInterval(async () => {
-    if (oiScalpBusy || !isTradingTimeIST()) return;
+    if (oiScalpBusy || !isTradingTimeIST() || !jobOn("paperScalps")) return;
     oiScalpBusy = true;
     try { await tickPaperScalps(paperDeps(false)); } catch { /* ignore */ }
     finally { oiScalpBusy = false; }
@@ -9034,7 +9066,7 @@ export function startHourlyScheduler() {
   // Scheduled (background) refresh - LOW priority. The two call sites inside
   // the /oi-change route handler itself (stale-kickoff, cold-start) are
   // serving an actual request and are deliberately left at the default HIGH.
-  setInterval(() => { if (isTradingTimeIST()) refreshOiChangeSnapshot(); }, 3 * 60 * 1000);
+  setInterval(() => { if (isTradingTimeIST() && jobOn("oiChangeSnapshot")) refreshOiChangeSnapshot(); }, 3 * 60 * 1000);
 
   // Daily log retention sweep — archives files >90d (gzip into data/log/archive),
   // deletes archives >1yr ONLY if LOG_ARCHIVE_DELETE=1. Runs once/day after close.
@@ -9073,13 +9105,14 @@ export function startHourlyScheduler() {
     } finally { warmBusy = false; }
   };
   setTimeout(() => { warmCoreFeeds().catch(() => {}); }, 4_000);
-  setInterval(() => { if (isFeedWindowIST()) warmCoreFeeds().catch(() => {}); }, 45_000);
+  setInterval(() => { if (isFeedWindowIST() && jobOn("warmFeeds")) warmCoreFeeds().catch(() => {}); }, 45_000);
 
   // OI COMMAND signal logger + multi-horizon (5/15/60 min) evaluator. Every 5 min:
   // (1) evaluate any due horizons vs live spot, (2) log a fresh high-confidence
   // signal per F&O index (deduped to a ~15-min cadence per symbol).
   const OI_LOG_MIN = 60; // log signals with confidence >= 60 (review filters >= 80)
   setInterval(async () => {
+    if (!jobOn("oiSignals")) return;
     try {
       await evaluateOiSignals(async (sym) => { try { const q = await getProvider().getQuote(sym); return (q as any)?.price ?? null; } catch { return null; } });
       if (!isTradingTimeIST() || !dhanProviderForOi()) {
@@ -9110,7 +9143,7 @@ export function startHourlyScheduler() {
   // (the OPHL scorer needs a running intraday premium high/avg per strike).
   let sampleBusy = false;
   setInterval(async () => {
-    if (sampleBusy || !isTradingTimeIST()) return;
+    if (sampleBusy || !isTradingTimeIST() || !jobOn("premiumSampler")) return;
     sampleBusy = true;
     try {
       const day = istDateStr();

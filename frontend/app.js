@@ -372,7 +372,7 @@ async function updateSuccessIndicator() {
   const node = el("success-ind");
   if (!node) return;
   try {
-    const s = await fetch("/api/paper/state").then((r) => r.json());
+    const s = await fetch("/api/paper/state", { screen: "w-status" }).then((r) => r.json());
     const decided = (s.wins || 0) + (s.losses || 0);
     const started = s.option?.startCapital || s.swing?.startCapital;
     if (!started) {
@@ -763,7 +763,7 @@ function startLiveTicker() {
     if (!syms.length) return;
     liveTickBusy = true;
     try {
-      const d = await fetch("/api/quotes?symbols=" + encodeURIComponent(syms.join(","))).then((r) => r.json());
+      const d = await fetch("/api/quotes?symbols=" + encodeURIComponent(syms.join(",")), { screen: "w-watchlist" }).then((r) => r.json());
       const q = d.quotes || {};
       // Live watchlist prices - skip stale last-good prints so they are not shown as live.
       (state.symbols || []).forEach((s) => {
@@ -977,7 +977,7 @@ async function loadWatchlistBadges() {
     // them and showed old data.
     await runLimited(state.symbols, 2, async (s) => {
       try {
-        const sig = await fetch(`/api/signal/${encodeURIComponent(s.symbol)}?interval=${state.interval}`).then((r) => r.json());
+        const sig = await fetch(`/api/signal/${encodeURIComponent(s.symbol)}?interval=${state.interval}`, { screen: "w-watchlist" }).then((r) => r.json());
         if (sig && sig.label) {
           state.wlData[s.symbol] = { score: sig.score, label: sig.label, price: sig.price, regime: sig.regime, rvol: sig.rvol };
         }
@@ -1869,7 +1869,7 @@ async function refreshIndexStrip() {
   if (!box || !document.body.classList.contains("mode-option") || document.body.classList.contains("mc-fullwidth")) return;
   try {
     const quotes = await Promise.all(
-      INDEX_STRIP_SYMBOLS.map((s) => fetch(`/api/quote/${encodeURIComponent(s.symbol)}`).then((r) => r.json()).catch(() => null))
+      INDEX_STRIP_SYMBOLS.map((s) => fetch(`/api/quote/${encodeURIComponent(s.symbol)}`, { screen: "w-watchlist" }).then((r) => r.json()).catch(() => null))
     );
     const nowSec = Math.floor(Date.now() / 1000);
     const items = INDEX_STRIP_SYMBOLS.map((s, i) => {
@@ -1902,6 +1902,7 @@ function switchTab(name) {
     t.classList.toggle("active", t.getAttribute("data-tab") === name)
   );
   renderTabFlow(name);
+  if (typeof dcPanelBanner === "function") dcPanelBanner(name);
   document.querySelectorAll(".tab-panel").forEach((p) =>
     p.classList.toggle("active", p.id === "panel-" + name)
   );
@@ -15424,6 +15425,37 @@ const LG_TOKEN_KEY = "nsa_session";
 // enforcing auth server-side would otherwise 401 every other call in this
 // file. Patching window.fetch once here covers all of them without touching
 // each of the ~85 call sites individually.
+// ---- Data Control (central on/off per screen; settings live on the server) ----
+const DC = { screens: {}, loadedAt: 0 };
+const DC_ALWAYS = /^\/api\/(data-control|login|session|logout|connection|connect|feed|symbols|compliance|admin|auth|dhan|groww|telegram)\b/;
+// Routes that belong to ONE screen/widget whichever tab is open.
+const DC_ROUTE_OWNER = {
+  "best-trade": "w-besttrade", "data-status": "w-status", "top-opportunities": "w-watchlist", "watchlist": "w-watchlist",
+  "index-desk": "w-watchlist", "alerts": "w-alerts", "swing": "w-alerts", "news": "news", "early-moves": "earlymoves",
+  "market-sentiment-brief": "marketcommand", "oi-command": "oicommand", "top-picks": "toppicks", "option-top-pick": "toppicks",
+  "liquidity-status": "liquiditystatus", "oi-analysis": "oianalysis", "oi-chain": "oianalysis", "premarket": "premarket",
+  "today-movers": "todaymovers", "bull-rank": "bullrank", "big-move": "bigmove", "testlab": "testlab", "move-timing": "movetiming",
+  "backtest-dhan": "dhanbacktest", "strategy-replay": "stratreplay", "qa": "strategylab", "ai-paper": "aip",
+};
+function dcActiveTab() {
+  const t = document.querySelector("#tabs .tab.active");
+  const n = t ? t.getAttribute("data-tab") : null;
+  return n && n.startsWith("aip") ? "aip" : n;
+}
+function dcScreenFor(url, init) {
+  if (init && init.screen) return init.screen;
+  const seg = url.replace(/^\/api\//, "").split(/[/?]/)[0];
+  return DC_ROUTE_OWNER[seg] || dcActiveTab();
+}
+function dcScreenOn(key) { return DC.screens[key] !== false; }
+async function loadDataControl() {
+  try {
+    const d = await fetch("/api/data-control").then((r) => r.json());
+    if (d && Array.isArray(d.screens)) { DC.screens = Object.fromEntries(d.screens.map((s) => [s.key, s.enabled])); DC.last = d; DC.loadedAt = Date.now(); }
+    dcMarkTabs();
+    return d;
+  } catch { return null; }
+}
 const API_INFLIGHT = new Map();
 const API_CLIENT_TIMEOUT_MS = 45000;   // server answers live GETs within 40s (504 otherwise)
 const LONG_API = /^\/api\/(backtest|backtest-dhan|backtest-compare|replay|strategy-replay|testlab|qa|audit|ask|analyst|admin|log|hourly|advisory|longterm|monthly-swing|bull-rank|zero-hero|oi-command\/backtest|move-timing|option-sell|paper\/review|ai-paper|vwapema-run|orb-run)/;
@@ -15443,6 +15475,17 @@ const LONG_API = /^\/api\/(backtest|backtest-dhan|backtest-compare|replay|strate
     // not hold one of the browser's 6 connections forever (that froze every screen
     // after ~5 min). Research/backtest routes and callers with their own signal are exempt.
     const method = ((init && init.method) || (input && input.method) || "GET").toUpperCase();
+    // Data Control: tag the request with its screen; a screen switched OFF sends nothing.
+    if (url.startsWith("/api/") && !DC_ALWAYS.test(url)) {
+      const screen = dcScreenFor(url, init);
+      if (screen) {
+        init = Object.assign({}, init || {}, { headers: Object.assign({}, (init && init.headers) || {}, { "X-NSA-Screen": screen }) });
+        if (!dcScreenOn(screen)) {
+          return Promise.resolve(new Response(JSON.stringify({ disabled: true, screen, error: "Data paused for this screen (Data Control)" }),
+            { status: 503, headers: { "Content-Type": "application/json" } }));
+        }
+      }
+    }
     if (url.startsWith("/api/") && method === "GET" && !(init && init.signal) && !LONG_API.test(url)) {
       // Same GET already in flight (a poll firing again before the last answer) →
       // share it instead of opening another connection.
@@ -17179,3 +17222,74 @@ function renderMCSentiment(d) {
   if (!el.dataset.init) { el.classList.toggle("open", mcSentOpen()); el.dataset.init = "1"; }
   el.hidden = false;
 }
+
+
+// ==================== DATA CONTROL screen ====================
+function dcEsc(v) { return String(v == null ? "" : v).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function dcMarkTabs() {
+  document.querySelectorAll("#tabs .tab").forEach((t) => {
+    const n = t.getAttribute("data-tab"); const k = n && n.startsWith("aip") ? "aip" : n;
+    const off = k && DC.screens[k] === false;
+    t.classList.toggle("dc-off", !!off);
+    if (off) t.setAttribute("title", "Data paused (Data Control)"); else if (t.getAttribute("title") === "Data paused (Data Control)") t.removeAttribute("title");
+  });
+  const n = dcActiveTab(); if (n) dcPanelBanner(n);
+}
+// Banner on a paused screen so stale numbers are never mistaken for live ones.
+function dcPanelBanner(name) {
+  const key = name && name.startsWith("aip") ? "aip" : name;
+  const panel = document.getElementById("panel-" + name);
+  if (!panel) return;
+  let b = panel.querySelector(":scope > .dc-paused");
+  if (DC.screens[key] === false) {
+    if (!b) { b = document.createElement("div"); b.className = "dc-paused"; panel.prepend(b); }
+    b.innerHTML = `⏸ Data paused for this screen — numbers below are NOT updating. <button type="button" class="pill-btn" onclick="dcToggle('screen','${dcEsc(key)}',true)">▶ Enable data</button>`;
+  } else if (b) b.remove();
+}
+function openDataControl() {
+  const m = document.getElementById("dc-modal"); if (!m) return;
+  m.hidden = false; renderDataControl(DC.last);
+  loadDataControl().then(renderDataControl);
+  if (!DC.timer) DC.timer = setInterval(() => { if (!document.getElementById("dc-modal").hidden) loadDataControl().then(renderDataControl); }, 15000);
+}
+function closeDataControl() { const m = document.getElementById("dc-modal"); if (m) m.hidden = true; }
+function renderDataControl(d) {
+  const body = document.getElementById("dc-body"); if (!body || !d) return;
+  const row = (kind, x) => {
+    const rate = kind === "screen"
+      ? `<span class="dc-rate" title="API requests per minute (last 5 min)">${x.reqPerMin ? x.reqPerMin + "/min" : "idle"}${x.blockedPerMin ? ` · ${x.blockedPerMin}/min blocked` : ""}</span>`
+      : `<span class="dc-rate">${x.lastRunAt ? "last tick " + new Date((x.lastRunAt + 19800) * 1000).toISOString().slice(11, 16) : "—"}</span>`;
+    return `<label class="dc-row ${x.enabled ? "on" : "off"}">
+      <input type="checkbox" ${x.enabled ? "checked" : ""} onchange="dcToggle('${kind}','${dcEsc(x.key)}',this.checked,${x.important ? "true" : "false"})">
+      <span class="dc-sw" aria-hidden="true"></span>
+      <span class="dc-name">${dcEsc(x.label)}${x.important ? ' <em class="dc-imp">important</em>' : ""}${x.note ? `<small>${dcEsc(x.note)}</small>` : ""}</span>
+      ${rate}<b class="dc-state">${x.enabled ? "ON" : "OFF"}</b></label>`;
+  };
+  const groups = {};
+  for (const s of d.screens) (groups[s.group] ||= []).push(s);
+  const total = d.screens.reduce((a, s) => a + (s.reqPerMin || 0), 0) + (d.otherReqPerMin || []).reduce((a, s) => a + s.reqPerMin, 0);
+  body.innerHTML =
+    `<div class="dc-total">Total from the browser: <b>${Math.round(total)}/min</b> · ${d.screens.filter((s) => !s.enabled).length} screens OFF · ${d.jobs.filter((j) => !j.enabled).length} jobs OFF</div>` +
+    Object.entries(groups).map(([g, xs]) => `<div class="dc-grp"><div class="dc-gh">${dcEsc(g)} screens</div>${xs.map((x) => row("screen", x)).join("")}</div>`).join("") +
+    `<div class="dc-grp"><div class="dc-gh">Background jobs (server)</div>${d.jobs.map((x) => row("job", x)).join("")}</div>`;
+}
+async function dcPost(body) {
+  const msg = document.getElementById("dc-msg");
+  try {
+    const r = await fetch("/api/data-control", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok) { if (msg) msg.textContent = r.status === 403 ? "Only admin can change Data Control." : (d.error || "Save failed"); return null; }
+    if (msg) { msg.textContent = "Saved ✓"; setTimeout(() => { if (msg.textContent === "Saved ✓") msg.textContent = ""; }, 2000); }
+    DC.screens = Object.fromEntries(d.screens.map((s) => [s.key, s.enabled])); DC.last = d;
+    dcMarkTabs(); renderDataControl(d);
+    return d;
+  } catch (e) { if (msg) msg.textContent = "Save failed: " + e.message; return null; }
+}
+function dcToggle(kind, key, enabled, important) {
+  if (!enabled && important && !confirm("This job is important (it manages trades). Turn it OFF anyway?")) { renderDataControl(DC.last); return; }
+  return dcPost({ kind, key, enabled });
+}
+function dcPreset(preset) { return dcPost({ preset }); }
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDataControl(); });
+setTimeout(loadDataControl, 1500);
+setInterval(loadDataControl, 60000);

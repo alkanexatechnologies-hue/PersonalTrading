@@ -7,7 +7,7 @@
          under the home indicator. Android ignores it harmlessly. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>BC Data Status</title>
-    <link rel="stylesheet" href="styles.css?v=20261007-sent1" />
+    <link rel="stylesheet" href="styles.css?v=20261007-dc1" />
     <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   </head>
   <body class="oi-focus">
@@ -434,6 +434,7 @@
         <button id="connect-btn" class="pill-btn hidden">Dhan</button>
         <button id="telegram-btn" class="pill-btn hidden">Telegram</button>
         <button id="rotate-login-btn" class="pill-btn" title="Turant naya login password generate karke email/Telegram par bhej do (agar configured hai) — 08:00 IST ka wait nahi karna padega">🔄 Rotate Login</button>
+        <button id="dc-btn" class="pill-btn" type="button" onclick="openDataControl()" title="Data Control — switch data loading on/off per screen and background job (saves bandwidth and Dhan rate limit)">📶 Data Control</button>
         <button id="logout-btn" class="pill-btn" title="Session band karke wapas login screen par jayein">🚪 Logout</button>
         <span id="clock" data-clock class="clock"></span>
       </div>
@@ -2539,7 +2540,22 @@
       </div>
     </div>
 
-    <script src="app.js?v=20261007-sent1"></script>
+    <div id="dc-modal" class="dc-modal" hidden role="dialog" aria-modal="true" aria-labelledby="dc-title">
+      <div class="dc-box">
+        <div class="dc-hd">
+          <span id="dc-title" class="dc-title">📶 Data Control</span>
+          <button type="button" class="dc-x" onclick="closeDataControl()" aria-label="Close">✕</button>
+        </div>
+        <div class="dc-sub">Switch data loading ON/OFF per screen. An OFF screen sends no requests and the server refuses them, so the screens you trade from get Dhan's full rate limit. Requests/min = last 5 minutes.</div>
+        <div class="dc-presets">
+          <button type="button" class="pill-btn" onclick="dcPreset('trading-focus')" title="Market Command, Option Terminal, Trade Execution, MC Summary + header status only">🎯 Trading focus</button>
+          <button type="button" class="pill-btn" onclick="dcPreset('all-on')">✅ Everything ON</button>
+          <span class="dc-msg" id="dc-msg"></span>
+        </div>
+        <div id="dc-body" class="dc-body">Loading…</div>
+      </div>
+    </div>
+    <script src="app.js?v=20261007-dc1"></script>
     <script src="mcsummary.js?v=20261007-mcsummary1"></script>
   </body>
 </html>
