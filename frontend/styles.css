@@ -6661,3 +6661,38 @@ body.lqa-fullwidth .watchlist, body.lqa-fullwidth #watchlist { display: none !im
 @media (max-width: 640px) { .lqa-takesum { grid-template-columns: minmax(0, 1fr); } }
 .lqa-two .lqa-src { max-width: 150px; }
 .lqa-time { color: #fbbf24; }
+/* ---- Liquidity Analysis: compact one-screen layout ---- */
+.lqa-wrap { padding: 6px 12px 8px; }
+.lqa-head { gap: 8px; margin-bottom: 6px; }
+.lqa-head .mcs-back { min-height: 34px; }
+.lqa-title { font-size: 16px; }
+.lqa-seg button { min-height: 34px; padding: 4px 10px; font-size: 12px; }
+.lqa-date { font-size: 12px; }
+.lqa-body { gap: 6px; }
+.lqa-ctx { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+.lqa-mini { background: #0f1626; border: 1px solid #1c2537; border-radius: 8px; padding: 5px 8px; min-width: 0; display: flex; flex-direction: column; gap: 1px; cursor: help; }
+.lqa-mt { font-size: 12px; font-weight: 800; color: #94a3b8; }
+.lqa-mm { font-size: 14px; font-weight: 800; color: #f1f5f9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lqa-ms { font-size: 12px; color: #cbd5e1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lqa-takesum { gap: 6px; margin: 0; }
+.lqa-takesum > div { background: #0f1626; border: 1px solid #1c2537; border-radius: 8px; padding: 4px 6px; min-width: 0; }
+.lqa-gh { padding: 3px 6px; margin-bottom: 4px; font-size: 12px; }
+.lqa-gh i { font-style: normal; font-weight: 500; color: #94a3b8; margin-left: 6px; }
+.lqa-chip { margin: 0 4px 4px 0; padding: 2px 6px; }
+.lqa-two { gap: 6px; }
+.lqa-two > div { background: #0f1626; border: 1px solid #1c2537; border-radius: 8px; padding: 4px; min-width: 0; }
+.lqa-t th, .lqa-t td { padding: 3px 6px; }
+.lqa-st { padding: 1px 5px; }
+.lqa-sec { padding: 6px 8px; }
+.lqa-histsec .lqa-sh { margin-bottom: 4px; font-size: 12px; }
+.lqa-histsec .lqa-sh i { font-size: 12px; }
+.lqa-hsum { margin-bottom: 4px; }
+@media (max-width: 1100px) { .lqa-ctx { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .lqa-ctx { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* Liquidity Analysis uses the whole screen like Market Command (no cockpit / news / tab-help bars). */
+body.lqa-fullwidth #cockpit-strip,
+body.lqa-fullwidth #opp-bar,
+body.lqa-fullwidth #index-strip,
+body.lqa-fullwidth #tabs,
+body.lqa-fullwidth #tab-flow-wrap { display: none !important; }
+body.lqa-fullwidth .content { padding-left: 0; padding-right: 0; }

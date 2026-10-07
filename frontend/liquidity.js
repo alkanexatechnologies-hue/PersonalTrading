@@ -36,14 +36,11 @@ function lqaShell() {
   return `
   <div class="lqa-head">
     <button type="button" class="mcs-back" onclick="switchTab('mcsummary')" title="Back to Market Command Summary">← MC Summary</button>
-    <div class="lqa-title">💧 LIQUIDITY ANALYSIS <span>— MORNING PLAN &amp; 20 DAY HISTORY</span></div>
-    <span class="lqa-status" id="lqa-status">—</span>
-  </div>
-  <div class="lqa-controls">
+    <div class="lqa-title" title="Morning plan &amp; 20-day history. Research only — not a trade signal; the Market Command FINAL DECISION is unchanged.">💧 LIQUIDITY ANALYSIS</div>
     <div class="lqa-seg" id="lqa-idx">${LQA_INDEX.map((x) => `<button type="button" data-sym="${x.sym}" onclick="lqaPick('${x.sym}')">${x.label}</button>`).join("")}</div>
     <div class="lqa-seg" id="lqa-tf"><button type="button" data-tf="5" onclick="lqaTf('5')">5M</button><button type="button" data-tf="15" onclick="lqaTf('15')">15M</button></div>
-    <span class="lqa-date" id="lqa-date">Date: Today</span>
-    <span class="lqa-note">Research only — not a trade signal. The Market Command FINAL DECISION is unchanged.</span>
+    <span class="lqa-date" id="lqa-date">Today</span>
+    <span class="lqa-status" id="lqa-status">—</span>
   </div>
   <div id="lqa-body" class="lqa-body"><div class="lqa-empty">Loading liquidity analysis…</div></div>`;
 }
@@ -96,19 +93,20 @@ function renderLiquidityAnalysis(d) {
   const list = (xs, cls) => xs.length ? `<ul class="lqa-ul ${cls || ""}">${xs.map((x) => `<li>${lqaEsc(x)}</li>`).join("")}</ul>` : "";
   const first15Dir = o.first15High != null && o.open != null && o.price != null ? (o.price > o.open ? "up" : o.price < o.open ? "down" : "flat") : null;
   const gapTxt = o.gapPct == null ? "—" : o.gapPct > 0.2 ? `Gap-up ${lqaS(o.gapPct)}%` : o.gapPct < -0.2 ? `Gap-down ${lqaS(o.gapPct)}%` : `Flat open ${lqaS(o.gapPct)}%`;
-  const ctx = c ? `
-    ${card("🌍 Global Market", `${leanB(c.globalLean)}${list(c.positives.slice(0, 3), "pos")}${list(c.negatives.slice(0, 4), "neg")}`)}
-    ${card("📰 Global News", c.globalNews.items.length ? `<div class="lqa-cnt"><span class="up">+${c.globalNews.positive}</span> <span class="dn">−${c.globalNews.negative}</span> <span>${c.globalNews.neutral} neutral</span></div>${c.globalNews.items.slice(0, 3).map((n) => `<div class="lqa-news ${n.sentiment === "positive" ? "up" : n.sentiment === "negative" ? "dn" : ""}">${lqaEsc(n.title)} <i>${lqaEsc(n.source)} · ${lqaEsc(n.ago)}</i></div>`).join("")}` : `<div class="lqa-na">DATA UNAVAILABLE</div>`)}
-    ${card("🇮🇳 Local Sentiment", `${leanB(c.indiaLean)}${list(c.indiaReasons.slice(0, 4))}`)}
-    ${card("🔔 Opening Context", `<div class="lqa-kv"><span>Opening bias</span><b>${lqaEsc(gapTxt)} · global ${lqaLean(c.globalLean)[0].toLowerCase()}${first15Dir ? ` · since open ${first15Dir}` : ""}</b>
-        <span>Open / Now</span><b>${lqaN(o.open)} / ${lqaN(o.price)}</b>
-        <span>PDH / PDL / PDC</span><b>${lqaN(o.pdh)} / ${lqaN(o.pdl)} / ${lqaN(o.pdc)}</b>
-        <span>15M High / Low</span><b>${lqaN(o.first15High)} / ${lqaN(o.first15Low)}</b>
-        <span>Opening Range H / L</span><b>${lqaN(o.orHigh)} / ${lqaN(o.orLow)}</b>
-        <span>Prev session</span><b>${lqaS(o.prevSession && o.prevSession.changePct)}% · range ${lqaN(o.prevSession && o.prevSession.range)} · closed at ${o.prevSession && o.prevSession.closePos != null ? o.prevSession.closePos + "% of range" : "—"}</b></div><div class="lqa-small">Opening bias is analysis only, not a trade.</div>`)}
-    ${card("📈 Expected Volatility", o.vix != null ? `<div class="lqa-big">±${lqaN(o.expectedMove, 0)} pts</div><div class="lqa-small">1σ day range implied by India VIX ${lqaN(o.vix)}</div>` : `<div class="lqa-na">DATA UNAVAILABLE</div>`)}
-    ${card("🗓 Key Events", `${(c.keyEvents || []).slice(0, 4).map((n) => `<div class="lqa-news"><em class="lqa-tag">${(n.tags || []).includes("RBI") ? "RBI" : "GOVT"}</em> ${lqaEsc(n.title)} <i>${lqaEsc(n.source)} · ${lqaEsc(n.ago)}</i></div>`).join("") || `<div class="lqa-na">No RBI / government headlines (48h)</div>`}<div class="lqa-small">Scheduled calendar: ${lqaEsc(c.scheduledCalendar)}</div>`)}` :
-    `<div class="lqa-empty">Market context: DATA UNAVAILABLE</div>`;
+  const tipOf = (xs) => lqaEsc(xs.filter(Boolean).join("\n"));
+  const mini = (title, main, sub, tip) => `<div class="lqa-mini" title="${tip || ""}"><span class="lqa-mt">${title}</span><span class="lqa-mm">${main}</span>${sub ? `<span class="lqa-ms">${sub}</span>` : ""}</div>`;
+  const neg0 = c && c.negatives[0] ? c.negatives[0].split(":")[0] : null, pos0 = c && c.positives[0] ? c.positives[0].split(":")[0] : null;
+  const ctx = c ? [
+    mini("🌍 Global", leanB(c.globalLean), [pos0 && `▲ ${lqaEsc(pos0)}`, neg0 && `▼ ${lqaEsc(neg0)}`, c.negatives.length > 1 ? `+${c.negatives.length - 1} more` : ""].filter(Boolean).join(" · "), tipOf([...c.positives.map((x) => "▲ " + x), ...c.negatives.map((x) => "▼ " + x)])),
+    mini("📰 Global news", c.globalNews.items.length ? `<span class="up">+${c.globalNews.positive}</span> <span class="dn">−${c.globalNews.negative}</span> <span>${c.globalNews.neutral}=</span>` : `<span class="lqa-na">DATA UNAVAILABLE</span>`, c.globalNews.items[0] ? lqaEsc(c.globalNews.items[0].title) : "", tipOf(c.globalNews.items.map((n) => `${n.title} (${n.source} · ${n.ago})`))),
+    mini("🇮🇳 India", leanB(c.indiaLean), lqaEsc(c.indiaReasons[0] || ""), tipOf(c.indiaReasons)),
+    mini("🔔 Opening", lqaEsc(gapTxt), `Open ${lqaN(o.open)} · PDC ${lqaN(o.pdc)}${first15Dir ? ` · since open ${first15Dir}` : ""}`,
+      tipOf([`PDH ${lqaN(o.pdh)} / PDL ${lqaN(o.pdl)} / PDC ${lqaN(o.pdc)}`, `15M H/L ${lqaN(o.first15High)} / ${lqaN(o.first15Low)}`, `Opening range H/L ${lqaN(o.orHigh)} / ${lqaN(o.orLow)}`,
+        `Prev session ${lqaS(o.prevSession && o.prevSession.changePct)}% · range ${lqaN(o.prevSession && o.prevSession.range)} · closed at ${o.prevSession && o.prevSession.closePos}% of range`, "Opening bias is analysis only, not a trade."])),
+    mini("📈 Volatility", o.vix != null ? `±${lqaN(o.expectedMove, 0)} pts` : `<span class="lqa-na">DATA UNAVAILABLE</span>`, o.vix != null ? `India VIX ${lqaN(o.vix)} (1σ day)` : "", ""),
+    mini("🗓 Events", (c.keyEvents || []).length ? `${(c.keyEvents || []).filter((n) => (n.tags || []).includes("RBI")).length} RBI · ${(c.keyEvents || []).filter((n) => !(n.tags || []).includes("RBI")).length} Govt` : `<span class="lqa-na">none (48h)</span>`,
+      (c.keyEvents || [])[0] ? lqaEsc(c.keyEvents[0].title) : "", tipOf([...(c.keyEvents || []).map((n) => `${(n.tags || []).includes("RBI") ? "[RBI]" : "[GOVT]"} ${n.title} (${n.source} · ${n.ago})`), "Scheduled calendar: " + c.scheduledCalendar])),
+  ].join("") : `<div class="lqa-empty">Market context: DATA UNAVAILABLE</div>`;
 
   const hist = d.history || [];
   const grid = (side) => {
@@ -130,20 +128,13 @@ function renderLiquidityAnalysis(d) {
   const takenL = d.levels.filter((l) => l.event).sort((a, b) => a.takenAt - b.takenAt);
   const pendL = d.levels.filter((l) => !l.event && l.status !== "INVALIDATED").sort((a, b) => Math.abs(a.distance ?? 1e9) - Math.abs(b.distance ?? 1e9));
   const gapL = d.levels.filter((l) => l.status === "INVALIDATED");
-  const tchip = (l) => `<span class="lqa-chip taken" title="${lqaEsc(l.sources.join("\n"))}"><b>${lqaEsc(l.event.time)}</b> ${l.side === "DOWNSIDE" ? "↓" : "↑"} ${lqaEsc(l.type)} ${lqaN(l.price)} → <span class="${l.event.afterDirection === "UP" ? "up" : l.event.afterDirection === "DOWN" ? "dn" : ""}">${lqaEsc(l.event.afterDirection || "…")} ${l.event.pointsCaptured != null ? lqaS(l.event.pointsCaptured) + " pts" : ""}</span> <i>${lqaEsc(l.event.outcome)}</i></span>`;
-  const pchip = (l) => `<span class="lqa-chip pend" title="${lqaEsc(l.sources.join("\n"))}">${l.side === "DOWNSIDE" ? "↓" : "↑"} ${lqaEsc(l.type)} <b>${lqaN(l.price)}</b> <i>${l.distance != null ? lqaN(Math.abs(l.distance)) + " pts away" : ""}</i> <span class="lqa-st ${LQA_ST_CLS[l.status] || ""}">${lqaEsc(l.status)}</span></span>`;
+  const OC_SHORT = { REVERSAL: "REV", CONTINUATION: "CONT", FALSE: "FALSE", "NO EDGE": "NO EDGE", PENDING: "…" };
+  const tchip = (l) => `<span class="lqa-chip taken" title="${lqaEsc([`${l.type} ${lqaN(l.price)} taken ${l.event.time}`, ...l.sources, `Time to liquidity ${l.event.timeToLiquidity}`, `After: ${l.event.afterDirection || "…"} ${l.event.pointsCaptured != null ? lqaS(l.event.pointsCaptured) + " pts" : ""}`, `Outcome ${l.event.outcome} · ${l.event.pattern}`].join("\n"))}"><b class="lqa-time">${lqaEsc(l.event.time)}</b> ${l.side === "DOWNSIDE" ? "↓" : "↑"} ${lqaEsc(l.type)} ${lqaN(l.price, 0)} <span class="${lqaCls(l.event.pointsCaptured)}">${l.event.pointsCaptured != null ? lqaS(l.event.pointsCaptured, 0) : ""}</span> <i>${OC_SHORT[l.event.outcome] || lqaEsc(l.event.outcome)}</i></span>`;
+  const pchip = (l) => `<span class="lqa-chip pend" title="${lqaEsc([...l.sources, `Status ${l.status}`].join("\n"))}">${l.side === "DOWNSIDE" ? "↓" : "↑"} ${lqaEsc(l.type)} <b>${lqaN(l.price, 0)}</b> <i>${l.distance != null ? lqaN(Math.abs(l.distance), 0) + " away" : ""}</i>${l.status !== "WAITING" ? ` <span class="lqa-st ${LQA_ST_CLS[l.status] || ""}">${lqaEsc(l.status)}</span>` : ""}</span>`;
   const takeSummary = `<div class="lqa-takesum">
       <div><div class="lqa-gh">✅ LIQUIDITY TAKEN TODAY (${takenL.length}) <i>in time order</i></div>${takenL.map(tchip).join("") || `<span class="lqa-na">None taken yet</span>`}</div>
       <div><div class="lqa-gh">⏳ PENDING — NOT YET TAKEN (${pendL.length}) <i>nearest first</i></div>${pendL.map(pchip).join("") || `<span class="lqa-na">No pending levels</span>`}${gapL.length ? `<div class="lqa-small">Gapped through at the open (no sweep): ${gapL.map((l) => `${lqaEsc(l.type)} ${lqaN(l.price)}`).join(", ")}</div>` : ""}</div>
     </div>`;
-  const statusRows = d.levels.slice().sort((a, b) => (b.takenAt || 0) - (a.takenAt || 0) || a.price - b.price);
-  const status = `<div class="lqa-tscroll"><table class="lqa-t"><thead><tr><th>Level</th><th class="r">Price</th><th>Current Status</th><th>Time Taken</th><th>Time to Liquidity</th><th>Direction After Take</th><th class="r">Points Moved</th><th>Outcome</th><th>Pattern</th></tr></thead><tbody>
-    ${statusRows.map((l) => { const e = l.event; return `<tr class="st-${LQA_ST_CLS[l.status] || ""}"><td><b>${lqaEsc(l.type)}</b> <i>${l.side === "DOWNSIDE" ? "↓" : "↑"}</i></td><td class="r">${lqaN(l.price)}</td>
-      <td><span class="lqa-st ${LQA_ST_CLS[l.status] || ""}">${lqaEsc(l.status)}</span></td><td>${e ? lqaEsc(e.time) : "—"}</td><td>${e ? lqaEsc(e.timeToLiquidity) : "—"}</td>
-      <td class="${e && e.afterDirection === "UP" ? "up" : e && e.afterDirection === "DOWN" ? "dn" : ""}">${e ? lqaEsc(e.afterDirection || "—") : "—"}</td>
-      <td class="r ${lqaCls(e && e.pointsCaptured)}">${e && e.pointsCaptured != null ? lqaS(e.pointsCaptured) + " pts" : "—"}</td><td>${e ? lqaEsc(e.outcome) : "—"}</td><td>${e ? lqaEsc(e.pattern) : "—"}</td></tr>`; }).join("")}
-    </tbody></table></div>`;
-
   const oc = (k) => hist.filter((e) => e.outcome === k).length;
   const histTable = hist.length ? `<div class="lqa-hsum">${hist.length} events · ${d.historySessions} sessions · Reversal ${oc("REVERSAL")} · Continuation ${oc("CONTINUATION")} · Whipsaw (FALSE) ${oc("FALSE")} · No edge ${oc("NO EDGE")}</div>
     <div class="lqa-tscroll lqa-hist"><table class="lqa-t lqa-wide"><thead><tr>
@@ -161,12 +152,18 @@ function renderLiquidityAnalysis(d) {
     </tbody></table></div>` : `<div class="lqa-empty">No liquidity events in the last 20 sessions (or history unavailable).</div>`;
 
   document.getElementById("lqa-body").innerHTML = `
-    <section class="lqa-sec"><div class="lqa-sh">MORNING MARKET CONTEXT <i>${lqaEsc(c ? c.headline : "")}</i></div><div class="lqa-cards">${ctx}</div></section>
-    <section class="lqa-sec"><div class="lqa-sh">TODAY'S LIQUIDITY LEVELS · ${lqaEsc(d.index)} · ${lqaEsc(d.tf)} <i>price ${lqaN(o.price)} · levels appear as they become known: previous day 09:15, opening range 09:20, 15M 09:30</i></div>
-      ${takeSummary}
-      <div class="lqa-two"><div><div class="lqa-gh dn">▼ POTENTIAL DOWNSIDE LIQUIDITY / SUPPORT</div>${grid("DOWNSIDE")}</div>
-      <div><div class="lqa-gh up">▲ POTENTIAL UPSIDE LIQUIDITY / RESISTANCE</div>${grid("UPSIDE")}</div></div></section>
-    <section class="lqa-sec"><div class="lqa-sh">TODAY'S LIQUIDITY STATUS</div>${status}</section>
-    <section class="lqa-sec"><div class="lqa-sh">LIQUIDITY EVENT HISTORY — LAST ${d.historySessions} TRADING DAYS <i>newest first</i></div>${histTable}</section>
-    <div class="lqa-foot">${(d.notes || []).map(lqaEsc).join(" · ")} · Expected reaction = the most common outcome of that level type over the 20-day history. Outcome: first side to move 1×ATR within 10 candles (both = FALSE / whipsaw).</div>`;
+    <div class="lqa-ctx">${ctx}</div>
+    ${takeSummary}
+    <div class="lqa-two"><div><div class="lqa-gh dn">▼ DOWNSIDE LIQUIDITY / SUPPORT <i>price ${lqaN(o.price)}</i></div>${grid("DOWNSIDE")}</div>
+      <div><div class="lqa-gh up">▲ UPSIDE LIQUIDITY / RESISTANCE <i>${lqaEsc(d.index)} · ${lqaEsc(d.tf)}</i></div>${grid("UPSIDE")}</div></div>
+    <section class="lqa-sec lqa-histsec"><div class="lqa-sh">LIQUIDITY EVENT HISTORY — LAST ${d.historySessions} TRADING DAYS <i title="${lqaEsc([...(d.notes || []), "Outcome = first side to move 1×ATR within 10 candles (both = FALSE / whipsaw). Expected reaction = most common outcome of that level type over 20 days."].join("\n"))}">newest first · research only ⓘ</i></div>${histTable}</section>`;
+  lqaFitHistory();
 }
+
+// Let the 20-day table use whatever screen height is left (scrolls inside its box).
+function lqaFitHistory() {
+  const h = document.querySelector("#lqa-root .lqa-hist"); if (!h) return;
+  const top = h.getBoundingClientRect().top + window.scrollY;
+  h.style.maxHeight = Math.max(260, window.innerHeight - top - 12) + "px";
+}
+window.addEventListener("resize", () => { if (document.body.classList.contains("lqa-fullwidth")) lqaFitHistory(); });
