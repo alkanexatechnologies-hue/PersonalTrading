@@ -47,6 +47,8 @@ export const SETUP_CONFIG = {
   // Study (5 indices, build + unseen check period): range-day losses −60%, stop-loss rate down on both periods,
   // 43% fewer trades; better than no filter after option costs.
   chopEfficiencyMin: 0.20,
+  // which chart the S3/S4/S5 trend gates read: "15m" = 15M EMA 9 vs 21 (default), "5m" = 5m EMA 9 vs 21 on closed candles
+  trendTf: "15m" as "15m" | "5m",
   // chopMode "session" = efficiency since the open; "rolling" = over the last chopWindowBars candles.
   // chopBreakOverride: a candle closing beyond the session's high (CE) / low (PE) so far may enter even when choppy.
   chopMode: "session" as "session" | "rolling", chopWindowBars: 12, chopBreakOverride: false,
@@ -118,6 +120,13 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
     return a == null || b == null ? null : a > b ? "UP" : a < b ? "DOWN" : "FLAT";
   };
   const sessOpen = today[0].open;
+  // trend used by the entry gates; the 5m version reads EMA 9 vs EMA 21 of the closed 5m candle at index i
+  const tfName = C.trendTf === "5m" ? "5m" : "15M";
+  const gateTrend = (i: number, tEnd: number): string | null => {
+    if (C.trendTf !== "5m") return dir15At(tEnd);
+    const a = E9[i], b = E21[i];
+    return a == null || b == null ? null : a > b ? "UP" : a < b ? "DOWN" : "FLAT";
+  };
   // home = which side price was on when the level came into play ("ABOVE" → the level is support).
   // It only flips after ACCEPTANCE (2 closes beyond); a 1-candle break that closes back is a failed break.
   const lvState = new Map<string, { home: "ABOVE" | "BELOW"; tests: { t: number; hi: number; lo: number }[]; closesBeyond: number; lastBeyondK: number; acceptedAt: number | null; pending: { i: number; kind: string } | null; fired: number; spentFarAt: number | null; lastFire: number | null }>();
@@ -283,7 +292,7 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
           const extreme = dailyAtr != null && moveIn >= C.extremeDailyAtrFrac * dailyAtr;
           const context = m + 5 <= C.morningEndMin ? "MORNING" : extreme ? "EXTREME" : "INTRADAY";
           const major = isMajor(L);
-          const d15 = dir15At(tEnd);
+          const d15 = gateTrend(i, tEnd);
           const reg = opts.regimeAt ? opts.regimeAt(all.slice(0, i + 1)) : null;
           let block: string | null = null;
           if (context === "INTRADAY" && !major) block = "Minor level outside the morning window (needs a major level or an extreme move)";
@@ -295,7 +304,7 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
             block = `VWAP gate — 5m close ${r2(c.close)} is ${c.close >= vwC ? "above" : "below"} VWAP ${r2(vwC)}; ${res ? "PE needs a close below VWAP" : "CE needs a close above VWAP"}`;
           // higher-timeframe permission: do not fade the 15M trend unless the move is extreme or the market is ranging
           if (!block && ((res && d15 === "UP") || (!res && d15 === "DOWN")) && context !== "EXTREME" && reg !== "RANGE")
-            block = `15M trend ${d15} — this is more likely a pullback than a reversal`;
+            block = `${tfName} trend ${d15} — this is more likely a pullback than a reversal`;
           // absorption: ≥3 tests with rising lows (resistance) / falling highs (support) → break more likely
           const recent = st.tests.filter((x) => x.t >= c.time - C.absorptionLookback * 300);
           if (!block && recent.length >= C.absorptionTests) {
@@ -358,10 +367,10 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
         const pull = side === "CE" ? c.low <= e9 + C.pullbackAtr * a && c.close > e9 && c.close > c.open && c.close - vw >= 0.5 * a
                                    : c.high >= e9 - C.pullbackAtr * a && c.close < e9 && c.close < c.open && vw - c.close >= 0.5 * a;
         if (!stretched || !pull) continue;
-        const d15 = dir15At(tEnd);
+        const d15 = gateTrend(i, tEnd);
         const reg = opts.regimeAt ? opts.regimeAt(all.slice(0, i + 1)) : null;
         let block: string | null = null;
-        if ((side === "CE" && d15 !== "UP") || (side === "PE" && d15 !== "DOWN")) block = `15M trend ${d15 ?? "n/a"} does not agree`;
+        if ((side === "CE" && d15 !== "UP") || (side === "PE" && d15 !== "DOWN")) block = `${tfName} trend ${d15 ?? "n/a"} does not agree`;
         if (!block) block = chopBlock(c.time, side);
         if (!block && reg === "RANGE") block = "Regime RANGE — VWAP extensions mean-revert";
         const dayMove = side === "CE" ? c.high - sessOpen : sessOpen - c.low;
@@ -434,9 +443,9 @@ export function evaluateSession(hist: Candle[], today: Candle[], levels: LiqLeve
             if (!block && openSig) block = "Another setup signal is still open";
             // optional 15M filter (research switch; default off = 15M only decides the exit)
             if (!block && opts.s5Trend15 && opts.s5Trend15 !== "off") {
-              const t15 = dir15At(tEnd), want = sg > 0 ? "UP" : "DOWN", against = sg > 0 ? "DOWN" : "UP";
-              if (opts.s5Trend15 === "notAgainst" && t15 === against) block = `15M trend ${t15} is against`;
-              if (opts.s5Trend15 === "agree" && t15 !== want) block = `15M trend ${t15 ?? "n/a"} does not agree`;
+              const t15 = gateTrend(i, tEnd), want = sg > 0 ? "UP" : "DOWN", against = sg > 0 ? "DOWN" : "UP";
+              if (opts.s5Trend15 === "notAgainst" && t15 === against) block = `${tfName} trend ${t15} is against`;
+              if (opts.s5Trend15 === "agree" && t15 !== want) block = `${tfName} trend ${t15 ?? "n/a"} does not agree`;
               // slower 5-minute trend instead of 15M: EMA 21 vs EMA 50 on the 5m chart
               if (opts.s5Trend15 === "slow5m" && E50[i] != null && (sg > 0 ? e21 < (E50[i] as number) : e21 > (E50[i] as number))) block = `5m EMA 21 ${sg > 0 ? "below" : "above"} EMA 50 (slower 5m trend against)`;
             }
