@@ -200,6 +200,7 @@ import { buildPremarketOverview } from "../sentiment/overview";
 import { todaySnapshots } from "../sentiment/snapshotStore";
 import { getMarketDataHealth, fetchMarketData, marketDataProviderName, MdKey } from "../sentiment/marketDataProvider";
 import { globalCues, indexSentiment, indiaSentiment, briefPhase, briefHeadline, SentimentBrief, IndexSentiment } from "../sentiment/brief";
+import { sessionsOf, analyseDay, aggregate, LiqEvent } from "../liquidity/liquidityTake";
 import fs from "fs";
 import path from "path";
 import {
@@ -8187,6 +8188,96 @@ async function buildSentimentBrief(): Promise<SentimentBrief> {
     note: "Context only — this never changes a trade decision. Global quotes are delayed; GIFT NIFTY is not available from the provider.",
   };
 }
+// ============================ Liquidity Analysis (research screen) ============================
+// RESEARCH ONLY — never feeds the arbiter, paper engine or trade execution.
+// Data: 45 days of 5m candles fetched ONCE per day per index through the shared
+// Dhan service (completed sessions never change), plus today's candles from the
+// shared live 5m cache that Market Command already keeps warm. Option OI is read
+// from the existing OI cache only (no extra chain call).
+const LIQ_INDEX = ["^NSEI", "^NSEBANK", "^CNXFIN", "^BSESN", "^NSEMDCP50"];
+async function buildLiquidityAnalysis(symbol: string, tfMin: 5 | 15) {
+  const def = findSymbolDef(symbol);
+  if (!def) throw new Error("unknown symbol");
+  const nowSec = Math.floor(Date.now() / 1000);
+  const today = istDateStr();
+  const hist: Candle[] = await cached(`liq-hist5:${symbol}:${today}`, 6 * 3600_000, () => getProvider().getCandles(symbol, "5m", 45) as Promise<Candle[]>);
+  let live: Candle[] = [];
+  try { live = (await getCandlesCached(symbol, "5m")) as Candle[]; } catch { live = (_cache.get(`c:${symbol}:5m`)?.v as Candle[]) || []; }
+  const byT = new Map<number, Candle>();
+  for (const c of hist) byT.set(c.time, c);
+  for (const c of live) byT.set(c.time, c);                 // live wins for today's bars
+  const ses = sessionsOf([...byT.values()].sort((a, b) => a.time - b.time));
+  const days = [...ses.keys()].sort();
+  if (days.length < 2) throw new Error("not enough candle history");
+  const lastDay = days[days.length - 1];
+  const step = def.strikeStep ?? null;
+  const dayEnd = (d: string) => { const a = ses.get(d)!; return a[a.length - 1].time + 300; };
+  // Today (or the latest session) — as of now, closed candles only.
+  const curIdx = days.length - 1;
+  const cur = analyseDay(days, ses, curIdx, tfMin, lastDay === today ? nowSec : dayEnd(lastDay), step);
+  // 20 completed sessions before it — immutable, cached for the day.
+  const history: LiqEvent[] = await cached(`liq-histres:${symbol}:${tfMin}:${lastDay}`, 6 * 3600_000, async () => {
+    const ev: LiqEvent[] = [];
+    for (let di = Math.max(1, curIdx - 20); di < curIdx; di++) { const r = analyseDay(days, ses, di, tfMin, dayEnd(days[di]), step); if (r) ev.push(...r.events); }
+    return ev.sort((a, b) => (a.date === b.date ? b.takenAt - a.takenAt : a.date < b.date ? 1 : -1));
+  });
+  // Opening / morning numbers.
+  const t5 = ses.get(lastDay)!, pd = ses.get(days[curIdx - 1])!;
+  const pdh = Math.max(...pd.map((c) => c.high)), pdl = Math.min(...pd.map((c) => c.low)), pdc = pd[pd.length - 1].close;
+  const closed5 = t5.filter((c) => c.time + 300 <= (lastDay === today ? nowSec : dayEnd(lastDay)));
+  const f15 = closed5.filter((c) => { const m = new Date((c.time + 19800) * 1000); return m.getUTCHours() * 60 + m.getUTCMinutes() < 9 * 60 + 30; });
+  const price = closed5.length ? closed5[closed5.length - 1].close : null;
+  const lvl = (t: string) => cur?.levels.find((x) => x.level.type === t || x.level.sources.some((s) => s.startsWith(t + ":")))?.level.price ?? null;
+  const oiv: any = _cache.get(`oi:${symbol}`)?.v;
+  const oiAt = (k: number | null) => { const r = k != null && oiv?.topStrikes?.find((x: any) => x.strike === k); return r ? { ceOi: r.ceOi ?? null, peOi: r.peOi ?? null } : null; };
+  const brief: any = await cached("sentiment-brief", 60_000, () => buildSentimentBrief()).catch(() => null);
+  const news: any = await cached("news-feed", 300_000, () => getMarketNews()).catch(() => null);
+  const gTags = new Set(["Global", "Fed", "Crude", "Rupee", "FII/DII"]);
+  const gItems = ((news?.items || []) as any[]).filter((n) => (n.tags || []).some((t: string) => gTags.has(t))).slice(0, 8);
+  const vix = brief?.india?.vix?.value ?? null;
+  const lastLive = live.length ? live[live.length - 1].time : null;
+  const marketOpen = isTradingTimeIST();
+  const dataStatus = !marketOpen ? "CLOSED" : lastLive != null && nowSec - (lastLive + 300) < 10 * 60 ? "LIVE" : "STALE";
+  const pdRange = pdh - pdl;
+  return {
+    symbol, index: def.nseSymbol || def.name, name: def.name, tf: `${tfMin}m`, date: lastDay, isToday: lastDay === today,
+    asOf: nowSec, dataStatus, lastCandle: closed5.length ? closed5[closed5.length - 1].time : null,
+    opening: {
+      price, open: t5[0]?.open ?? null, pdh, pdl, pdc, gapPct: t5[0] ? Math.round((t5[0].open - pdc) / pdc * 10000) / 100 : null,
+      first15High: f15.length === 3 ? Math.max(...f15.map((c) => c.high)) : null, first15Low: f15.length === 3 ? Math.min(...f15.map((c) => c.low)) : null,
+      orHigh: lvl("Opening Range High"), orLow: lvl("Opening Range Low"),
+      prevSession: { changePct: Math.round((pdc - pd[0].open) / pd[0].open * 10000) / 100, range: Math.round(pdRange * 100) / 100,
+        closePos: pdRange > 0 ? Math.round((pdc - pdl) / pdRange * 100) : null },
+      expectedMove: vix != null && price != null ? Math.round(price * vix / 100 / Math.sqrt(252)) : null, vix,
+    },
+    context: brief ? {
+      headline: brief.headline, globalLean: brief.global?.cues?.lean, positives: brief.global?.cues?.positives || [], negatives: brief.global?.cues?.negatives || [],
+      indiaLean: brief.india?.lean, indiaReasons: brief.india?.reasons || [],
+      globalNews: { positive: gItems.filter((n) => n.sentiment === "positive").length, negative: gItems.filter((n) => n.sentiment === "negative").length,
+        neutral: gItems.filter((n) => n.sentiment === "neutral").length, items: gItems.slice(0, 5).map((n) => ({ title: n.title, source: n.source, ago: n.ago, sentiment: n.sentiment, tags: n.tags })) },
+      keyEvents: (brief.policy?.items || []).slice(0, 5),
+      scheduledCalendar: "DATA UNAVAILABLE — no economic-calendar source is connected",
+    } : null,
+    levels: (cur?.levels || []).map((t) => ({ ...t.level, status: t.status, distance: t.distance, takenAt: t.takenAt,
+      strike: step ? Math.round(t.level.price / step) * step : null, oi: oiAt(step ? Math.round(t.level.price / step) * step : null),
+      event: t.event ? { time: t.event.time, afterDirection: t.event.afterDirection, pointsCaptured: t.event.pointsCaptured, outcome: t.event.outcome, pattern: t.event.pattern, timeToLiquidity: t.event.timeToLiquidity } : null })),
+    todayEvents: cur?.events || [],
+    history,
+    historySessions: Math.min(20, curIdx),
+    notes: [
+      "Research only — not a trading signal; the Market Command FINAL DECISION is unchanged.",
+      `Time to liquidity resolution = ${tfMin} min (Dhan has no 1-minute data).`,
+    ],
+  };
+}
+router.get("/liquidity-analysis", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  const symbol = LIQ_INDEX.includes(String(req.query.symbol)) ? String(req.query.symbol) : "^NSEI";
+  const tf = String(req.query.tf) === "15" ? 15 : 5;
+  try {
+    // Recomputed at most once per 30s per index/timeframe (statuses change per closed 5m candle).
+    res.json(await cached(`liq-analysis:${symbol}:${tf}`, 30_000, () => buildLiquidityAnalysis(symbol, tf as 5 | 15)));
+  } catch (e: any) { res.json({ error: e?.message || "liquidity analysis failed" }); }
+});
 router.get("/market-sentiment-brief", requirePermission("oiAnalysis"), async (_req: Request, res: Response) => {
   try { res.json(await cached("sentiment-brief", 60_000, () => buildSentimentBrief())); }
   catch (e: any) { res.json({ error: e?.message || "sentiment brief failed" }); }

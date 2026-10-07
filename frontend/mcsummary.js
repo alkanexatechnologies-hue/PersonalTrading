@@ -39,6 +39,7 @@ function mcsShell() {
   <div class="mcs-head">
     <button class="mcs-back" id="mcs-back" title="Back to Market Command">← Market Command</button>
     <div class="mcs-title">MARKET COMMAND SUMMARY <span class="mcs-mode">Intraday</span></div>
+    <button class="mcs-back mc2-summary-btn" type="button" onclick="if (typeof switchTab === 'function') switchTab('liquidityanalysis')" title="Liquidity Analysis — morning liquidity plan and 20-day history (research only)">💧 LIQUIDITY ANALYSIS</button>
     <div class="mcs-quote" id="mcs-quote"></div>
     <div class="mcs-tickers" id="mcs-tickers"></div>
   </div>

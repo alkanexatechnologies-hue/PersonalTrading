@@ -7,7 +7,7 @@
          under the home indicator. Android ignores it harmlessly. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>BC Data Status</title>
-    <link rel="stylesheet" href="styles.css?v=20261007-mc2" />
+    <link rel="stylesheet" href="styles.css?v=20261007-lqa1" />
     <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   </head>
   <body class="oi-focus">
@@ -496,6 +496,7 @@
           <button class="tab tab-primary" data-tab="oianalysis" data-group="marketcommand">🔬 OI Analysis</button>
           <button class="tab tab-primary" data-tab="tradeexec" data-group="marketcommand">🧾 Trade Execution</button>
           <button class="tab tab-primary" data-tab="mcsummary" data-group="marketcommand">🧭 MC Summary</button>
+          <button class="tab tab-primary" data-tab="liquidityanalysis" data-group="marketcommand">💧 Liquidity Analysis</button>
           <!-- AI Paper Desk screens (own desk; each tab is permission-gated server-side) -->
           <button class="tab tab-primary" data-tab="aipdash" data-group="aipaper">🤖 Dashboard</button>
           <button class="tab" data-tab="aipanalysis" data-group="aipaper">🧠 AI Market Analysis</button>
@@ -1568,6 +1569,7 @@
               <button class="mc2-replay" id="mc-open-oianalysis" title="Open the OI Analysis screen for this index">🔬 OI Analysis</button>
               <button class="mc2-replay" id="mc-open-tradeexec" title="Open the Trade & Levels / Trade Execution screen">🧾 Trade Execution</button>
               <button class="mc2-replay mc2-summary-btn" id="mc-open-mcsummary" title="Open the Market Command Summary for this index">📋 MARKET COMMAND SUMMARY</button>
+              <button class="mc2-replay mc2-summary-btn" id="mc-open-liquidity" title="Liquidity Analysis — morning liquidity plan and 20-day liquidity history for this index (research only)">💧 LIQUIDITY ANALYSIS</button>
               <div class="mc2-status">
                 <span class="mc-live-dot" id="mc-live-dot"></span>
                 <span id="mc-live-label">Dhan Connected</span>
@@ -1820,6 +1822,7 @@
              Command. CE + PE premium charts are the primary focus. All data is the
              live Dhan snapshot; nothing is fabricated. -->
         <div class="tab-panel" id="panel-mcsummary"><div class="mcs-wrap" id="mcs-root"></div></div>
+        <div class="tab-panel" id="panel-liquidityanalysis"><div class="lqa-wrap" id="lqa-root"></div></div>
         <div class="tab-panel" id="panel-optionterminal">
           <div class="ot-wrap">
             <div class="arb-banner" id="ot-arbiter" hidden></div>
@@ -2555,7 +2558,8 @@
         <div id="dc-body" class="dc-body">Loading…</div>
       </div>
     </div>
-    <script src="app.js?v=20261007-mc2"></script>
+    <script src="app.js?v=20261007-lqa1"></script>
     <script src="mcsummary.js?v=20261007-mcsummary1"></script>
+    <script src="liquidity.js?v=20261007-lqa1"></script>
   </body>
 </html>
