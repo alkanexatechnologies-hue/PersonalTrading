@@ -200,7 +200,7 @@ import { buildPremarketOverview } from "../sentiment/overview";
 import { todaySnapshots } from "../sentiment/snapshotStore";
 import { getMarketDataHealth, fetchMarketData, marketDataProviderName, MdKey } from "../sentiment/marketDataProvider";
 import { globalCues, indexSentiment, indiaSentiment, briefPhase, briefHeadline, SentimentBrief, IndexSentiment } from "../sentiment/brief";
-import { sessionsOf, analyseDay, aggregate, LiqEvent } from "../liquidity/liquidityTake";
+import { sessionsOf, analyseDay, aggregate, LiqEvent, LiqLevel } from "../liquidity/liquidityTake";
 import fs from "fs";
 import path from "path";
 import {
@@ -8195,6 +8195,22 @@ async function buildSentimentBrief(): Promise<SentimentBrief> {
 // shared live 5m cache that Market Command already keeps warm. Option OI is read
 // from the existing OI cache only (no extra chain call).
 const LIQ_INDEX = ["^NSEI", "^NSEBANK", "^CNXFIN", "^BSESN", "^NSEMDCP50"];
+// ---- OI support / resistance: top PUT-OI strikes = support, top CALL-OI strikes =
+// resistance (same definition as OiAnalysis.support/.resistance). The FIRST reading
+// after 09:15 each day is kept as the MORNING snapshot (persisted so a restart keeps
+// it) and becomes tracked liquidity levels; the latest reading shows any shift.
+type OiSR = { at: number; spot: number | null; expiry: string | null; pcr: number | null;
+  support: { strike: number; oi: number; chg: number | null }[]; resistance: { strike: number; oi: number; chg: number | null }[] };
+const OI_MORNING_FILE = path.join(process.cwd(), "data", "liquidity-oi-morning.json");
+let _oiMorning: Record<string, OiSR & { date: string }> = (() => { try { return JSON.parse(fs.readFileSync(OI_MORNING_FILE, "utf8")); } catch { return {}; } })();
+function oiSrOf(oi: any): OiSR | null {
+  const rows: any[] = oi && oi.available && Array.isArray(oi.topStrikes) ? oi.topStrikes : [];
+  if (!rows.length) return null;
+  const top = (k: "ceOi" | "peOi", c: "ceChg" | "peChg") => rows.filter((r) => (r[k] ?? 0) > 0).sort((a, b) => b[k] - a[k]).slice(0, 2)
+    .map((r) => ({ strike: r.strike, oi: r[k], chg: r[c] ?? null }));
+  return { at: Math.floor((oi.asOf ? (oi.asOf > 1e12 ? oi.asOf / 1000 : oi.asOf) : Date.now() / 1000)), spot: oi.underlying ?? null, expiry: oi.expiry ?? null,
+    pcr: oi.pcr ?? null, support: top("peOi", "peChg"), resistance: top("ceOi", "ceChg") };
+}
 async function buildLiquidityAnalysis(symbol: string, tfMin: 5 | 15) {
   const def = findSymbolDef(symbol);
   if (!def) throw new Error("unknown symbol");
@@ -8212,9 +8228,27 @@ async function buildLiquidityAnalysis(symbol: string, tfMin: 5 | 15) {
   const lastDay = days[days.length - 1];
   const step = def.strikeStep ?? null;
   const dayEnd = (d: string) => { const a = ses.get(d)!; return a[a.length - 1].time + 300; };
+  // OI (shared OI cache; one chain call at most per OI TTL, same as Market Command).
+  let oiNow: OiSR | null = null;
+  try { oiNow = oiSrOf(await withTimeout(getOiCached(def), 12_000, `liq oi ${symbol}`)); } catch { oiNow = oiSrOf(_cache.get(`oi:${symbol}`)?.v); }
+  const istMinNow = Math.floor(((nowSec + 19800) % 86400) / 60);
+  if (oiNow && lastDay === today && isTradingTimeIST() && istMinNow >= 9 * 60 + 15 && _oiMorning[symbol]?.date !== today) {
+    _oiMorning[symbol] = { ...oiNow, at: nowSec, date: today };
+    try { fs.writeFileSync(OI_MORNING_FILE, JSON.stringify(_oiMorning, null, 1)); } catch { /* best effort */ }
+  }
+  const oiMorning = _oiMorning[symbol]?.date === lastDay ? _oiMorning[symbol] : null;
+  const fmtOi = (v: number) => v >= 1e7 ? (v / 1e7).toFixed(2) + "Cr" : (v / 1e5).toFixed(1) + "L";
+  const oiLevels: LiqLevel[] = [];
+  if (oiMorning) {
+    const refP = oiMorning.spot ?? null;
+    oiMorning.support.forEach((x, i) => oiLevels.push({ id: "", type: "OI Support", sources: [`${i ? "2nd" : "max"} PUT OI ${fmtOi(x.oi)} @ ${new Date((oiMorning.at + 19800) * 1000).toISOString().slice(11, 16)}`],
+      price: x.strike, side: refP != null && x.strike > refP ? "UPSIDE" : "DOWNSIDE", activeFrom: oiMorning.at, refPrice: refP ?? x.strike + 1, priority: 3 + i * 0.1 }));
+    oiMorning.resistance.forEach((x, i) => oiLevels.push({ id: "", type: "OI Resistance", sources: [`${i ? "2nd" : "max"} CALL OI ${fmtOi(x.oi)} @ ${new Date((oiMorning.at + 19800) * 1000).toISOString().slice(11, 16)}`],
+      price: x.strike, side: refP != null && x.strike < refP ? "DOWNSIDE" : "UPSIDE", activeFrom: oiMorning.at, refPrice: refP ?? x.strike - 1, priority: 3 + i * 0.1 }));
+  }
   // Today (or the latest session) — as of now, closed candles only.
   const curIdx = days.length - 1;
-  const cur = analyseDay(days, ses, curIdx, tfMin, lastDay === today ? nowSec : dayEnd(lastDay), step);
+  const cur = analyseDay(days, ses, curIdx, tfMin, lastDay === today ? nowSec : dayEnd(lastDay), step, oiLevels);
   // 20 completed sessions before it — immutable, cached for the day.
   const history: LiqEvent[] = await cached(`liq-histres:${symbol}:${tfMin}:${lastDay}`, 6 * 3600_000, async () => {
     const ev: LiqEvent[] = [];
@@ -8261,6 +8295,7 @@ async function buildLiquidityAnalysis(symbol: string, tfMin: 5 | 15) {
     levels: (cur?.levels || []).map((t) => ({ ...t.level, status: t.status, distance: t.distance, takenAt: t.takenAt,
       strike: step ? Math.round(t.level.price / step) * step : null, oi: oiAt(step ? Math.round(t.level.price / step) * step : null),
       event: t.event ? { time: t.event.time, afterDirection: t.event.afterDirection, pointsCaptured: t.event.pointsCaptured, outcome: t.event.outcome, pattern: t.event.pattern, timeToLiquidity: t.event.timeToLiquidity } : null })),
+    oi: { morning: oiMorning, now: oiNow, note: oiMorning ? null : "Morning OI snapshot is taken at the first reading after 09:15 on a trading day" },
     todayEvents: cur?.events || [],
     history,
     historySessions: Math.min(20, curIdx),

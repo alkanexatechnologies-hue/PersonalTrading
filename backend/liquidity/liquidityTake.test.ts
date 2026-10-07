@@ -96,3 +96,16 @@ test("15m aggregation aligns to 09:15", () => {
   assert.equal(a[0].time, s[0].time);
   assert.equal(a[1].close, 6);
 });
+
+test("OI support from the morning snapshot is tracked, and only from its snapshot time", () => {
+  const { m, d, take } = sweepDay();
+  const t0 = m.get(d[1])![0].time;
+  const oiSup = { id: "", type: "OI Support", sources: ["max PUT OI 1.2Cr @ 09:16"], price: 86, side: "DOWNSIDE" as const, activeFrom: t0 + 60, refPrice: 104, priority: 3 };
+  const day = analyseDay(d, m, 1, 5, take + 3600, 50, [oiSup])!;
+  const tr = day.levels.find((t) => t.level.type === "OI Support" || t.level.sources.some((s) => s.startsWith("OI Support:")))!;
+  assert.ok(tr, "OI level present");
+  assert.ok(tr.event && tr.event.takenAt === take, "taken by the sweep candle (low 85 < 86)");
+  // Not known yet → not present.
+  const before = analyseDay(d, m, 1, 5, t0 + 30, 50, [oiSup]);
+  assert.ok(!before || !before.levels.some((t) => t.level.sources.some((s) => s.includes("PUT OI"))));
+});

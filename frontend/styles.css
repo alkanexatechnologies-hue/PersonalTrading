@@ -6669,7 +6669,7 @@ body.lqa-fullwidth .watchlist, body.lqa-fullwidth #watchlist { display: none !im
 .lqa-seg button { min-height: 34px; padding: 4px 10px; font-size: 12px; }
 .lqa-date { font-size: 12px; }
 .lqa-body { gap: 6px; }
-.lqa-ctx { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+.lqa-ctx { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
 .lqa-mini { background: #0f1626; border: 1px solid #1c2537; border-radius: 8px; padding: 5px 8px; min-width: 0; display: flex; flex-direction: column; gap: 1px; cursor: help; }
 .lqa-mt { font-size: 12px; font-weight: 800; color: #94a3b8; }
 .lqa-mm { font-size: 14px; font-weight: 800; color: #f1f5f9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -6687,7 +6687,7 @@ body.lqa-fullwidth .watchlist, body.lqa-fullwidth #watchlist { display: none !im
 .lqa-histsec .lqa-sh { margin-bottom: 4px; font-size: 12px; }
 .lqa-histsec .lqa-sh i { font-size: 12px; }
 .lqa-hsum { margin-bottom: 4px; }
-@media (max-width: 1100px) { .lqa-ctx { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 1300px) { .lqa-ctx { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .lqa-ctx { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 /* Liquidity Analysis uses the whole screen like Market Command (no cockpit / news / tab-help bars). */
 body.lqa-fullwidth #cockpit-strip,
@@ -6696,3 +6696,18 @@ body.lqa-fullwidth #index-strip,
 body.lqa-fullwidth #tabs,
 body.lqa-fullwidth #tab-flow-wrap { display: none !important; }
 body.lqa-fullwidth .content { padding-left: 0; padding-right: 0; }
+/* ---- Liquidity Analysis: 20-day Patterns view ---- */
+.lqa-hv { margin-left: 10px; vertical-align: middle; }
+.lqa-hv button { min-height: 30px; padding: 2px 10px; font-size: 12px; }
+.lqa-pat { overflow-y: auto; }
+.lqa-tk { background: #131c2e; border: 1px solid #2563eb; border-radius: 8px; padding: 6px 10px; margin-bottom: 6px; }
+.lqa-tk ul { margin: 2px 0 0 18px; padding: 0; font-size: 13px; line-height: 1.5; color: #e2e8f0; }
+.lqa-pgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.lqa-pcard { background: #0f1626; border: 1px solid #1c2537; border-radius: 8px; padding: 4px; min-width: 0; overflow-x: auto; }
+.lqa-pbar { display: inline-flex; width: 90px; height: 10px; border-radius: 3px; overflow: hidden; background: #1e293b; vertical-align: middle; }
+.lqa-pbar i { display: block; height: 100%; }
+.lqa-pbar .rev { background: #22c55e; } .lqa-pbar .cont { background: #60a5fa; } .lqa-pbar .fls { background: #ef4444; } .lqa-pbar .ne { background: #64748b; }
+.lqa-wrap .cont { color: #60a5fa; }
+.lqa-few td { opacity: .55; }
+@media (max-width: 1300px) { .lqa-pgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .lqa-pgrid { grid-template-columns: minmax(0, 1fr); } }

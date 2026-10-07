@@ -103,6 +103,7 @@ function renderLiquidityAnalysis(d) {
     mini("🔔 Opening", lqaEsc(gapTxt), `Open ${lqaN(o.open)} · PDC ${lqaN(o.pdc)}${first15Dir ? ` · since open ${first15Dir}` : ""}`,
       tipOf([`PDH ${lqaN(o.pdh)} / PDL ${lqaN(o.pdl)} / PDC ${lqaN(o.pdc)}`, `15M H/L ${lqaN(o.first15High)} / ${lqaN(o.first15Low)}`, `Opening range H/L ${lqaN(o.orHigh)} / ${lqaN(o.orLow)}`,
         `Prev session ${lqaS(o.prevSession && o.prevSession.changePct)}% · range ${lqaN(o.prevSession && o.prevSession.range)} · closed at ${o.prevSession && o.prevSession.closePos}% of range`, "Opening bias is analysis only, not a trade."])),
+    lqaOiMini(d.oi, mini, tipOf),
     mini("📈 Volatility", o.vix != null ? `±${lqaN(o.expectedMove, 0)} pts` : `<span class="lqa-na">DATA UNAVAILABLE</span>`, o.vix != null ? `India VIX ${lqaN(o.vix)} (1σ day)` : "", ""),
     mini("🗓 Events", (c.keyEvents || []).length ? `${(c.keyEvents || []).filter((n) => (n.tags || []).includes("RBI")).length} RBI · ${(c.keyEvents || []).filter((n) => !(n.tags || []).includes("RBI")).length} Govt` : `<span class="lqa-na">none (48h)</span>`,
       (c.keyEvents || [])[0] ? lqaEsc(c.keyEvents[0].title) : "", tipOf([...(c.keyEvents || []).map((n) => `${(n.tags || []).includes("RBI") ? "[RBI]" : "[GOVT]"} ${n.title} (${n.source} · ${n.ago})`), "Scheduled calendar: " + c.scheduledCalendar])),
@@ -156,8 +157,86 @@ function renderLiquidityAnalysis(d) {
     ${takeSummary}
     <div class="lqa-two"><div><div class="lqa-gh dn">▼ DOWNSIDE LIQUIDITY / SUPPORT <i>price ${lqaN(o.price)}</i></div>${grid("DOWNSIDE")}</div>
       <div><div class="lqa-gh up">▲ UPSIDE LIQUIDITY / RESISTANCE <i>${lqaEsc(d.index)} · ${lqaEsc(d.tf)}</i></div>${grid("UPSIDE")}</div></div>
-    <section class="lqa-sec lqa-histsec"><div class="lqa-sh">LIQUIDITY EVENT HISTORY — LAST ${d.historySessions} TRADING DAYS <i title="${lqaEsc([...(d.notes || []), "Outcome = first side to move 1×ATR within 10 candles (both = FALSE / whipsaw). Expected reaction = most common outcome of that level type over 20 days."].join("\n"))}">newest first · research only ⓘ</i></div>${histTable}</section>`;
+    <section class="lqa-sec lqa-histsec"><div class="lqa-sh">LIQUIDITY EVENT HISTORY — LAST ${d.historySessions} TRADING DAYS
+      <span class="lqa-seg lqa-hv"><button type="button" class="${LQA.histView !== "patterns" ? "on" : ""}" onclick="lqaHistView('events')">📋 Events</button><button type="button" class="${LQA.histView === "patterns" ? "on" : ""}" onclick="lqaHistView('patterns')">📊 Patterns — what the market is doing</button></span>
+      <i title="${lqaEsc([...(d.notes || []), "Outcome = first side to move 1×ATR within 10 candles (both = FALSE / whipsaw). Expected reaction = most common outcome of that level type over 20 days."].join("\n"))}">research only ⓘ</i></div>
+      ${LQA.histView === "patterns" ? `<div class="lqa-hist lqa-pat">${lqaPatterns(hist)}</div>` : histTable}</section>`;
   lqaFitHistory();
+}
+function lqaHistView(v) { LQA.histView = v; if (LQA.data) renderLiquidityAnalysis(LQA.data); }
+
+// ---- 20-day PATTERNS: what the market has been doing at liquidity levels ----
+// Pure statistics over the real events in the history table (nothing predicted).
+// Groups with fewer than 4 events are shown but never used for a takeaway.
+function lqaPatterns(histAll) {
+  const h = histAll.filter((e) => e.outcome !== "PENDING");
+  if (!h.length) return `<div class="lqa-empty">No completed liquidity events in the history.</div>`;
+  const MIN_N = 4;
+  const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+  const stat = (xs) => {
+    const n = xs.length, c = (o) => xs.filter((e) => e.outcome === o).length;
+    const pts = xs.map((e) => e.pointsCaptured).filter((v) => v != null);
+    const ttl = xs.map((e) => e.timeToLiquiditySec).filter((v) => v != null);
+    return { n, rev: c("REVERSAL"), cont: c("CONTINUATION"), fls: c("FALSE"), ne: c("NO EDGE"),
+      avgAbs: pts.length ? pts.reduce((a, v) => a + Math.abs(v), 0) / pts.length : null,
+      avgTtl: ttl.length ? ttl.reduce((a, v) => a + v, 0) / ttl.length : null };
+  };
+  const dom = (s) => { const m = Math.max(s.rev, s.cont, s.fls, s.ne); return m === s.rev ? "REVERSAL" : m === s.cont ? "CONTINUATION" : m === s.fls ? "FALSE" : "NO EDGE"; };
+  const bar = (s) => `<span class="lqa-pbar" title="Reversal ${s.rev} · Continuation ${s.cont} · Whipsaw ${s.fls} · No edge ${s.ne}">
+      <i class="rev" style="width:${pct(s.rev, s.n)}%"></i><i class="cont" style="width:${pct(s.cont, s.n)}%"></i><i class="fls" style="width:${pct(s.fls, s.n)}%"></i><i class="ne" style="width:${pct(s.ne, s.n)}%"></i></span>`;
+  const mmss = (sec) => (sec == null ? "—" : `${Math.floor(sec / 60)}m`);
+  const row = (label, s) => `<tr class="${s.n < MIN_N ? "lqa-few" : ""}"><td><b>${lqaEsc(label)}</b></td><td class="r">${s.n}</td><td>${bar(s)}</td>
+      <td class="r up">${pct(s.rev, s.n)}%</td><td class="r cont">${pct(s.cont, s.n)}%</td><td class="r dn">${pct(s.fls, s.n)}%</td>
+      <td class="r">${s.avgAbs == null ? "—" : lqaN(s.avgAbs, 0)}</td><td class="r">${mmss(s.avgTtl)}</td><td>${s.n < MIN_N ? `<i>few events</i>` : `<span class="lqa-oc ${dom(s).toLowerCase().replace(/\s/g, "")}">${dom(s)}</span>`}</td></tr>`;
+  const table = (title, groups) => `<div class="lqa-pcard"><div class="lqa-gh">${title}</div><table class="lqa-t"><thead><tr><th>Group</th><th class="r">Events</th><th>Mix</th><th class="r">Rev</th><th class="r">Cont</th><th class="r">Whip</th><th class="r">Avg pts</th><th class="r">Avg time to liq.</th><th>Mostly</th></tr></thead><tbody>
+      ${groups.map(([k, xs]) => row(k, stat(xs))).join("")}</tbody></table></div>`;
+  const groupBy = (f) => { const m = new Map(); for (const e of h) { const k = f(e); if (!m.has(k)) m.set(k, []); m.get(k).push(e); } return [...m.entries()].sort((a, b) => b[1].length - a[1].length); };
+  const slot = (e) => { const [hh, mm] = e.time.split(":").map(Number), t = hh * 60 + mm; return t < 585 ? "1. 09:15–09:45 (open)" : t < 660 ? "2. 09:45–11:00" : t < 780 ? "3. 11:00–13:00" : "4. 13:00–15:15"; };
+  const withTrend = (e) => (e.dir15 == null || e.dir15 === "SIDEWAYS" ? "15M trend flat" : (e.side === "UPSIDE") === (e.dir15 === "UP") ? "Take WITH the 15M trend" : "Take AGAINST the 15M trend");
+  const dates = [...new Set(h.map((e) => e.date))].sort();
+  const recentSet = new Set(dates.slice(-5));
+  const firstOfDay = dates.map((dd) => h.filter((e) => e.date === dd).sort((a, b) => a.takenAt - b.takenAt)[0]);
+  const all = stat(h), rec = stat(h.filter((e) => recentSet.has(e.date))), old = stat(h.filter((e) => !recentSet.has(e.date)));
+
+  // Plain-language takeaways — only from groups with enough events.
+  const tk = [];
+  const domTxt = { REVERSAL: "reversed (price came back after taking the level)", CONTINUATION: "continued (the break kept running)", FALSE: "whipsawed (moved both ways ≥1 ATR)", "NO EDGE": "had no clear follow-through" };
+  tk.push(`Over ${dates.length} sessions, liquidity takes mostly <b>${domTxt[dom(all)]}</b>: reversal ${pct(all.rev, all.n)}%, continuation ${pct(all.cont, all.n)}%, whipsaw ${pct(all.fls, all.n)}% (${all.n} events).`);
+  if (rec.n >= MIN_N && old.n >= MIN_N) {
+    const dr = pct(rec.rev, rec.n) - pct(old.rev, old.n), dc = pct(rec.cont, rec.n) - pct(old.cont, old.n);
+    tk.push(Math.abs(dr) < 10 && Math.abs(dc) < 10 ? `Behaviour is <b>stable</b>: last 5 sessions look like the 15 before.`
+      : `Behaviour is <b>changing</b>: last 5 sessions reversal ${pct(rec.rev, rec.n)}% (was ${pct(old.rev, old.n)}%), continuation ${pct(rec.cont, rec.n)}% (was ${pct(old.cont, old.n)}%).`);
+  }
+  for (const [k, xs] of groupBy((e) => e.levelType)) {
+    const s = stat(xs); if (s.n < MIN_N) continue;
+    const top = Math.max(s.rev, s.cont);
+    if (pct(top, s.n) >= 55) tk.push(`<b>${lqaEsc(k)}</b>: ${s.rev >= s.cont ? "mostly <span class='up'>reverses</span>" : "mostly <span class='cont'>continues</span>"} (${top}/${s.n}), average move ${lqaN(s.avgAbs, 0)} pts.`);
+  }
+  const tw = groupBy(withTrend).filter(([, xs]) => xs.length >= MIN_N).map(([k, xs]) => [k, stat(xs)]);
+  const w = tw.find(([k]) => k.includes("WITH")), a = tw.find(([k]) => k.includes("AGAINST"));
+  if (w && a) tk.push(`Takes <b>with</b> the 15M trend continued ${pct(w[1].cont, w[1].n)}% of the time; takes <b>against</b> it reversed ${pct(a[1].rev, a[1].n)}%.`);
+  const sl = groupBy(slot).map(([k, xs]) => [k, xs.length]);
+  const busiest = sl.slice().sort((x, y) => y[1] - x[1])[0];
+  if (busiest) tk.push(`Most liquidity is taken in <b>${busiest[0].slice(3)}</b> (${pct(busiest[1], all.n)}% of events).`);
+  const fo = stat(firstOfDay.filter(Boolean));
+  if (fo.n >= MIN_N) tk.push(`The <b>first</b> liquidity take of the day: reversal ${pct(fo.rev, fo.n)}%, continuation ${pct(fo.cont, fo.n)}% (${fo.n} days).`);
+
+  const dayRows = dates.slice().reverse().map((dd) => {
+    const xs = h.filter((e) => e.date === dd).sort((p, q) => p.takenAt - q.takenAt), f = xs[0], s = stat(xs);
+    const up = xs.filter((e) => e.side === "UPSIDE").length;
+    return `<tr><td>${lqaEsc(dd)} ${lqaEsc(f.day)}</td><td>${lqaEsc(f.time)} ${f.side === "DOWNSIDE" ? "↓" : "↑"} ${lqaEsc(f.levelType)}</td><td><span class="lqa-oc ${f.outcome.toLowerCase().replace(/\s/g, "")}">${f.outcome}</span></td>
+      <td class="r"><span class="up">↑${up}</span> <span class="dn">↓${xs.length - up}</span></td><td>${bar(s)}</td></tr>`;
+  }).join("");
+  return `<div class="lqa-tk"><div class="lqa-gh">🧭 WHAT THE MARKET HAS BEEN DOING <i>from ${all.n} real events · analysis only, not a trade signal</i></div><ul>${tk.map((t) => `<li>${t}</li>`).join("")}</ul></div>
+    <div class="lqa-pgrid">
+      ${table("By level type", groupBy((e) => e.levelType))}
+      ${table("By time of day", groupBy(slot).sort((p, q) => (p[0] < q[0] ? -1 : 1)))}
+      ${table("With / against the 15M trend", groupBy(withTrend))}
+      ${table("Up-side vs down-side takes", groupBy((e) => (e.side === "UPSIDE" ? "↑ Upside (highs taken)" : "↓ Downside (lows taken)")))}
+      ${table("Last 5 sessions vs the 15 before", [["Last 5 sessions", h.filter((e) => recentSet.has(e.date))], ["Previous 15 sessions", h.filter((e) => !recentSet.has(e.date))]])}
+      <div class="lqa-pcard"><div class="lqa-gh">Day by day — first take &amp; mix</div><table class="lqa-t"><thead><tr><th>Date</th><th>First take</th><th>Outcome</th><th class="r">Takes</th><th>Mix</th></tr></thead><tbody>${dayRows}</tbody></table></div>
+    </div>
+    <div class="lqa-small">Mix bar: <span class="up">■ reversal</span> <span class="cont">■ continuation</span> <span class="dn">■ whipsaw</span> ■ no edge. Groups with fewer than ${MIN_N} events are greyed out and not used for takeaways.</div>`;
 }
 
 // Let the 20-day table use whatever screen height is left (scrolls inside its box).
@@ -167,3 +246,25 @@ function lqaFitHistory() {
   h.style.maxHeight = Math.max(260, window.innerHeight - top - 12) + "px";
 }
 window.addEventListener("resize", () => { if (document.body.classList.contains("lqa-fullwidth")) lqaFitHistory(); });
+
+// OI support (max PUT OI) / resistance (max CALL OI): morning snapshot vs latest reading.
+function lqaOiMini(oi, mini, tipOf) {
+  const m = oi && oi.morning, n = oi && oi.now;
+  const fmt = (v) => (v == null ? "—" : v >= 1e7 ? (v / 1e7).toFixed(2) + "Cr" : (v / 1e5).toFixed(1) + "L");
+  const k = (x) => (x && x[0] ? lqaN(x[0].strike, 0) : "—");
+  if (!m && !n) return mini("🧱 OI S / R", `<span class="lqa-na">DATA UNAVAILABLE</span>`, "", "");
+  const src = m || n;
+  const shiftS = m && n && n.support[0] && m.support[0] && n.support[0].strike !== m.support[0].strike ? ` → now ${lqaN(n.support[0].strike, 0)}` : "";
+  const shiftR = m && n && n.resistance[0] && m.resistance[0] && n.resistance[0].strike !== m.resistance[0].strike ? ` → now ${lqaN(n.resistance[0].strike, 0)}` : "";
+  const hmOf = (t) => new Date((t + 19800) * 1000).toISOString().slice(11, 16);
+  const tip = tipOf([
+    m ? `MORNING snapshot ${hmOf(m.at)} (spot ${lqaN(m.spot)}, expiry ${m.expiry || "—"}, PCR ${m.pcr ?? "—"})` : (oi && oi.note) || "",
+    ...(m ? [...m.support.map((x, i) => `  Support ${i + 1}: ${x.strike} · PUT OI ${fmt(x.oi)}`), ...m.resistance.map((x, i) => `  Resistance ${i + 1}: ${x.strike} · CALL OI ${fmt(x.oi)}`)] : []),
+    n ? `LATEST ${hmOf(n.at)} (spot ${lqaN(n.spot)}, PCR ${n.pcr ?? "—"})` : "",
+    ...(n ? [...n.support.map((x, i) => `  Support ${i + 1}: ${x.strike} · PUT OI ${fmt(x.oi)}${x.chg != null ? ` (chg ${fmt(x.chg)})` : ""}`), ...n.resistance.map((x, i) => `  Resistance ${i + 1}: ${x.strike} · CALL OI ${fmt(x.oi)}${x.chg != null ? ` (chg ${fmt(x.chg)})` : ""}`)] : []),
+  ]);
+  return mini(m ? "🧱 OI S / R (morning)" : "🧱 OI S / R (latest)",
+    `<span class="up">S ${k(src.support)}</span> · <span class="dn">R ${k(src.resistance)}</span>`,
+    m ? `${shiftS || shiftR ? `<span class="lqa-time">shift:</span> S${shiftS || " same"} · R${shiftR || " same"}` : "unchanged since " + hmOf(m.at)} · PCR ${n && n.pcr != null ? n.pcr : m.pcr ?? "—"}`
+      : `no morning snapshot yet (taken after 09:15) · PCR ${n.pcr ?? "—"}`, tip);
+}

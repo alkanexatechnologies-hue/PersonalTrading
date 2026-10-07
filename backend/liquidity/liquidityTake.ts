@@ -113,11 +113,12 @@ function pivots(c: Candle[], k = 2): { highs: { t: number; p: number }[]; lows: 
 const PRIORITY: Record<string, number> = {
   "Previous Day High": 1, "Previous Day Low": 1, "Previous Day Close": 2, "Opening Range High": 3, "Opening Range Low": 3,
   "Today 15M High": 4, "Today 15M Low": 4, "Equal High": 5, "Equal Low": 5, "Swing High": 6, "Swing Low": 6,
-  "Structure Resistance": 7, "Structure Support": 7,
+  "Structure Resistance": 7, "Structure Support": 7, "OI Support": 3, "OI Resistance": 3,
 };
 
 /** Levels for session `day`, built only from data known before each level's activation. */
-export function buildLevels(prior: Candle[][], today5: Candle[], nowSec: number): LiqLevel[] {
+/** `extra` = levels supplied by the caller (e.g. today's morning OI support/resistance). */
+export function buildLevels(prior: Candle[][], today5: Candle[], nowSec: number, extra: LiqLevel[] = []): LiqLevel[] {
   const out: LiqLevel[] = [];
   if (!prior.length || !today5.length) return out;
   const pd = prior[prior.length - 1];
@@ -182,6 +183,7 @@ export function buildLevels(prior: Candle[][], today5: Candle[], nowSec: number)
   const sup = strong.filter((z) => z.p < open.open).sort((x, y) => y.p - x.p)[0];
   if (res) add("Structure Resistance", res.p, openT, open.open, `${res.n} pivot touches (5 sessions)`);
   if (sup) add("Structure Support", sup.p, openT, open.open, `${sup.n} pivot touches (5 sessions)`);
+  for (const x of extra) if (x.activeFrom <= nowSec) out.push({ ...x, sources: x.sources.slice() });
   return consolidate(out, Math.max(open.open * 0.0003, a15 * 0.1));
 }
 
@@ -292,13 +294,13 @@ export function trackLevel(level: LiqLevel, ses: Candle[], tfSec: number, nowSec
 export interface DayAnalysis { date: string; levels: LevelTrack[]; events: LiqEvent[]; }
 
 /** Analyse one session (index `di` of the ordered session list) as of `nowSec`. */
-export function analyseDay(days: string[], ses: Map<string, Candle[]>, di: number, tfMin: 5 | 15, nowSec: number, strikeStep: number | null): DayAnalysis | null {
+export function analyseDay(days: string[], ses: Map<string, Candle[]>, di: number, tfMin: 5 | 15, nowSec: number, strikeStep: number | null, extra: LiqLevel[] = []): DayAnalysis | null {
   if (di < 1) return null;
   const date = days[di];
   const prior = days.slice(Math.max(0, di - 6), di).map((d) => ses.get(d)!);
   const today5 = ses.get(date)!.filter((c) => c.time + 300 <= nowSec);
   if (!today5.length) return { date, levels: [], events: [] };
-  const levels = buildLevels(prior, today5, nowSec);
+  const levels = buildLevels(prior, today5, nowSec, extra);
   const tfSec = tfMin * 60;
   const sesTf = tfMin === 15 ? aggregate(ses.get(date)!, 3) : ses.get(date)!;
   const histTf = (tfMin === 15 ? prior.slice(-2).flatMap((s) => aggregate(s, 3)) : prior.slice(-2).flat());
