@@ -34,6 +34,12 @@ const UNAV = '<span class="mcs-na">DATA UNAVAILABLE</span>';
 
 function mcsEma(vals, p) { const out = new Array(vals.length).fill(null); if (vals.length < p) return out; const k = 2 / (p + 1); let e = vals.slice(0, p).reduce((a, b) => a + b, 0) / p; out[p - 1] = e; for (let i = p; i < vals.length; i++) { e = vals[i] * k + e * (1 - k); out[i] = e; } return out; }
 function mcsVwap(c) { const out = []; let pv = 0, vv = 0, day = ""; for (const x of c) { const d = mcsIstDay(x.time); if (d !== day) { day = d; pv = 0; vv = 0; } const tp = (x.high + x.low + x.close) / 3; pv += tp * (x.volume || 0); vv += x.volume || 0; out.push(vv > 0 ? pv / vv : null); } return out; }
+// Finished candles only: drop the last candle while it is still forming (LIVE). Testing data is already cut at "as of".
+function mcsClosed(cs) {
+  if (!cs || !cs.length) return [];
+  const tfSec = { "5m": 300, "15m": 900, "30m": 1800, "60m": 3600 }[MCS.tf] || 300;
+  return cs[cs.length - 1].time + tfSec > Date.now() / 1000 ? cs.slice(0, -1) : cs;
+}
 function mcsAtr(c, p = 14) { if (c.length <= p) return null; const tr = c.map((x, i) => (i ? Math.max(x.high - x.low, Math.abs(x.high - c[i - 1].close), Math.abs(x.low - c[i - 1].close)) : x.high - x.low)); let a = tr.slice(1, p + 1).reduce((s, v) => s + v, 0) / p; for (let i = p + 1; i < tr.length; i++) a = (a * (p - 1) + tr[i]) / p; return a; }
 
 function mcsShell() {
@@ -226,7 +232,7 @@ function mcsRenderChart() {
     MCS.series.lines.push(MCS.series.c.createPriceLine({ price: o.low, color: col, lineWidth: 1, lineStyle: 3, axisLabelVisible: false, title: "" }));
   });
   // shaded zones around each visible level + the engine's No-Trade Zone
-  const atrZ = mcsAtr(cs) || d.spot * 0.001; const halfZ = Math.max(atrZ * 0.12, d.spot * 0.00025);
+  const atrZ = mcsAtr(mcsClosed(cs)) || d.spot * 0.001; const halfZ = Math.max(atrZ * 0.12, d.spot * 0.00025);
   const zones = MCS.show.zones ? [...lad.res, ...lad.sup].filter((l) => want(l) && inView(l.price)).map((l) => ({ lo: l.price - halfZ, hi: l.price + halfZ, kind: l.side === "resistance" ? "res" : "sup" })) : [];
   const ntz = MCS.ma?.noTradeZone;
   if (MCS.show.ntz && ntz?.active && ntz.low != null && ntz.high != null) zones.push({ lo: ntz.low, hi: ntz.high, kind: "ntz", label: `NO TRADE ZONE ${mcsN(ntz.low)} – ${mcsN(ntz.high)}` });
@@ -369,7 +375,7 @@ function mcsRenderStrikes() {
 const MCS_FAST_READY = 7, MCS_FAST_WATCH = 4;
 function mcsFastMove() {
   const ma = MCS.ma, d = MCS.d; if (!ma || !d || d.spot == null) return null;
-  const spot = d.spot, lad = mcsSpotLadder(d), atr = mcsAtr(d.candles || []) || spot * 0.001;
+  const spot = d.spot, lad = mcsSpotLadder(d), atr = mcsAtr(mcsClosed(d.candles || [])) || spot * 0.001;
   const strikes = (ma.callOptions || []).map((r) => r.strike).sort((a, b) => a - b);
   const step = strikes.length > 1 ? Math.min(...strikes.slice(1).map((k, i) => k - strikes[i]).filter((x) => x > 0)) : 50;
   const score = (r, side) => {
@@ -464,7 +470,7 @@ function mcsRenderLevels() {
   const lad = mcsSpotLadder(d), spot = lad.spot;
   const row = (l, cls) => `<div class="mcs-lv ${cls}"><span>${l.tag}</span><b>${mcsN(l.price)}</b><em>${mcsEsc(l.type)} · ${l.price > spot ? "+" : ""}${mcsN(l.price - spot, 1)} pts</em></div>`;
   const ov = d.overlays || {}; const lastv = (a) => (a && a.length ? a[a.length - 1] : null);
-  const atr = mcsAtr(d.candles || []);
+  const atr = mcsAtr(mcsClosed(d.candles || []));
   const cf = d.confirmationFlow || {}, mv = d.marketView || {}, an = MCS.ma?.movement;
   box.innerHTML = `<h4>Market Levels (${mcsEsc(MCS_SYMS.find((x) => x[0] === MCS.sym)?.[1] || "")})</h4>
     <div class="mcs-ladder">
@@ -652,7 +658,7 @@ function mcsRenderAnalysis() {
   const box = mcsEl("mcs-analysis"); const d = MCS.d, ma = MCS.ma; if (!box) return;
   const nm = MCS_SYMS.find((x) => x[0] === MCS.sym)?.[1] || MCS.sym;
   if (!d || d.spot == null) { box.innerHTML = `<h4>🧠 MARKET ANALYSIS — ${mcsEsc(nm)}</h4>${UNAV}`; return; }
-  const spot = d.spot, lad = mcsSpotLadder(d), cs = d.candles || [], atr = mcsAtr(cs);
+  const spot = d.spot, lad = mcsSpotLadder(d), cs = d.candles || [], atr = mcsAtr(mcsClosed(cs));
   const ov = d.overlays || {}; const lastv = (a) => { if (!a) return null; for (let i = a.length - 1; i >= 0; i--) if (a[i] != null) return a[i]; return null; };
   const e9 = lastv(ov.ema9), e21 = lastv(ov.ema21), e50 = lastv(ov.ema50), e200 = lastv(ov.ema200), vwap = lastv(ov.vwap);
   const mtf = d.mtfDirection || {}, mv = d.marketView || {}, tp = d.tradePlan || {}, cf = d.confirmationFlow || {};
@@ -930,7 +936,7 @@ function mcsRenderKeyRow() {
     }
     return null; };
   const eqh = eq(true), eql = eq(false);
-  const atr = mcsAtr(d.candles || []);
+  const atr = mcsAtr(mcsClosed(d.candles || []));
   const chg = s.prevClose != null ? d.spot - s.prevClose : null;
   const card = (t, body) => `<section class="mcs-card mcs-kcard"><h4>${t}</h4><div class="mcs-kvs">${body}</div></section>`;
   const sR = px(lv.strongResistance), sS = px(lv.strongSupport);
@@ -939,7 +945,7 @@ function mcsRenderKeyRow() {
     card("PREVIOUS DAY LEVELS", kv("Previous Day High (PDH)", px(lv.pdh) ?? s.prevHigh, "mcs-dn") + kv("Previous Day Low (PDL)", px(lv.pdl) ?? s.prevLow, "mcs-up") + kv("Previous Close (PDC)", s.prevClose)) +
     card("STRUCTURE LEVELS", kv("Swing High (SWH)", swH ? swH.price : null, "mcs-dn") + kv("Swing Low (SWL)", swL ? swL.price : null, "mcs-up") + kv("Equal High (EQH)", eqh ?? "none") + kv("Equal Low (EQL)", eql ?? "none") + kv("BOS Level", d.bos?.price ?? null, d.bos?.direction === "BULLISH" ? "mcs-up" : "mcs-dn", d.bos ? ` <em>${mcsEsc(d.bos.direction || "")} ${mcsEsc(d.bos.stage || "")}</em>` : "")) +
     card("OI LEVELS", kv("OI Resistance", oi.resistance ?? null, "mcs-dn") + kv("OI Support", oi.support ?? null, "mcs-up") + kv("Max Call OI Strike", sR, "", lv.strongResistance?.oi ? ` <em>${mcsL(lv.strongResistance.oi)}</em>` : "") + kv("Max Put OI Strike", sS, "", lv.strongSupport?.oi ? ` <em>${mcsL(lv.strongSupport.oi)}</em>` : "") + kv("PCR", oi.pcr != null ? mcsN(oi.pcr) : null) + (oi.maxPain != null ? kv("Max Pain", oi.maxPain) : "")) +
-    card("QUICK STATS", kv("LTP", d.spot) + kv("Change", chg != null ? `${chg >= 0 ? "+" : ""}${mcsN(chg)} (${mcsPct((chg / s.prevClose) * 100)})` : null, mcsCls(chg)) + kv("Day Range", s.low != null ? `${mcsN(s.low)} – ${mcsN(s.high)}` : null) + kv("ATR (14)", atr != null ? mcsN(atr) : null) + kv("Volatility", d.vix?.available ? `${mcsEsc(d.vixEnvironment?.environment || "—")} · VIX ${mcsN(d.vix.value)}` : null));
+    card("QUICK STATS", kv("LTP", d.spot) + kv("Change", chg != null ? `${chg >= 0 ? "+" : ""}${mcsN(chg)} (${mcsPct((chg / s.prevClose) * 100)})` : null, mcsCls(chg)) + kv("Day Range", s.low != null ? `${mcsN(s.low)} – ${mcsN(s.high)}` : null) + kv("ATR (14) · closed candles", atr != null ? mcsN(atr) : null) + kv("Volatility", d.vix?.available ? `${mcsEsc(d.vixEnvironment?.environment || "—")} · VIX ${mcsN(d.vix.value)}` : null));
 }
 
 
