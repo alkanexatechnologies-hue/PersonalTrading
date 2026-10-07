@@ -52,6 +52,7 @@ export const DC_JOBS: DcItem[] = [
   { key: "hourlyScan", label: "Hourly picks snapshot (09:30 … 15:30)", group: "Background" },
   { key: "oiSignals", label: "OI signal logger (every 5 min)", group: "Background" },
   { key: "premiumSampler", label: "ATM premium recorder (every 60s)", group: "Background" },
+  { key: "oiMinuteLog", label: "1-minute OI log for analysis (every 60s, 09:15–15:30)", group: "Background", note: "CSV per day; pulled to the desktop by scripts/pull-oi-logs.mjs" },
   { key: "oiChangeSnapshot", label: "OI change snapshot (every 3 min)", group: "Background" },
   { key: "arbiterObserver", label: "Decision ledger observer (every 30s, no extra Dhan calls)", group: "Background" },
 ];

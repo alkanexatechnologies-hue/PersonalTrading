@@ -203,6 +203,7 @@ import { getMarketDataHealth, fetchMarketData, marketDataProviderName, MdKey } f
 import { globalCues, indexSentiment, indiaSentiment, briefPhase, briefHeadline, SentimentBrief, IndexSentiment } from "../sentiment/brief";
 import { sessionsOf, analyseDay, aggregate, buildLevels, LiqEvent, LiqLevel } from "../liquidity/liquidityTake";
 import { evaluateSession, dailyAtrFrom5m, summarizeReplay, analyzeMoves, SETUP_CONFIG, SetupSignal, SessionResult } from "../signals/setupSignals";
+import { writeOiMinute, listOiMinuteDays, oiMinuteFilePath } from "../oi/oiMinuteLog";
 import { runLabStrategy, pdhPdlLevels, swingLevels, oiLevels, liquidityMap, LAB_CONFIG, LAB_OVERRIDES, type LabTrade } from "../signals/strategyLab";
 import { regimeAt } from "../decision/regime";
 import { buildOptionPlan } from "../signals/breakoutOption";
@@ -8639,6 +8640,15 @@ router.get("/setup-signals", requirePermission("oiAnalysis"), async (req: Reques
     res.json(await cached(`setup-signals:${symbol}`, 30_000, () => buildSetupSignals(symbol)));
   } catch (e: any) { res.json({ error: e?.message || "setup signals failed" }); }
 });
+// 1-minute OI log files (for the desktop pull script / manual download)
+router.get("/oi-minute/days", requirePermission("oiAnalysis"), (_req: Request, res: Response) => { res.json({ days: listOiMinuteDays() }); });
+router.get("/oi-minute/file", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
+  const f = oiMinuteFilePath(String(req.query.date || ""), String(req.query.name || ""));
+  if (!f) return res.status(404).json({ error: "file not found" });
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="oi-${String(req.query.date)}-${String(req.query.name)}"`);
+  fs.createReadStream(f).pipe(res);
+});
 router.get("/market-sentiment-brief", requirePermission("oiAnalysis"), async (_req: Request, res: Response) => {
   try { res.json(await cached("sentiment-brief", 60_000, () => buildSentimentBrief())); }
   catch (e: any) { res.json({ error: e?.message || "sentiment brief failed" }); }
@@ -9620,6 +9630,41 @@ export function startHourlyScheduler() {
       sampleBusy = false;
     }
   }, 60 * 1000);
+
+  // 1-MINUTE OI LOG: every minute 09:15–15:30 record each index's chain summary + ATM ±10 strikes
+  // (CSV under DATA_DIR/oi-minute/<date>/). Reuses the shared OI cache; refreshes it only when the
+  // cached chain is ≥ 55 s old, so it is ~1 chain read per index per minute on the same Dhan connection.
+  let oiMinBusy = false;
+  setInterval(async () => {
+    if (oiMinBusy || !isTradingTimeIST() || !jobOn("oiMinuteLog")) return;
+    oiMinBusy = true;
+    try {
+      const date = istDateStr(), nowSec = Math.floor(Date.now() / 1000);
+      const timeIST = new Date((nowSec + 19800) * 1000).toISOString().slice(11, 16);
+      for (const sym of LIQ_INDEX) {
+        try {
+          const def = findSymbolDef(sym); if (!def) continue;
+          const key = `oi:${sym}`, hit = _cache.get(key);
+          if (hit && Date.now() - hit.ts >= 55_000) _cache.delete(key);
+          const oi = (await getOiCached(def)) as any;
+          if (!oi || !oi.available || !oi.topStrikes?.length) continue;
+          const q = await getProvider().getQuote(sym).catch(() => null);
+          const spot = q?.price ?? oi.underlying ?? null; if (spot == null) continue;
+          writeOiMinute({ date, timeIST, symbol: sym, index: def.nseSymbol || def.name, spot, chainAsOf: typeof oi.asOf === "number" ? oi.asOf : null, nowSec, oi });
+        } catch { /* skip this index this minute */ }
+      }
+    } catch { /* best effort */ } finally { oiMinBusy = false; }
+  }, 60 * 1000);
+
+  // RENDER KEEP-ALIVE: a free Render service sleeps after 15 min without visitors. During market
+  // days (Mon–Fri 08:00–16:00 IST) ping our own public URL every 10 min so the app — and the
+  // 1-minute OI log — keep running while nobody has the screen open. Off everywhere else.
+  const selfUrl = process.env.RENDER_EXTERNAL_URL;
+  if (selfUrl) setInterval(() => {
+    const ist = new Date(Date.now() + 19800000), dow = ist.getUTCDay(), m = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+    if (dow === 0 || dow === 6 || m < 8 * 60 || m > 16 * 60) return;
+    fetch(`${selfUrl.replace(/\/$/, "")}/health`).catch(() => {});
+  }, 10 * 60 * 1000);
 
   // MARKET ACTIVITY ANALYST — background daily review. After the session closes
   // (>= 15:40 IST) build today's application-strength report ONCE from the app's
