@@ -40,13 +40,14 @@ export interface DhanFetchOptions {
 // ---- Dhan RATE-LIMIT gate (global, category-aware) --------------------------
 // Dhan enforces hard per-second caps PER CATEGORY (DhanHQ v2 docs):
 //   Quote APIs (/marketfeed/*)              → 1  req/sec
-//   Data APIs  (/charts/*, /optionchain*)   → 5  req/sec
+//   Data APIs  (/charts/*)                  → 5  req/sec
+//   Option Chain (/optionchain*)            → 1 request per 3 sec (its own, stricter cap)
 //   Non-Trading(/fundlimit)                 → 20 req/sec
 // Breaching any of these returns HTTP 429 / DH-904, which previously starved the
 // Option Terminal's OI chain (served stale/last-good → "inconsistent data").
 // Because every Dhan call funnels through dhanFetch, pacing HERE throttles the
 // whole app at once, no matter how many endpoints fan out concurrently.
-type DhanCat = "quote" | "data" | "nontrading";
+type DhanCat = "quote" | "data" | "optionchain" | "nontrading";
 // Min gap between DISPATCHES per category. Slightly below the documented ceiling
 // (gap = 1000/limit, padded) so bursts can't trip the limiter. Overridable via env.
 const _envGap = (k: string, d: number) => {
@@ -60,6 +61,10 @@ const _envGap = (k: string, d: number) => {
 const MIN_GAP_MS: Record<DhanCat, number> = {
   quote: _envGap("DHAN_QUOTE_GAP_MS", 1100),   // 1/sec cap → ~0.9/sec
   data: _envGap("DHAN_DATA_GAP_MS", 250),      // 5/sec cap → ~4/sec
+  // Option chain has its own 1-per-3s limit. Pacing it with the 250ms data gap
+  // produced a 429 storm (83 of 86 rate-limit errors in a market-hours test), and
+  // every 429 retry/backoff delayed the screens waiting on that chain.
+  optionchain: _envGap("DHAN_OPTIONCHAIN_GAP_MS", 3100),
   nontrading: _envGap("DHAN_NONTRADING_GAP_MS", 80), // 20/sec cap → ~12/sec
 };
 // Global in-flight cap: a secondary guard so slow responses can't cluster the
@@ -73,7 +78,9 @@ const DHAN_BACKOFF_CAP_MS = _envGap("DHAN_BACKOFF_CAP_MS", 10000);
 const _dhanSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 function dhanCategory(basePath: string): DhanCat {
   if (basePath.startsWith("/marketfeed")) return "quote";
-  if (basePath.startsWith("/charts") || basePath.startsWith("/optionchain")) return "data";
+  if (basePath === "/optionchain") return "optionchain";            // the chain itself (1 per 3s)
+  if (basePath.startsWith("/optionchain")) return "data";          // expiry list: normal data limit
+  if (basePath.startsWith("/charts")) return "data";
   return "nontrading";
 }
 
@@ -97,9 +104,9 @@ function currentDhanPriority(): DhanPriority {
 // (FIFO within the same priority). Only dispatch STARTS are spaced/ordered — the
 // network request itself still overlaps, so Data calls keep their allowed burst.
 type DhanWaiter = { priority: number; seq: number; resolve: () => void };
-const _dhanQueue: Record<DhanCat, DhanWaiter[]> = { quote: [], data: [], nontrading: [] };
-const _dhanRunning: Record<DhanCat, boolean> = { quote: false, data: false, nontrading: false };
-const _dhanLastDispatch: Record<DhanCat, number> = { quote: 0, data: 0, nontrading: 0 };
+const _dhanQueue: Record<DhanCat, DhanWaiter[]> = { quote: [], data: [], optionchain: [], nontrading: [] };
+const _dhanRunning: Record<DhanCat, boolean> = { quote: false, data: false, optionchain: false, nontrading: false };
+const _dhanLastDispatch: Record<DhanCat, number> = { quote: 0, data: 0, optionchain: 0, nontrading: 0 };
 let _dhanSeq = 0;
 
 async function _runDhanQueue(cat: DhanCat): Promise<void> {

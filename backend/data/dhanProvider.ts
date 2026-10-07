@@ -319,6 +319,31 @@ async function getExpiries(nseSymbol: string): Promise<string[]> {
   }
 }
 
+// ---- Shared option-chain requests ----
+// Several screens/engines ask for the SAME chain within a second or two (a market-
+// hours audit counted 170 such duplicates in 9 min). Dhan allows ~1 chain request
+// per 3s, so duplicates caused 429 retries that delayed every screen. Identical
+// requests now share one call; a chain is reused for 2.5s and the expiry list
+// (changes once a day) for 30 min. Failures are never cached.
+const EXPIRYLIST_TTL_MS = 30 * 60_000;
+const CHAIN_SHARE_MS = 2_500;
+const _sharedPost = new Map<string, { at: number; v?: { ok: boolean; status: number; json: any }; p?: Promise<{ ok: boolean; status: number; json: any }> }>();
+async function sharedDhanPost(key: string, ttlMs: number, path: string, cfg: any, body: any): Promise<{ ok: boolean; status: number; json: any }> {
+  const hit = _sharedPost.get(key);
+  if (hit?.v && Date.now() - hit.at < ttlMs) return hit.v;
+  if (hit?.p) return hit.p;
+  const p = (async () => {
+    const res = await dhanFetch(path, { method: "POST", accessToken: cfg.accessToken, clientId: cfg.clientId, body });
+    return { ok: res.ok, status: res.status, json: res.ok ? await res.json() : null };
+  })();
+  _sharedPost.set(key, { at: 0, p });
+  try {
+    const v = await p;
+    if (v.ok) _sharedPost.set(key, { at: Date.now(), v }); else _sharedPost.delete(key);
+    return v;
+  } catch (e) { _sharedPost.delete(key); throw e; }
+}
+
 // ---- Full option chain for a CHOSEN expiry ----
 export async function dhanChainForExpiry(def: SymbolDef, expiryOffset = 0): Promise<any> {
   if (!def.nseSymbol) return { available: false, message: "No NSE symbol." };
@@ -334,12 +359,10 @@ export async function dhanChainForExpiry(def: SymbolDef, expiryOffset = 0): Prom
     const scrip = Number(sec.securityId);
 
     // Expiry list — Dhan v2: POST /optionchain/expirylist { UnderlyingScrip, UnderlyingSeg }
-    const elRes = await dhanFetch("/optionchain/expirylist", {
-      method: "POST", accessToken: cfg.accessToken, clientId: cfg.clientId,
-      body: { UnderlyingScrip: scrip, UnderlyingSeg: underlyingSeg },
-    });
-    if (!elRes.ok) return { available: false, message: `expirylist ${elRes.status}` };
-    const elJson: any = await elRes.json();
+    const el = await sharedDhanPost(`el:${scrip}:${underlyingSeg}`, EXPIRYLIST_TTL_MS, "/optionchain/expirylist",
+      cfg, { UnderlyingScrip: scrip, UnderlyingSeg: underlyingSeg });
+    if (!el.ok) return { available: false, message: `expirylist ${el.status}` };
+    const elJson: any = el.json;
     const allExpiries: string[] = Array.isArray(elJson?.data) ? elJson.data : [];
     const today = new Date(Date.now() + 19800000).toISOString().slice(0, 10);
     const future = allExpiries.filter((e: string) => e >= today);
@@ -351,12 +374,10 @@ export async function dhanChainForExpiry(def: SymbolDef, expiryOffset = 0): Prom
 
     // Chain — Dhan v2: POST /optionchain { UnderlyingScrip, UnderlyingSeg, Expiry }
     // (rate-limited to ~1 req / 3s by Dhan; callers cache it).
-    const chainRes = await dhanFetch("/optionchain", {
-      method: "POST", accessToken: cfg.accessToken, clientId: cfg.clientId,
-      body: { UnderlyingScrip: scrip, UnderlyingSeg: underlyingSeg, Expiry: expiry },
-    });
-    if (!chainRes.ok) return { available: false, message: `chain ${chainRes.status}` };
-    const chainData: any = await chainRes.json();
+    const ch = await sharedDhanPost(`oc:${scrip}:${underlyingSeg}:${expiry}`, CHAIN_SHARE_MS, "/optionchain",
+      cfg, { UnderlyingScrip: scrip, UnderlyingSeg: underlyingSeg, Expiry: expiry });
+    if (!ch.ok) return { available: false, message: `chain ${ch.status}` };
+    const chainData: any = ch.json;
 
     // Parse Dhan's oc map: { "<strike>": { ce:{...}, pe:{...} } }. Each leg carries
     // last_price, oi, previous_oi, volume, implied_volatility and greeks{delta,theta}.

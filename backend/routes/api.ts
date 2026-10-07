@@ -56,6 +56,7 @@ import { getOiAnalysis } from "../oi/oi";
 import { dhanOiAnalysis, dhanHasOptions, dhanZeroHero, dhanRateLimitStats, DhanProvider, dhanChainForExpiry, dhanOptionCandles, dhanSpotCandles, recordDhanOk, recordDhanFail, getDhanHealth } from "../data/dhanProvider";
 import { loadDhanConfig, saveDhanConfig, dhanConfigured, disconnectDhan, testDhanConnection } from "../data/dhanConfig";
 import { withDhanPriority } from "../data/dhanClient";
+import { installAsyncSafety, apiDeadline } from "./requestSafety";
 // Universal Market Indicator — Test Lab V1 (research/audit only, fully isolated).
 import { runTest as runTestLab, availableHistory as testLabAvailableHistory } from "../testlab/runner";
 import { writeReviewPackage as writeTestLabPackage } from "../testlab/exporter";
@@ -232,6 +233,11 @@ import { detectMarketStructure, nearestValidOB, priceRelativeToOB, OrderBlock } 
 import { Interval, NextDayPick, Opportunity, TradeAlert, OiAnalysis, Candle } from "../types";
 
 const router = Router();
+// Safety net (see requestSafety.ts): every async handler always replies, and no
+// live-screen GET can hold a browser connection for more than 40s.
+installAsyncSafety(router);
+const LONG_RUNNING_API = /^\/(backtest|backtest-dhan|backtest-compare|replay|strategy-replay|testlab|qa|audit|ask|analyst|admin|log|hourly|advisory|longterm|monthly-swing|bull-rank|zero-hero|oi-command\/backtest|move-timing|option-sell|paper\/review|ai-paper|vwapema-run|orb-run)/;
+router.use(apiDeadline(Number(process.env.API_DEADLINE_MS) || 40_000, LONG_RUNNING_API));
 
 // AUDIT MODE: tag every request with a screen (referer) + request id so the
 // Dhan/Groww fetch chokepoints can attribute their calls. No-op when disabled.
@@ -316,24 +322,24 @@ let _swingTop: { ts: number; v: any[] } | null = null;
 async function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
   const hit = _cache.get(key);
   if (hit && Date.now() - hit.ts < ttlMs) { if (AUDIT_ENABLED) recordCache(key, true); return hit.v as T; }
-  const flying = _inflight.get(key);
-  if (flying) { if (AUDIT_ENABLED) recordCache(key, true); return flying as Promise<T>; } // coalesce concurrent callers into one fetch
-  if (AUDIT_ENABLED) recordCache(key, false);
-  const p = (async () => {
-    try {
-      const v = await withTimeout(fn(), 18_000, key);
-      _cache.set(key, { ts: Date.now(), v });
-      return v;
-    } catch (e) {
-      // Do not serve last-good candles/quotes as a successful fetch — callers
-      // must see the failure instead of treating minutes-old bars as live.
-      throw e;
-    } finally {
-      _inflight.delete(key);
-    }
-  })();
-  _inflight.set(key, p);
-  return p as Promise<T>;
+  // ONE underlying run per key until it actually settles. Each caller still gives
+  // up after 18s, but the run is NOT forgotten when a caller times out: later
+  // callers join it instead of starting a duplicate. (Previously a timeout dropped
+  // the in-flight entry while fn() kept running, so every new poll launched another
+  // copy of the same multi-symbol scan — during market hours 2–3 copies overlapped,
+  // flooded the Dhan queue and slowed every screen more the longer the app ran.)
+  let run = _inflight.get(key) as Promise<T> | undefined;
+  if (run) { if (AUDIT_ENABLED) recordCache(key, true); }
+  else {
+    if (AUDIT_ENABLED) recordCache(key, false);
+    run = fn().then((v) => { _cache.set(key, { ts: Date.now(), v }); return v; })
+      .finally(() => { if (_inflight.get(key) === run) _inflight.delete(key); });
+    run.catch(() => { /* surfaced to callers below; avoid an unhandled rejection */ });
+    _inflight.set(key, run);
+  }
+  // Do not serve last-good candles/quotes as a successful fetch — callers must
+  // see the failure instead of treating minutes-old bars as live.
+  return withTimeout(run, 18_000, key);
 }
 // Read-only peek at an already-warm cache entry (no fetch). Used by the Trader
 // Specific Strategies block on the oi-command hot path so it adds ZERO extra
@@ -682,7 +688,8 @@ router.get("/data-status", async (_req: Request, res: Response) => {
   let refPrice: number | null = null;
   let refSymbol = "RELIANCE.NS";
   try {
-    const q = await getProvider().getQuote(refSymbol);
+    // Shared 10s cache: every open tab polls this every 15s and the Dhan quote lane is 1 req/s.
+    const q: any = await cached(`ds-quote:${refSymbol}`, 10_000, () => getProvider().getQuote(refSymbol));
     refPrice = q?.price ?? null;
     lastTick = q?.marketTime && q.marketTime > 0 ? q.marketTime : null;
     // LIVE health must reflect an actual exchange timestamp, not HTTP success.
@@ -8164,14 +8171,17 @@ router.get("/premarket/health", async (_req: Request, res: Response) => {
 
 // Best trade RIGHT NOW on the 15-min model (the top safety-gated option play).
 // Shown in the header across every section. Cached 60s so polling is cheap.
+// Header pill, polled every 60s from every page. The multi-symbol scan behind it
+// takes longer than 18s at market hours, so awaiting it made each poll hold a
+// browser connection for 18s and then fail. Now: answer at once with the latest
+// scan and refresh it in the background (at most every 3 min, one run at a time).
 router.get("/best-trade", async (_req: Request, res: Response) => {
   if (!isTradingTimeIST()) return res.json({ marketOpen: false });
-  try {
-    const picks = await cached("hourly-scan-shared", 60_000, () => runHourlyScan());
-    res.json({ marketOpen: true, best: picks && picks.length ? picks[0] : null, count: picks ? picks.length : 0 });
-  } catch (e: any) {
-    res.status(502).json({ error: e?.message || "best-trade failed" });
-  }
+  const hit = _cache.get("hourly-scan-shared");
+  if (!hit || Date.now() - hit.ts > 180_000) cached("hourly-scan-shared", 180_000, () => runHourlyScan()).catch(() => { /* next poll retries */ });
+  const picks = (hit?.v as any[]) || null;
+  res.json({ marketOpen: true, best: picks && picks.length ? picks[0] : null, count: picks ? picks.length : 0,
+    ageSec: hit ? Math.round((Date.now() - hit.ts) / 1000) : null, warming: !hit });
 });
 
 // Today's recorded picks (all snapshots so far).
@@ -9172,13 +9182,16 @@ router.get("/scalp/:symbol", async (req: Request, res: Response) => {
 
 // EARLY-MOVE alert: indices + F&O stocks whose move is in its INITIAL stage
 // (fresh momentum + volume, not yet extended, potential still to run). Cached 45s.
-router.get("/early-moves", async (_req: Request, res: Response) => {
-  // Cache ~20s (+jitter): recomputing the ENTIRE F&O universe every 5s was the
-  // source of the recurring "early-moves timed out (18s)" rejections whenever the
-  // underlying candle caches were cold — it fanned a universe-wide Dhan fetch 12×
-  // a minute. An early-move detector is fine refreshing ~3×/min, and the jitter
-  // keeps it off the other scanners' 60s expiry boundary.
-  const data = await cached("early-moves", 20_000 + Math.floor(Math.random() * 8_000), async () => {
+// Early moves scan the whole F&O universe (5m + 15m + daily candles per symbol),
+// which takes 20–40s when caches are cold. It used to run INSIDE the request with an
+// 18s timeout: on timeout the handler threw, the browser never got a reply, and a
+// new stuck request piled up every minute until all browser connections were used
+// (the "every page hangs after ~5 min" bug). Now the scan runs in the background
+// and the route always answers at once with the latest result and its age.
+let _earlyInflight: Promise<void> | null = null;
+function refreshEarlyMoves(): Promise<void> {
+  if (_earlyInflight) return _earlyInflight;
+  _earlyInflight = (async () => {
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     const universe = DEFAULT_SYMBOLS.filter((d) => d.fno);
     const out: any[] = [];
@@ -9201,10 +9214,23 @@ router.get("/early-moves", async (_req: Request, res: Response) => {
       if (i + BATCH < universe.length) await sleep(120);
     }
     out.sort((a, b) => b.earlyScore - a.earlyScore);
-    return { moves: out };
-  });
+    _cache.set("early-moves", { ts: Date.now(), v: { moves: out } });   // same key/shape the arbiter features read
+  })().catch((e) => { console.warn("[early-moves] refresh failed:", e?.message || e); })
+    .finally(() => { _earlyInflight = null; });
+  return _earlyInflight;
+}
+router.get("/early-moves", async (_req: Request, res: Response) => {
+  const maxAge = isTradingTimeIST() ? 55_000 : 5 * 60_000;   // ~1 universe scan per minute
+  let hit = _cache.get("early-moves");
+  if (!hit || Date.now() - hit.ts > maxAge) {
+    const p = refreshEarlyMoves();
+    // Only the very first call waits (bounded); later calls get the last result instantly.
+    if (!hit) { await Promise.race([p, new Promise((r) => setTimeout(r, 15_000))]); hit = _cache.get("early-moves"); }
+  }
   res.json({
-    generatedAt: Math.floor(Date.now() / 1000), marketOpen: isTradingTimeIST(), ...data,
+    generatedAt: Math.floor(Date.now() / 1000), marketOpen: isTradingTimeIST(),
+    moves: [], ...(hit?.v || {}),
+    ageSec: hit ? Math.round((Date.now() - hit.ts) / 1000) : null, refreshing: !!_earlyInflight,
     disclaimer:
       "Early-Move alert flags moves in their INITIAL stage: fresh momentum (squeeze fire / expansion) + volume, " +
       "NOT yet extended, with potential still to run. Direction is a read from price/volume, not a guarantee - confirm and use stops.",

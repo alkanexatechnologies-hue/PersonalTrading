@@ -132,8 +132,17 @@ async function fetchFeed(feed: Feed): Promise<NewsItem[]> {
 let cache: { at: number; data: NewsResult } | null = null;
 const TTL_MS = 5 * 60_000;
 
+let inflight: Promise<NewsResult> | null = null;
+// One shared fetch for all callers; once we have news, a stale cache is served
+// immediately while the refresh runs in the background (no caller waits on RSS).
 export async function getMarketNews(force = false): Promise<NewsResult> {
   if (!force && cache && Date.now() - cache.at < TTL_MS) return cache.data;
+  if (!inflight) inflight = fetchAllNews().finally(() => { inflight = null; });
+  if (!force && cache) { inflight.catch(() => null); return cache.data; }
+  return inflight;
+}
+
+async function fetchAllNews(): Promise<NewsResult> {
   const settled = await Promise.allSettled(FEEDS.map(fetchFeed));
   const all: NewsItem[] = [], policyAll: NewsItem[] = [];
   settled.forEach((r, i) => { if (r.status === "fulfilled") { policyAll.push(...r.value); if (!FEEDS[i].policyOnly) all.push(...r.value); } });

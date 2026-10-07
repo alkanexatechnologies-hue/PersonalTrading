@@ -416,6 +416,7 @@ async function updateBestTrade() {
       return;
     }
     let b = d.best;
+    if (!b && d.warming) { node.textContent = "best 15m: scanning…"; node.className = "pill best-trade"; return; }
     if (!b) {
       state.bestPick = null;
       node.textContent = "best 15m: none — wait";
@@ -951,6 +952,13 @@ async function loadIndexDesk() {
 }
 
 let wlBadgesBusy = false;
+// Run fn over items with at most n in flight (keeps browser connections free for live screens).
+async function runLimited(items, n, fn) {
+  let i = 0;
+  const worker = async () => { while (i < items.length) { const it = items[i++]; await fn(it); } };
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, worker));
+}
+
 async function loadWatchlistBadges() {
   if (wlBadgesBusy) return; // avoid overlapping refreshes
   wlBadgesBusy = true;
@@ -964,14 +972,17 @@ async function loadWatchlistBadges() {
     // login") — the browser's own per-origin connection cap plus the server's
     // Dhan request throttle (dhanProvider.ts) already bound real concurrency,
     // so this adds no extra load, just removes an unnecessary added wait.
-    await Promise.all(state.symbols.map(async (s) => {
+    // At most 2 at a time: firing all ~26 at once took every browser connection
+    // (6 per host) for 20–30s, so the trading screen's own refresh queued behind
+    // them and showed old data.
+    await runLimited(state.symbols, 2, async (s) => {
       try {
         const sig = await fetch(`/api/signal/${encodeURIComponent(s.symbol)}?interval=${state.interval}`).then((r) => r.json());
         if (sig && sig.label) {
           state.wlData[s.symbol] = { score: sig.score, label: sig.label, price: sig.price, regime: sig.regime, rvol: sig.rvol };
         }
       } catch (_) { /* ignore per-item errors */ }
-    }));
+    });
     renderWatchlist(); // re-order: indices first, then best opportunities
   } finally {
     wlBadgesBusy = false;
@@ -14974,7 +14985,13 @@ function startEarlyMoveAlerts() {
   state.early.timer = setInterval(() => { if (isMarketOpen()) pollEarlyMoves(); }, 60 * 1000);
 }
 
+let _earlyPollBusy = false;
 async function pollEarlyMoves() {
+  if (_earlyPollBusy) return;      // never stack polls behind a slow one
+  _earlyPollBusy = true;
+  try { await pollEarlyMovesOnce(); } finally { _earlyPollBusy = false; }
+}
+async function pollEarlyMovesOnce() {
   const pill = el("early-ind");
   try {
     const d = await fetch("/api/early-moves").then((r) => r.json());
@@ -15407,6 +15424,9 @@ const LG_TOKEN_KEY = "nsa_session";
 // enforcing auth server-side would otherwise 401 every other call in this
 // file. Patching window.fetch once here covers all of them without touching
 // each of the ~85 call sites individually.
+const API_INFLIGHT = new Map();
+const API_CLIENT_TIMEOUT_MS = 45000;   // server answers live GETs within 40s (504 otherwise)
+const LONG_API = /^\/api\/(backtest|backtest-dhan|backtest-compare|replay|strategy-replay|testlab|qa|audit|ask|analyst|admin|log|hourly|advisory|longterm|monthly-swing|bull-rank|zero-hero|oi-command\/backtest|move-timing|option-sell|paper\/review|ai-paper|vwapema-run|orb-run)/;
 (function installAuthFetch() {
   const nativeFetch = window.fetch.bind(window);
   const PUBLIC = ["/api/login", "/api/session", "/api/logout"];
@@ -15418,6 +15438,22 @@ const LG_TOKEN_KEY = "nsa_session";
         init = init || {};
         init.headers = Object.assign({}, init.headers || {}, { Authorization: "Bearer " + token });
       }
+    }
+    // Hard client-side limit for live GET polls: a request that never answers must
+    // not hold one of the browser's 6 connections forever (that froze every screen
+    // after ~5 min). Research/backtest routes and callers with their own signal are exempt.
+    const method = ((init && init.method) || (input && input.method) || "GET").toUpperCase();
+    if (url.startsWith("/api/") && method === "GET" && !(init && init.signal) && !LONG_API.test(url)) {
+      // Same GET already in flight (a poll firing again before the last answer) →
+      // share it instead of opening another connection.
+      const shared = API_INFLIGHT.get(url);
+      if (shared) return shared.then((r) => r.clone());
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), API_CLIENT_TIMEOUT_MS);
+      init = Object.assign({}, init || {}, { signal: ctrl.signal });
+      const p = nativeFetch(input, init).finally(() => { clearTimeout(t); API_INFLIGHT.delete(url); });
+      API_INFLIGHT.set(url, p);
+      return p.then((r) => r.clone());
     }
     return nativeFetch(input, init);
   };
