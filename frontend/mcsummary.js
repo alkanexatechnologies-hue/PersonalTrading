@@ -515,10 +515,11 @@ function mcsRenderPreopen() {
   let pick = null;
   const m = MCS.d?.optionMatrix;
   if (now >= 9 * 60 + 12) {
-    const key = `mcsPre:${day}:${MCS.sym}`;
+    const key = `mcsPre2:${day}:${MCS.sym}`;   // v2: v1 could freeze on yesterday's close before the live quote arrived
     try { pick = JSON.parse(localStorage.getItem(key) || "null"); } catch (_) { pick = null; }
-    if (!pick && m && m.available && m.rows?.length && MCS.d?.symbol === MCS.sym) {
-      const spotNow = qs[MCS.sym]?.price ?? MCS.d.spot;   // live (pre-open) index price, not yesterday's close
+    const liveQ = qs[MCS.sym], fresh = liveQ && liveQ.price != null && (liveQ.fetchedAt == null || Date.now() - liveQ.fetchedAt < 120_000);
+    if (!pick && fresh && m && m.available && m.rows?.length && MCS.d?.symbol === MCS.sym) {
+      const spotNow = liveQ.price;   // live (pre-open) index price — never yesterday's close
       const ce = mcsBestStrike(m.rows, "CE", spotNow), pe = mcsBestStrike(m.rows, "PE", spotNow);
       const ch = qs[MCS.sym]?.changePercent;
       if (ce || pe) { pick = { at: new Date(Date.now() + 19800000).toISOString().slice(11, 16), spot: spotNow, expiry: m.expiry, ce, pe, primary: ch == null ? null : ch >= 0.3 ? "CE" : ch <= -0.3 ? "PE" : null }; try { localStorage.setItem(key, JSON.stringify(pick)); } catch (_) {} }
@@ -531,15 +532,43 @@ function mcsRenderPreopen() {
       <span class="mcs-prelbl">${side === "CE" ? "BEST CALL" : "BEST PUT"}${pick.primary === side ? " · PRIMARY (gap side)" : ""}</span>
       <b class="mcs-prestk">${b.strike} ${side}${b.why === "ATM" ? ' <span class="mcs-badge hot">ATM</span>' : ""}</b>
       <span>₹${mcsN(b.ltp)} at ${mcsEsc(pick.at)}${l != null ? ` → now <b>₹${mcsN(l)}</b> <span class="${mcsCls(chg)}">${chg != null ? (chg > 0 ? "+" : "") + mcsN(chg, 1) + "%" : ""}</span>` : ""}</span>
-      <span class="mcs-sub">delta ${mcsN(Math.abs(b.delta), 2)} · IV ${mcsN(b.iv, 1)} · OI ${mcsN((b.oi || 0) / 1e5, 1)}L · OI chg ${b.oiChg > 0 ? "+" : ""}${mcsN((b.oiChg || 0) / 1e5, 1)}L</span></button>`; };
+      <span class="mcs-sub">delta ${mcsN(Math.abs(b.delta), 2)} · IV ${mcsN(b.iv, 1)} · OI ${mcsN((b.oi || 0) / 1e5, 1)}L · OI chg ${b.oiChg > 0 ? "+" : ""}${mcsN((b.oiChg || 0) / 1e5, 1)}L</span>
+      ${mcsPreSrHtml(side, b.strike)}</button>`; };
   const nm = MCS_SYMS.find((x) => x[0] === MCS.sym)?.[1] || MCS.sym;
   box.innerHTML = `<h4>🌅 PRE-OPEN ACTIVITY <span class="mcs-sub">09:00–09:15 pre-open vs previous close · best strikes from 09:12 · shown until 09:45</span></h4>
     <div class="mcs-prerows">${rows}</div>
     ${now < 9 * 60 + 12 ? `<div class="mcs-sub">⏳ Best CALL / PUT strikes for ${mcsEsc(nm)} appear at 09:12.</div>`
       : pick ? `<div class="mcs-prepicks">${card("CE", pick.ce)}${card("PE", pick.pe)}</div>
+        ${MCS.d?.oi && (MCS.d.oi.support != null || MCS.d.oi.resistance != null) ? `<div class="mcs-preidx">${mcsEsc(nm)} OI levels: <b class="mcs-up">support ${mcsN(MCS.d.oi.support, 0)}</b> (max PUT OI) · <b class="mcs-dn">resistance ${mcsN(MCS.d.oi.resistance, 0)}</b> (max CALL OI)${MCS.d.oi.pcr != null ? ` · PCR ${mcsN(MCS.d.oi.pcr, 2)}` : ""}</div>` : ""}
         <div class="mcs-sub">${mcsEsc(nm)} · spot ${mcsN(pick.spot)} at ${mcsEsc(pick.at)}${pick.expiry ? " · expiry " + mcsEsc(pick.expiry) : ""} · first preference ATM (nearest the live index price); delta ≈ 0.55 only if ATM has no premium · ${pick.primary ? `gap ${pick.primary === "CE" ? "UP → CALL" : "DOWN → PUT"} is the primary side` : "no clear gap (< 0.3%) — wait for the first 5-min candle to pick a side"} · advisory only</div>`
       : `<div class="mcs-sub">⏳ Waiting for the option chain to pick the best strikes…</div>`}`;
   box.querySelectorAll(".mcs-prepick").forEach((b) => (b.onclick = () => mcsPickStrike(Number(b.dataset.k))));
+  if (pick) mcsPreSrLoad(pick);
+}
+// Premium support / resistance of the picked strikes (same 5-min option structure the Option Terminal
+// draws: S1/S2 support, R1/R2 resistance from the premium chart's swings). Refreshed every 60 s.
+async function mcsPreSrLoad(pick) {
+  const exp = pick.expiry || MCS.d?.optionMatrix?.expiry; if (!exp) return;
+  const ks = [...new Set([pick.ce?.strike, pick.pe?.strike].filter((x) => x != null))];
+  MCS._preSR = MCS._preSR || {};
+  for (const k of ks) {
+    const key = `${MCS.sym}|${k}|${exp}`, cur = MCS._preSR[key];
+    if (cur && (cur.busy || Date.now() - cur.at < 60_000)) continue;
+    MCS._preSR[key] = { ...(cur || {}), busy: true, at: cur?.at || 0 };
+    const sym = MCS.sym;
+    fetchJSON(`/api/option-structure?symbol=${encodeURIComponent(sym)}&strike=${k}&expiry=${encodeURIComponent(exp)}&interval=5`, 25000).catch(() => null).then((r) => {
+      MCS._preSR[key] = { busy: false, at: Date.now(), data: r && r.available ? r : (cur && cur.data) || null };
+      if (sym === MCS.sym) { const box = mcsEl("mcs-preopen"); if (box && !box.hidden) mcsRenderPreopen(); }
+    });
+  }
+}
+function mcsPreSrHtml(side, k) {
+  const exp = MCS.d?.optionMatrix?.expiry;
+  const hit = Object.entries(MCS._preSR || {}).find(([key]) => key.startsWith(`${MCS.sym}|${k}|`) && (!exp || key.endsWith(exp)));
+  const x = hit && hit[1].data ? hit[1].data[side === "CE" ? "ce" : "pe"] : null;
+  if (!x || !x.available) return `<span class="mcs-sub mcs-presr">Premium S/R: loading…</span>`;
+  const v = (n) => (n == null ? "—" : "₹" + mcsN(n, 1));
+  return `<span class="mcs-presr"><span class="mcs-up">Support S1 ${v(x.s1)} · S2 ${v(x.s2)}</span> <span class="mcs-dn">Resistance R1 ${v(x.r1)} · R2 ${v(x.r2)}</span>${x.structure ? ` <span class="mcs-sub">· premium structure ${mcsEsc(x.structure)}</span>` : ""}</span>`;
 }
 setInterval(() => { try { if (MCS.init && document.getElementById("mcs-preopen")) mcsRenderPreopen(); } catch (_) {} }, 15000);
 

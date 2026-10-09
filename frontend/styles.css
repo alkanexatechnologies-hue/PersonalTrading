@@ -6887,3 +6887,5 @@ body.lqa-fullwidth .content { padding-left: 0; padding-right: 0; }
 .mcs-prelbl { font-size: 12px; font-weight: 700; letter-spacing: .04em; color: #f59e0b; }
 .mcs-prestk { font-size: 20px; }
 .mcs-prepick.ce .mcs-prestk { color: #22c55e; } .mcs-prepick.pe .mcs-prestk { color: #ef4444; }
+.mcs-presr { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 12px; font-weight: 600; margin-top: 2px; }
+.mcs-preidx { font-size: 13px; margin: 2px 0; }
