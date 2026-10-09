@@ -71,8 +71,8 @@ function mcsShell() {
     <div class="mcs-tprog" id="mcs-tprog" title="Session progress 09:15 → 15:15"><i id="mcs-tprogbar"></i><span id="mcs-tprogtxt">09:15</span></div>
     <span class="mcs-tstat" id="mcs-tstat"></span>
   </div>
+  <section class="mcs-card mcs-preopen" id="mcs-preopen" hidden></section>
   <div class="mcs-top">
-    <section class="mcs-card mcs-preopen" id="mcs-preopen" hidden></section>
     <section class="mcs-card mcs-chartcard">
       <div class="mcs-chhead">
         <b id="mcs-chname">NIFTY 50 (Spot)</b><span class="mcs-sub" id="mcs-ohlc"></span>
