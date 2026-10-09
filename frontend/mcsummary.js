@@ -72,6 +72,7 @@ function mcsShell() {
     <span class="mcs-tstat" id="mcs-tstat"></span>
   </div>
   <div class="mcs-top">
+    <section class="mcs-card mcs-preopen" id="mcs-preopen" hidden></section>
     <section class="mcs-card mcs-chartcard">
       <div class="mcs-chhead">
         <b id="mcs-chname">NIFTY 50 (Spot)</b><span class="mcs-sub" id="mcs-ohlc"></span>
@@ -471,6 +472,77 @@ function mcsRenderHeader() {
   if (m && d) { const exp = d.optionMatrix?.expiry; m.innerHTML = `${s ? "📅 " + new Date(s.date + "T00:00:00Z").toUTCString().slice(0, 16) : ""} ${exp ? " · Expiry <b>" + mcsEsc(exp) + "</b>" : ""} · Updated <b>${new Date().toLocaleTimeString("en-IN", { hour12: false })}</b> ${d.dataStale ? '<span class="mcs-warn">· DATA STALE</span>' : ""}`; }
 }
 
+// ---------------------------------------------------------------------------
+// PRE-OPEN TRACKER (09:00–09:45 IST, LIVE only). 09:00–09:15: each index's pre-open price vs the
+// previous close (gap). From 09:12: BEST CALL and BEST PUT strike for this index, frozen at the
+// first read after 09:12 and BLINKING until 09:30 (then highlighted). FIRST PREFERENCE = the ATM
+// strike (nearest the live index price) for both CALL and PUT. Only if ATM has no premium: the strike
+// whose |delta| is closest to 0.55 among liquid strikes (≥ 30% of the side's top volume); ties →
+// higher OI change. Gap direction marks the PRIMARY side.
+// ---------------------------------------------------------------------------
+function mcsIstMin() { const d = new Date(Date.now() + 19800000); return d.getUTCHours() * 60 + d.getUTCMinutes(); }
+function mcsBestStrike(rows, side, spot) {
+  const k = side === "CE" ? "ce" : "pe";
+  const pack = (r, why) => ({ strike: r.strike, ltp: r[k].ltp, delta: r[k].delta, iv: r[k].iv, oi: r[k].oi, oiChg: r[k].oiChg, vol: r[k].vol, why });
+  if (spot != null && rows.length) {
+    const atm = rows.reduce((b, r) => (Math.abs(r.strike - spot) < Math.abs(b.strike - spot) ? r : b), rows[0]);
+    if (atm[k] && atm[k].ltp > 0) return pack(atm, "ATM");
+  }
+  const ok = rows.filter((r) => r[k] && r[k].ltp > 0 && r[k].delta != null);
+  if (!ok.length) return null;
+  const maxVol = Math.max(...ok.map((r) => r[k].vol || 0));
+  const liquid = ok.filter((r) => (r[k].vol || 0) >= 0.3 * maxVol);
+  const pool = liquid.length ? liquid : ok;
+  pool.sort((a, b) => Math.abs(Math.abs(a[k].delta) - 0.55) - Math.abs(Math.abs(b[k].delta) - 0.55) || (b[k].oiChg || 0) - (a[k].oiChg || 0));
+  return pack(pool[0], "delta ≈ 0.55 (ATM had no premium)");
+}
+function mcsRenderPreopen() {
+  const box = mcsEl("mcs-preopen"); if (!box) return;
+  const now = mcsIstMin(), dow = new Date(Date.now() + 19800000).getUTCDay();
+  const show = MCS.mode === "LIVE" && dow >= 1 && dow <= 5 && now >= 9 * 60 && now < 9 * 60 + 45;
+  box.hidden = !show; if (!show) return;
+  const day = new Date(Date.now() + 19800000).toISOString().slice(0, 10);
+  const qs = MCS.q?.quotes || {};
+  // pre-open trail: first and latest price seen per index (kept for the day in this browser)
+  MCS._pre = MCS._pre || {};
+  for (const [sy] of MCS_SYMS) { const x = qs[sy]; if (!x || x.price == null) continue; const t = MCS._pre[sy] = MCS._pre[sy] || { first: null, last: null };
+    const hm = new Date(Date.now() + 19800000).toISOString().slice(11, 16); if (!t.first) t.first = { t: hm, p: x.price }; t.last = { t: hm, p: x.price, ch: x.changePercent }; }
+  const gapTag = (ch) => ch == null ? "" : ch >= 0.3 ? `<b class="mcs-up">GAP UP</b>` : ch <= -0.3 ? `<b class="mcs-dn">GAP DOWN</b>` : `<b>FLAT</b>`;
+  const rows = MCS_SYMS.map(([sy, n]) => { const x = qs[sy], t = MCS._pre[sy];
+    return `<div class="mcs-prerow${sy === MCS.sym ? " on" : ""}"><span>${mcsEsc(n)}</span><b>${x ? mcsN(x.price) : "—"}</b><span class="${mcsCls(x?.changePercent)}">${x && x.changePercent != null ? (x.changePercent > 0 ? "+" : "") + mcsN(x.changePercent, 2) + "%" : ""}</span>${gapTag(x?.changePercent)}
+      ${t && t.first && t.last && t.first.t !== t.last.t ? `<span class="mcs-sub">${t.first.t} ${mcsN(t.first.p)} → ${t.last.t} ${mcsN(t.last.p)}</span>` : ""}</div>`; }).join("");
+  // best strikes from 09:12, frozen at the first read (survives a page refresh for the day)
+  let pick = null;
+  const m = MCS.d?.optionMatrix;
+  if (now >= 9 * 60 + 12) {
+    const key = `mcsPre:${day}:${MCS.sym}`;
+    try { pick = JSON.parse(localStorage.getItem(key) || "null"); } catch (_) { pick = null; }
+    if (!pick && m && m.available && m.rows?.length && MCS.d?.symbol === MCS.sym) {
+      const spotNow = qs[MCS.sym]?.price ?? MCS.d.spot;   // live (pre-open) index price, not yesterday's close
+      const ce = mcsBestStrike(m.rows, "CE", spotNow), pe = mcsBestStrike(m.rows, "PE", spotNow);
+      const ch = qs[MCS.sym]?.changePercent;
+      if (ce || pe) { pick = { at: new Date(Date.now() + 19800000).toISOString().slice(11, 16), spot: spotNow, expiry: m.expiry, ce, pe, primary: ch == null ? null : ch >= 0.3 ? "CE" : ch <= -0.3 ? "PE" : null }; try { localStorage.setItem(key, JSON.stringify(pick)); } catch (_) {} }
+    }
+  }
+  const live = (side, k) => { const r = m?.rows?.find((x) => x.strike === k); return r ? r[side === "CE" ? "ce" : "pe"]?.ltp : null; };
+  const blink = now < 9 * 60 + 30 ? " mcs-blink" : "";
+  const card = (side, b) => { if (!b) return ""; const l = live(side, b.strike), chg = l != null && b.ltp ? ((l - b.ltp) / b.ltp) * 100 : null;
+    return `<button type="button" class="mcs-prepick ${side === "CE" ? "ce" : "pe"}${blink}${pick.primary === side ? " primary" : ""}" data-k="${b.strike}" title="Tap to open this strike's charts">
+      <span class="mcs-prelbl">${side === "CE" ? "BEST CALL" : "BEST PUT"}${pick.primary === side ? " · PRIMARY (gap side)" : ""}</span>
+      <b class="mcs-prestk">${b.strike} ${side}${b.why === "ATM" ? ' <span class="mcs-badge hot">ATM</span>' : ""}</b>
+      <span>₹${mcsN(b.ltp)} at ${mcsEsc(pick.at)}${l != null ? ` → now <b>₹${mcsN(l)}</b> <span class="${mcsCls(chg)}">${chg != null ? (chg > 0 ? "+" : "") + mcsN(chg, 1) + "%" : ""}</span>` : ""}</span>
+      <span class="mcs-sub">delta ${mcsN(Math.abs(b.delta), 2)} · IV ${mcsN(b.iv, 1)} · OI ${mcsN((b.oi || 0) / 1e5, 1)}L · OI chg ${b.oiChg > 0 ? "+" : ""}${mcsN((b.oiChg || 0) / 1e5, 1)}L</span></button>`; };
+  const nm = MCS_SYMS.find((x) => x[0] === MCS.sym)?.[1] || MCS.sym;
+  box.innerHTML = `<h4>🌅 PRE-OPEN ACTIVITY <span class="mcs-sub">09:00–09:15 pre-open vs previous close · best strikes from 09:12 · shown until 09:45</span></h4>
+    <div class="mcs-prerows">${rows}</div>
+    ${now < 9 * 60 + 12 ? `<div class="mcs-sub">⏳ Best CALL / PUT strikes for ${mcsEsc(nm)} appear at 09:12.</div>`
+      : pick ? `<div class="mcs-prepicks">${card("CE", pick.ce)}${card("PE", pick.pe)}</div>
+        <div class="mcs-sub">${mcsEsc(nm)} · spot ${mcsN(pick.spot)} at ${mcsEsc(pick.at)}${pick.expiry ? " · expiry " + mcsEsc(pick.expiry) : ""} · first preference ATM (nearest the live index price); delta ≈ 0.55 only if ATM has no premium · ${pick.primary ? `gap ${pick.primary === "CE" ? "UP → CALL" : "DOWN → PUT"} is the primary side` : "no clear gap (< 0.3%) — wait for the first 5-min candle to pick a side"} · advisory only</div>`
+      : `<div class="mcs-sub">⏳ Waiting for the option chain to pick the best strikes…</div>`}`;
+  box.querySelectorAll(".mcs-prepick").forEach((b) => (b.onclick = () => mcsPickStrike(Number(b.dataset.k))));
+}
+setInterval(() => { try { if (MCS.init && document.getElementById("mcs-preopen")) mcsRenderPreopen(); } catch (_) {} }, 15000);
+
 function mcsRenderLevels() {
   const box = mcsEl("mcs-levels"); const d = MCS.d; if (!box) return;
   if (!d) { box.innerHTML = `<h4>Market Levels</h4>${UNAV}`; return; }
@@ -771,11 +843,11 @@ function mcsLiveOnly(id) {
 }
 function mcsRenderAll() {
   if (MCS.mode === "TEST") {
-    mcsStable(() => { mcsRenderHeader(); mcsRenderChart(); mcsRenderLvTable(); mcsRenderKeyRow(); mcsRenderSetups(); mcsRenderLab();
+    mcsStable(() => { mcsRenderHeader(); mcsRenderPreopen(); mcsRenderChart(); mcsRenderLvTable(); mcsRenderKeyRow(); mcsRenderSetups(); mcsRenderLab();
       ["mcs-optlv", "mcs-analysis", "mcs-fast", "mcs-strikes", "mcs-optCE", "mcs-optPE", "mcs-next5", "mcs-next15", "mcs-movers", "mcs-chain", "mcs-topmove", "mcs-cmd"].forEach(mcsLiveOnly); });
     return;
   }
-  mcsStable(() => { mcsRenderHeader(); mcsRenderChart(); mcsRenderLvTable(); mcsRenderOptLv(); mcsRenderKeyRow(); mcsRenderSetups(); mcsRenderLab(); mcsRenderAnalysis(); mcsRenderLevels(); mcsRenderFast(); mcsRenderStrikes(); mcsRenderOpt("CE"); mcsRenderOpt("PE");
+  mcsStable(() => { mcsRenderHeader(); mcsRenderPreopen(); mcsRenderChart(); mcsRenderLvTable(); mcsRenderOptLv(); mcsRenderKeyRow(); mcsRenderSetups(); mcsRenderLab(); mcsRenderAnalysis(); mcsRenderLevels(); mcsRenderFast(); mcsRenderStrikes(); mcsRenderOpt("CE"); mcsRenderOpt("PE");
   mcsRenderNext(5); mcsRenderNext(15); mcsRenderMovers(); mcsRenderChain(); mcsRenderTopMove(); mcsRenderCmd(); });
 }
 
