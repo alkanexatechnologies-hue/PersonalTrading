@@ -204,6 +204,9 @@ import { globalCues, indexSentiment, indiaSentiment, briefPhase, briefHeadline, 
 import { sessionsOf, analyseDay, aggregate, buildLevels, LiqEvent, LiqLevel } from "../liquidity/liquidityTake";
 import { evaluateSession, dailyAtrFrom5m, summarizeReplay, analyzeMoves, SETUP_CONFIG, SetupSignal, SessionResult } from "../signals/setupSignals";
 import { writeOiMinute, listOiMinuteDays, oiMinuteFilePath } from "../oi/oiMinuteLog";
+import { jwtExp, renewDecision, pickRenewedToken } from "../data/dhanTokenRenew";
+import { dhanFetch as dhanGuardedFetch } from "../data/dhanClient";
+import { notify } from "../integrations/notificationService";
 import { runLabStrategy, pdhPdlLevels, swingLevels, oiLevels, liquidityMap, LAB_CONFIG, LAB_OVERRIDES, type LabTrade } from "../signals/strategyLab";
 import { regimeAt } from "../decision/regime";
 import { buildOptionPlan } from "../signals/breakoutOption";
@@ -6549,6 +6552,8 @@ router.get("/dhan/status", requireAdmin, (_req: Request, res: Response) => {
     configured: dhanConfigured(cfg),
     clientId: cfg.clientId || null,
     hasToken: !!cfg.accessToken,
+    tokenExpiresAt: jwtExp(cfg.accessToken) ? new Date(jwtExp(cfg.accessToken)! * 1000).toISOString() : null,
+    autoRenew: dhanRenewState,
   });
 });
 router.post("/dhan/config", requireAdmin, (req: Request, res: Response) => {
@@ -8463,6 +8468,80 @@ function buildLab(symbol: string, days: string[], ses: Map<string, Candle[]>, di
       "Record after costs = total R − 0.15R per trade. Paper / advisory — no orders are placed."],
   };
 }
+// ---- Dhan token auto-renew state + Render sync -------------------------------
+const dhanRenewState: { enabled: boolean; lastCheck: string | null; lastDecision: string | null; lastRenewAt: string | null; lastError: string | null; renderSync: string | null } =
+  { enabled: false, lastCheck: null, lastDecision: null, lastRenewAt: null, lastError: null, renderSync: null };
+let _renewBusy = false;
+async function maybeRenewDhanToken(force = false): Promise<void> {
+  if (_renewBusy) return; _renewBusy = true;
+  try {
+    const cfg = loadDhanConfig(), now = Math.floor(Date.now() / 1000);
+    dhanRenewState.lastCheck = new Date().toISOString();
+    if (!cfg.accessToken) { dhanRenewState.lastDecision = "no token saved"; return; }
+    const d = renewDecision(now, jwtExp(cfg.accessToken));
+    dhanRenewState.lastDecision = d.why;
+    if (!d.renew && !force) {
+      if (/expired/.test(d.why) && dhanRenewState.lastError !== d.why) { dhanRenewState.lastError = d.why; notify("CREDENTIAL_ROTATION", "⚠️ Dhan token has expired — auto-renew is not possible. Paste a fresh token in the app (Dhan button) before 09:15.").catch(() => {}); }
+      return;
+    }
+    const res = await dhanGuardedFetch("/RenewToken", { method: "POST", accessToken: cfg.accessToken, clientId: cfg.clientId });
+    const body: any = await res.json().catch(() => null);
+    const fresh = res.ok ? pickRenewedToken(body, cfg.accessToken, cfg.clientId) : null;
+    if (!fresh) {
+      const keys = body && typeof body === "object" ? Object.keys(body).join(",") : "none";
+      dhanRenewState.lastError = `RenewToken ${res.status}: no new token in the response (fields: ${keys})`;
+      console.warn("[dhan-renew]", dhanRenewState.lastError);
+      notify("CREDENTIAL_ROTATION", `⚠️ Dhan token auto-renew failed (HTTP ${res.status}). Paste a fresh token in the app before 09:15.`).catch(() => {});
+      return;
+    }
+    const next = saveDhanConfig({ accessToken: fresh, clientId: cfg.clientId });
+    try { setFeedFlags({ dhan: true }); } catch { /* best-effort */ }
+    const t = await testDhanConnection().catch((e: any) => ({ ok: false, error: e?.message }));
+    const exp = jwtExp(fresh);
+    dhanRenewState.lastRenewAt = new Date().toISOString(); dhanRenewState.lastError = t.ok ? null : `renewed, but the test call failed: ${(t as any).error || "unknown"}`;
+    logAuditEvent({ type: "DHAN_CREDENTIAL_UPDATED", userId: "system", username: "auto-renew", mode: "admin", provider: "dhan", result: t.ok ? "success" : "failure" });
+    console.log(`[dhan-renew] token renewed, valid until ${exp ? new Date((exp + 19800) * 1000).toISOString().slice(0, 16).replace("T", " ") + " IST" : "?"}; test ${t.ok ? "OK" : "FAILED"}`);
+    dhanRenewState.renderSync = await pushDhanTokenToRender(fresh, next.clientId || cfg.clientId || null);
+    notify("CREDENTIAL_ROTATION", `✅ Dhan token renewed automatically — valid until ${exp ? new Date((exp + 19800) * 1000).toISOString().slice(0, 16).replace("T", " ") + " IST" : "?"}. Render: ${dhanRenewState.renderSync}.`).catch(() => {});
+  } catch (e: any) {
+    dhanRenewState.lastError = e?.message || String(e);
+    console.warn("[dhan-renew] failed:", dhanRenewState.lastError);
+  } finally { _renewBusy = false; }
+}
+// Render address + admin login: env NSA_RENDER_URL / NSA_RENDER_USER / NSA_RENDER_PASS / NSA_RENDER_MODE,
+// else the desktop pull settings in ~/.nsa-pull.env (NSA_URL / NSA_USER / NSA_PASS / NSA_MODE).
+function renderLogin(): { url: string; user: string; pass: string; mode: string } | null {
+  const env: Record<string, string> = {};
+  try {
+    for (const ln of fs.readFileSync(path.join(require("os").homedir(), ".nsa-pull.env"), "utf8").split("\n")) {
+      const m = /^\s*([A-Z_]+)\s*=\s*(.*?)\s*$/.exec(ln); if (m && !ln.trim().startsWith("#")) env[m[1]] = m[2].replace(/^["']|["']$/g, "");
+    }
+  } catch { /* no file */ }
+  const url = (process.env.NSA_RENDER_URL || env.NSA_URL || "").replace(/\/$/, "");
+  const pass = process.env.NSA_RENDER_PASS || env.NSA_PASS || "";
+  if (!url || !pass || /YOUR-APP/.test(url) || process.env.RENDER_EXTERNAL_URL) return null;
+  return { url, user: process.env.NSA_RENDER_USER || env.NSA_USER || "admin", pass, mode: process.env.NSA_RENDER_MODE || env.NSA_MODE || "admin" };
+}
+async function pushDhanTokenToRender(token: string, clientId: string | null): Promise<string> {
+  const r = renderLogin(); if (!r) return "not synced (set NSA_PASS in ~/.nsa-pull.env to sync Render)";
+  const go = (p: string, body: any, tok?: string) => fetch(`${r.url}${p}`, { method: "POST", headers: { "Content-Type": "application/json", ...(tok ? { Authorization: `Bearer ${tok}` } : {}) }, body: JSON.stringify(body), signal: AbortSignal.timeout(90_000) });
+  for (let i = 0; i < 3; i++) {   // a sleeping free Render service needs ~1 min to wake
+    try {
+      const lj: any = await (await go("/api/login", { username: r.user, password: r.pass, mode: r.mode })).json();
+      if (!lj?.token) return "not synced (Render login failed — check NSA_USER / NSA_PASS)";
+      const sj: any = await (await go("/api/dhan/config", { accessToken: token, clientId }, lj.token)).json();
+      if (!sj?.ok) return "not synced (Render refused the token)";
+      const tj: any = await (await go("/api/dhan/test", {}, lj.token)).json().catch(() => ({}));
+      return tj?.ok ? "synced and tested" : "synced (Render test call failed)";
+    } catch { await new Promise((res) => setTimeout(res, 20_000)); }
+  }
+  return "not synced (Render did not respond)";
+}
+router.post("/dhan/renew-now", requireAdmin, async (_req: Request, res: Response) => {
+  await maybeRenewDhanToken(true);
+  res.json({ ...dhanRenewState, tokenExpiresAt: jwtExp(loadDhanConfig().accessToken) ? new Date(jwtExp(loadDhanConfig().accessToken)! * 1000).toISOString() : null });
+});
+
 // Live log of Strategy Lab signals (one line per status change).
 const LAB_LOG_DIR = path.join(process.cwd(), "data", "strategy-lab");
 const _labLogged = new Map<string, string>();
@@ -9675,6 +9754,14 @@ export function startHourlyScheduler() {
     if (dow === 0 || dow === 6 || m < 8 * 60 || m > 16 * 60) return;
     fetch(`${selfUrl.replace(/\/$/, "")}/health`).catch(() => {});
   }, 10 * 60 * 1000);
+
+  // DHAN TOKEN AUTO-RENEW (Dhan v2 /RenewToken): outside market hours, whenever < 13 h remain,
+  // swap the Web token for a new 24 h one, re-test it, and push it to the Render app (its copy of
+  // the old token stops working). Runs on the local app; on Render only with DHAN_AUTO_RENEW=on
+  // (a free Render service sleeps overnight). DHAN_AUTO_RENEW=off disables it everywhere.
+  const renewOn = process.env.DHAN_AUTO_RENEW === "on" || (process.env.DHAN_AUTO_RENEW !== "off" && !process.env.RENDER_EXTERNAL_URL);
+  dhanRenewState.enabled = renewOn;
+  if (renewOn) { const tick = () => { maybeRenewDhanToken().catch(() => {}); }; setTimeout(tick, 60_000); setInterval(tick, 10 * 60 * 1000); }
 
   // MARKET ACTIVITY ANALYST — background daily review. After the session closes
   // (>= 15:40 IST) build today's application-strength report ONCE from the app's

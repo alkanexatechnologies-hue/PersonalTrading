@@ -28,6 +28,7 @@ const ALLOWED_PATHS = new Set<string>([
   "/marketfeed/quote",  // full market quote (OI, volume, OHLC)
   "/optionchain",           // option chain (strikes, OI, greeks) — Dhan v2 POST
   "/optionchain/expirylist", // expiry dates for an underlying — Dhan v2 POST
+  "/RenewToken",            // account auth only: swaps the current Web token for a new 24 h one (no trading)
 ]);
 
 export interface DhanFetchOptions {
@@ -165,6 +166,7 @@ export async function dhanFetch(path: string, opts: DhanFetchOptions): Promise<R
     "access-token": opts.accessToken,
   };
   if (opts.clientId) headers["client-id"] = opts.clientId;
+  if (basePath === "/RenewToken" && opts.clientId) headers["dhanClientId"] = opts.clientId;   // header name RenewToken expects
 
   const cat = dhanCategory(basePath);
   const t0 = Date.now();
