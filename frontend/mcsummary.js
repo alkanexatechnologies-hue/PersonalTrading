@@ -72,6 +72,7 @@ function mcsShell() {
     <span class="mcs-tstat" id="mcs-tstat"></span>
   </div>
   <section class="mcs-card mcs-preopen" id="mcs-preopen" hidden></section>
+  <div class="mcs-cmdtop"><section class="mcs-card mcs-cmd" id="mcs-cmd"></section></div>
   <div class="mcs-top">
     <section class="mcs-card mcs-chartcard">
       <div class="mcs-chhead">
@@ -85,16 +86,16 @@ function mcsShell() {
     <section class="mcs-card mcs-optlv" id="mcs-optlv"></section>
   </div>
   <div class="mcs-keyrow" id="mcs-keyrow"></div>
-  <section class="mcs-card mcs-setups" id="mcs-setups"></section>
-  <section class="mcs-card mcs-lab" id="mcs-lab"></section>
-  <section class="mcs-card mcs-testlog" id="mcs-testlog" hidden></section>
   <section class="mcs-card mcs-analysis" id="mcs-analysis"></section>
-  <section class="mcs-card mcs-fast" id="mcs-fast"></section>
   <div class="mcs-grid2">
     <section class="mcs-card mcs-strikes" id="mcs-strikes"></section>
     <section class="mcs-card mcs-optcard" id="mcs-optCE"></section>
     <section class="mcs-card mcs-optcard" id="mcs-optPE"></section>
   </div>
+  <section class="mcs-card mcs-fast" id="mcs-fast"></section>
+  <section class="mcs-card mcs-setups" id="mcs-setups"></section>
+  <section class="mcs-card mcs-lab" id="mcs-lab"></section>
+  <section class="mcs-card mcs-testlog" id="mcs-testlog" hidden></section>
   <div class="mcs-grid3">
     <section class="mcs-card" id="mcs-next5"></section>
     <section class="mcs-card" id="mcs-next15"></section>
@@ -103,7 +104,6 @@ function mcsShell() {
   <div class="mcs-grid4">
     <section class="mcs-card mcs-chain" id="mcs-chain"></section>
     <section class="mcs-card" id="mcs-topmove"></section>
-    <section class="mcs-card mcs-cmd" id="mcs-cmd"></section>
   </div>
   <div class="mcs-foot">Data: existing Dhan connection (Market Command, Market Analysis, Option Terminal endpoints). Expected moves, delta/gamma projections and spike triggers are model estimates, not guarantees. Advisory only — no orders are placed.</div>`;
   mcsEl("mcs-back").onclick = () => { if (typeof switchTab === "function") switchTab("marketcommand"); };

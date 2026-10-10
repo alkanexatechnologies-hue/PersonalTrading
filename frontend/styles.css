@@ -6259,7 +6259,7 @@ body.mcs-fullwidth .watchlist, body.mcs-fullwidth #watchlist { display: none !im
 .mcs-grid1 { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 8px; margin-bottom: 8px; }
 .mcs-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
 .mcs-grid3 { display: grid; grid-template-columns: 1fr 1fr 1.4fr; gap: 8px; margin-bottom: 8px; }
-.mcs-grid4 { display: grid; grid-template-columns: 1.6fr 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.mcs-grid4 { display: grid; grid-template-columns: 1.6fr 1fr; gap: 8px; margin-bottom: 8px; }
 .mcs-chhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
 .mcs-tfs { display: flex; gap: 4px; margin-left: auto; }
 .mcs-toggles { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; color: var(--muted); }
@@ -6303,7 +6303,7 @@ body.mcs-fullwidth .watchlist, body.mcs-fullwidth #watchlist { display: none !im
 .mcs-foot { color: var(--muted); font-size: 11px; margin-top: 6px; }
 @media (max-width: 1200px) {
   .mcs-grid3 { grid-template-columns: 1fr 1fr; } .mcs-grid3 .mcs-movers { grid-column: 1 / -1; }
-  .mcs-grid4 { grid-template-columns: 1fr 1fr; } .mcs-grid4 .mcs-chain { grid-column: 1 / -1; }
+  .mcs-grid4 { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 900px) {
   .mcs-grid1, .mcs-grid2, .mcs-grid3, .mcs-grid4 { grid-template-columns: minmax(0, 1fr); }
@@ -6889,3 +6889,7 @@ body.lqa-fullwidth .content { padding-left: 0; padding-right: 0; }
 .mcs-prepick.ce .mcs-prestk { color: #22c55e; } .mcs-prepick.pe .mcs-prestk { color: #ef4444; }
 .mcs-presr { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 12px; font-weight: 600; margin-top: 2px; }
 .mcs-preidx { font-size: 13px; margin: 2px 0; }
+
+/* Market Command (Final Arbiter) card sits at the top of MC Summary, at its usual card width */
+.mcs-cmdtop { max-width: 520px; margin-bottom: 8px; }
+@media (max-width: 900px) { .mcs-cmdtop { max-width: none; } }
