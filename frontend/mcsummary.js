@@ -72,7 +72,6 @@ function mcsShell() {
     <span class="mcs-tstat" id="mcs-tstat"></span>
   </div>
   <section class="mcs-card mcs-preopen" id="mcs-preopen" hidden></section>
-  <div class="mcs-cmdtop"><section class="mcs-card mcs-cmd" id="mcs-cmd"></section></div>
   <div class="mcs-top">
     <section class="mcs-card mcs-chartcard">
       <div class="mcs-chhead">
