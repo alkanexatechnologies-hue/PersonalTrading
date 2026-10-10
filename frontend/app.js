@@ -9015,7 +9015,7 @@ function renderMCChart(d) {
     M: markers.map((m) => m.time + "|" + m.shape + "|" + m.text + "|" + m.color),
   });
   if (MC._overlaySig !== overlaySig) {
-    MC._overlaySig = overlaySig;
+    MC._overlaySig = overlaySig; MC._lvlNotes = {};
     MC._levelLines.forEach((pl) => { try { MC.candleSeries.removePriceLine(pl); } catch {} });
     MC._levelLines = [];
     visible.forEach((l) => {
@@ -9023,11 +9023,17 @@ function renderMCChart(d) {
       const col = mcLevelColor(l);
       // Structural walls = solid; ORB/PDH-PDL/swing = dashed; invalidation = dotted.
       const style = l.kind === "invalidation" ? 1 : (l.kind === "orb" || l.kind === "pdhl" || l.kind === "swing" || l.strength === "MEDIUM") ? 2 : 0;
-      MC._levelLines.push(MC.candleSeries.createPriceLine({ price: l.price, color: col, lineWidth: near ? 2 : 1, lineStyle: style, axisLabelVisible: true, title: `${l.short} ${mcFmtP(l.price)}${near ? " ◀" : ""}` }));
+      // drawn as a short ray + collision-free tag in the overlay (mcDrawLevelRays); the price line keeps
+      // only the axis price, and only for the nearest level above and below price
+      const nearSide = l === visible.find((x) => x.price > d.spot) || l === visible.find((x) => x.price < d.spot) || l.kind === "invalidation";
+      MC._levelLines.push(MC.candleSeries.createPriceLine({ price: l.price, color: col, lineWidth: 1, lineStyle: style, lineVisible: false, axisLabelVisible: nearSide, title: "" }));
     });
     MC.candleSeries.setMarkers(markers);
   }
   mcDrawForecast(d);
+  mcDrawLevelRays();
+  requestAnimationFrame(() => requestAnimationFrame(() => { try { mcDrawLevelRays(); } catch {} }));   // again once the price scale has settled
+  if (!MC._raySub) { MC._raySub = true; MC.chart.timeScale().subscribeVisibleLogicalRangeChange(() => requestAnimationFrame(mcDrawLevelRays)); }
   renderMCLevelsLegend(d);
   applyMCBreakoutLines(d);
   positionMCBoTag();
@@ -9523,7 +9529,7 @@ function mcFitPanes(force = true) {
   const curH = parseInt(cc.style.height, 10);
   if (!force && curH && Math.abs(curH - chartH) <= 24 && (MC._fitKey || "").split("|").slice(1).join("|") === `${rsiH}|${macdH}`) return;
   MC._fitKey = fitKey;
-  cc.style.height = chartH + "px"; MC.chart.applyOptions({ height: chartH });
+  cc.style.height = chartH + "px"; MC.chart.applyOptions({ height: chartH }); requestAnimationFrame(() => { try { mcDrawLevelRays(); } catch {} });
   if (rb) { rb.style.height = rsiH ? rsiH + "px" : ""; if (MC.rsiChart && rsiH) MC.rsiChart.applyOptions({ height: rsiH }); }
   if (mb) { mb.style.height = macdH ? macdH + "px" : ""; if (MC.macdChart && macdH) MC.macdChart.applyOptions({ height: macdH }); }
 }
@@ -9577,6 +9583,54 @@ function mcStartFcBlink() {
       : { axisLabelColor: "rgba(148,163,184,.18)", axisLabelTextColor: "rgba(229,231,235,.55)", color: "rgba(148,163,184,.3)" }); } catch { MC._fcBlink = null; }
   }, 700);
 }
+// ---- Level rays: short lines on the recent part of the chart + tags that never overlap ----
+// Display only: uses MC._activeLevels (the same levels as before) and the order blocks chosen above.
+function mcEscText(t) { return String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]); }
+function mcDrawLevelRays() {
+  const host = el("mc-chart-container"); if (!host || !MC.chart || !MC.candleSeries) return;
+  let lay = el("mc-lvl-layer");
+  if (!lay) { lay = document.createElement("div"); lay.id = "mc-lvl-layer"; lay.className = "mc-lvl-layer"; host.appendChild(lay); }
+  const spot = MC.lastData && MC.lastData.spot;
+  let plotW = host.clientWidth; try { plotW -= MC.chart.priceScale("right").width(); } catch {}
+  const H = host.clientHeight, x0 = Math.round(plotW * 0.52), x1 = plotW - 2;
+  const Y = (p) => { const y = MC.candleSeries.priceToCoordinate(p); return y == null || !isFinite(y) ? null : y; };
+  const lv = (MC.show.levels ? MC._activeLevels || [] : []).map((l, k) => ({ ...l, note: (MC._lvlNotes || {})[k] || "" }));
+  // merge levels within ~0.04 % of price (≈ 9 pts on NIFTY) into one ray
+  const tol = Math.max(1, (spot || 0) * 0.0004), groups = [];
+  [...lv].sort((a, b) => b.price - a.price).forEach((l) => { const g = groups.find((x) => Math.abs(x.price - l.price) <= tol); if (g) g.items.push(l); else groups.push({ price: l.price, items: [l] }); });
+  const above = groups.filter((g) => spot != null && g.price > spot).sort((a, b) => a.price - b.price), below = groups.filter((g) => spot != null && g.price < spot).sort((a, b) => b.price - a.price);
+  above.forEach((g, i) => (g.tag = "R" + (i + 1))); below.forEach((g, i) => (g.tag = "S" + (i + 1)));
+  const rows = groups.map((g) => {
+    const y = Y(g.price); if (y == null || y < 0 || y > H) return null;
+    const sl = g.items.some((l) => l.kind === "invalidation"), res = spot != null && g.price > spot;
+    const near = g.tag === "R1" || g.tag === "S1";
+    const names = [...new Set(g.items.map((l) => l.short))].join(" · "), note = g.items.map((l) => l.note).filter(Boolean).join(" · ");
+    const dist = spot != null ? g.price - spot : null;
+    return { y, near, cls: sl ? "sl" : res ? "res" : "sup", dashed: g.items.every((l) => l.strength !== "STRONG"),
+      text: `${sl ? "SL" : g.tag || ""} ${names} ${mcFmtP(g.price)}${dist != null ? ` <i>${dist > 0 ? "+" : ""}${mcFmtP(Math.round(dist * 10) / 10)}</i>` : ""}${note ? ` <em>${note}</em>` : ""}` };
+  }).filter(Boolean);
+  // the Resistance / Pullback Zone joins the same tag stack (its own label is hidden)
+  const zEl = el("mcfo-zone"), zLbl = el("mcfo-zone-lbl");
+  if (zEl && !zEl.hidden && zLbl && zLbl.textContent) {
+    const zt = parseFloat(zEl.style.top), zh = parseFloat(zEl.style.height);
+    if (isFinite(zt) && isFinite(zh)) rows.push({ y: zt + zh / 2, near: false, cls: "zone", dashed: false, noLine: true, text: mcEscText(zLbl.textContent.replace("Resistance / Pullback Zone", "Pullback zone")) });
+    zLbl.style.visibility = "hidden";
+  }
+  rows.sort((a, b) => a.y - b.y);
+  // stack tags: at least 18 px apart; push back up if they run off the bottom
+  const LH = 18; let prev = -Infinity; rows.forEach((r) => { r.ty = Math.max(r.y - LH / 2, prev + LH + 1); prev = r.ty; });
+  let over = rows.length ? rows[rows.length - 1].ty + LH - H : 0; for (let i = rows.length - 1; i >= 0 && over > 0; i--) { const lim = i ? rows[i - 1].ty + LH + 1 : 0; const mv = Math.min(over, rows[i].ty - lim); rows[i].ty -= mv; over -= mv; }
+  const bands = (MC.show.levels && MC.show.ob ? MC._obBands || [] : []).map((b) => { const a = Y(b.hi), z = Y(b.lo); return a == null || z == null ? null : { top: Math.min(a, z), h: Math.max(3, Math.abs(z - a)), ...b }; }).filter(Boolean);
+  const html = bands.map((b) => `<div class="mc-obband ${b.bull ? "bull" : "bear"}${b.confirmed ? "" : " pre"}" style="top:${b.top}px;height:${b.h}px;left:${x0}px;width:${x1 - x0}px"><span>${b.label}</span></div>`).join("")
+    + `<svg class="mc-lvl-svg" width="${plotW}" height="${H}">${rows.map((r) => `${r.noLine ? "" : `<line class="${r.cls}${r.near ? " near" : ""}" x1="${x0}" x2="${x1}" y1="${r.y}" y2="${r.y}" ${r.dashed ? 'stroke-dasharray="6 4"' : ""}/>`}${Math.abs(r.ty + LH / 2 - r.y) > 2 ? `<line class="lead ${r.cls}" x1="${x0 - 6}" y1="${r.ty + LH / 2}" x2="${x0}" y2="${r.y}"/>` : ""}`).join("")}</svg>`
+    + rows.map((r) => `<div class="mc-lvltag ${r.cls}${r.near ? " near" : ""}" style="top:${r.ty}px;right:${plotW - x0 + 6}px">${r.text}</div>`).join("");
+  if (lay._html !== html) { lay._html = html; lay.innerHTML = html; }
+  // the Resistance / Pullback Zone uses the same recent region instead of the full chart width
+  const z = el("mcfo-zone"), zl = el("mcfo-zone-lbl");
+  if (z) { z.style.left = x0 + "px"; z.style.right = (host.clientWidth - x1) + "px"; }
+  if (zl) zl.style.left = x0 + "px";
+}
+
 function mcDrawForecast(d) {
   const cs0 = MC._candles || [], sp = MC._swingPoints || [];
   const fsig = JSON.stringify([MC.show.forecast !== false, MC._overlaySig, cs0.length, sp.length ? sp[sp.length - 1].index : null, (MC._bosEvents || []).length]);
@@ -9595,7 +9649,7 @@ function mcDrawForecast(d) {
   // if a level line already sits on this price, append the note to its label instead of drawing a second line
   const add = (o) => {
     const k = (MC._activeLevels || []).findIndex((l) => Math.abs(l.price - o.price) <= Math.max(0.5, o.price * 0.0001));
-    if (k >= 0 && MC._levelLines && MC._levelLines[k] && /^BOS/.test(o.title)) { try { const l = MC._activeLevels[k]; MC._levelLines[k].applyOptions({ title: `${l.short} ${mcFmtP(l.price)} · ${o.title}` }); } catch {} return; }
+    if (k >= 0 && /^BOS/.test(o.title)) { MC._lvlNotes = MC._lvlNotes || {}; MC._lvlNotes[k] = o.title; return; }
     try { MC._fcLines.push(MC.candleSeries.createPriceLine(o)); } catch {}
   };
   MC._fcBlink = null;
@@ -9707,7 +9761,7 @@ function applyMCOverlays() {
   if (MC._obSig !== obSig) {
     MC._obSig = obSig;
     MC.obMarkers.forEach((pl) => { try { MC.candleSeries.removePriceLine(pl); } catch {} });
-    MC.obMarkers = [];
+    MC.obMarkers = []; MC._obBands = [];
     obs.forEach((ob) => drawMCOrderBlock(ob));
   }
 }
@@ -9723,8 +9777,10 @@ function drawMCOrderBlock(ob) {
   const color = confirmed ? solid : faded;
   const style = confirmed ? 0 : 2; // solid vs dashed
   const label = `${isBull ? "Bull" : "Bear"} OB${confirmed ? "" : " (pre)"}`;
-  const hiLine = MC.candleSeries.createPriceLine({ price: ob.high, color, lineWidth: confirmed ? 2 : 1, lineStyle: style, axisLabelVisible: false, title: label });
-  const loLine = MC.candleSeries.createPriceLine({ price: ob.low, color, lineWidth: 1, lineStyle: style, axisLabelVisible: false, title: "" });
+  // drawn as a shaded band in the level overlay (mcDrawLevelRays); invisible placeholders keep the old bookkeeping
+  const hiLine = MC.candleSeries.createPriceLine({ price: ob.high, color, lineWidth: 1, lineStyle: style, lineVisible: false, axisLabelVisible: false, title: "" });
+  const loLine = MC.candleSeries.createPriceLine({ price: ob.low, color, lineWidth: 1, lineStyle: style, lineVisible: false, axisLabelVisible: false, title: "" });
+  (MC._obBands = MC._obBands || []).push({ hi: ob.high, lo: ob.low, bull: isBull, confirmed, label });
   MC.obMarkers.push(hiLine, loLine);
 }
 
