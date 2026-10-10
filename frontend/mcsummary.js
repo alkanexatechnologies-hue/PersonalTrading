@@ -873,16 +873,83 @@ function mcsRenderAnalysis() {
     : dn ? (R1 ? `Bearish view is wrong on a 15M close above ${lvTxt(R1)}${lad.sl ? `; Market Command SL ${P(lad.sl.price)}` : ""}.` : null)
     : `A 15M close outside ${S1 ? P(S1.price) : "—"} – ${R1 ? P(R1.price) : "—"} sets the next direction.`;
 
-  const sec = (t, items) => `<div class="mcs-an-sec"><h5>${t}</h5><ul>${items.map((x) => `<li>${x}</li>`).join("")}</ul></div>`;
+  // ---- render: panel layout (same data and rules as above) ----
+  const IC = {
+    trend: '<path d="M3 17l6-6 4 4 7-7M14 8h6v6"/>', wave: '<path d="M2 12c3-6 5-6 8 0s5 6 8 0 3-4 4-3"/>', struct: '<path d="M12 3v6M5 15v-3h14v3M5 15v4M12 9v10M19 15v4"/>',
+    eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>', block: '<rect x="3" y="4" width="8" height="7"/><rect x="13" y="4" width="8" height="7"/><rect x="3" y="13" width="18" height="7"/>',
+    bars: '<path d="M4 20V12M10 20V8M16 20V4M22 20H2"/>', db: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
+    pulse: '<path d="M2 12h4l3-8 4 16 3-8h6"/>', warn: '<path d="M12 3l10 18H2L12 3zM12 10v5M12 18v.5"/>', shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z"/>',
+    target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/>', ban: '<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>',
+    range: '<path d="M4 8h16M16 4l4 4-4 4M20 16H4M8 12l-4 4 4 4"/>',
+  };
+  const ico = (k) => `<svg class="mcs-ai" viewBox="0 0 24 24" aria-hidden="true">${IC[k]}</svg>`;
+  const dc = (v) => (v === "BULLISH" ? "up" : v === "BEARISH" ? "dn" : "mid");
+  const arrow = (v) => (v === "BULLISH" ? "↑" : v === "BEARISH" ? "↓" : "↔");
+  const ev = [...(mv.validation?.bullishEvidence || []).map((x) => ["up", x]), ...(mv.validation?.bearishEvidence || []).map((x) => ["dn", x])];
+  const evOf = (re) => ev.find(([, x]) => re.test(x));
+  const msEv = evOf(/market structure/i), obEv = evOf(/order block/i);
+  const mark = (c) => (c === "up" ? '<b class="mcs-up">▲</b>' : c === "dn" ? '<b class="mcs-dn">▼</b>' : "•");
+  const row = (icon, label, value, note) => `<div class="mcs-arow">${ico(icon)}<span class="mcs-alb">${label}</span><span class="mcs-aval">${value}</span>${note != null ? `<span class="mcs-anote">${note}</span>` : ""}</div>`;
+  const sm = /(\d+)\s*\/\s*(\d+)/.exec(String(mv.strengthEvidence || "")), sOn = sm ? +sm[1] : 0, sOf = sm ? +sm[2] : 0;
+  const p1 = `<div class="mcs-atiles">${tfs.map(([k2, v]) => `<div class="mcs-atile ${dc(v)}"><span class="mcs-aarr">${arrow(v)}</span><span><small>${k2}</small><b>${mcsEsc(v)}</b></span></div>`).join("") || '<div class="mcs-sub">Timeframes unavailable</div>'}</div>
+    ${row("trend", e9 != null && e21 != null && e50 != null ? (e9 > e21 && e21 > e50 ? "EMAs (9 > 21 > 50)" : e9 < e21 && e21 < e50 ? "EMAs (9 < 21 < 50)" : "EMAs (mixed)") : "EMAs", e200 != null ? `${mark(spot >= e200 ? "up" : "dn")} Price ${spot >= e200 ? "above" : "below"} EMA 200 (${P(e200)})` : "—")}
+    ${vwap != null ? row("wave", "VWAP", `<b>${P(vwap)}</b>`, `${mark(spot >= vwap ? "up" : "dn")} Price ${spot >= vwap ? "above" : "below"} VWAP`) : ""}
+    ${row("struct", "Market structure", msEv ? `${mark(msEv[0])} ${mcsEsc(msEv[1].replace(/^market structure\s*/i, "")) || "—"}` : "—")}
+    ${vwap != null ? row("eye", "Price vs VWAP", `${mark(spot >= vwap ? "up" : "dn")} ${spot >= vwap ? "Above" : "Below"} VWAP <span class="mcs-sub">(${pts(spot - vwap)} pts)</span>`) : ""}
+    ${row("block", "Order Block", obEv ? `${mark(obEv[0])} ${mcsEsc(obEv[1].replace(/\s*order block\s*/i, " ").trim())}` : "—")}
+    ${mv.strengthEvidence ? row("bars", "Strength", `${sOf ? `<span class="mcs-sbar">${Array.from({ length: sOf }, (_, i) => `<i class="${i < sOn ? "on" : ""}"></i>`).join("")}</span> ` : ""}${mcsEsc(mv.strength || "")} — ${mcsEsc(mv.strengthEvidence)}`) : ""}`;
+
+  const ss = mcsSessionStats(), dayChg = ss && ss.prevClose != null && ss.close != null ? ss.close - ss.prevClose : null;
+  const pos = S1 && R1 && R1.price > S1.price ? Math.max(0, Math.min(100, ((spot - S1.price) / (R1.price - S1.price)) * 100)) : null;
+  const p2 = `<div class="mcs-aspot"><small>Spot price</small><b>${P(spot)}</b>${dayChg != null ? `<span class="${dayChg >= 0 ? "mcs-up" : "mcs-dn"}">${pts(dayChg)} pts (${mcsPct((dayChg / ss.prevClose) * 100)}) <span class="mcs-sub">vs prev close</span></span>` : ""}</div>
+    ${pos != null ? `<div class="mcs-arange" aria-label="Price between support and resistance"><div class="mcs-arl"><i style="left:${pos}%"></i><span class="mcs-arpx" style="left:${pos}%">${P(spot)}</span></div>
+      <div class="mcs-arlb"><span><b>${P(S1.price)}</b><br>Support<br><small>(${S1.tag} ${mcsEsc(S1.short)})</small></span><span class="r"><b>${P(R1.price)}</b><br>Resistance<br><small>(${R1.tag} ${mcsEsc(R1.short)})</small></span></div></div>
+      <div class="mcs-adist"><div><small>Distance to Support</small><b class="mcs-up">${mcsN(spot - S1.price, 1)} pts</b></div><div><small>Distance to Resistance</small><b class="mcs-dn">${mcsN(R1.price - spot, 1)} pts</b></div></div>`
+      : `<div class="mcs-sub">${loc[0] || ""}</div>`}
+    ${loc[1] ? `<div class="mcs-anoteb">${ico("target")}<span>${loc[1]}</span></div>` : ""}`;
+
+  const scCard = (cls, icon, title, primary, cond, lv, nxt, act) => `<div class="mcs-ascen ${cls}"><div class="mcs-asch">${icon}<b>${title}</b>${primary ? '<span> • Primary</span>' : ""}</div>
+      <div class="mcs-ascb">${cond}${lv ? `<br><b>${lv}</b>` : ""}${nxt || ""}</div><span class="mcs-aact ${cls}">${act}</span></div>`;
+  const nextTxt = (a, b) => (a ? `<br>→ next <b>${P(a.price)}</b> (${a.tag} ${mcsEsc(a.short)})<br><b class="${a.price > spot ? "mcs-up" : "mcs-dn"}">${pts(a.price - spot)} pts</b>${b ? `<br><span class="mcs-sub">then ${P(b.price)} (${b.tag} ${mcsEsc(b.short)})</span>` : ""}` : "<br>no mapped level beyond");
+  const p3 = `<div class="mcs-ascens">
+      ${R1 ? scCard("up", '<span class="mcs-aarr up">↑</span>', "BULL", up, "If a 15M candle closes above", `${P(R1.price)} (${R1.tag} ${mcsEsc(R1.short)})`, nextTxt(R2, R3), "BUY CE") : scCard("up", '<span class="mcs-aarr up">↑</span>', "BULL", up, "No resistance mapped above", "", "", "—")}
+      ${S1 ? scCard("dn", '<span class="mcs-aarr dn">↓</span>', "BEAR", dn, "If a 15M candle closes below", `${P(S1.price)} (${S1.tag} ${mcsEsc(S1.short)})`, nextTxt(S2, S3), "BUY PE") : scCard("dn", '<span class="mcs-aarr dn">↓</span>', "BEAR", dn, "No support mapped below", "", "", "—")}
+      ${S1 && R1 ? scCard("mid", ico("range"), "RANGE", false, "Until either break:", `${P(S1.price)} – ${P(R1.price)}`, "<br>Mid-range entries have poor room — wait at the edges.", "WAIT") : ""}
+    </div>`;
+
+  const p4 = `<div class="mcs-antz ${ntz?.active ? "on" : ""}">${ico("ban")}<div><b>${!ma ? "Not calculated" : ntz?.active ? `ACTIVE ${P(ntz.low)} – ${P(ntz.high)}` : "Not active"}</b><span>${!ma ? "Market Analysis data unavailable." : ntz?.active ? `${(ntz.reasons || []).map((x) => mcsEsc(String(x).replace(/\.+$/, ""))).join("; ")}. ${inNtz ? "Price is inside it now." : `Price is ${spot > ntz.high ? "above" : "below"} it.`}` : `${(ntz?.reasons || ["conditions tradeable"]).map((x) => mcsEsc(String(x).replace(/\.+$/, ""))).join("; ")}.`}</span></div></div>`;
+
+  const optTile = (side, o) => `<div class="mcs-aopt ${side === "CE" ? "up" : "dn"}"><div class="mcs-aoh"><span class="mcs-aarr ${side === "CE" ? "up" : "dn"}">${side === "CE" ? "↗" : "↘"}</span><b>${k} ${side}</b></div>
+      ${o.ltp == null ? '<div class="mcs-sub">Premium candles not loaded.</div>' : `<div class="mcs-aor"><span>Premium (LTP)</span><b class="${side === "CE" ? "mcs-up" : "mcs-dn"}">${P(o.ltp)}</b><i></i></div>
+      <div class="mcs-aor"><span>Support</span><b>${o.sup[0] ? P(o.sup[0].price) : "none"}</b><i>${o.sup[0] ? "(" + mcsEsc(o.sup[0].short) + ")" : ""}</i></div>
+      <div class="mcs-aor"><span>Resistance</span><b>${o.res[0] ? P(o.res[0].price) : "none"}</b><i>${o.res[0] ? "(" + mcsEsc(o.res[0].short) + ")" : ""}</i></div>`}</div>`;
+  const fastLine = opts.find((x) => /^Fast-move/.test(x)), pickLine = opts.find((x) => /^Market Command preferred/.test(x)), expLine = opts.find((x) => /Expiry/.test(x));
+  const p5 = `<div class="mcs-aopts">${optTile("CE", ce)}${optTile("PE", pe)}</div>
+    ${pickLine || fastLine || expLine ? `<div class="mcs-anoteb">${ico("target")}<span>${[pickLine, fastLine, expLine].filter(Boolean).join("<br>")}</span></div>` : ""}`;
+
+  const vixEnv = d.vixEnvironment?.environment;
+  const rrow = (icon, label, value, note, cls) => `<div class="mcs-arisk ${cls || ""}">${ico(icon)}<span class="mcs-alb">${label}</span><span class="mcs-aval">${value}</span><span class="mcs-anote">${note || ""}</span></div>`;
+  const conflict = mcsFastMove()?.conflict;
+  const p6 = [
+    rrow("db", "Data status", stale ? `<b class="mcs-warn">${mcsEsc(d.syncHealth?.overall || "STALE")}</b>` : '<b class="mcs-up">LIVE</b>', stale ? `Last candle ${cs.length ? mcsHm(cs[cs.length - 1].time) : "—"}${d.syncHealth?.oi?.dataTs ? ", option chain " + mcsHm(d.syncHealth.oi.dataTs) : ""}.` : ""),
+    d.vix?.available ? rrow("trend", "India VIX", `<b>${P(d.vix.value)}</b>`, vixEnv ? `<span class="mcs-achip">${mcsEsc(vixEnv)}</span>` : "") : "",
+    atr ? rrow("pulse", `ATR (14, ${mcsEsc(MCS.tf)})`, `<b>${mcsN(atr, 1)} pts</b>`, em15 ? `Model expected move next 15 min ±${mcsN(em15.pts, 1)} pts` : "") : "",
+    tfs.length ? rrow("warn", "Timeframes vs bias", against.length && (up || dn) ? `<b class="mcs-warn">${mcsEsc(against.join(" + "))} against</b>` : '<b class="mcs-up">aligned</b>', against.length && (up || dn) ? `Moves can reverse quickly at ${up ? "resistance" : "support"}.` : "") : "",
+    conflict ? rrow("warn", "Direction conflict", "", mcsEsc(conflict)) : "",
+    expDay ? rrow("warn", "Expiry today", `<b class="mcs-warn">${mcsEsc(expiry)}</b>`, "Fast theta decay, high gamma — small size, quick exits.") : "",
+    inv ? rrow("shield", "Invalidation", "", inv, "inv") : "",
+  ].join("");
+
+  const panel = (n, title, body, cls) => `<section class="mcs-apanel ${cls || ""}"><h5><span class="mcs-anum">${n}</span>${title}</h5>${body}</section>`;
   box.innerHTML = `<h4>🧠 MARKET ANALYSIS — ${mcsEsc(nm)} <span class="mcs-sub">updated ${new Date().toLocaleTimeString("en-IN", { hour12: false })}</span></h4>
-    <div class="mcs-verdict ${vcls}">${verdict}</div>
-    <div class="mcs-an-grid">
-      ${sec("1 · Trend & structure", trend)}
-      ${sec("2 · Where price is", loc)}
-      ${sec("3 · Scenarios — what to do if…", scen)}
-      ${sec("4 · No-Trade Zone", [ntzTxt])}
-      ${sec("5 · Options", opts)}
-      ${sec("6 · Risk & data", risk.concat(inv ? [`<b>Invalidation:</b> ${inv}`] : []))}
+    <div class="mcs-verdict ${vcls} mcs-averdict">${vcls === "wait" || vcls === "mixed" ? ico("warn") : `<span class="mcs-aarr ${vcls}">${vcls === "up" ? "↑" : "↓"}</span>`}<span>${verdict}</span></div>
+    <div class="mcs-agrid">
+      ${panel(1, "Trend &amp; structure", p1, "a1")}
+      ${panel(2, "Where price is", p2, "a2")}
+      ${panel(3, "Scenarios — what to do if…", p3, "a3")}
+      ${panel(4, "No-Trade Zone", p4, "a4")}
+      ${panel(5, "Options", p5, "a5")}
+      ${panel(6, "Risk &amp; data", p6, "a6")}
     </div>
     <div class="mcs-sub">Built only from this screen's live engine outputs (Market Command, Market Analysis, option candles). Rule-based read — not a prediction or probability. Advisory only; no orders.</div>`;
 }
