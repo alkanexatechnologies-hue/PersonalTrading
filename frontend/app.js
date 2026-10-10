@@ -5688,7 +5688,7 @@ const MC = {
   sym: "^NSEI", tf: "15m", chart: null, candleSeries: null,
   ema9Series: null, ema21Series: null, ema50Series: null, vwapSeries: null,
   obMarkers: [], _levelLines: [], _overlaySig: null, _obSig: null, _indSig: null, priceLine: null, timer: null, loading: false, lastData: null,
-  show: { vwap: true, ema21: true, ema50: true, ema9: false, ema200: true, ob: true, vol: true, rsi: true, levels: true, bos: true, liq: true, orb: false, trade: true },
+  show: { vwap: true, ema21: true, ema50: true, ema9: false, ema200: true, ob: true, vol: true, rsi: true, forecast: true, levels: true, bos: true, liq: true, orb: false, trade: true },
   replayDate: null, // yyyy-mm-dd when replaying a past session; null = live
 };
 
@@ -5735,11 +5735,11 @@ function initMarketCommand() {
 
   // Wire indicator toggles. "levels"/"bos"/"liq"/"orb" govern the Important-Levels
   // drawing → a full chart redraw; the EMA/VWAP/Volume overlays just re-apply.
-  ["vwap", "ema21", "ema50", "ema9", "ema200", "ob", "vol", "rsi", "levels", "bos", "liq", "orb", "trade"].forEach((k) => {
+  ["vwap", "ema21", "ema50", "ema9", "ema200", "ob", "vol", "rsi", "forecast", "levels", "bos", "liq", "orb", "trade"].forEach((k) => {
     const cb = el("mc-tog-" + k);
     if (cb) cb.addEventListener("change", () => {
       MC.show[k] = cb.checked;
-      if ((k === "levels" || k === "bos" || k === "liq" || k === "orb" || k === "trade") && MC.lastData) renderMCChart(MC.lastData);
+      if ((k === "levels" || k === "bos" || k === "liq" || k === "orb" || k === "trade" || k === "forecast") && MC.lastData) renderMCChart(MC.lastData);
       else applyMCOverlays();
     });
   });
@@ -5829,7 +5829,7 @@ function initMarketCommand() {
 
   // Volume histogram pinned to the bottom of the price pane
   MC.volSeries = MC.chart.addHistogramSeries({ priceScaleId: "vol", priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false });
-  MC.chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
+  MC.chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.86, bottom: 0 } });
 
   // RSI (14, Wilder) pane under the price chart — same candles, time-synced both ways.
   const rsiBox = el("mc-rsi-container");
@@ -5871,10 +5871,10 @@ function initMarketCommand() {
   });
 
   // EMA 9 / 21 / 50 carry a NAME on the chart (title + last-value tag on the axis).
-  MC.ema9Series = MC.chart.addLineSeries({ color: "#3b82f6", lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: "EMA 9" });
-  MC.ema21Series = MC.chart.addLineSeries({ color: "#f0b90b", lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: "EMA 21" });
-  MC.ema50Series = MC.chart.addLineSeries({ color: "#a855f7", lineWidth: 2, priceLineVisible: false, lastValueVisible: true, title: "EMA 50" });
-  MC.ema200Series = MC.chart.addLineSeries({ color: "#e056a0", lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
+  MC.ema9Series = MC.chart.addLineSeries({ color: "rgba(59,130,246,.85)", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+  MC.ema21Series = MC.chart.addLineSeries({ color: "rgba(240,185,11,.85)", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+  MC.ema50Series = MC.chart.addLineSeries({ color: "rgba(168,85,247,.8)", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+  MC.ema200Series = MC.chart.addLineSeries({ color: "rgba(224,86,160,.7)", lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
   // VWAP: SOLID (lineStyle 0) and GREEN, with its name shown on the chart.
   MC.vwapSeries = MC.chart.addLineSeries({ color: "#22c55e", lineWidth: 2, lineStyle: 0, priceLineVisible: false, lastValueVisible: true, title: "VWAP" });
 
@@ -8559,7 +8559,7 @@ function renderMCFakeMove(d) {
   // Pullback / resistance zone from the fake-move level (or nearest resistance).
   const fmLevel = (fm15 && fm15.level) || (fm5 && fm5.level) || resAbove[0] || null;
   const zone = (fmLevel != null && spot != null)
-    ? { hi: fmLevel, lo: fmLevel - Math.max(spot * 0.0009, 4), label: "Resistance / Pullback Zone" }
+    ? (() => { const W = mcZoneHalf(MC.sym); return { hi: fmLevel + W, lo: fmLevel - W, label: `Resistance / Pullback Zone ${mcFmtP(fmLevel - W)} – ${mcFmtP(fmLevel + W)} (±${W})` }; })()
     : null;
   // Projected close by ~3:00 PM: nearest level in the EXISTING direction.
   const projClose = existingDir === "BEARISH" ? (supBelow[0] ?? null) : existingDir === "BULLISH" ? (resAbove[0] ?? null) : null;
@@ -8946,8 +8946,11 @@ function renderMCChart(d) {
   // output (d.structure.bosEvents) UNCHANGED — this only *displays* them; the
   // detection logic is untouched. Gated by the BOS/CHoCH toggle.
   const markers = [];
+  // declutter: BOS / breakout marks only for the latest session on the chart
+  const lastDay = candles.length ? new Date((candles[candles.length - 1].time + 19800) * 1000).toISOString().slice(0, 10) : "";
+  const onLastDay = (t) => t && new Date((t + 19800) * 1000).toISOString().slice(0, 10) === lastDay;
   if (MC.show.bos && d.structure?.bosEvents?.length) {
-    d.structure.bosEvents.forEach((b) => {
+    d.structure.bosEvents.filter((b) => onLastDay(b.time)).slice(-3).forEach((b) => {
       const pre = b.stage === "Pre", bull = b.direction === "Bullish";
       markers.push({
         time: b.time, position: bull ? "belowBar" : "aboveBar",
@@ -8962,7 +8965,9 @@ function renderMCChart(d) {
     : k === "sweep" ? MC.show.liq !== false
     : k === "orb" ? MC.show.orb === true
     : true;
-  const visible = MC.show.levels ? buildMCLevels(d).filter((l) => kindOn(l.kind) && MC._inView(l.price)).slice(0, 7) : [];
+  const allLv = MC.show.levels ? buildMCLevels(d).filter((l) => kindOn(l.kind) && MC._inView(l.price)) : [];
+  const visible = [...allLv.filter((l) => l.kind !== "invalidation" && l.price > d.spot).slice(0, 2), ...allLv.filter((l) => l.kind !== "invalidation" && l.price < d.spot).slice(0, 2), ...allLv.filter((l) => l.kind === "invalidation").slice(0, 1)]
+    .sort((a, b) => Math.abs(a.price - d.spot) - Math.abs(b.price - d.spot));   // declutter: nearest 2 above + 2 below (+ SL); the full list stays in the Levels panel
   MC._activeLevels = visible;
   const nearest = visible[0] || null;
   visible.forEach((l) => {
@@ -8976,7 +8981,7 @@ function renderMCChart(d) {
   });
 
   // Breakout Engine signals / blocked breakouts (gated by the Trade Plan toggle).
-  markers.push(...mcboMarkers(d));
+  markers.push(...mcboMarkers(d).filter((m) => onLastDay(m.time)).slice(-4));   // declutter: today's breakout-engine marks only
   markers.sort((a, b) => a.time - b.time);
 
   // Anti-flicker: only tear down + rebuild the level price-lines and markers when
@@ -9000,6 +9005,7 @@ function renderMCChart(d) {
     });
     MC.candleSeries.setMarkers(markers);
   }
+  mcDrawForecast(d);
   renderMCLevelsLegend(d);
   applyMCBreakoutLines(d);
   positionMCBoTag();
@@ -9499,6 +9505,43 @@ function mcRenderRsi() {
   if (lbl) { lbl.textContent = last == null ? "RSI 14 —" : `RSI 14  ${last.toFixed(1)}${last >= 70 ? " · overbought" : last <= 30 ? " · oversold" : ""}`; lbl.className = "mc-rsi-lbl" + (last >= 70 ? " ob" : last <= 30 ? " os" : ""); }
 }
 
+
+// ---- Market Command chart: zone half-width per index (NIFTY ±10; others scaled to price) ----
+function mcZoneHalf(sym) { return ({ "^NSEI": 10, "^CNXFIN": 10, "^NSEMDCP50": 5, "^NSEBANK": 25, "^BSESN": 35 })[sym] ?? 10; }
+// ---- Next-swing FORECAST + BOS trigger (display only) ----
+// Forecast = last confirmed swing ± ATR(now) × median(leg size / ATR) of the last 6 legs in that
+// direction. Backtest (80 days): within ±10 pts only ~30% (5m) / ~17% (15m) of the time, so it is
+// labelled LOW CONFIDENCE. BOS trigger = the swing whose close-through confirms the next BOS (exact);
+// the next BOS continued the last one's direction 64–72% of the time.
+function mcAtr14(c) { if (!c || c.length < 15) return null; let a = 0; for (let i = 1; i <= 14; i++) a += Math.max(c[i].high - c[i].low, Math.abs(c[i].high - c[i - 1].close), Math.abs(c[i].low - c[i - 1].close)); a /= 14;
+  for (let i = 15; i < c.length; i++) a = (a * 13 + Math.max(c[i].high - c[i].low, Math.abs(c[i].high - c[i - 1].close), Math.abs(c[i].low - c[i - 1].close))) / 14; return a; }
+function mcDrawForecast(d) {
+  const cs0 = MC._candles || [], sp = MC._swingPoints || [];
+  const fsig = JSON.stringify([MC.show.forecast !== false, MC._overlaySig, cs0.length, sp.length ? sp[sp.length - 1].index : null, (MC._bosEvents || []).length]);
+  if (MC._fcSig === fsig) return;          // unchanged since the last poll: keep the lines still (no flicker)
+  MC._fcSig = fsig;
+  (MC._fcLines || []).forEach((pl) => { try { MC.candleSeries.removePriceLine(pl); } catch {} }); MC._fcLines = [];
+  if (MC.show.forecast === false) return;
+  const sw = (MC._swingPoints || []).map((p) => ({ hi: p.type === "HH" || p.type === "LH", price: p.price, i: p.index }));
+  const alt = []; for (const s of sw) { const l = alt[alt.length - 1]; if (l && l.hi === s.hi) { if ((s.hi && s.price > l.price) || (!s.hi && s.price < l.price)) alt[alt.length - 1] = s; } else alt.push(s); }
+  const cs = MC._candles || [], atr = mcAtr14(cs); if (alt.length < 8 || !atr) return;
+  const cur = alt[alt.length - 1], legs = [];
+  for (let q = 1; q < alt.length; q++) { const a0 = alt[q - 1], a1 = alt[q], at = mcAtr14(cs.slice(0, a1.i + 1)) || atr; legs.push({ up: !a0.hi, r: Math.abs(a1.price - a0.price) / at }); }
+  const same = legs.filter((l) => l.up === !cur.hi).slice(-6).map((l) => l.r).sort((a, b) => a - b); if (same.length < 3) return;
+  const m = same.length % 2 ? same[(same.length - 1) / 2] : (same[same.length / 2 - 1] + same[same.length / 2]) / 2;
+  const fc = cur.price + (cur.hi ? -1 : 1) * atr * m;
+  // if a level line already sits on this price, append the note to its label instead of drawing a second line
+  const add = (o) => {
+    const k = (MC._activeLevels || []).findIndex((l) => Math.abs(l.price - o.price) <= Math.max(0.5, o.price * 0.0001));
+    if (k >= 0 && MC._levelLines && MC._levelLines[k] && /^BOS/.test(o.title)) { try { const l = MC._activeLevels[k]; MC._levelLines[k].applyOptions({ title: `${l.short} ${mcFmtP(l.price)} · ${o.title}` }); } catch {} return; }
+    try { MC._fcLines.push(MC.candleSeries.createPriceLine(o)); } catch {}
+  };
+  if (MC._inView(fc)) add({ price: fc, color: "rgba(148,163,184,.55)", lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: `${cur.hi ? "SWL" : "SWH"} fcst (low conf.)` });
+  const lastHi = [...alt].reverse().find((s) => s.hi), lastLo = [...alt].reverse().find((s) => !s.hi);
+  const bos = (MC._bosEvents || []).filter((b) => b.stage === "Confirmed"), lastDir = bos.length ? bos[bos.length - 1].direction : null;
+  if (lastHi && MC._inView(lastHi.price)) add({ price: lastHi.price, color: "rgba(22,199,132,.7)", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `BOS↑ ${lastDir === "Bullish" ? "cont ~67%" : lastDir === "Bearish" ? "flip ~33%" : "trigger"}` });
+  if (lastLo && MC._inView(lastLo.price)) add({ price: lastLo.price, color: "rgba(234,57,67,.7)", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `BOS↓ ${lastDir === "Bearish" ? "cont ~67%" : lastDir === "Bullish" ? "flip ~33%" : "trigger"}` });
+}
 function applyMCOverlays() {
   if (!MC.chart) return;
   try { mcRenderRsi(); } catch (e) { console.warn("[MC RSI]", e); }
@@ -9523,7 +9566,14 @@ function applyMCOverlays() {
   // Re-render OB zones — gated on "Show Levels" (default OFF = clean chart). Guarded
   // by a signature so unchanged order blocks don't blink every poll.
   const inView = MC._inView || (() => true);
-  const obs = (MC.show.levels && MC.show.ob && MC._orderBlocks) ? MC._orderBlocks.filter((ob) => inView(ob.high) || inView(ob.low)) : [];
+  const spotNow = MC.lastData && MC.lastData.spot;
+  const obAll = (MC.show.levels && MC.show.ob && MC._orderBlocks) ? MC._orderBlocks.filter((ob) => inView(ob.high) || inView(ob.low)) : [];
+  // declutter: only the nearest order block above price, below price, and any price is inside
+  const obs = spotNow == null ? obAll.slice(-2) : [
+    ...obAll.filter((ob) => ob.low <= spotNow && ob.high >= spotNow).slice(-1),
+    ...obAll.filter((ob) => ob.low > spotNow).sort((a, b) => a.low - b.low).slice(0, 1),
+    ...obAll.filter((ob) => ob.high < spotNow).sort((a, b) => b.high - a.high).slice(0, 1),
+  ];
   const obSig = JSON.stringify(obs.map((ob) => ob.side + "|" + ob.stage + "|" + ob.high + "|" + ob.low));
   if (MC._obSig !== obSig) {
     MC._obSig = obSig;
@@ -9539,8 +9589,8 @@ function applyMCOverlays() {
 function drawMCOrderBlock(ob) {
   const isBull = ob.side === "Bullish";
   const confirmed = ob.stage === "Confirmed";
-  const solid = isBull ? "#16c784" : "#ea3943";
-  const faded = isBull ? "rgba(22,199,132,.55)" : "rgba(234,57,67,.55)";
+  const solid = isBull ? "rgba(22,199,132,.7)" : "rgba(234,57,67,.7)";
+  const faded = isBull ? "rgba(22,199,132,.4)" : "rgba(234,57,67,.4)";
   const color = confirmed ? solid : faded;
   const style = confirmed ? 0 : 2; // solid vs dashed
   const label = `${isBull ? "Bull" : "Bear"} OB${confirmed ? "" : " (pre)"}`;
