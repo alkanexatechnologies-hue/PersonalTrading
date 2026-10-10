@@ -577,6 +577,10 @@ export interface OiAnalysis {
   topStrikes: OiStrike[]; // strikes around ATM
   asOf: number;
   disclaimer: string;
+  underlyingSource?: "chain" | "index quote" | "put-call parity"; // used when the chain's own last_price disagreed (> 0.4 %)
+  chainUnderlying?: number | null;                // what the chain itself reported
+  sessionDate?: string;                           // set when saved during market hours (IST date)
+  afterHours?: boolean;                           // fetched outside market hours (OI may differ from the session)
 }
 
 export interface NextDayPick {

@@ -11,6 +11,7 @@ import { dhanFetch } from "./dhanClient";
 import { lookupDhanSecurity, DhanSecurity } from "./dhanInstruments";
 import { fetchDhanCandles, DhanBacktestInterval } from "./dhanHistorical";
 import { CONFIG } from "../config/arbitration";
+import { checkedUnderlying } from "../oi/parity";
 import { recordDhanDataSuccess, recordDhanError } from "./dhanHealth";
 
 const round2 = (n: number) => Math.round(Number(n) * 100) / 100;
@@ -463,7 +464,7 @@ export async function dhanZeroHero(def: SymbolDef): Promise<any> {
 }
 
 // ---- Option chain OI / PCR analysis ----
-export async function dhanOiAnalysis(def: SymbolDef): Promise<OiAnalysis> {
+export async function dhanOiAnalysis(def: SymbolDef, indexSpot?: number | null): Promise<OiAnalysis> {
   const disclaimer =
     "Live OI from Dhan option chain (nearest expiry). PCR, support/resistance and max-pain are " +
     "context — confirm with price action.";
@@ -495,7 +496,9 @@ export async function dhanOiAnalysis(def: SymbolDef): Promise<OiAnalysis> {
     const chain = await dhanChainForExpiry(def, 0);
     if (!chain.available) return fail(chain.message || "Dhan chain unavailable");
 
-    const underlying = chain.spot;
+    // The chain's own last_price can be wrong (seen after hours); check it against put-call parity.
+    const uc = checkedUnderlying(chain.spot, chain.strikes, indexSpot);
+    const underlying = uc.underlying;
     const expiry = chain.expiry;
     const all: OiStrike[] = chain.strikes.map((s: any) => ({
       strike: s.strike,
@@ -582,6 +585,8 @@ export async function dhanOiAnalysis(def: SymbolDef): Promise<OiAnalysis> {
       topStrikes,
       asOf: Math.floor(Date.now() / 1000),
       disclaimer,
+      underlyingSource: uc.source,
+      chainUnderlying: uc.chainSpot,
     };
   } catch (e: any) {
     recordDhanFail(e?.message);

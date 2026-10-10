@@ -499,27 +499,37 @@ function oiSnapshotFresh(oi: any): boolean {
   const asOf = Number(oi.asOf) || 0;
   return asOf > 0 && Date.now() - asOf * 1000 < 20 * 3600_000;
 }
+// The index's own price, used to check the option chain's underlying (Dhan's chain last_price can be wrong).
+async function indexSpotFor(def: SymbolDef): Promise<number | null> {
+  try { const q = await withTimeout(getProvider().getQuote(def.symbol), 5_000, `spot ${def.symbol}`); return q && (q as any).price > 0 ? (q as any).price : null; } catch { return null; }
+}
 async function liveOptionOi(def: SymbolDef): Promise<OiAnalysis> {
   const feed = syncSessionProvider();
   const gp = dhanProviderForOi();
   if (gp && isMarketOpenIST()) {
-    const oi = await withTimeout(dhanOiAnalysis(def), 15_000, `dhan OI ${def.symbol}`);
+    const oi = await withTimeout(dhanOiAnalysis(def, await indexSpotFor(def)), 15_000, `dhan OI ${def.symbol}`);
     try { recordOiBaseline(def.symbol, oi); } catch { /* best-effort */ }
     try { saveOiSnapshot(def.symbol, oi); } catch { /* best-effort */ }
-    try { if (oi && oi.available) saveLastOiJson(def.symbol, oi); } catch { /* best-effort */ }
+    try { if (oi && oi.available) saveLastOiJson(def.symbol, { ...oi, sessionDate: istDateStr() }); } catch { /* best-effort */ }
     return oi;
   }
   const disk = loadLastOiJson(def.symbol);
+  // A chain saved DURING market hours stays the reference until the next open (weekends and
+  // holidays included) as long as its expiry hasn't passed. Dhan's after-hours chain is not
+  // reliable (wrong last_price, OI and IV differ from the session), so it never replaces it.
+  if (disk && disk.available && disk.sessionDate && (!disk.expiry || String(disk.expiry) >= istDateStr()))
+    return { ...disk, message: `After hours: last session OI (${disk.sessionDate})` };
   if (gp && !oiSnapshotFresh(disk) && Date.now() - (_afterHoursOiTry.get(def.symbol) || 0) > 5 * 60_000) {
     // Saved snapshot is from an older session (or its expiry has passed): pull the
     // closing chain once from Dhan and save it, so after-hours screens show the
     // LAST session's options instead of a days-old chain.
     _afterHoursOiTry.set(def.symbol, Date.now());
     try {
-      const oi = await withTimeout(dhanOiAnalysis(def), 15_000, `dhan OI after-hours ${def.symbol}`);
+      const oi = await withTimeout(dhanOiAnalysis(def, await indexSpotFor(def)), 15_000, `dhan OI after-hours ${def.symbol}`);
       if (oi && oi.available) {
-        try { saveLastOiJson(def.symbol, oi); } catch { /* best-effort */ }
-        return { ...oi, message: oi.message || "After hours: last session OI" };
+        const ah = { ...oi, afterHours: true };
+        try { saveLastOiJson(def.symbol, ah); } catch { /* best-effort */ }
+        return { ...ah, message: "After hours: Dhan's after-hours chain — OI / IV can differ from the session" };
       }
     } catch { /* fall back to the saved snapshot */ }
   }
@@ -1714,7 +1724,7 @@ router.get("/oi/:symbol", async (req: Request, res: Response) => {
     if (feed.skipLive) return res.status(503).json({ error: "Dhan feed off / not configured" });
     // Prefer Groww's real option-chain OI when connected; else NSE public API.
     if (provider.name === "dhan") {
-      res.json(await dhanOiAnalysis(def));
+      res.json(await dhanOiAnalysis(def, await indexSpotFor(def)));
     } else {
       res.json(await getOiAnalysis(def));
     }
@@ -1737,7 +1747,7 @@ router.get("/final/:symbol", async (req: Request, res: Response) => {
     const provider = getProvider();
     let oi: any = null;
     if (def.fno) {
-      oi = await dhanOiAnalysis(def);
+      oi = await dhanOiAnalysis(def, await indexSpotFor(def));
     }
 
     const oiOk = oi && oi.available;
