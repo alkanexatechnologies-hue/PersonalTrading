@@ -5688,7 +5688,7 @@ const MC = {
   sym: "^NSEI", tf: "15m", chart: null, candleSeries: null,
   ema9Series: null, ema21Series: null, ema50Series: null, vwapSeries: null,
   obMarkers: [], _levelLines: [], _overlaySig: null, _obSig: null, _indSig: null, priceLine: null, timer: null, loading: false, lastData: null,
-  show: { vwap: true, ema21: true, ema50: true, ema9: false, ema200: true, ob: true, vol: true, rsi: true, forecast: true, levels: true, bos: true, liq: true, orb: false, trade: true },
+  show: { vwap: true, ema21: true, ema50: true, ema9: false, ema200: true, ob: true, vol: true, rsi: true, macd: true, forecast: true, levels: true, bos: true, liq: true, orb: false, trade: true },
   replayDate: null, // yyyy-mm-dd when replaying a past session; null = live
 };
 
@@ -5735,7 +5735,7 @@ function initMarketCommand() {
 
   // Wire indicator toggles. "levels"/"bos"/"liq"/"orb" govern the Important-Levels
   // drawing → a full chart redraw; the EMA/VWAP/Volume overlays just re-apply.
-  ["vwap", "ema21", "ema50", "ema9", "ema200", "ob", "vol", "rsi", "forecast", "levels", "bos", "liq", "orb", "trade"].forEach((k) => {
+  ["vwap", "ema21", "ema50", "ema9", "ema200", "ob", "vol", "rsi", "macd", "forecast", "levels", "bos", "liq", "orb", "trade"].forEach((k) => {
     const cb = el("mc-tog-" + k);
     if (cb) cb.addEventListener("change", () => {
       MC.show[k] = cb.checked;
@@ -5852,6 +5852,27 @@ function initMarketCommand() {
     MC.chart.timeScale().subscribeVisibleLogicalRangeChange(sync(MC.rsiChart));
     MC.rsiChart.timeScale().subscribeVisibleLogicalRangeChange(sync(MC.chart));
     if (typeof ResizeObserver !== "undefined") new ResizeObserver(() => { if (MC.rsiChart && rsiBox.clientWidth) MC.rsiChart.applyOptions({ width: rsiBox.clientWidth, height: rsiBox.clientHeight || 120 }); }).observe(rsiBox);
+  }
+  // MACD (12, 26, 9) pane — histogram + MACD + signal, time-synced with the price chart.
+  const macdBox = el("mc-macd-container");
+  if (macdBox) {
+    MC.macdChart = LightweightCharts.createChart(macdBox, {
+      width: macdBox.clientWidth || container.clientWidth, height: macdBox.clientHeight || 130,
+      layout: { background: { type: "solid", color: "#0a0e17" }, textColor: "#b2b5be", fontSize: 11 },
+      grid: { vertLines: { color: "#141c2e" }, horzLines: { color: "#141c2e" } },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      rightPriceScale: { borderColor: "#2a2e39", scaleMargins: { top: 0.15, bottom: 0.1 } },
+      timeScale: { borderColor: "#2a2e39", visible: false, barSpacing: 12 },
+    });
+    MC.macdHist = MC.macdChart.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false, priceFormat: { type: "price", precision: 2, minMove: 0.01 } });
+    MC.macdLine = MC.macdChart.addLineSeries({ color: "#2962ff", lineWidth: 2, priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false });
+    MC.macdSignal = MC.macdChart.addLineSeries({ color: "#f59e0b", lineWidth: 1, priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false });
+    MC.macdLine.createPriceLine({ price: 0, color: "rgba(138,151,173,0.45)", lineWidth: 1, lineStyle: 3, axisLabelVisible: false, title: "" });
+    let syncingM = false;
+    const syncM = (to) => (r) => { if (syncingM || !r) return; syncingM = true; try { to.timeScale().setVisibleLogicalRange(r); } catch {} syncingM = false; };
+    MC.chart.timeScale().subscribeVisibleLogicalRangeChange(syncM(MC.macdChart));
+    MC.macdChart.timeScale().subscribeVisibleLogicalRangeChange(syncM(MC.chart));
+    if (typeof ResizeObserver !== "undefined") new ResizeObserver(() => { if (MC.macdChart && macdBox.clientWidth) MC.macdChart.applyOptions({ width: macdBox.clientWidth, height: macdBox.clientHeight || 130 }); }).observe(macdBox);
   }
 
   // Crosshair OHLC sync
@@ -9557,9 +9578,73 @@ function mcDrawForecast(d) {
   if (lastHi && MC._inView(lastHi.price)) add({ price: lastHi.price, color: "rgba(22,199,132,.7)", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `BOS↑ ${lastDir === "Bullish" ? "cont ~67%" : lastDir === "Bearish" ? "flip ~33%" : "trigger"}` });
   if (lastLo && MC._inView(lastLo.price)) add({ price: lastLo.price, color: "rgba(234,57,67,.7)", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `BOS↓ ${lastDir === "Bearish" ? "cont ~67%" : lastDir === "Bullish" ? "flip ~33%" : "trigger"}` });
 }
+// ---- MACD (12, 26, 9) + cross alerts with history-based odds -------------------------------
+// A cross is judged on CLOSED candles only (the last candle may still be forming). The odds
+// shown after a cross are measured on this chart's own loaded history: for every earlier cross
+// of the same kind, what NIFTY did over the next 10 candles (closed higher / lower, biggest move
+// up and down). The "any candle" figure is the same measure for every candle, so the cross can
+// be compared with doing nothing. Backtest (80 days): crosses had NO edge over any candle.
+function mcEma(a, n) { const k = 2 / (n + 1), o = []; a.forEach((v, i) => o.push(i ? v * k + o[i - 1] * (1 - k) : v)); return o; }
+function mcMacd(closes) { const e12 = mcEma(closes, 12), e26 = mcEma(closes, 26); const m = closes.map((_, i) => e12[i] - e26[i]); const s = mcEma(m, 9); return { m, s, h: m.map((v, i) => v - s[i]) }; }
+function mcMacdOdds(cs, M, kind) {
+  const H = 10, rows = [], base = [];
+  for (let i = 35; i < cs.length - 1 - H; i++) {
+    const w = cs.slice(i + 1, i + 1 + H), r = { up: Math.max(...w.map((x) => x.high)) - cs[i].close, dn: cs[i].close - Math.min(...w.map((x) => x.low)), ch: cs[i + H].close - cs[i].close };
+    base.push(r);
+    const d0 = M.m[i - 1] - M.s[i - 1], d1 = M.m[i] - M.s[i];
+    if (kind === "UP" ? d0 <= 0 && d1 > 0 : d0 >= 0 && d1 < 0) rows.push(r);
+  }
+  const sum = (a, f) => a.reduce((x, r) => x + f(r), 0);
+  const pack = (a) => a.length ? { n: a.length, pUp: Math.round((100 * a.filter((r) => r.ch > 0).length) / a.length), pDn: Math.round((100 * a.filter((r) => r.ch < 0).length) / a.length), up: sum(a, (r) => r.up) / a.length, dn: sum(a, (r) => r.dn) / a.length } : null;
+  return { cross: pack(rows), any: pack(base), bars: H };
+}
+function mcRenderMacd() {
+  const box = el("mc-macd-container"); if (!box || !MC.macdLine) return;
+  box.hidden = !MC.show.macd; if (!MC.show.macd) return;
+  const cs = MC._candles || []; if (cs.length < 40) return;
+  const M = mcMacd(cs.map((c) => c.close)), r2 = (v) => Math.round(v * 100) / 100;
+  const L = cs.map((c, i) => ({ time: c.time, value: r2(M.m[i]) })), S = cs.map((c, i) => ({ time: c.time, value: r2(M.s[i]) }));
+  const Hh = cs.map((c, i) => { const h = M.h[i], ph = i ? M.h[i - 1] : 0; return { time: c.time, value: r2(h), color: h >= 0 ? (h >= ph ? "rgba(22,199,132,.85)" : "rgba(22,199,132,.4)") : (h <= ph ? "rgba(234,57,67,.85)" : "rgba(234,57,67,.4)") }; });
+  const sig = `${MC._chartViewKey}|${cs.length}|${cs[0].time}`;
+  if (MC._macdSig === sig) { MC.macdLine.update(L[L.length - 1]); MC.macdSignal.update(S[S.length - 1]); MC.macdHist.update(Hh[Hh.length - 1]); }
+  else { MC._macdSig = sig; MC.macdLine.setData(L); MC.macdSignal.setData(S); MC.macdHist.setData(Hh); try { MC.macdChart.timeScale().setVisibleLogicalRange(MC.chart.timeScale().getVisibleLogicalRange()); } catch {} }
+  // latest cross on CLOSED candles (exclude the last, possibly forming, candle)
+  const lastClosed = cs.length - 2; let k = -1, dir = null;
+  for (let i = lastClosed; i > 35; i--) { const d0 = M.m[i - 1] - M.s[i - 1], d1 = M.m[i] - M.s[i]; if (d0 <= 0 && d1 > 0) { k = i; dir = "UP"; break; } if (d0 >= 0 && d1 < 0) { k = i; dir = "DOWN"; break; } }
+  const marks = []; const day = (t) => new Date((t + 19800) * 1000).toISOString().slice(0, 10), today = day(cs[cs.length - 1].time);
+  for (let i = 36; i <= lastClosed; i++) { const d0 = M.m[i - 1] - M.s[i - 1], d1 = M.m[i] - M.s[i]; if (day(cs[i].time) !== today) continue;
+    if (d0 <= 0 && d1 > 0) marks.push({ time: cs[i].time, position: "belowBar", color: "#16c784", shape: "arrowUp", text: "▲" });
+    else if (d0 >= 0 && d1 < 0) marks.push({ time: cs[i].time, position: "aboveBar", color: "#ea3943", shape: "arrowDown", text: "▼" }); }
+  try { MC.macdLine.setMarkers(marks); } catch {}
+  const lbl = el("mc-macd-lbl"), xb = el("mc-macd-x");
+  const fresh = k >= 0 && lastClosed - k <= 2;   // cross on one of the last 3 closed candles
+  if (lbl) lbl.textContent = `MACD 12 26 9  ${r2(M.m[cs.length - 1])} / ${r2(M.s[cs.length - 1])}`;
+  if (!xb) return;
+  if (k < 0) { xb.hidden = true; return; }
+  const o = mcMacdOdds(cs, M, dir), c = o.cross, a = o.any, t = fmtIST(cs[k].time + ({ "5m": 300, "15m": 900, "30m": 1800, "60m": 3600 }[MC.tf] || 300), true);
+  const f1 = (v) => mcFmtP(Math.round(v * 10) / 10);
+  xb.hidden = false; xb.className = "mc-macd-x " + (dir === "UP" ? "up" : "dn") + (fresh ? " fresh" : "");
+  xb.innerHTML = `<b>${dir === "UP" ? "▲ MACD crossed UP" : "▼ MACD crossed DOWN"}</b> <span>${t}</span>
+    ${c ? `<span>after past ${dir === "UP" ? "up" : "down"}-crosses (n=${c.n}), next ${o.bars} candles: <b class="up">up ${c.pUp}%</b> / <b class="dn">down ${c.pDn}%</b> · avg move <b class="up">+${f1(c.up)}</b> / <b class="dn">−${f1(c.dn)}</b> pts</span>` : "<span>not enough history</span>"}
+    ${a ? `<span class="base">any candle: up ${a.pUp}% / down ${a.pDn}% · +${f1(a.up)} / −${f1(a.dn)}</span>` : ""}`;
+  // alert once per new cross (never on first load)
+  const key = `${MC.sym}|${MC.tf}|${cs[k].time}|${dir}`;
+  if (fresh && MC._macdAlerted !== undefined && MC._macdAlerted !== key && !(MC.lastData && MC.lastData.historical)) mcMacdToast(dir, t, c, a, o.bars);
+  if (fresh || MC._macdAlerted === undefined) MC._macdAlerted = fresh ? key : (MC._macdAlerted ?? null);
+}
+function mcMacdToast(dir, t, c, a, bars) {
+  const nm = (el("mc-sym-name") || {}).textContent || MC.sym;
+  let x = document.getElementById("mc-macd-toast");
+  if (!x) { x = document.createElement("div"); x.id = "mc-macd-toast"; x.setAttribute("role", "alert"); document.body.appendChild(x); }
+  x.className = "mc-macd-toast " + (dir === "UP" ? "up" : "dn");
+  x.innerHTML = `<b>${nm} — MACD crossed ${dir} (${MC.tf}, ${t})</b><div>${c ? `History: next ${bars} candles up ${c.pUp}% / down ${c.pDn}% (n=${c.n}); any candle up ${a ? a.pUp : "—"}%. Not a prediction.` : ""}</div><button type="button" onclick="this.parentElement.remove()" aria-label="Close">✕</button>`;
+  clearTimeout(MC._macdToastT); MC._macdToastT = setTimeout(() => x && x.remove(), 25000);
+}
+
 function applyMCOverlays() {
   if (!MC.chart) return;
   try { mcRenderRsi(); } catch (e) { console.warn("[MC RSI]", e); }
+  try { mcRenderMacd(); } catch (e) { console.warn("[MC MACD]", e); }
   const ov = MC._overlayData || {};
   const candles = MC._candles || [];
   const align = (arr) => candles.map((c, i) => arr && arr[i] != null ? { time: c.time, value: arr[i] } : null).filter(Boolean);
