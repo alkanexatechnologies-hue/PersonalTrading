@@ -6893,3 +6893,4 @@ body.lqa-fullwidth .content { padding-left: 0; padding-right: 0; }
 /* Market Command (Final Arbiter) card sits at the top of MC Summary, at its usual card width */
 .mcs-cmdtop { max-width: 520px; margin-bottom: 8px; }
 @media (max-width: 900px) { .mcs-cmdtop { max-width: none; } }
+.mcs-live.preopen { color: #f59e0b; }

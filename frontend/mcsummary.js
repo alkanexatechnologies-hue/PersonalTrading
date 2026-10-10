@@ -271,8 +271,34 @@ function mcsRenderChart() {
   mcsEl("mcs-ohlc").innerHTML = MCS._ohlcHtml = ss ? `O <b>${mcsN(ss.open)}</b> H <b>${mcsN(ss.high)}</b> L <b>${mcsN(ss.low)}</b> C <b class="${mcsCls(dchg)}">${mcsN(ss.close)}</b> <b class="${mcsCls(dchg)}">${dchg != null ? (dchg >= 0 ? "+" : "") + mcsN(dchg) + " (" + mcsPct((dchg / ss.prevClose) * 100) + ")" : ""}</b> <span class="mcs-sub">· last candle ${mcsHm(last.time)}</span>` : "";
 }
 
+// PRE-OPEN (Mon–Fri 09:00–09:15, LIVE): there are no candles for the new day yet, so Market Command's
+// data still treats the last session as "today". For the screen only, switch to the new day:
+// price = live pre-open quote; previous day = last session's high / low / close (PDH / PDL / PDC
+// and pivots); today's open (from 09:08, when the pre-open price is fixed), high, low and opening
+// range wait for 09:15. Display only — Arbiter decisions are unchanged. Ends by itself at the
+// first candle of the day.
+function mcsApplyPreOpen() {
+  const d = MCS.d; if (!d) return;
+  if (d._preOpen) { d.spot = d._preOpen.closeSpot; d.levels = d._preOpen.levels; delete d._preOpen; }   // re-evaluate from the original data
+  const ist = new Date(Date.now() + 19800000), dow = ist.getUTCDay(), m = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  if (MCS.mode !== "LIVE" || dow === 0 || dow === 6 || m < 9 * 60 || m >= 9 * 60 + 15) return;
+  const today = ist.toISOString().slice(0, 10), cs = d.candles || [];
+  if (!cs.length || mcsIstDay(cs[cs.length - 1].time) >= today) return;          // today's candles already exist
+  const x = MCS.q?.quotes?.[MCS.sym];
+  if (!x || x.price == null || (x.fetchedAt != null && Date.now() - x.fetchedAt > 120_000)) return;   // need a fresh pre-open price
+  const lastDay = mcsIstDay(cs[cs.length - 1].time), ld = cs.filter((c) => mcsIstDay(c.time) === lastDay);
+  const lastHigh = Math.max(...ld.map((c) => c.high)), lastLow = Math.min(...ld.map((c) => c.low)), lastClose = ld[ld.length - 1].close;
+  const r2 = (v) => Math.round(v * 100) / 100;
+  d._preOpen = { date: today, price: x.price, fixed: m >= 9 * 60 + 8, lastDay, lastHigh: r2(lastHigh), lastLow: r2(lastLow), lastClose: r2(lastClose), closeSpot: d.spot, levels: d.levels };
+  d.spot = x.price;
+  d.levels = { ...(d.levels || {}), pdh: r2(lastHigh), pdl: r2(lastLow), pdc: r2(lastClose), orbHigh: null, orbLow: null };
+}
 function mcsSessionStats() {
   const cs = MCS.d?.candles || []; if (!cs.length) return null;
+  if (MCS.d?._preOpen) {   // before 09:15 every candle belongs to an earlier session
+    const p = MCS.d._preOpen;
+    return { date: p.date, open: p.fixed ? p.price : null, high: null, low: null, close: p.price, prevClose: p.lastClose, prevHigh: p.lastHigh, prevLow: p.lastLow, preOpen: true };
+  }
   const today = mcsIstDay(cs[cs.length - 1].time);
   const td = cs.filter((x) => mcsIstDay(x.time) === today); const prev = cs.filter((x) => mcsIstDay(x.time) < today);
   const prevDay = prev.length ? mcsIstDay(prev[prev.length - 1].time) : null; const pd = prev.filter((x) => mcsIstDay(x.time) === prevDay);
@@ -460,10 +486,10 @@ function mcsRenderHeader() {
     if (!d || !s) q.innerHTML = `<b>${mcsEsc(nm)}</b> ${UNAV}`;
     else {
       const chg = s.prevClose != null ? s.close - s.prevClose : null, pct = chg != null && s.prevClose ? (chg / s.prevClose) * 100 : null;
-      const live = d.syncHealth?.overall || (d.dhanLive ? "LIVE" : "DISCONNECTED");
+      const live = s.preOpen ? (d._preOpen.fixed ? "PRE-OPEN · PRICE FIXED" : "PRE-OPEN") : d.syncHealth?.overall || (d.dhanLive ? "LIVE" : "DISCONNECTED");
       q.innerHTML = `<b>${mcsEsc(nm)}</b> <span class="mcs-px">${mcsN(d.spot)}</span> <span class="${mcsCls(chg)}">${chg != null ? (chg >= 0 ? "+" : "") + mcsN(chg) + " (" + mcsPct(pct) + ")" : ""}</span>
-        <span class="mcs-kv">Open <b>${mcsN(s.open)}</b></span><span class="mcs-kv">High <b>${mcsN(s.high)}</b></span><span class="mcs-kv">Low <b>${mcsN(s.low)}</b></span><span class="mcs-kv">Prev Close <b>${mcsN(s.prevClose)}</b></span>
-        <span class="mcs-live ${String(live).toLowerCase()}">● ${mcsEsc(live)}</span>`;
+        <span class="mcs-kv">${s.preOpen ? "Pre-open" : "Open"} <b>${mcsN(s.open)}</b></span><span class="mcs-kv">High <b>${mcsN(s.high)}</b></span><span class="mcs-kv">Low <b>${mcsN(s.low)}</b></span><span class="mcs-kv">Prev Close <b>${mcsN(s.prevClose)}</b></span>
+        <span class="mcs-live ${s.preOpen ? "preopen" : String(live).toLowerCase()}">● ${mcsEsc(live)}</span>`;
     }
   }
   const tk = mcsEl("mcs-tickers"); const qs = MCS.q?.quotes || {};
@@ -570,7 +596,7 @@ function mcsPreSrHtml(side, k) {
   const v = (n) => (n == null ? "—" : "₹" + mcsN(n, 1));
   return `<span class="mcs-presr"><span class="mcs-up">Support S1 ${v(x.s1)} · S2 ${v(x.s2)}</span> <span class="mcs-dn">Resistance R1 ${v(x.r1)} · R2 ${v(x.r2)}</span>${x.structure ? ` <span class="mcs-sub">· premium structure ${mcsEsc(x.structure)}</span>` : ""}</span>`;
 }
-setInterval(() => { try { if (MCS.init && document.getElementById("mcs-preopen")) mcsRenderPreopen(); } catch (_) {} }, 15000);
+setInterval(() => { try { if (MCS.init && document.getElementById("mcs-preopen")) { const was = !!(MCS.d && MCS.d._preOpen); mcsApplyPreOpen(); if (was || (MCS.d && MCS.d._preOpen)) mcsRenderAll(); else mcsRenderPreopen(); } } catch (_) {} }, 15000);
 
 function mcsRenderLevels() {
   const box = mcsEl("mcs-levels"); const d = MCS.d; if (!box) return;
@@ -902,6 +928,7 @@ async function mcsRefresh(force) {
     if (sym !== MCS.sym || tf !== MCS.tf || gen !== MCS.gen || MCS.mode !== "LIVE") return;   // user switched (symbol / tf / mode) — never paint stale results
     if (d && !d.error) MCS.d = d; else if (!MCS.d) { const m = mcsEl("mcs-meta"); if (m) m.innerHTML = `<span class="mcs-warn">${mcsEsc(d?.error || "Market Command data unavailable")}</span>`; }
     if (q && q.quotes) MCS.q = q;
+    mcsApplyPreOpen();   // 09:00–09:15: show the live pre-open price and the last session as "previous day"
     mcsRenderAll();   // paint chart / levels / command as soon as Market Command data is in
     const maP = (force || Date.now() - MCS.maAt > 30_000)
       ? fetchJSON(`/api/market-analysis?symbol=${encodeURIComponent(sym)}`, 45000).catch(() => null).then((ma) => {
@@ -976,8 +1003,9 @@ function mcsLevelList(d) {
 // ACTIVE / TESTED (touched today) / BROKEN (crossed since the open) — from today's real candles.
 function mcsLevelStatus(l, d) {
   const cs = d.candles || []; if (!cs.length) return "—";
+  if (l.kind === "ind") return d._preOpen ? "PREV SESSION" : "LIVE";
+  if (d._preOpen) return "ACTIVE";   // pre-open: nothing has traded today yet (the candles are the last session's)
   const t0 = mcsIstDay(cs[cs.length - 1].time), td = cs.filter((c) => mcsIstDay(c.time) === t0);
-  if (l.kind === "ind") return "LIVE";
   if (l.kind === "day") return l.name === "Today High" ? "DAY HIGH" : "DAY LOW";
   if (!td.length) return "ACTIVE";
   const tol = d.spot * 0.0002, open = td[0].open;
