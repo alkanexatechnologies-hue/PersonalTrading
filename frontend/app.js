@@ -9524,11 +9524,12 @@ function mcFitPanes(force = true) {
   const rsiH = MC.show.rsi && rb ? Math.max(50, Math.min(120, Math.round(avail * 0.16))) : 0;
   const macdH = MC.show.macd && mb ? Math.max(64, Math.min(130, Math.round(avail * 0.2))) : 0;
   const chartH = Math.max(180, avail - rsiH - macdH);
-  const fitKey = `${chartH}|${rsiH}|${macdH}`; if (MC._fitKey === fitKey && cc.style.height === chartH + "px") return;
+  // own key: MC._fitKey belongs to the chart's "framed this view" check — sharing it re-framed the chart on every refresh
+  const fitKey = `${chartH}|${rsiH}|${macdH}`; if (MC._paneFitKey === fitKey && cc.style.height === chartH + "px") return;
   // automatic re-fits (after data updates) ignore small layout jitter, so the chart doesn't resize on every poll
   const curH = parseInt(cc.style.height, 10);
-  if (!force && curH && Math.abs(curH - chartH) <= 24 && (MC._fitKey || "").split("|").slice(1).join("|") === `${rsiH}|${macdH}`) return;
-  MC._fitKey = fitKey;
+  if (!force && curH && Math.abs(curH - chartH) <= 24 && (MC._paneFitKey || "").split("|").slice(1).join("|") === `${rsiH}|${macdH}`) return;
+  MC._paneFitKey = fitKey;
   cc.style.height = chartH + "px"; MC.chart.applyOptions({ height: chartH }); requestAnimationFrame(() => { try { mcDrawLevelRays(); } catch {} });
   if (rb) { rb.style.height = rsiH ? rsiH + "px" : ""; if (MC.rsiChart && rsiH) MC.rsiChart.applyOptions({ height: rsiH }); }
   if (mb) { mb.style.height = macdH ? macdH + "px" : ""; if (MC.macdChart && macdH) MC.macdChart.applyOptions({ height: macdH }); }
