@@ -7009,10 +7009,11 @@ body.lqa-fullwidth .content { padding-left: 0; padding-right: 0; }
 @media (max-width: 900px) { .mc-macd-container { height: 120px; } .mc-macd-x { right: 8px; font-size: 11px; } }
 
 /* Market Command: level rays + collision-free tags (overlay) */
-.mc-lvl-layer { position: absolute; inset: 0; pointer-events: none; z-index: 4; overflow: hidden; }
+.mc-lvl-layer { position: absolute; inset: 0; pointer-events: none; z-index: 7; overflow: hidden; }   /* above the zone band / callout layer (6) so tags are never covered */
 .mc-lvl-svg { position: absolute; left: 0; top: 0; overflow: visible; }
-.mc-lvl-svg line { stroke-width: 1; opacity: .75; }
-.mc-lvl-svg line.near { stroke-width: 2; opacity: 1; }
+.mc-lvl-svg line { stroke-width: 1; opacity: .38; }
+.mc-lvl-svg line.near { stroke-width: 1.5; opacity: .75; }
+.mc-lvl-svg line.lead { opacity: .7; }
 .mc-lvl-svg line.res { stroke: #ef4444; } .mc-lvl-svg line.sup { stroke: #22c55e; } .mc-lvl-svg line.sl { stroke: #f97316; }
 .mc-lvl-svg line.lead { stroke-width: 1; opacity: .6; }
 .mc-lvltag { position: absolute; height: 18px; line-height: 16px; padding: 0 6px; border-radius: 4px; font: 600 11px/16px system-ui, -apple-system, "Segoe UI", sans-serif; white-space: nowrap; color: #e5e7eb; background: rgba(10,14,23,.86); border: 1px solid #334155; }
@@ -7025,3 +7026,18 @@ body.lqa-fullwidth .content { padding-left: 0; padding-right: 0; }
 .mc-obband span { position: absolute; right: 4px; top: -1px; font: 600 9.5px system-ui, sans-serif; color: #94a3b8; }
 .mc-lvltag.zone { background: #7f1d1d; border-color: #ef4444; color: #fff; }
 .mc-lvl-svg line.lead.zone { stroke: #ef4444; }
+
+/* counter-trend callout: compact, explanation on hover only */
+#mcfo-callout { pointer-events: auto; cursor: help; }
+#mcfo-callout .ttl::after { content: " ⓘ"; font-weight: 600; opacity: .8; }
+#mcfo-tip { display: none; }
+#mcfo-callout:hover ~ #mcfo-tip { display: block; }
+.mc-lvltag { background: rgba(10,14,23,.92); }
+
+/* Market Command: candle markers drawn in the overlay (no extra price-scale room) */
+.mc-cmark { position: absolute; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; font: 700 10px/1.1 system-ui, -apple-system, "Segoe UI", sans-serif; white-space: nowrap; text-shadow: 0 1px 2px #000; }
+.mc-cmark.above { transform: translate(-50%, -100%); flex-direction: column-reverse; }
+.mc-cmark b { font-size: 10px; line-height: 10px; }
+.mc-cmark span { font-weight: 600; font-size: 9.5px; opacity: .95; }
+@media (max-width: 600px) { .mc-lvltag i, .mc-lvltag em, .mc-lvltag .nm { display: none; } .mc-lvltag { font-size: 10px; padding: 0 4px; background: rgba(10,14,23,.72); } }
+.mc-lvltag b { font-weight: 800; }

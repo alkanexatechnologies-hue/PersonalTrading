@@ -5820,7 +5820,9 @@ function initMarketCommand() {
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal, vertLine: { color: "#758696", width: 1, style: 3, labelBackgroundColor: "#2a2e39" }, horzLine: { color: "#758696", width: 1, style: 3, labelBackgroundColor: "#2a2e39" } },
     rightPriceScale: { borderColor: "#2a2e39", scaleMargins: { top: 0.08, bottom: 0.28 } },
     localization: { timeFormatter: (t) => fmtIST(t, true) },
-    timeScale: { borderColor: "#2a2e39", timeVisible: true, secondsVisible: false, tickMarkFormatter: (t) => fmtIST(t, false), barSpacing: 12 },
+    // rightOffset: ~25 empty bars right of the latest candle, kept whenever the chart shows the latest candles —
+    // level tags, notes and the callout live there instead of on top of the candles
+    timeScale: { borderColor: "#2a2e39", timeVisible: true, secondsVisible: false, tickMarkFormatter: (t) => fmtIST(t, false), barSpacing: 12, rightOffset: 25 },
   });
 
   MC.candleSeries = MC.chart.addCandlestickSeries({
@@ -8664,15 +8666,15 @@ function positionMCFakeOverlay() {
     if (data.ct) {
       coTtl.textContent = data.ct.title; coSub.textContent = data.ct.sub || ""; coSub.className = "sub " + (data.ct.subCls || "watch");
       const cx = xNow != null ? xNow : W * 0.55, cy = yLast != null ? yLast : H * 0.4;
-      const bx = Math.max(6, Math.min(cx - 100, W - 200)), by = Math.max(6, cy - 74);
+      // in the empty area right of the latest candle, at the top, so it never covers candles
+      const bx = Math.max(6, Math.min(cx + 14, W - 270)), by = 6;
       co.style.left = bx + "px"; co.style.top = by + "px"; co.hidden = false;
       if (xNow != null && yLast != null) {
         conn.setAttribute("x1", bx + 90); conn.setAttribute("y1", by + 34); conn.setAttribute("x2", xNow); conn.setAttribute("y2", yLast); conn.style.display = "";
       } else { conn.style.display = "none"; }
       if (data.ct.note) {
         tip.textContent = data.ct.note;
-        const tx = Math.max(6, Math.min(cx + 14, W - 184)), ty = Math.max(6, cy - 6);
-        tip.style.left = tx + "px"; tip.style.top = ty + "px"; tip.hidden = false;
+        tip.style.left = bx + "px"; tip.style.top = (by + 40) + "px"; tip.hidden = false;   // shown only while the callout is hovered (CSS)
       } else tip.hidden = true;
     } else { co.hidden = true; tip.hidden = true; conn.style.display = "none"; }
   } catch { layer.hidden = true; }
@@ -9005,6 +9007,19 @@ function renderMCChart(d) {
   // Breakout Engine signals / blocked breakouts (gated by the Trade Plan toggle).
   markers.push(...mcboMarkers(d).filter((m) => onLastDay(m.time)).slice(-4));   // declutter: today's breakout-engine marks only
   markers.sort((a, b) => a.time - b.time);
+  // One marker per candle and side: stacked markers make the chart reserve room for each one, which
+  // stretched the price scale (~2x) and squashed the candles. Same marks, texts combined.
+  {
+    const merged = new Map();
+    for (const m of markers) {
+      const k = m.time + "|" + m.position, cur = merged.get(k);
+      if (!cur) { merged.set(k, { ...m, text: m.text || "" }); continue; }
+      const t = [cur.text, m.text].filter(Boolean); cur.text = [...new Set(t.join(" · ").split(" · "))].join(" · ");
+      if (/BOS|CHoCH/.test(m.text || "") && !/BOS|CHoCH/.test(cur.text.split(" · ")[0])) { cur.color = m.color; cur.shape = m.shape; }
+    }
+    markers.length = 0; merged.forEach((m) => markers.push({ ...m, size: /BOS|CHoCH/.test(m.text) ? 1 : 0.7 }));
+    markers.sort((a, b) => a.time - b.time);
+  }
 
   // Anti-flicker: only tear down + rebuild the level price-lines and markers when
   // the set actually changed. On an unchanged poll (very common — levels update
@@ -9028,7 +9043,9 @@ function renderMCChart(d) {
       const nearSide = l === visible.find((x) => x.price > d.spot) || l === visible.find((x) => x.price < d.spot) || l.kind === "invalidation";
       MC._levelLines.push(MC.candleSeries.createPriceLine({ price: l.price, color: col, lineWidth: 1, lineStyle: style, lineVisible: false, axisLabelVisible: nearSide, title: "" }));
     });
-    MC.candleSeries.setMarkers(markers);
+    // markers are drawn in the overlay (mcDrawLevelRays): chart-library markers reserve extra price
+    // room around themselves, which squashed the candles to about half their height when zoomed in
+    MC.candleSeries.setMarkers([]); MC._ovMarkers = markers;
   }
   mcDrawForecast(d);
   mcDrawLevelRays();
@@ -9041,7 +9058,7 @@ function renderMCChart(d) {
   // Frame the recent ~120 bars on first render / symbol / timeframe switch only.
   const viewKey = MC.sym + ":" + MC.tf;
   if (MC._fitKey !== viewKey) {
-    MC.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, N - showBars), to: N + 2 });
+    MC.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, N - showBars), to: N + 26 });   // ~25 empty bars on the right: level tags / notes live there, not on the candles
     MC._fitKey = viewKey;
   }
 }
@@ -9513,6 +9530,8 @@ function renderMCLevelsLegend(d) {
 // (min 180 px). Hidden panes give their space back. Phones / tablets (≤ 900 px wide) keep the normal
 // page scroll and the CSS heights.
 function mcFitPanes(force = true) {
+  // empty space right of the latest candle: 25 bars on desktop, 6 on phones (narrow charts)
+  if (MC.chart) { const ro = window.innerWidth <= 600 ? 10 : 25; if (MC._ro !== ro) { MC._ro = ro; try { MC.chart.applyOptions({ timeScale: { rightOffset: ro } }); } catch {} } }
   const area = document.querySelector("#panel-marketcommand .mc2-chart-area"), cc = el("mc-chart-container"), rb = el("mc-rsi-container"), mb = el("mc-macd-container");
   if (!area || !cc || !MC.chart) return;
   const fs = !!document.querySelector("#panel-marketcommand .mc-wrap.mc-fullscreen-active");
@@ -9593,7 +9612,11 @@ function mcDrawLevelRays() {
   if (!lay) { lay = document.createElement("div"); lay.id = "mc-lvl-layer"; lay.className = "mc-lvl-layer"; host.appendChild(lay); }
   const spot = MC.lastData && MC.lastData.spot;
   let plotW = host.clientWidth; try { plotW -= MC.chart.priceScale("right").width(); } catch {}
-  const H = host.clientHeight, x0 = Math.round(plotW * 0.52), x1 = plotW - 2;
+  const H = host.clientHeight, x1 = plotW - 2;
+  // latest candle's x: everything right of it is empty space for bands and tags
+  let lastX = null; try { const cs = MC._candles || []; if (cs.length) lastX = MC.chart.timeScale().timeToCoordinate(cs[cs.length - 1].time); } catch {}
+  const x0 = lastX != null && lastX < plotW - 60 ? Math.round(lastX + 10) : Math.round(plotW * 0.78);
+  const coEl = el("mcfo-callout"), topReserve = coEl && !coEl.hidden ? 44 : 0;
   const Y = (p) => { const y = MC.candleSeries.priceToCoordinate(p); return y == null || !isFinite(y) ? null : y; };
   const lv = (MC.show.levels ? MC._activeLevels || [] : []).map((l, k) => ({ ...l, note: (MC._lvlNotes || {})[k] || "" }));
   // merge levels within ~0.04 % of price (≈ 9 pts on NIFTY) into one ray
@@ -9608,28 +9631,37 @@ function mcDrawLevelRays() {
     const names = [...new Set(g.items.map((l) => l.short))].join(" · "), note = g.items.map((l) => l.note).filter(Boolean).join(" · ");
     const dist = spot != null ? g.price - spot : null;
     return { y, near, cls: sl ? "sl" : res ? "res" : "sup", dashed: g.items.every((l) => l.strength !== "STRONG"),
-      text: `${sl ? "SL" : g.tag || ""} ${names} ${mcFmtP(g.price)}${dist != null ? ` <i>${dist > 0 ? "+" : ""}${mcFmtP(Math.round(dist * 10) / 10)}</i>` : ""}${note ? ` <em>${note}</em>` : ""}` };
+      text: `<b>${sl ? "SL" : g.tag || ""}</b> <span class="nm">${names}</span> ${mcFmtP(g.price)}${dist != null ? ` <i>${dist > 0 ? "+" : ""}${mcFmtP(Math.round(dist * 10) / 10)}</i>` : ""}${note ? ` <em>${note}</em>` : ""}` };
   }).filter(Boolean);
   // the Resistance / Pullback Zone joins the same tag stack (its own label is hidden)
   const zEl = el("mcfo-zone"), zLbl = el("mcfo-zone-lbl");
   if (zEl && !zEl.hidden && zLbl && zLbl.textContent) {
     const zt = parseFloat(zEl.style.top), zh = parseFloat(zEl.style.height);
-    if (isFinite(zt) && isFinite(zh)) rows.push({ y: zt + zh / 2, near: false, cls: "zone", dashed: false, noLine: true, text: mcEscText(zLbl.textContent.replace("Resistance / Pullback Zone", "Pullback zone")) });
+    if (isFinite(zt) && isFinite(zh)) rows.push({ y: zt + zh / 2, near: false, cls: "zone", dashed: false, noLine: true, text: `<span class="nm">Pullback</span> zone ${mcEscText(zLbl.textContent.replace("Resistance / Pullback Zone", "").trim()).replace(/\s*\(±\d+\)/, (m) => `<span class="nm">${m}</span>`)}` });
     zLbl.style.visibility = "hidden";
   }
   rows.sort((a, b) => a.y - b.y);
   // stack tags: at least 18 px apart; push back up if they run off the bottom
-  const LH = 18; let prev = -Infinity; rows.forEach((r) => { r.ty = Math.max(r.y - LH / 2, prev + LH + 1); prev = r.ty; });
+  const LH = 18; let prev = topReserve - LH - 1; rows.forEach((r) => { r.ty = Math.max(r.y - LH / 2, prev + LH + 1); prev = r.ty; });
   let over = rows.length ? rows[rows.length - 1].ty + LH - H : 0; for (let i = rows.length - 1; i >= 0 && over > 0; i--) { const lim = i ? rows[i - 1].ty + LH + 1 : 0; const mv = Math.min(over, rows[i].ty - lim); rows[i].ty -= mv; over -= mv; }
   const bands = (MC.show.levels && MC.show.ob ? MC._obBands || [] : []).map((b) => { const a = Y(b.hi), z = Y(b.lo); return a == null || z == null ? null : { top: Math.min(a, z), h: Math.max(3, Math.abs(z - a)), ...b }; }).filter(Boolean);
   const html = bands.map((b) => `<div class="mc-obband ${b.bull ? "bull" : "bear"}${b.confirmed ? "" : " pre"}" style="top:${b.top}px;height:${b.h}px;left:${x0}px;width:${x1 - x0}px"><span>${b.label}</span></div>`).join("")
-    + `<svg class="mc-lvl-svg" width="${plotW}" height="${H}">${rows.map((r) => `${r.noLine ? "" : `<line class="${r.cls}${r.near ? " near" : ""}" x1="${x0}" x2="${x1}" y1="${r.y}" y2="${r.y}" ${r.dashed ? 'stroke-dasharray="6 4"' : ""}/>`}${Math.abs(r.ty + LH / 2 - r.y) > 2 ? `<line class="lead ${r.cls}" x1="${x0 - 6}" y1="${r.ty + LH / 2}" x2="${x0}" y2="${r.y}"/>` : ""}`).join("")}</svg>`
-    + rows.map((r) => `<div class="mc-lvltag ${r.cls}${r.near ? " near" : ""}" style="top:${r.ty}px;right:${plotW - x0 + 6}px">${r.text}</div>`).join("");
-  if (lay._html !== html) { lay._html = html; lay.innerHTML = html; }
+    + `<svg class="mc-lvl-svg" width="${plotW}" height="${H}">${rows.map((r) => `${r.noLine ? "" : `<line class="${r.cls}${r.near ? " near" : ""}" x1="0" x2="${x1}" y1="${r.y}" y2="${r.y}" ${r.dashed ? 'stroke-dasharray="6 4"' : ""}/>`}${Math.abs(r.ty + LH / 2 - r.y) > 2 ? `<line class="lead ${r.cls}" x1="${x1 - 2}" y1="${r.ty + LH / 2}" x2="${x1 - 2}" y2="${r.y}"/>` : ""}`).join("")}</svg>`
+    + rows.map((r) => `<div class="mc-lvltag ${r.cls}${r.near ? " near" : ""}" style="top:${r.ty}px;right:${host.clientWidth - plotW + 6}px">${r.text}</div>`).join("");
+  // candle markers (BOS / swing / breakout marks) as small tags above / below their candle
+  const cmap = new Map((MC._candles || []).map((c) => [c.time, c]));
+  const mk = (MC._ovMarkers || []).map((m) => {
+    let x = null; try { x = MC.chart.timeScale().timeToCoordinate(m.time); } catch {}
+    const c = cmap.get(m.time); if (x == null || !c || x < 0 || x > plotW) return "";
+    const up = m.position === "belowBar", y = Y(up ? c.low : c.high); if (y == null) return "";
+    const glyph = m.shape === "arrowUp" ? "▲" : m.shape === "arrowDown" ? "▼" : m.shape === "circle" ? "●" : "■";
+    return `<div class="mc-cmark ${up ? "below" : "above"}" style="left:${Math.round(x)}px;top:${Math.round(up ? y + 3 : y - 3)}px;color:${m.color || "#94a3b8"}"><b>${glyph}</b><span>${mcEscText(m.text || "")}</span></div>`;
+  }).join("");
+  const htmlAll = html + mk;
+  if (lay._html !== htmlAll) { lay._html = htmlAll; lay.innerHTML = htmlAll; }
   // the Resistance / Pullback Zone uses the same recent region instead of the full chart width
   const z = el("mcfo-zone"), zl = el("mcfo-zone-lbl");
-  if (z) { z.style.left = x0 + "px"; z.style.right = (host.clientWidth - x1) + "px"; }
-  if (zl) zl.style.left = x0 + "px";
+  if (z) { z.style.left = "0px"; z.style.right = (host.clientWidth - x1) + "px"; }   // zone across the chart, so candles reacting to it are visible
 }
 
 function mcDrawForecast(d) {
