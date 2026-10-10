@@ -5710,7 +5710,7 @@ function initMarketCommand() {
     });
   });
 
-  el("mc-refresh")?.addEventListener("click", () => { MC._fitKey = null; loadMarketCommand(!MC.replayDate); if (!MC.replayDate) loadIndexNews(); });
+  el("mc-refresh")?.addEventListener("click", () => { loadMarketCommand(false); if (!MC.replayDate) loadIndexNews(); });   // full payload in one step: no chart-only phase, so nothing is torn down and redrawn
 
   // Wire timeframe buttons
   el("mc-tf-btns")?.querySelectorAll(".mc2-tfbtn").forEach((btn) => {
@@ -9506,7 +9506,7 @@ function renderMCLevelsLegend(d) {
 // height with its own scroll): RSI ~16 % (50–120 px), MACD ~20 % (64–130 px), the chart gets the rest
 // (min 180 px). Hidden panes give their space back. Phones / tablets (≤ 900 px wide) keep the normal
 // page scroll and the CSS heights.
-function mcFitPanes() {
+function mcFitPanes(force = true) {
   const area = document.querySelector("#panel-marketcommand .mc2-chart-area"), cc = el("mc-chart-container"), rb = el("mc-rsi-container"), mb = el("mc-macd-container");
   if (!area || !cc || !MC.chart) return;
   const fs = !!document.querySelector("#panel-marketcommand .mc-wrap.mc-fullscreen-active");
@@ -9518,7 +9518,11 @@ function mcFitPanes() {
   const rsiH = MC.show.rsi && rb ? Math.max(50, Math.min(120, Math.round(avail * 0.16))) : 0;
   const macdH = MC.show.macd && mb ? Math.max(64, Math.min(130, Math.round(avail * 0.2))) : 0;
   const chartH = Math.max(180, avail - rsiH - macdH);
-  const fitKey = `${chartH}|${rsiH}|${macdH}`; if (MC._fitKey === fitKey && cc.style.height === chartH + "px") return; MC._fitKey = fitKey;
+  const fitKey = `${chartH}|${rsiH}|${macdH}`; if (MC._fitKey === fitKey && cc.style.height === chartH + "px") return;
+  // automatic re-fits (after data updates) ignore small layout jitter, so the chart doesn't resize on every poll
+  const curH = parseInt(cc.style.height, 10);
+  if (!force && curH && Math.abs(curH - chartH) <= 24 && (MC._fitKey || "").split("|").slice(1).join("|") === `${rsiH}|${macdH}`) return;
+  MC._fitKey = fitKey;
   cc.style.height = chartH + "px"; MC.chart.applyOptions({ height: chartH });
   if (rb) { rb.style.height = rsiH ? rsiH + "px" : ""; if (MC.rsiChart && rsiH) MC.rsiChart.applyOptions({ height: rsiH }); }
   if (mb) { mb.style.height = macdH ? macdH + "px" : ""; if (MC.macdChart && macdH) MC.macdChart.applyOptions({ height: macdH }); }
@@ -9669,7 +9673,7 @@ function applyMCOverlays() {
   if (!MC.chart) return;
   try { mcRenderRsi(); } catch (e) { console.warn("[MC RSI]", e); }
   try { mcRenderMacd(); } catch (e) { console.warn("[MC MACD]", e); }
-  setTimeout(() => { try { mcFitPanes(); } catch {} }, 0);   // re-fit after the bars above the chart settle (no-op when unchanged)
+  setTimeout(() => { try { mcFitPanes(false); } catch {} }, 0);   // re-fit after the bars above the chart settle (ignores small jitter)
   const ov = MC._overlayData || {};
   const candles = MC._candles || [];
   const align = (arr) => candles.map((c, i) => arr && arr[i] != null ? { time: c.time, value: arr[i] } : null).filter(Boolean);
