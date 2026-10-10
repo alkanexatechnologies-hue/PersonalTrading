@@ -1924,7 +1924,7 @@ function switchTab(name) {
   document.body.classList.toggle("mc-fullwidth", name === "marketcommand");
   if (name === "marketcommand") {
     initMarketCommand(); startMarketCommandLive(); startIndexNewsLive();
-    if (MC.chart) setTimeout(() => { const c = el("mc-chart-container"); if (c) MC.chart.applyOptions({ width: c.clientWidth }); }, 60);
+    if (MC.chart) setTimeout(() => { const c = el("mc-chart-container"); if (c) MC.chart.applyOptions({ width: c.clientWidth }); try { mcFitPanes(); } catch {} }, 60);
   }
   // Option Terminal — full-width (keeps the tab bar), follows Market Command's index.
   document.body.classList.toggle("ot-fullwidth", name === "optionterminal");
@@ -5740,6 +5740,7 @@ function initMarketCommand() {
     if (cb) cb.addEventListener("change", () => {
       MC.show[k] = cb.checked;
       if ((k === "levels" || k === "bos" || k === "liq" || k === "orb" || k === "trade" || k === "forecast") && MC.lastData) renderMCChart(MC.lastData);
+      if (k === "rsi" || k === "macd") setTimeout(mcFitPanes, 0);
       else applyMCOverlays();
     });
   });
@@ -5759,7 +5760,7 @@ function initMarketCommand() {
     const wrap = el("panel-marketcommand")?.querySelector(".mc-wrap");
     if (wrap) {
       wrap.classList.toggle("mc-fullscreen-active");
-      if (MC.chart) setTimeout(() => MC.chart.applyOptions({ width: container.clientWidth }), 50);
+      if (MC.chart) setTimeout(() => { MC.chart.applyOptions({ width: container.clientWidth }); mcFitPanes(); }, 50);
     }
   });
 
@@ -5900,7 +5901,7 @@ function initMarketCommand() {
   MC.vwapSeries = MC.chart.addLineSeries({ color: "#22c55e", lineWidth: 2, lineStyle: 0, priceLineVisible: false, lastValueVisible: true, title: "VWAP" });
 
   window.addEventListener("resize", () => {
-    if (MC.chart) MC.chart.applyOptions({ width: container.clientWidth, height: Math.max(container.clientHeight, 500) });
+    if (MC.chart) { MC.chart.applyOptions({ width: container.clientWidth, height: Math.max(container.clientHeight, 200) }); mcFitPanes(); }
   });
 
   // ---- ADDITIVE: fake-move on-chart overlay (presentation only) ----
@@ -9501,6 +9502,29 @@ function renderMCLevelsLegend(d) {
   }).join("");
 }
 
+// Fit price chart + RSI + MACD into the visible chart area on desktop / laptop (the area has a fixed
+// height with its own scroll): RSI ~16 % (50–120 px), MACD ~20 % (64–130 px), the chart gets the rest
+// (min 180 px). Hidden panes give their space back. Phones / tablets (≤ 900 px wide) keep the normal
+// page scroll and the CSS heights.
+function mcFitPanes() {
+  const area = document.querySelector("#panel-marketcommand .mc2-chart-area"), cc = el("mc-chart-container"), rb = el("mc-rsi-container"), mb = el("mc-macd-container");
+  if (!area || !cc || !MC.chart) return;
+  const fs = !!document.querySelector("#panel-marketcommand .mc-wrap.mc-fullscreen-active");
+  if (window.innerWidth <= 900 && !fs) { [cc, rb, mb].forEach((e) => e && (e.style.height = "")); MC.chart.applyOptions({ height: cc.clientHeight || 360 }); if (MC.rsiChart && rb) MC.rsiChart.applyOptions({ height: rb.clientHeight || 100 }); if (MC.macdChart && mb) MC.macdChart.applyOptions({ height: mb.clientHeight || 120 }); return; }
+  // space from the top of the price chart to the bottom of the visible chart area
+  const above = cc.getBoundingClientRect().top - area.getBoundingClientRect().top + area.scrollTop;
+  const avail = Math.floor(area.clientHeight - above - 4);
+  if (!(avail > 0)) return;
+  const rsiH = MC.show.rsi && rb ? Math.max(50, Math.min(120, Math.round(avail * 0.16))) : 0;
+  const macdH = MC.show.macd && mb ? Math.max(64, Math.min(130, Math.round(avail * 0.2))) : 0;
+  const chartH = Math.max(180, avail - rsiH - macdH);
+  const fitKey = `${chartH}|${rsiH}|${macdH}`; if (MC._fitKey === fitKey && cc.style.height === chartH + "px") return; MC._fitKey = fitKey;
+  cc.style.height = chartH + "px"; MC.chart.applyOptions({ height: chartH });
+  if (rb) { rb.style.height = rsiH ? rsiH + "px" : ""; if (MC.rsiChart && rsiH) MC.rsiChart.applyOptions({ height: rsiH }); }
+  if (mb) { mb.style.height = macdH ? macdH + "px" : ""; if (MC.macdChart && macdH) MC.macdChart.applyOptions({ height: macdH }); }
+}
+if (typeof window !== "undefined") window.addEventListener("resize", () => { try { mcFitPanes(); } catch {} });
+
 // RSI(14), Wilder smoothing, on the chart's closes. Returns one value per candle (null until warm).
 function mcRsi(closes, n = 14) {
   const out = new Array(closes.length).fill(null); if (closes.length <= n) return out;
@@ -9645,6 +9669,7 @@ function applyMCOverlays() {
   if (!MC.chart) return;
   try { mcRenderRsi(); } catch (e) { console.warn("[MC RSI]", e); }
   try { mcRenderMacd(); } catch (e) { console.warn("[MC MACD]", e); }
+  setTimeout(() => { try { mcFitPanes(); } catch {} }, 0);   // re-fit after the bars above the chart settle (no-op when unchanged)
   const ov = MC._overlayData || {};
   const candles = MC._candles || [];
   const align = (arr) => candles.map((c, i) => arr && arr[i] != null ? { time: c.time, value: arr[i] } : null).filter(Boolean);
