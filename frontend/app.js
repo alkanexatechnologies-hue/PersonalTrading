@@ -9515,12 +9515,25 @@ function mcZoneHalf(sym) { return ({ "^NSEI": 10, "^CNXFIN": 10, "^NSEMDCP50": 5
 // the next BOS continued the last one's direction 64–72% of the time.
 function mcAtr14(c) { if (!c || c.length < 15) return null; let a = 0; for (let i = 1; i <= 14; i++) a += Math.max(c[i].high - c[i].low, Math.abs(c[i].high - c[i - 1].close), Math.abs(c[i].low - c[i - 1].close)); a /= 14;
   for (let i = 15; i < c.length; i++) a = (a * 13 + Math.max(c[i].high - c[i].low, Math.abs(c[i].high - c[i - 1].close), Math.abs(c[i].low - c[i - 1].close))) / 14; return a; }
+// Blink the forecast label: amber ↔ dim every 0.7 s (static amber when the OS asks for reduced motion).
+function mcStartFcBlink() {
+  if (MC._fcBlinkTimer) return;
+  const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduce) return;
+  MC._fcBlinkTimer = setInterval(() => {
+    const pl = MC._fcBlink; if (!pl) return;
+    MC._fcBlinkOn = !MC._fcBlinkOn;
+    try { pl.applyOptions(MC._fcBlinkOn
+      ? { axisLabelColor: "#f59e0b", axisLabelTextColor: "#111827", color: "rgba(245,158,11,.9)" }
+      : { axisLabelColor: "rgba(148,163,184,.18)", axisLabelTextColor: "rgba(229,231,235,.55)", color: "rgba(148,163,184,.3)" }); } catch { MC._fcBlink = null; }
+  }, 700);
+}
 function mcDrawForecast(d) {
   const cs0 = MC._candles || [], sp = MC._swingPoints || [];
   const fsig = JSON.stringify([MC.show.forecast !== false, MC._overlaySig, cs0.length, sp.length ? sp[sp.length - 1].index : null, (MC._bosEvents || []).length]);
   if (MC._fcSig === fsig) return;          // unchanged since the last poll: keep the lines still (no flicker)
   MC._fcSig = fsig;
-  (MC._fcLines || []).forEach((pl) => { try { MC.candleSeries.removePriceLine(pl); } catch {} }); MC._fcLines = [];
+  (MC._fcLines || []).forEach((pl) => { try { MC.candleSeries.removePriceLine(pl); } catch {} }); MC._fcLines = []; MC._fcBlink = null;
   if (MC.show.forecast === false) return;
   const sw = (MC._swingPoints || []).map((p) => ({ hi: p.type === "HH" || p.type === "LH", price: p.price, i: p.index }));
   const alt = []; for (const s of sw) { const l = alt[alt.length - 1]; if (l && l.hi === s.hi) { if ((s.hi && s.price > l.price) || (!s.hi && s.price < l.price)) alt[alt.length - 1] = s; } else alt.push(s); }
@@ -9536,7 +9549,9 @@ function mcDrawForecast(d) {
     if (k >= 0 && MC._levelLines && MC._levelLines[k] && /^BOS/.test(o.title)) { try { const l = MC._activeLevels[k]; MC._levelLines[k].applyOptions({ title: `${l.short} ${mcFmtP(l.price)} · ${o.title}` }); } catch {} return; }
     try { MC._fcLines.push(MC.candleSeries.createPriceLine(o)); } catch {}
   };
-  if (MC._inView(fc)) add({ price: fc, color: "rgba(148,163,184,.55)", lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: `${cur.hi ? "SWL" : "SWH"} fcst (low conf.)` });
+  MC._fcBlink = null;
+  if (MC._inView(fc)) { add({ price: fc, color: "rgba(245,158,11,.75)", lineWidth: 1, lineStyle: 3, axisLabelVisible: true, axisLabelColor: "#f59e0b", axisLabelTextColor: "#111827", title: `${cur.hi ? "SWL" : "SWH"} fcst (low conf.)` }); MC._fcBlink = MC._fcLines[MC._fcLines.length - 1] || null; }
+  mcStartFcBlink();
   const lastHi = [...alt].reverse().find((s) => s.hi), lastLo = [...alt].reverse().find((s) => !s.hi);
   const bos = (MC._bosEvents || []).filter((b) => b.stage === "Confirmed"), lastDir = bos.length ? bos[bos.length - 1].direction : null;
   if (lastHi && MC._inView(lastHi.price)) add({ price: lastHi.price, color: "rgba(22,199,132,.7)", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `BOS↑ ${lastDir === "Bullish" ? "cont ~67%" : lastDir === "Bearish" ? "flip ~33%" : "trigger"}` });
