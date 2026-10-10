@@ -5688,7 +5688,7 @@ const MC = {
   sym: "^NSEI", tf: "15m", chart: null, candleSeries: null,
   ema9Series: null, ema21Series: null, ema50Series: null, vwapSeries: null,
   obMarkers: [], _levelLines: [], _overlaySig: null, _obSig: null, _indSig: null, priceLine: null, timer: null, loading: false, lastData: null,
-  show: { vwap: true, ema21: true, ema50: true, ema9: false, ema200: true, ob: true, vol: true, levels: true, bos: true, liq: true, orb: false, trade: true },
+  show: { vwap: true, ema21: true, ema50: true, ema9: false, ema200: true, ob: true, vol: true, rsi: true, levels: true, bos: true, liq: true, orb: false, trade: true },
   replayDate: null, // yyyy-mm-dd when replaying a past session; null = live
 };
 
@@ -5735,7 +5735,7 @@ function initMarketCommand() {
 
   // Wire indicator toggles. "levels"/"bos"/"liq"/"orb" govern the Important-Levels
   // drawing → a full chart redraw; the EMA/VWAP/Volume overlays just re-apply.
-  ["vwap", "ema21", "ema50", "ema9", "ema200", "ob", "vol", "levels", "bos", "liq", "orb", "trade"].forEach((k) => {
+  ["vwap", "ema21", "ema50", "ema9", "ema200", "ob", "vol", "rsi", "levels", "bos", "liq", "orb", "trade"].forEach((k) => {
     const cb = el("mc-tog-" + k);
     if (cb) cb.addEventListener("change", () => {
       MC.show[k] = cb.checked;
@@ -5830,6 +5830,29 @@ function initMarketCommand() {
   // Volume histogram pinned to the bottom of the price pane
   MC.volSeries = MC.chart.addHistogramSeries({ priceScaleId: "vol", priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false });
   MC.chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
+
+  // RSI (14, Wilder) pane under the price chart — same candles, time-synced both ways.
+  const rsiBox = el("mc-rsi-container");
+  if (rsiBox) {
+    MC.rsiChart = LightweightCharts.createChart(rsiBox, {
+      width: rsiBox.clientWidth || container.clientWidth, height: rsiBox.clientHeight || 120,
+      layout: { background: { type: "solid", color: "#0a0e17" }, textColor: "#b2b5be", fontSize: 11 },
+      grid: { vertLines: { color: "#141c2e" }, horzLines: { color: "#141c2e" } },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      rightPriceScale: { borderColor: "#2a2e39", scaleMargins: { top: 0.1, bottom: 0.1 } },
+      timeScale: { borderColor: "#2a2e39", visible: false, barSpacing: 12 },
+      handleScroll: true, handleScale: true,
+    });
+    MC.rsiSeries = MC.rsiChart.addLineSeries({ color: "#e879f9", lineWidth: 2, priceLineVisible: false, lastValueVisible: true, autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }) });
+    MC.rsiSeries.createPriceLine({ price: 70, color: "rgba(234,57,67,0.7)", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "70" });
+    MC.rsiSeries.createPriceLine({ price: 50, color: "rgba(138,151,173,0.45)", lineWidth: 1, lineStyle: 3, axisLabelVisible: false, title: "" });
+    MC.rsiSeries.createPriceLine({ price: 30, color: "rgba(22,199,132,0.7)", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "30" });
+    let syncing = false;
+    const sync = (to) => (r) => { if (syncing || !r) return; syncing = true; try { to.timeScale().setVisibleLogicalRange(r); } catch {} syncing = false; };
+    MC.chart.timeScale().subscribeVisibleLogicalRangeChange(sync(MC.rsiChart));
+    MC.rsiChart.timeScale().subscribeVisibleLogicalRangeChange(sync(MC.chart));
+    if (typeof ResizeObserver !== "undefined") new ResizeObserver(() => { if (MC.rsiChart && rsiBox.clientWidth) MC.rsiChart.applyOptions({ width: rsiBox.clientWidth, height: rsiBox.clientHeight || 120 }); }).observe(rsiBox);
+  }
 
   // Crosshair OHLC sync
   MC.chart.subscribeCrosshairMove((param) => {
@@ -9451,8 +9474,34 @@ function renderMCLevelsLegend(d) {
   }).join("");
 }
 
+// RSI(14), Wilder smoothing, on the chart's closes. Returns one value per candle (null until warm).
+function mcRsi(closes, n = 14) {
+  const out = new Array(closes.length).fill(null); if (closes.length <= n) return out;
+  let g = 0, l = 0;
+  for (let i = 1; i <= n; i++) { const ch = closes[i] - closes[i - 1]; if (ch > 0) g += ch; else l -= ch; }
+  g /= n; l /= n; out[n] = l === 0 ? 100 : 100 - 100 / (1 + g / l);
+  for (let i = n + 1; i < closes.length; i++) {
+    const ch = closes[i] - closes[i - 1];
+    g = (g * (n - 1) + Math.max(ch, 0)) / n; l = (l * (n - 1) + Math.max(-ch, 0)) / n;
+    out[i] = l === 0 ? 100 : 100 - 100 / (1 + g / l);
+  }
+  return out;
+}
+function mcRenderRsi() {
+  const box = el("mc-rsi-container"); if (!box || !MC.rsiSeries) return;
+  box.hidden = !MC.show.rsi; if (!MC.show.rsi) return;
+  const cs = MC._candles || []; const r = mcRsi(cs.map((c) => c.close));
+  const pts = cs.map((c, i) => (r[i] == null ? null : { time: c.time, value: Math.round(r[i] * 100) / 100 })).filter(Boolean);
+  const sig = `${MC._chartViewKey}|${pts.length}|${pts.length ? pts[0].time : 0}`;
+  if (MC._rsiSig === sig && pts.length) MC.rsiSeries.update(pts[pts.length - 1]);   // forming bar: move the last point only
+  else { MC._rsiSig = sig; MC.rsiSeries.setData(pts); try { MC.rsiChart.timeScale().setVisibleLogicalRange(MC.chart.timeScale().getVisibleLogicalRange()); } catch {} }
+  const last = pts.length ? pts[pts.length - 1].value : null, lbl = el("mc-rsi-lbl");
+  if (lbl) { lbl.textContent = last == null ? "RSI 14 —" : `RSI 14  ${last.toFixed(1)}${last >= 70 ? " · overbought" : last <= 30 ? " · oversold" : ""}`; lbl.className = "mc-rsi-lbl" + (last >= 70 ? " ob" : last <= 30 ? " os" : ""); }
+}
+
 function applyMCOverlays() {
   if (!MC.chart) return;
+  try { mcRenderRsi(); } catch (e) { console.warn("[MC RSI]", e); }
   const ov = MC._overlayData || {};
   const candles = MC._candles || [];
   const align = (arr) => candles.map((c, i) => arr && arr[i] != null ? { time: c.time, value: arr[i] } : null).filter(Boolean);

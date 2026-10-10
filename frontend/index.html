@@ -7,7 +7,7 @@
          under the home indicator. Android ignores it harmlessly. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>BC Data Status</title>
-    <link rel="stylesheet" href="styles.css?v=20261010-lvl1" />
+    <link rel="stylesheet" href="styles.css?v=20261011-rsi1" />
     <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   </head>
   <body class="oi-focus">
@@ -1658,6 +1658,7 @@
                       <label class="mc-tog"><input type="checkbox" id="mc-tog-ema200" checked><span class="mc-tog-dot" style="background:#e056a0"></span>EMA 200</label>
                       <label class="mc-tog"><input type="checkbox" id="mc-tog-vwap" checked><span class="mc-tog-dot" style="background:#22c55e"></span>VWAP</label>
                       <label class="mc-tog"><input type="checkbox" id="mc-tog-vol" checked><span class="mc-tog-dot" style="background:#16c784"></span>Volume</label>
+                      <label class="mc-tog"><input type="checkbox" id="mc-tog-rsi" checked><span class="mc-tog-dot" style="background:#e879f9"></span>RSI</label>
                       <label class="mc-tog mc-tog-levels-wrap"><input type="checkbox" id="mc-tog-levels" checked><span class="mc-tog-dot" style="background:#2962ff"></span>Important Levels</label>
                       <label class="mc-tog"><input type="checkbox" id="mc-tog-bos" checked><span class="mc-tog-dot" style="background:#a855f7"></span>BOS / CHoCH</label>
                       <label class="mc-tog"><input type="checkbox" id="mc-tog-liq" checked><span class="mc-tog-dot" style="background:#f0b90b"></span>Liquidity</label>
@@ -1667,6 +1668,7 @@
                   </div>
                 </div>
                 <div class="mc-chart-container" id="mc-chart-container"></div>
+                <div class="mc-rsi-container" id="mc-rsi-container"><span class="mc-rsi-lbl" id="mc-rsi-lbl">RSI 14</span></div>
                 <!-- Important Levels legend — TYPE · PRICE · STRENGTH · TIME (nearest = TESTING) -->
                 <div class="mc-levels-legend" id="mc-levels-legend"></div>
                 <!-- BOS + Early Move banners under the chart -->
@@ -2561,7 +2563,7 @@
         <div id="dc-body" class="dc-body">Loading…</div>
       </div>
     </div>
-    <script src="app.js?v=20261008-ref1"></script>
+    <script src="app.js?v=20261011-rsi1"></script>
     <script src="mcsummary.js?v=20261010-lvl1"></script>
     <script src="liquidity.js?v=20261007-lqa7"></script>
   </body>
