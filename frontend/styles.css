@@ -4559,8 +4559,9 @@ body.ot-fullwidth .content { padding: 0 !important; }
 .mcfo-layer > * { position: absolute; pointer-events: none; }
 
 /* Pullback / resistance zone band */
-.mcfo-zone { left: 0; right: 0; background: rgba(239,68,68,0.10); border-top: 1px dashed rgba(239,68,68,0.5); border-bottom: 1px dashed rgba(239,68,68,0.5); }
-.mcfo-zone-lbl { left: 8px; transform: translateY(-100%); font: 700 9.5px "Segoe UI",Arial,sans-serif; color: #fca5a5; background: rgba(42,17,19,0.9); border: 1px solid #7f1d1d; border-radius: 6px; padding: 1px 6px; white-space: nowrap; }
+/* Resistance / Pullback Zone — dark, clearly shaded band (level ±10) so it reads at a glance */
+.mcfo-zone { left: 0; right: 0; min-height: 6px; background: repeating-linear-gradient(135deg, rgba(239,68,68,0.34) 0 6px, rgba(239,68,68,0.22) 6px 12px); border-top: 2px solid rgba(239,68,68,0.95); border-bottom: 2px solid rgba(239,68,68,0.95); box-shadow: inset 0 0 0 1px rgba(127,29,29,0.6); }
+.mcfo-zone-lbl { left: 8px; transform: translateY(-100%); font: 800 11px "Segoe UI",Arial,sans-serif; color: #fff; background: #b91c1c; border: 1px solid #ef4444; border-radius: 6px; padding: 2px 8px; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,.45); }
 
 /* Projection SVG (3 PM cone/line) fills the layer; shapes drawn in user coords */
 .mcfo-svg { left: 0; top: 0; width: 100%; height: 100%; }
