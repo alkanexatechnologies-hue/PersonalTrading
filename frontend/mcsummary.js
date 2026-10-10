@@ -1131,7 +1131,9 @@ function mcsRenderKeyRow() {
   if (!d || d.spot == null) { box.innerHTML = ""; return; }
   const s = mcsSessionStats() || {}, lv = d.levels || {}, oi = d.oi || {};
   const px = (v) => (v == null ? null : typeof v === "number" ? v : v.strike ?? null);
-  const kv = (k, v, cls = "", extra = "") => `<div><span>${k}</span><b class="${cls}">${v == null ? "—" : typeof v === "number" ? mcsN(v) : v}</b>${extra}</div>`;
+  const kv = (k, v, cls = "", extra = "") => { const a = typeof v === "number" ? mcsLvlNear(k, v) : null;
+    return `<div class="${a ? "mcs-kvnear mcs-blink " + a.state.toLowerCase() : ""}"><span>${k}${a ? ` <i class="mcs-kvtag">${a.state === "AT" ? "AT LEVEL" : "NEAR"} ${a.dist >= 0 ? "+" : ""}${mcsN(a.dist, 1)}</i>` : ""}</span><b class="${cls}">${v == null ? "—" : typeof v === "number" ? mcsN(v) : v}</b>${extra}</div>`; };
+  mcsLvlBegin(d);
   // Structure: latest swing high / low (today and before), equal highs/lows (two swings within 0.03%), last BOS.
   const sw = d.structure?.swingPoints || [];
   const swH = [...sw].reverse().find((p) => p.type === "HH" || p.type === "LH"), swL = [...sw].reverse().find((p) => p.type === "HL" || p.type === "LL");
@@ -1155,8 +1157,46 @@ function mcsRenderKeyRow() {
     card("TODAY'S KEY LEVELS", kv("Today High (TH)", s.high, "mcs-dn") + kv("Today Low (TL)", s.low, "mcs-up") + kv("Opening Range High", px(lv.orbHigh)) + kv("Opening Range Low", px(lv.orbLow))) +
     card("PREVIOUS DAY LEVELS", kv("Previous Day High (PDH)", px(lv.pdh) ?? s.prevHigh, "mcs-dn") + kv("Previous Day Low (PDL)", px(lv.pdl) ?? s.prevLow, "mcs-up") + kv("Previous Close (PDC)", s.prevClose)) +
     card("STRUCTURE LEVELS", kv("Swing High (SWH)", swH ? swH.price : null, "mcs-dn") + kv("Swing Low (SWL)", swL ? swL.price : null, "mcs-up") + kv("Equal High (EQH)", eqh ?? "none") + kv("Equal Low (EQL)", eql ?? "none") + kv("BOS Level", d.bos?.price ?? null, d.bos?.direction === "BULLISH" ? "mcs-up" : "mcs-dn", d.bos ? ` <em>${mcsEsc(d.bos.direction || "")} ${mcsEsc(d.bos.stage || "")}</em>` : "")) +
-    card("OI LEVELS", kv("OI Resistance", oi.resistance ?? null, "mcs-dn") + kv("OI Support", oi.support ?? null, "mcs-up") + kv("Max Call OI Strike", sR, "", lv.strongResistance?.oi ? ` <em>${mcsL(lv.strongResistance.oi)}</em>` : "") + kv("Max Put OI Strike", sS, "", lv.strongSupport?.oi ? ` <em>${mcsL(lv.strongSupport.oi)}</em>` : "") + kv("PCR", oi.pcr != null ? mcsN(oi.pcr) : null) + (oi.maxPain != null ? kv("Max Pain", oi.maxPain) : "")) +
-    card("QUICK STATS", kv("LTP", d.spot) + kv("Change", chg != null ? `${chg >= 0 ? "+" : ""}${mcsN(chg)} (${mcsPct((chg / s.prevClose) * 100)})` : null, mcsCls(chg)) + kv("Day Range", s.low != null ? `${mcsN(s.low)} – ${mcsN(s.high)}` : null) + kv("ATR (14) · closed candles", atr != null ? mcsN(atr) : null) + kv("Volatility", d.vix?.available ? `${mcsEsc(d.vixEnvironment?.environment || "—")} · VIX ${mcsN(d.vix.value)}` : null));
+    card("OI LEVELS", kv("OI Resistance", oi.resistance ?? null, "mcs-dn") + kv("OI Support", oi.support ?? null, "mcs-up") + kv("Max Call OI Strike", sR != null ? mcsN(sR) : null, "", lv.strongResistance?.oi ? ` <em>${mcsL(lv.strongResistance.oi)}</em>` : "") + kv("Max Put OI Strike", sS != null ? mcsN(sS) : null, "", lv.strongSupport?.oi ? ` <em>${mcsL(lv.strongSupport.oi)}</em>` : "") + kv("PCR", oi.pcr != null ? mcsN(oi.pcr) : null) + (oi.maxPain != null ? kv("Max Pain", mcsN(oi.maxPain)) : "")) +
+    card("QUICK STATS", kv("LTP", mcsN(d.spot)) + kv("Change", chg != null ? `${chg >= 0 ? "+" : ""}${mcsN(chg)} (${mcsPct((chg / s.prevClose) * 100)})` : null, mcsCls(chg)) + kv("Day Range", s.low != null ? `${mcsN(s.low)} – ${mcsN(s.high)}` : null) + kv("ATR (14) · closed candles", atr != null ? mcsN(atr) : null) + kv("Volatility", d.vix?.available ? `${mcsEsc(d.vixEnvironment?.environment || "—")} · VIX ${mcsN(d.vix.value)}` : null));
+  mcsLvlEnd(d);
+}
+
+// ---- Key-level proximity alerts (Mon–Fri 09:30–15:30 IST, LIVE data only) ----
+// NEAR = within 0.35 × ATR (min 0.03 % of price); AT = within 0.1 × ATR or crossed since the last
+// check. A level alerts once, then re-arms only after price moves > 2 × the NEAR distance away.
+function mcsLvlActive(d) {
+  const ist = new Date(Date.now() + 19800000), dow = ist.getUTCDay(), m = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  const live = !d.dataStale && (!d.syncHealth?.overall || d.syncHealth.overall === "LIVE");
+  return MCS.mode === "LIVE" && dow >= 1 && dow <= 5 && m >= 9 * 60 + 30 && m <= 15 * 60 + 30 && live && !d._preOpen;
+}
+function mcsLvlBegin(d) {
+  const atr = mcsAtr(mcsClosed(d.candles || [])) || 0;
+  MCS._lvlCtx = { on: mcsLvlActive(d), spot: d.spot, near: Math.max(0.35 * atr, d.spot * 0.0003), at: Math.max(0.1 * atr, d.spot * 0.0001), hits: [] };
+}
+// Called for each numeric key level while the row renders; returns { state, dist } to highlight it.
+function mcsLvlNear(name, price) {
+  const c = MCS._lvlCtx; if (!c || !c.on || price == null || !isFinite(price) || /PCR|ATR|LTP|Change|Max Pain/.test(name)) return null;
+  MCS._lvlArm = MCS._lvlArm || {}; MCS._lvlLast = MCS._lvlLast || {};
+  const key = `${MCS.sym}|${name}|${Math.round(price * 100)}`, dist = c.spot - price, ad = Math.abs(dist);
+  const prev = MCS._lvlLast[key]; MCS._lvlLast[key] = c.spot;
+  const crossed = prev != null && (prev - price) * (c.spot - price) < 0;
+  const state = ad <= c.at || crossed ? "AT" : ad <= c.near ? "NEAR" : null;
+  if (MCS._lvlArm[key] === undefined) MCS._lvlArm[key] = true;
+  if (!state) { if (ad > 2 * c.near) MCS._lvlArm[key] = true; return null; }
+  if (MCS._lvlArm[key]) { MCS._lvlArm[key] = false; c.hits.push({ name, price, dist, state }); }
+  return { state, dist };
+}
+function mcsLvlEnd(d) {
+  const c = MCS._lvlCtx; if (!c || !c.hits.length) return;
+  const nm = MCS_SYMS.find((x) => x[0] === MCS.sym)?.[1] || MCS.sym;
+  let t = document.getElementById("mcs-lvltoast");
+  if (!t) { t = document.createElement("div"); t.id = "mcs-lvltoast"; t.setAttribute("role", "alert"); document.body.appendChild(t); }
+  t.className = "mcs-dirtoast mcs-lvltoast";
+  t.innerHTML = `<b>${mcsEsc(nm)} ${mcsN(c.spot)} — ${c.hits.map((h) => `${h.state === "AT" ? "AT" : "near"} ${mcsEsc(h.name)} ${mcsN(h.price)}`).join(" · ")}</b>
+    <div>${c.hits.map((h) => `${mcsEsc(h.name)}: ${h.dist >= 0 ? "price " + mcsN(h.dist, 1) + " pts above" : "price " + mcsN(-h.dist, 1) + " pts below"}`).join(" · ")} · watch the 5-min close for rejection or break</div>
+    <button type="button" onclick="this.parentElement.remove()" aria-label="Close">✕</button>`;
+  clearTimeout(MCS._lvlToastT); MCS._lvlToastT = setTimeout(() => t && t.remove(), 25000);
 }
 
 

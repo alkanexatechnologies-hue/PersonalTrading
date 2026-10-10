@@ -6977,3 +6977,11 @@ body.lqa-fullwidth .content { padding-left: 0; padding-right: 0; }
   #mcs-analysis .mcs-averdict { font-size: 14px; }
 }
 @media (max-width: 420px) { #mcs-analysis .mcs-atile { padding: 6px; gap: 4px; } #mcs-analysis .mcs-atile b { font-size: 12px; } #mcs-analysis .mcs-aarr { font-size: 18px; } #mcs-analysis .mcs-aopts { grid-template-columns: minmax(0, 1fr); } }
+
+/* MC Summary key levels: price near / at a level (09:30–15:30) */
+.mcs-kvs > div.mcs-kvnear { border-radius: 4px; padding-inline: 4px; }
+.mcs-kvs > div.mcs-kvnear.near { background: rgba(245,158,11,.14); }
+.mcs-kvs > div.mcs-kvnear.at { background: rgba(59,130,246,.22); }
+.mcs-kvtag { font-style: normal; font-size: 11px; font-weight: 800; margin-left: 4px; padding: 0 5px; border-radius: 4px; background: #f59e0b; color: #111827; }
+.mcs-kvnear.at .mcs-kvtag { background: #3b82f6; color: #fff; }
+.mcs-lvltoast { bottom: 176px; border-color: #f59e0b; }
