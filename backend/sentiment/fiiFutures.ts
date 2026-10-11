@@ -3,6 +3,7 @@ import path from "path";
 import { DATA_DIR } from "../config/dataDir";
 import type { FiiRow, FiiSummary, FiiPositionType, Bias, FiiOptions } from "./types";
 import { loadParticipantOi } from "./nseParticipantOi";
+import { loadFiiStats, indexFlows } from "./nseFiiStats";
 
 // ============================ FII index-futures positioning ============================
 // The FII long/short in index futures is published by NSE (daily participant-wise
@@ -164,6 +165,18 @@ export async function getFiiFutures(sessions = 20): Promise<FiiSummary> {
       // Published after the close: current if it is the latest weekday file that could exist.
       const ageDays = (Date.now() - Date.parse(last.date + "T13:00:00Z")) / 86400000;
       s.freshness = ageDays <= 4 ? "DELAYED" : "STALE";
+      // Index-wise split (NSE FII derivatives statistics), cross-checked against the participant file.
+      try {
+        const st = await loadFiiStats(6);
+        const lastSt = st.days[st.days.length - 1];
+        if (lastSt) {
+          const rows = indexFlows(st.days), tot = rows[0];
+          const pRow = enriched.find((r) => r.date === lastSt.date);
+          const check = !pRow || pRow.longQty == null || pRow.shortQty == null ? "NOT CHECKED"
+            : tot.oi === pRow.longQty + pRow.shortQty && (pRow.dailyChange == null || tot.netC === pRow.dailyChange) ? "MATCH" : "MISMATCH";
+          s.indexWise = { asOf: lastSt.date, check, rows };
+        }
+      } catch { /* index-wise stays absent */ }
       s.note = `NSE participant-wise OI as on ${fmtDate(last.date)} (end of day, contracts). All index futures combined; NSE does not split NIFTY / BANK NIFTY / FIN NIFTY.`;
       return s;
     }

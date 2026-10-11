@@ -103,6 +103,7 @@ export interface FiiSummary {
   source?: string;                       // where the rows came from
   asOf?: string | null;                  // yyyy-mm-dd of the newest row
   participants?: ParticipantFut[];       // latest day, all four participant types
+  indexWise?: { asOf: string; check: "MATCH" | "MISMATCH" | "NOT CHECKED"; rows: import("./nseFiiStats").IndexFlow[] } | null;
   options?: (FiiOptions & { netCall: number; netPut: number; chgNetCall: number | null; chgNetPut: number | null }) | null;
 }
 
