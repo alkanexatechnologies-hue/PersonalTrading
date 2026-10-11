@@ -6564,6 +6564,7 @@ router.post("/dhan/config", requireAdmin, (req: Request, res: Response) => {
   // turn it back ON, otherwise `skipLive` stays true and no live data / candles flow
   // even though the token is valid. (This was the "saved but still disconnected" bug.)
   if (dhanConfigured(next)) { try { setFeedFlags({ dhan: true }); } catch { /* best-effort */ } }
+  dhanRenewState.lastError = null; dhanRenewState.retryAfter = null;   // fresh token: renewal starts clean
   const admin = getSession(bearerToken(req));
   logAuditEvent({ type: "DHAN_CREDENTIAL_UPDATED", userId: admin?.userId ?? null, username: admin?.username ?? null, mode: "admin", provider: "dhan", result: "success" });
   res.json({ ok: true, configured: dhanConfigured(next), clientId: next.clientId || null, feedReenabled: dhanConfigured(next) });
@@ -8469,8 +8470,8 @@ function buildLab(symbol: string, days: string[], ses: Map<string, Candle[]>, di
   };
 }
 // ---- Dhan token auto-renew state + Render sync -------------------------------
-const dhanRenewState: { enabled: boolean; lastCheck: string | null; lastDecision: string | null; lastRenewAt: string | null; lastError: string | null; renderSync: string | null } =
-  { enabled: false, lastCheck: null, lastDecision: null, lastRenewAt: null, lastError: null, renderSync: null };
+const dhanRenewState: { enabled: boolean; lastCheck: string | null; lastDecision: string | null; lastRenewAt: string | null; lastError: string | null; renderSync: string | null; retryAfter: number | null } =
+  { enabled: false, lastCheck: null, lastDecision: null, lastRenewAt: null, lastError: null, renderSync: null, retryAfter: null };
 let _renewBusy = false;
 async function maybeRenewDhanToken(force = false): Promise<void> {
   if (_renewBusy) return; _renewBusy = true;
@@ -8484,16 +8485,22 @@ async function maybeRenewDhanToken(force = false): Promise<void> {
       if (/expired/.test(d.why) && dhanRenewState.lastError !== d.why) { dhanRenewState.lastError = d.why; notify("CREDENTIAL_ROTATION", "⚠️ Dhan token has expired — auto-renew is not possible. Paste a fresh token in the app (Dhan button) before 09:15.").catch(() => {}); }
       return;
     }
-    const res = await dhanGuardedFetch("/RenewToken", { method: "POST", accessToken: cfg.accessToken, clientId: cfg.clientId });
+    if (!force && dhanRenewState.retryAfter && Date.now() < dhanRenewState.retryAfter) return;   // back off after a failure
+    // Dhan's documented call is a plain GET with the access-token and dhanClientId headers (a POST is rejected with 400)
+    const res = await dhanGuardedFetch("/RenewToken", { method: "GET", accessToken: cfg.accessToken, clientId: cfg.clientId });
     const body: any = await res.json().catch(() => null);
     const fresh = res.ok ? pickRenewedToken(body, cfg.accessToken, cfg.clientId) : null;
     if (!fresh) {
       const keys = body && typeof body === "object" ? Object.keys(body).join(",") : "none";
-      dhanRenewState.lastError = `RenewToken ${res.status}: no new token in the response (fields: ${keys})`;
-      console.warn("[dhan-renew]", dhanRenewState.lastError);
-      notify("CREDENTIAL_ROTATION", `⚠️ Dhan token auto-renew failed (HTTP ${res.status}). Paste a fresh token in the app before 09:15.`).catch(() => {});
+      const why = body && typeof body === "object" && (body.errorCode || body.errorMessage) ? `${body.errorCode || ""} ${String(body.errorMessage || "").slice(0, 160)}`.trim() : `fields: ${keys}`;
+      const msg = `RenewToken ${res.status}: ${why}`;
+      const repeat = dhanRenewState.lastError === msg;
+      dhanRenewState.lastError = msg; dhanRenewState.retryAfter = Date.now() + 2 * 3600_000;
+      console.warn("[dhan-renew]", msg, "— next try in 2 h");
+      if (!repeat) notify("CREDENTIAL_ROTATION", `⚠️ Dhan token auto-renew failed (${msg}). Paste a fresh token in the app before 09:15 if it doesn't recover.`).catch(() => {});
       return;
     }
+    dhanRenewState.retryAfter = null;
     const next = saveDhanConfig({ accessToken: fresh, clientId: cfg.clientId });
     try { setFeedFlags({ dhan: true }); } catch { /* best-effort */ }
     const t = await testDhanConnection().catch((e: any) => ({ ok: false, error: e?.message }));

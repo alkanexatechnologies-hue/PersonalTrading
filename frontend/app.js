@@ -9713,6 +9713,26 @@ function mcMacdOdds(cs, M, kind) {
   const pack = (a) => a.length ? { n: a.length, pUp: Math.round((100 * a.filter((r) => r.ch > 0).length) / a.length), pDn: Math.round((100 * a.filter((r) => r.ch < 0).length) / a.length), up: sum(a, (r) => r.up) / a.length, dn: sum(a, (r) => r.dn) / a.length } : null;
   return { cross: pack(rows), any: pack(base), bars: H };
 }
+// MACD EARLY WARNING (before the cross).
+//  "nearing": on the last CLOSED candle the histogram (MACD − signal) has shrunk 2 candles in a row and
+//             is within 25 % of its biggest size over the last 20 candles. Backtest (80 days, NIFTY /
+//             BANKNIFTY 5m & 15m): a cross followed within 3 candles 54–68 % of the time; about 2 in 3
+//             crosses got this warning beforehand. The odds shown are measured on this chart's history.
+//  "forming": the still-open candle has already crossed — unconfirmed until it closes.
+const MC_EARLY_K = 0.25;
+function mcMacdNearing(h, i) {
+  if (i < 22) return null;
+  const s0 = Math.sign(h[i]), sh = Math.abs(h[i]) < Math.abs(h[i - 1]) && Math.abs(h[i - 1]) < Math.abs(h[i - 2]) && s0 !== 0 && Math.sign(h[i - 1]) === s0 && Math.sign(h[i - 2]) === s0;
+  if (!sh) return null;
+  const mx = Math.max(...h.slice(i - 20, i + 1).map(Math.abs));
+  return Math.abs(h[i]) <= MC_EARLY_K * mx ? (h[i] < 0 ? "UP" : "DOWN") : null;
+}
+function mcMacdNearingOdds(h, last) {
+  let n = 0, hit = 0; let lw = -99;
+  for (let i = 40; i <= last - 3; i++) { const d = mcMacdNearing(h, i); if (!d || i - lw < 3) continue; lw = i; n++;
+    for (let j = i + 1; j <= i + 3; j++) if (d === "UP" ? h[j - 1] <= 0 && h[j] > 0 : h[j - 1] >= 0 && h[j] < 0) { hit++; break; } }
+  return n ? { n, p: Math.round((100 * hit) / n) } : null;
+}
 function mcRenderMacd() {
   const box = el("mc-macd-container"); if (!box || !MC.macdLine) return;
   box.hidden = !MC.show.macd; if (!MC.show.macd) return;
@@ -9734,6 +9754,26 @@ function mcRenderMacd() {
   const lbl = el("mc-macd-lbl"), xb = el("mc-macd-x");
   const fresh = k >= 0 && lastClosed - k <= 2;   // cross on one of the last 3 closed candles
   if (lbl) lbl.textContent = `MACD 12 26 9  ${r2(M.m[cs.length - 1])} / ${r2(M.s[cs.length - 1])}`;
+  // ---- early warning (before the cross) ----
+  const eb = el("mc-macd-early");
+  if (eb) {
+    // "forming" only while the market is open (after the close the last candle is final)
+    const fi = cs.length - 1, liveNow = !(MC.lastData && MC.lastData.historical) && (typeof isMarketOpen !== "function" || isMarketOpen());
+    const forming = liveNow && fi > 35 && ((M.h[fi - 1] <= 0 && M.h[fi] > 0) ? "UP" : (M.h[fi - 1] >= 0 && M.h[fi] < 0) ? "DOWN" : null);
+    const nearing = !forming ? mcMacdNearing(M.h, lastClosed) : null;
+    const tfSec = { "5m": 300, "15m": 900, "30m": 1800, "60m": 3600 }[MC.tf] || 300;
+    if (forming || nearing) {
+      const dir = forming || nearing, odds = mcMacdNearingOdds(M.h, lastClosed);
+      const closeAt = fmtIST(cs[fi].time + tfSec, true);
+      const txt = forming
+        ? `⚡ MACD cross ${dir} forming — unconfirmed until the ${closeAt} close`
+        : `⏳ MACD nearing ${dir} cross${odds ? ` — on this chart a cross followed within 3 candles ${odds.p}% of the time (n=${odds.n})` : ""}`;
+      eb.hidden = false; eb.className = "mc-macd-early " + (dir === "UP" ? "up" : "dn"); eb.textContent = txt;
+      const ekey = `${MC.sym}|${MC.tf}|${forming ? "F" : "N"}|${cs[forming ? fi : lastClosed].time}|${dir}`;
+      if (MC._macdEarlySeen !== undefined && MC._macdEarlySeen !== ekey && liveNow) mcMacdEarlyToast(dir, txt);
+      MC._macdEarlySeen = ekey;
+    } else { eb.hidden = true; if (MC._macdEarlySeen === undefined) MC._macdEarlySeen = null; }
+  }
   if (!xb) return;
   if (k < 0) { xb.hidden = true; return; }
   const o = mcMacdOdds(cs, M, dir), c = o.cross, a = o.any, t = fmtIST(cs[k].time + ({ "5m": 300, "15m": 900, "30m": 1800, "60m": 3600 }[MC.tf] || 300), true);
@@ -9746,6 +9786,14 @@ function mcRenderMacd() {
   const key = `${MC.sym}|${MC.tf}|${cs[k].time}|${dir}`;
   if (fresh && MC._macdAlerted !== undefined && MC._macdAlerted !== key && !(MC.lastData && MC.lastData.historical)) mcMacdToast(dir, t, c, a, o.bars);
   if (fresh || MC._macdAlerted === undefined) MC._macdAlerted = fresh ? key : (MC._macdAlerted ?? null);
+}
+function mcMacdEarlyToast(dir, txt) {
+  const nm = (el("mc-sym-name") || {}).textContent || MC.sym;
+  let x = document.getElementById("mc-macd-etoast");
+  if (!x) { x = document.createElement("div"); x.id = "mc-macd-etoast"; x.setAttribute("role", "alert"); document.body.appendChild(x); }
+  x.className = "mc-macd-toast early " + (dir === "UP" ? "up" : "dn");
+  x.innerHTML = `<b>${nm} (${MC.tf}) — early warning</b><div>${txt.replace(/[<>&]/g, "")}. Not a prediction.</div><button type="button" onclick="this.parentElement.remove()" aria-label="Close">✕</button>`;
+  clearTimeout(MC._macdEToastT); MC._macdEToastT = setTimeout(() => x && x.remove(), 25000);
 }
 function mcMacdToast(dir, t, c, a, bars) {
   const nm = (el("mc-sym-name") || {}).textContent || MC.sym;

@@ -7041,3 +7041,11 @@ body.lqa-fullwidth .content { padding-left: 0; padding-right: 0; }
 .mc-cmark span { font-weight: 600; font-size: 9.5px; opacity: .95; }
 @media (max-width: 600px) { .mc-lvltag i, .mc-lvltag em, .mc-lvltag .nm { display: none; } .mc-lvltag { font-size: 10px; padding: 0 4px; background: rgba(10,14,23,.72); } }
 .mc-lvltag b { font-weight: 800; }
+
+/* MACD early warning (before the cross) */
+.mc-macd-early { position: absolute; top: 40px; left: 8px; right: 70px; z-index: 3; font-size: 12px; font-weight: 700; color: #fbbf24; pointer-events: none; text-shadow: 0 1px 2px #000; }
+.mc-macd-early.up::first-letter, .mc-macd-early.dn::first-letter { color: #fbbf24; }
+.mc-macd-early { animation: mcMacdBlink 0.9s steps(2, start) infinite; }
+@media (prefers-reduced-motion: reduce) { .mc-macd-early { animation: none; } }
+.mc-macd-toast.early { bottom: 316px; border-color: #f59e0b; }
+@media (max-width: 900px) { .mc-macd-early { right: 8px; font-size: 11px; top: 36px; } }
