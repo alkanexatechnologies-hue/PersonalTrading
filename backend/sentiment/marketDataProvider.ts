@@ -103,14 +103,16 @@ const unavailable = (k: MdKey, reason: string, freshness: Freshness = "UNAVAILAB
 });
 
 /** The batched, cached, de-duplicated entry point used by the sentiment engine. */
-export async function fetchMarketData(keys: MdKey[]): Promise<Record<string, Quote>> {
+/** `force` skips the cache and the stale-while-revalidate copy and waits for a fresh fetch
+ *  (used by the 09:13 full refresh). */
+export async function fetchMarketData(keys: MdKey[], opts: { force?: boolean } = {}): Promise<Record<string, Quote>> {
   const out: Record<string, Quote> = {};
   if (!marketDataConfigured()) {
     for (const k of keys) out[k] = unavailable(k, "API key not configured");
     return out;
   }
   // Serve from the warm cache when possible.
-  if (Date.now() - cache.at < CACHE_MS && keys.every((k) => cache.data[k])) {
+  if (!opts.force && Date.now() - cache.at < CACHE_MS && keys.every((k) => cache.data[k])) {
     for (const k of keys) out[k] = cache.data[k]!;
     return out;
   }
@@ -122,7 +124,7 @@ export async function fetchMarketData(keys: MdKey[]): Promise<Record<string, Quo
   // Stale-while-revalidate: with a copy under 10 min old, answer now and let the refresh land
   // in the cache for the next call (Yahoo takes ~3 s). Each quote keeps its own provider
   // timestamp/freshness, so an older value is still labelled as such on screen.
-  if (cache.at && Date.now() - cache.at < 10 * 60_000 && keys.every((k) => cache.data[k])) {
+  if (!opts.force && cache.at && Date.now() - cache.at < 10 * 60_000 && keys.every((k) => cache.data[k])) {
     inflight.then((f) => { cache = { at: Date.now(), data: { ...cache.data, ...f } }; }).catch(() => null);
     for (const k of keys) out[k] = cache.data[k]!;
     return out;

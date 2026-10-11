@@ -184,15 +184,17 @@ export interface PremarketOverview {
   providers: { marketData: boolean; fii: boolean };
 }
 
-export async function buildPremarketOverview(): Promise<PremarketOverview> {
+/** `force` (the 09:13 full refresh) drops every quote cache and waits for fresh Yahoo and news. */
+export async function buildPremarketOverview(opts: { force?: boolean } = {}): Promise<PremarketOverview> {
+  if (opts.force) { _qCache.clear(); _closedLtp.at = 0; }
   const now = Date.now();
   const marketOpen = marketOpenNow(now);
 
   // Independent sources start together (they used to run one after another).
   const mdKeys: MdKey[] = ["GIFTNIFTY","USDINR","DXY","US10Y","BRENT","WTI","GOLD","CBOEVIX","SPX","NASDAQ","DOW","USFUT","NIKKEI","HANGSENG","SHANGHAI","KOSPI","TAIWAN","FTSE","DAX","CAC"];
-  const mdP = fetchMarketData(mdKeys);
+  const mdP = fetchMarketData(mdKeys, { force: opts.force });
   const fiiP = getFiiFutures(20);
-  const newsP = getMarketNews();
+  const newsP = getMarketNews(!!opts.force);
   const vixP = getIndiaVix();
   [mdP, fiiP, newsP, vixP].forEach((pr) => (pr as Promise<unknown>).catch(() => null));
 

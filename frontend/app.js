@@ -8206,6 +8206,7 @@ function initPremarket() {
     </div>
     <div class="pm-substrip">
       <span id="pm-updated" class="pm-upd">Last Update: — · Next Sentiment Update: —</span>
+      <span class="pm-913" id="pm-913"></span>
       <span class="pm-extstatus" id="pm-extstatus">External Data: —</span>
     </div>
     <div class="pm-strip" id="pm-strip"></div>
@@ -8233,6 +8234,21 @@ function startPremarketLive() {
   const tick = () => { const pn = pmEl("panel-premarket"); if (pn && pn.classList.contains("active")) loadPremarket(); pmClock(); };
   pmClock();
   PM.liveTimer = setInterval(tick, 20000); // live feeds; server caches external calls (rate-limit safe)
+  setInterval(pm913Check, 5000);
+}
+// 09:13 full refresh: the server rebuilds everything with caches bypassed at 09:13:20 (after the
+// 09:08 pre-open price fix). An open screen reloads every panel at 09:13:30 and re-checks the
+// heatmap at 09:14:50 (it may be taken on a retry up to 09:14:45).
+function pm913Check() {
+  const pn = pmEl("panel-premarket"); if (!pn || !pn.classList.contains("active")) return;
+  const ist = new Date(Date.now() + 19800000), wd = ist.getUTCDay(); if (wd === 0 || wd === 6) return;
+  const day = ist.toISOString().slice(0, 10), sec = ist.getUTCHours() * 3600 + ist.getUTCMinutes() * 60 + ist.getUTCSeconds();
+  const T1 = 9 * 3600 + 13 * 60 + 30, T2 = 9 * 3600 + 14 * 60 + 50, END = 9 * 3600 + 20 * 60;
+  if (sec >= T1 && sec < END && PM.r913 !== day) {
+    PM.r913 = day; PM.intelAt = 0; PM.heatAt = 0;
+    loadPremarket().then(() => { const e = pmEl("pm-913"); if (e) e.textContent = "✓ 09:13 full refresh " + new Date().toLocaleTimeString("en-IN", { hour12: false, timeZone: "Asia/Kolkata" }); });
+  }
+  if (sec >= T2 && sec < END && PM.h913 !== day) { PM.h913 = day; PM.heatAt = 0; loadPMHeat(); }
 }
 function pmClock() {
   const now = new Date();

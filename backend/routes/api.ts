@@ -8180,8 +8180,16 @@ router.get("/sector-heatmap", (_req: Request, res: Response) => {
 // from the existing Dhan provider + the pluggable external provider; sentiment is
 // assembled per request (the 30-min snapshot is stored inside). Every value is
 // real-or-DATA-UNAVAILABLE; the API key is never returned to the browser.
-router.get("/premarket/overview", async (_req: Request, res: Response) => {
+let _pmForcedAt = 0;
+router.get("/premarket/overview", async (req: Request, res: Response) => {
   try {
+    // ?force=true (the 09:13 full refresh): rebuild without any cache, at most once per 20 s.
+    if (String(req.query.force) === "true" && Date.now() - _pmForcedAt > 20_000) {
+      _pmForcedAt = Date.now();
+      _cache.delete("premarket:overview");
+      const fresh = await cached("premarket:overview", 30_000, () => buildPremarketOverview({ force: true }));
+      return res.json(fresh);
+    }
     // Cache + coalesce: buildPremarketOverview fans out ~12 provider quotes; the
     // 30s frontend poll (and multiple viewers) must not re-run it every time or
     // Dhan rate-limits (DH-904) and segments fall back to UNAVAILABLE.
@@ -9752,6 +9760,23 @@ export function startHourlyScheduler() {
   // redeploy doesn't wait for cold quotes / candles / Yahoo (~6 s). Normal 30 s cache after that.
   setTimeout(() => { cached("premarket:overview", 30_000, () => buildPremarketOverview()).catch(() => null); }, 15_000);
   setTimeout(() => { getNewsIntel().catch(() => null); }, 20_000);
+
+  // 09:13 FULL REFRESH (weekdays): after the 09:08 pre-open price fix, rebuild the Market Sentiment
+  // overview and news intelligence with every cache bypassed (Dhan quotes, Yahoo, news), so anyone
+  // opening the screen from 09:13 sees fresh data. Open screens reload themselves at 09:13:30.
+  let pm913Done = "";
+  setInterval(() => {
+    const ist = new Date(Date.now() + 19800_000), wd = ist.getUTCDay(), date = ist.toISOString().slice(0, 10);
+    const sec = ist.getUTCHours() * 3600 + ist.getUTCMinutes() * 60 + ist.getUTCSeconds();
+    if (wd === 0 || wd === 6 || pm913Done === date || sec < 9 * 3600 + 13 * 60 + 20 || sec > 9 * 3600 + 20 * 60) return;
+    pm913Done = date;
+    _pmForcedAt = Date.now();
+    _cache.delete("premarket:overview");
+    cached("premarket:overview", 30_000, () => buildPremarketOverview({ force: true }))
+      .then(() => console.log("[premarket] 09:13 full refresh done"))
+      .catch((e) => console.log("[premarket] 09:13 full refresh failed:", e?.message || e));
+    getNewsIntel(true).catch(() => null);
+  }, 5_000);
 
   // 09:13 SECTOR HEATMAP: one batched quote for every NSE sector-index stock, weekdays 09:13–09:14:45.
   // Retries every 15 s inside that window while the feed shows no pre-open prices or fails; the
