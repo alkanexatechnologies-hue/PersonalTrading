@@ -4030,6 +4030,12 @@ body.mode-decisionflow #index-strip { display: none !important; }
 .mc-tog-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 .mc-fullscreen-btn { background: none; border: 1px solid #2a2e39; color: #787b86; border-radius: 3px; padding: 2px 7px; cursor: pointer; font-size: 14px; transition: color .15s; }
 .mc-fullscreen-btn:hover { color: #d1d4dc; }
+.mc-fold-btn { background: none; border: 1px solid #2a2e39; color: #9aa3b5; border-radius: 3px; padding: 2px 8px; cursor: pointer; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.mc-fold-btn:hover { color: #d1d4dc; border-color: #3b4660; }
+.mc-fold-btn[aria-pressed="true"] { color: #7fb0ff; border-color: #2f5ea8; }
+.mc-fold-btn:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+.mc-wrap.mc-top-folded #mc2-cards, .mc-wrap.mc-top-folded #mc-sent, .mc-wrap.mc-top-folded #mc-bo { display: none !important; }
+@media (max-width: 760px) { .mc-fold-btn { min-height: 36px; padding: 4px 10px; } }
 
 /* Chart container — given generous height so the chart is the focus */
 .mc-chart-container { width: 100%; height: 720px; position: relative; background: #131722; flex-shrink: 0; }
@@ -4364,6 +4370,16 @@ body.mc-fullwidth #tab-flow-wrap { display: none !important; }
 body.mc-fullwidth .content { padding: 0 !important; overflow: hidden; display: flex; flex-direction: column; }
 body.mc-fullwidth #panel-marketcommand.active { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 body.mc-fullwidth #panel-marketcommand.active .mc-wrap { flex: 1; height: 100%; min-height: 0; }
+/* ≤900px (tablet / phone): the fixed one-screen layout squeezed the sections — the chart area
+   collapsed to ~100px and the FINAL DECISION bar to a sliver under the bottom tabs. Here the
+   screen scrolls as a page instead and every section keeps its natural height. */
+@media (max-width: 900px) {
+  body.mc-fullwidth .content { overflow-y: auto; overflow-x: hidden; }
+  body.mc-fullwidth #panel-marketcommand.active { flex: none; min-height: auto; }
+  body.mc-fullwidth #panel-marketcommand.active .mc-wrap { flex: none; height: auto; min-height: 0; }
+  #panel-marketcommand .mc-wrap > * { flex-shrink: 0; }
+  #panel-marketcommand .mc2-main { overflow: visible; }
+}
 
 /* ==================== OPTION TERMINAL (Market Option Selection) ==================== */
 /* Full-width like Market Command but KEEP the tab bar visible so the trader can

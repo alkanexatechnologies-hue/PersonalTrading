@@ -5767,6 +5767,23 @@ function initMarketCommand() {
     }
   });
 
+  // Fold the panels above the chart (VIX / direction / news cards, sentiment, breakout bar) up or
+  // down so the chart gets the room; the FINAL DECISION bar always stays visible. Remembered.
+  const foldBtn = el("mc-fold");
+  const applyFold = (on) => {
+    const wrap = el("panel-marketcommand")?.querySelector(".mc-wrap"); if (!wrap || !foldBtn) return;
+    wrap.classList.toggle("mc-top-folded", on);
+    foldBtn.textContent = on ? "▼ Show panels" : "▲ Hide panels";
+    foldBtn.setAttribute("aria-pressed", String(on));
+    requestAnimationFrame(() => { try { if (MC.chart) MC.chart.applyOptions({ width: container.clientWidth }); mcFitPanes(true); } catch {} });
+  };
+  let folded = false; try { folded = localStorage.getItem("mcTopFolded") === "1"; } catch {}
+  applyFold(folded);
+  if (foldBtn) foldBtn.addEventListener("click", () => {
+    folded = !folded; try { localStorage.setItem("mcTopFolded", folded ? "1" : "0"); } catch {}
+    applyFold(folded);
+  });
+
   // Wire replay / backtest controls
   const rToggle = el("mc-replay-toggle");
   const rPop = el("mc-replay-pop");
