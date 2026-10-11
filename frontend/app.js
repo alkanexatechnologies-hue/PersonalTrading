@@ -5691,7 +5691,7 @@ const MC = {
   sym: "^NSEI", tf: "15m", chart: null, candleSeries: null,
   ema9Series: null, ema21Series: null, ema50Series: null, vwapSeries: null,
   obMarkers: [], _levelLines: [], _overlaySig: null, _obSig: null, _indSig: null, priceLine: null, timer: null, loading: false, lastData: null,
-  show: { vwap: true, ema21: true, ema50: true, ema9: false, ema200: true, ob: true, vol: true, rsi: true, macd: true, forecast: true, levels: true, bos: true, liq: true, orb: false, trade: true },
+  show: { vwap: true, ema21: true, ema50: true, ema9: false, ema200: true, ob: true, vol: true, rsi: false, macd: true, forecast: true, levels: true, bos: true, liq: true, orb: false, trade: true },
   replayDate: null, // yyyy-mm-dd when replaying a past session; null = live
 };
 
@@ -5738,7 +5738,7 @@ function initMarketCommand() {
 
   // Wire indicator toggles. "levels"/"bos"/"liq"/"orb" govern the Important-Levels
   // drawing → a full chart redraw; the EMA/VWAP/Volume overlays just re-apply.
-  ["vwap", "ema21", "ema50", "ema9", "ema200", "ob", "vol", "rsi", "macd", "forecast", "levels", "bos", "liq", "orb", "trade"].forEach((k) => {
+  ["vwap", "ema21", "ema50", "ema9", "ema200", "ob", "vol", "macd", "forecast", "levels", "bos", "liq", "orb", "trade"].forEach((k) => {
     const cb = el("mc-tog-" + k);
     if (cb) cb.addEventListener("change", () => {
       MC.show[k] = cb.checked;
