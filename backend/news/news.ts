@@ -64,7 +64,7 @@ const IMPACT_TAGS: Array<{ tag: string; kws: string[] }> = [
   { tag: "IPO", kws: ["ipo", "listing", "gmp"] },
 ];
 
-function decodeEntities(s: string): string {
+export function decodeEntities(s: string): string {
   return s
     .replace(/<!\[CDATA\[/g, "").replace(/\]\]>/g, "")
     .replace(/<[^>]+>/g, "") // strip any stray HTML tags
@@ -74,7 +74,7 @@ function decodeEntities(s: string): string {
     .replace(/\s+/g, " ").trim();
 }
 
-function tag(el: string, xml: string): string {
+export function tag(el: string, xml: string): string {
   const m = xml.match(new RegExp(`<${el}[^>]*>([\\s\\S]*?)</${el}>`, "i"));
   return m ? decodeEntities(m[1]) : "";
 }
@@ -90,7 +90,7 @@ function timeAgo(epoch: number): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-function classify(title: string): { sentiment: NewsItem["sentiment"]; impact: NewsItem["impact"]; tags: string[] } {
+export function classify(title: string): { sentiment: NewsItem["sentiment"]; impact: NewsItem["impact"]; tags: string[] } {
   const t = " " + title.toLowerCase() + " ";
   let pos = 0, neg = 0;
   for (const w of POSITIVE) if (t.includes(w)) pos++;

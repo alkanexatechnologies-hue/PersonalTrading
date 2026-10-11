@@ -5074,10 +5074,11 @@ body.pm-fullwidth #tab-flow { display:none !important; }
     "e e e e e e e f f f f f"
     "b b b b m m m n n n n n"
     "g g g g c c c n n n n n"
-    "g g g g c c c t t t t t";}
+    "g g g g c c c t t t t t"
+    "i i i i i i i i i i i i";}
 .pm-panel{background:#0d1424;border:1px solid #1b2540;border-radius:12px;padding:11px 13px;min-width:0}
 .a-s{grid-area:s} .a-p{grid-area:p} .a-e{grid-area:e} .a-f{grid-area:f} .a-b{grid-area:b}
-.a-m{grid-area:m} .a-n{grid-area:n} .a-g{grid-area:g} .a-c{grid-area:c} .a-t{grid-area:t}
+.a-m{grid-area:m} .a-n{grid-area:n} .a-g{grid-area:g} .a-c{grid-area:c} .a-t{grid-area:t} .a-i{grid-area:i}
 .pm-ph{display:flex;align-items:center;gap:9px;margin-bottom:10px}
 .pm-ph .pm-num{width:22px;height:22px;border-radius:6px;background:#173056;color:#7fb0ff;font-weight:800;font-size:12px;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
 .pm-ph h2{font-size:14px;margin:0;font-weight:800}
@@ -5166,11 +5167,57 @@ body.pm-fullwidth #tab-flow { display:none !important; }
 .pm-cta{margin-top:10px;width:100%;background:linear-gradient(90deg,#2563eb,#3b82f6);border:0;color:#fff;border-radius:10px;padding:12px;font-size:14px;font-weight:800;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px}
 .pm-cta small{font-weight:500;opacity:.85;font-size:10px}
 
+
+/* 11 global news intelligence */
+.pm-in-dir{background:#111a2e;border:1px solid #1b2540;border-radius:10px;padding:10px 12px;display:grid;gap:8px}
+.pm-in-dh{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.pm-in-k{font-size:10.5px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;color:#cfd8e6}
+.pm-in-sc{font-size:11px;color:#8395b3}
+.pm-in-pill{display:inline-block;font-size:10.5px;font-weight:800;letter-spacing:.3px;padding:2px 8px;border-radius:999px;border:1px solid currentColor;white-space:nowrap}
+.pm-in-pill.pos{color:var(--grn)} .pm-in-pill.neg{color:var(--red)} .pm-in-pill.mix{color:var(--amb)} .pm-in-pill.neu{color:#8395b3}
+.pm-in-keys{margin:0;padding-left:20px;display:grid;gap:5px;font-size:12.5px;line-height:1.45}
+.pm-in-why{color:#9fb0cc;font-size:11.5px}
+.pm-in-age{color:#5f6f8e;font-size:10.5px;white-space:nowrap}
+.pm-in-seg{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-top:10px}
+.pm-in-sc2{background:#111a2e;border:1px solid #1b2540;border-radius:10px;padding:8px 12px;min-width:0}
+.pm-in-sc2.pos{border-color:rgba(34,199,133,.45)} .pm-in-sc2.neg{border-color:rgba(239,71,87,.45)}
+.pm-in-sh{font-size:10.5px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;margin-bottom:4px}
+.pm-in-sc2.pos .pm-in-sh{color:var(--grn)} .pm-in-sc2.neg .pm-in-sh{color:var(--red)}
+.pm-in-sc2 ul{margin:0;padding-left:16px;display:grid;gap:3px;font-size:12px}
+.pm-in-none{font-size:11.5px;color:#7f8aa3;padding:4px 0}
+.pm-in-tabs{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.pm-in-tab{font:inherit;font-size:12px;font-weight:700;color:#9fb0cc;background:transparent;border:1px solid #24314f;border-radius:999px;padding:6px 12px;min-height:36px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.pm-in-tab:hover{border-color:#3b5b92;color:#e6ecf5}
+.pm-in-tab:focus-visible{outline:2px solid #3b82f6;outline-offset:2px}
+.pm-in-tab.on{color:#e6ecf5;border-color:#3b82f6;background:rgba(47,125,255,.16)}
+.pm-in-c{font-size:10.5px;font-weight:800;min-width:18px;text-align:center;border-radius:999px;padding:0 5px;background:#1b2540;color:#8395b3}
+.pm-in-c.pos{color:var(--grn)} .pm-in-c.neg{color:var(--red)} .pm-in-c.mix{color:var(--amb)} .pm-in-c.neu{color:#8395b3}
+#pm-in-pane{display:grid;gap:8px;margin-top:10px}
+.pm-in-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
+.pm-in-q{background:#111a2e;border:1px solid #1b2540;border-radius:9px;padding:6px 10px}
+.pm-in-qk{font-size:9.5px;color:#8395b3;font-weight:700;letter-spacing:.3px}
+.pm-in-qv{font-size:15px;font-weight:800;font-variant-numeric:tabular-nums}
+.pm-in-qc{font-size:10.5px;color:#8395b3}
+.pm-in-sum{background:#111a2e;border:1px solid #1b2540;border-radius:9px;padding:8px 12px;font-size:12.5px;line-height:1.5}
+.pm-in-segs{font-size:11.5px;margin-top:4px}
+.pm-in-legend{font-size:10.5px;color:#8395b3;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.pm-in-items{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.pm-in-it{display:flex;gap:8px;align-items:flex-start;border:1px solid #1b2540;border-radius:9px;padding:8px 10px;min-width:0}
+.pm-in-ib{min-width:0;display:grid;gap:3px}
+.pm-in-ti{font-size:12.5px;font-weight:600;line-height:1.4;overflow-wrap:anywhere}
+.pm-in-ti a{color:#e6ecf5;text-decoration:none} .pm-in-ti a:hover{text-decoration:underline}
+.pm-in-m{font-size:10.5px;color:#7f8aa3;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.pm-in-tier,.pm-in-st{font-size:9px;font-weight:800;letter-spacing:.3px;padding:1px 6px;border-radius:999px;border:1px solid currentColor}
+.pm-in-tier.off{color:var(--grn)} .pm-in-tier.med{color:#8395b3}
+.pm-in-st.implemented{color:var(--red)} .pm-in-st.signed,.pm-in-st.announced{color:var(--amb)} .pm-in-st.proposal{color:#7fb0ff} .pm-in-st.statement{color:#8395b3}
+.pm-in-foot{font-size:10.5px;color:#5f6f8e;margin-top:8px}
+@media (max-width:760px){ .pm-in-seg,.pm-in-items{grid-template-columns:minmax(0,1fr)} .pm-in-tab{min-height:44px} }
+
 /* responsive */
 @media (max-width:1200px){ .pm-strip{grid-template-columns:repeat(6,1fr)} .pm-sent-grid{grid-template-columns:repeat(4,1fr)} }
 @media (max-width:1024px){
   .pm-grid{grid-template-columns:repeat(6,1fr);
-    grid-template-areas:"s s s p p p" "e e e e e e" "f f f f f f" "b b b m m m" "g g g c c c" "n n n n n n" "t t t t t t";}
+    grid-template-areas:"s s s p p p" "e e e e e e" "f f f f f f" "b b b m m m" "g g g c c c" "n n n n n n" "i i i i i i" "t t t t t t";}
 }
 @media (max-width:760px){
   .pm-wrap{padding:8px}
@@ -5185,7 +5232,7 @@ body.pm-fullwidth #tab-flow { display:none !important; }
   .pm-factors{grid-template-columns:1fr}
   /* single column in spec PRIORITY order: sentiment→prob→FII→sector→banks→movers→global→macro→news→timeline */
   .pm-grid{grid-template-columns:1fr;
-    grid-template-areas:"s" "p" "f" "e" "b" "m" "g" "c" "n" "t";}
+    grid-template-areas:"s" "p" "f" "e" "b" "m" "g" "c" "n" "i" "t";}
 }
 @media (max-width:430px){ .pm-strip{grid-template-columns:repeat(2,1fr)} }
 

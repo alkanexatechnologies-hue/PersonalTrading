@@ -197,6 +197,7 @@ import {
 } from "../liquidity/liquidityAudit";
 import { writeBaseline as writeStrategyBaseline, checkStrategyIntegrity } from "../qa/strategyIntegrity";
 import { getMarketNews } from "../news/news";
+import { getNewsIntel } from "../news/intel";
 import { buildPremarketOverview } from "../sentiment/overview";
 import { todaySnapshots } from "../sentiment/snapshotStore";
 import { getMarketDataHealth, fetchMarketData, marketDataProviderName, MdKey } from "../sentiment/marketDataProvider";
@@ -8150,6 +8151,17 @@ router.get("/news", async (req: Request, res: Response) => {
     res.json(data);
   } catch (e: any) {
     res.status(502).json({ error: e?.message || "Failed to fetch news." });
+  }
+});
+
+// Global News Intelligence (Market Sentiment screen): fresh-only, category-wise news with a
+// rule-based direction + segment summary. Display only — separate from /news, whose bias the
+// paper engine reads. ?force=true bypasses the 5-min cache.
+router.get("/news/intel", async (req: Request, res: Response) => {
+  try {
+    res.json(await getNewsIntel(String(req.query.force) === "true"));
+  } catch (e: any) {
+    res.status(502).json({ error: e?.message || "Failed to fetch news intelligence." });
   }
 });
 

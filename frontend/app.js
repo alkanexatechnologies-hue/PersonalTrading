@@ -8170,7 +8170,7 @@ function startIndexNewsLive() {
 // Market-context only — it never trades. Every value shows its own freshness;
 // missing data renders as DATA UNAVAILABLE (never faked). The layout is the 1:1
 // master composition; CSS reflows it for tablet / laptop / TV / mobile.
-const PM = { built: false, liveTimer: null, data: null, health: null };
+const PM = { built: false, liveTimer: null, data: null, health: null, intel: null, intelAt: 0, intelTab: null };
 
 function pmEl(id) { return document.getElementById(id); }
 function pmNum(v, dec) { if (v == null || !isFinite(v)) return "—"; return Number(v).toLocaleString("en-IN", { minimumFractionDigits: dec || 0, maximumFractionDigits: dec || 0 }); }
@@ -8214,6 +8214,7 @@ function initPremarket() {
       <section class="pm-panel a-b"><div class="pm-ph"><span class="pm-num">5</span><h2>Bank Leaders</h2><span class="pm-sub">High NIFTY Impact</span><span class="pm-r" id="pm-bank-fr"></span></div><div id="pm-banks"></div></section>
       <section class="pm-panel a-m"><div class="pm-ph"><span class="pm-num">6</span><h2>Top Index Movers</h2><span class="pm-r" id="pm-mv-fr"></span></div><div id="pm-movers"></div></section>
       <section class="pm-panel a-n"><div class="pm-ph"><span class="pm-num">9</span><h2>Market News Flash</h2><span class="pm-sub">⚡ Auto</span><span class="pm-r" id="pm-news-fr"></span></div><div class="pm-news" id="pm-news"></div></section>
+      <section class="pm-panel a-i"><div class="pm-ph"><span class="pm-num">11</span><h2>Global News Intelligence</h2><span class="pm-sub">Fresh news only</span><span class="pm-r" id="pm-intel-fr"></span></div><div id="pm-intel"><div class="pm-na">Loading fresh news…</div></div></section>
       <section class="pm-panel a-g"><div class="pm-ph"><span class="pm-num">7</span><h2>Global Market Sentiment</h2><span class="pm-r" id="pm-global-fr"></span></div><div id="pm-global"></div></section>
       <section class="pm-panel a-c"><div class="pm-ph"><span class="pm-num">8</span><h2>Macro &amp; Risk</h2><span class="pm-sub">(Live)</span><span class="pm-r" id="pm-macro-fr"></span></div><div class="pm-mac-grid" id="pm-macro"></div></section>
       <section class="pm-panel a-t"><div class="pm-ph"><span class="pm-num">10</span><h2>Sentiment Timeline</h2><span class="pm-sub">(30-min snapshots)</span></div><div class="pm-tl" id="pm-timeline"></div><button class="pm-cta" data-pm-go="marketcommand">Open Market Command →<small>Go to Trading Decision Desk</small></button></section>
@@ -8246,6 +8247,7 @@ async function loadPremarket() {
     if (d && !d.error) { PM.data = d; renderPremarket(d); }
     if (h) { PM.health = h; renderPMExtStatus(h); }
     renderPMTimeline();
+    loadPMIntel();
   } catch (e) { /* keep last render */ }
 }
 
@@ -8383,6 +8385,81 @@ function renderPMNews(n) {
   const box = pmEl("pm-news"); if (!box) return;
   if (!n.items || !n.items.length) { box.innerHTML = `<div class="pm-na">DATA UNAVAILABLE</div>`; return; }
   box.innerHTML = n.items.map((it) => `<a class="pm-nrow" href="${pmEsc(it.link || "#")}" target="_blank" rel="noopener"><span class="pm-tm">${pmEsc(it.time)}</span><span class="pm-imp ${it.impact}">${it.impact}</span><span class="pm-nti"><span class="pm-tag">${pmEsc(it.category)}</span>${pmEsc(it.title)}</span><span class="pm-src2">${pmEsc(it.source)}</span></a>`).join("");
+}
+
+// ---- 11 Global News Intelligence (/api/news/intel): fresh-only news by category with a
+// rule-based market direction and segment effects. Display only. Polled at most once a minute
+// (the server caches 5 min); re-rendered only when the server's asOf changes, so the chosen tab stays.
+async function loadPMIntel(force) {
+  if (!force && Date.now() - PM.intelAt < 60000) return;
+  PM.intelAt = Date.now();
+  try {
+    // part of the Market Sentiment screen, so Data Control's "premarket" switch governs it (not "news")
+    const d = await fetch("/api/news/intel" + (force ? "?force=true" : ""), { screen: "premarket" }).then((r) => r.json());
+    if (!d || d.error || !Array.isArray(d.categories)) throw new Error((d && d.error) || "bad response");
+    if (PM.intel && PM.intel.asOf === d.asOf) return;
+    PM.intel = d; renderPMIntel(d);
+  } catch (e) {
+    if (!PM.intel) { const box = pmEl("pm-intel"); if (box) box.innerHTML = `<div class="pm-na">News sources unreachable. Retrying in a minute.</div>`; }
+  }
+}
+function pmAttr(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function pmAge(h) { if (h == null) return ""; if (h < 1) return `${Math.max(1, Math.round(h * 60))} min ago`; if (h < 24) return `${h.toFixed(1)} h ago`; return `${Math.floor(h / 24)} d ${Math.round(h % 24)} h ago`; }
+function pmIst(sec) { return new Date(sec * 1000).toLocaleString("en-IN", { weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }); }
+function pmDirArrow(d) { return d > 0 ? '<span class="up">▲</span>' : d < 0 ? '<span class="dn">▼</span>' : '<span class="neu">●</span>'; }
+function pmToneCls(t) { return /POSITIVE/.test(t) ? "pos" : /NEGATIVE/.test(t) ? "neg" : /EVENT|MIXED/.test(t) ? "mix" : "neu"; }
+function renderPMIntel(d) {
+  const fr = pmEl("pm-intel-fr");
+  if (fr) fr.textContent = `News since ${pmIst(d.windowStart)} · updated ${pmIst(d.asOf)}`;
+  const box = pmEl("pm-intel"); if (!box) return;
+  const cats = d.categories || [];
+  if (!PM.intelTab || !cats.some((c) => c.id === PM.intelTab)) PM.intelTab = (cats.find((c) => c.count) || cats[0] || {}).id;
+  const dir = d.direction || {};
+  const kp = (d.keyPoints || []).map((k) => `<li>${pmDirArrow(k.dir)} <b>${pmEsc(k.label)}:</b> ${pmEsc(k.text)}${k.note ? ` <span class="pm-in-why">→ ${pmEsc(k.note)}</span>` : ""} <span class="pm-in-age">${pmEsc(k.source)} · ${pmAge(k.ageH)}</span></li>`).join("");
+  const seg = (list) => list && list.length ? `<ul>${list.map((s) => `<li><b>${pmEsc(s.name)}</b> <span class="pm-in-why">${pmEsc(s.why)}</span></li>`).join("")}</ul>` : `<div class="pm-in-none">None from fresh news</div>`;
+  const tabs = cats.map((c) => `<button type="button" class="pm-in-tab ${c.id === PM.intelTab ? "on" : ""}" data-intel-tab="${pmAttr(c.id)}" aria-pressed="${c.id === PM.intelTab}">${pmEsc(c.label)}<span class="pm-in-c ${pmToneCls(c.tone)}">${c.count}</span></button>`).join("");
+  box.innerHTML = `
+    <div class="pm-in-dir">
+      <div class="pm-in-dh"><span class="pm-in-k">Market direction from news</span><span class="pm-in-pill ${pmToneCls(dir.label || "")}">${pmEsc(dir.label || "—")}</span><span class="pm-in-sc">score ${dir.score > 0 ? "+" : ""}${dir.score ?? "—"} · ${dir.positive ?? 0} positive · ${dir.negative ?? 0} negative categories</span></div>
+      ${kp ? `<ol class="pm-in-keys">${kp}</ol>` : `<div class="pm-in-none">No fresh market-moving news yet.</div>`}
+    </div>
+    <div class="pm-in-seg">
+      <div class="pm-in-sc2 pos"><div class="pm-in-sh">Positive segments</div>${seg(d.segments && d.segments.positive)}</div>
+      <div class="pm-in-sc2 neg"><div class="pm-in-sh">Negative segments</div>${seg(d.segments && d.segments.negative)}</div>
+    </div>
+    <div class="pm-in-tabs" role="group" aria-label="News category">${tabs}</div>
+    <div id="pm-in-pane"></div>
+    <div class="pm-in-foot">Possible effects from headline rules, not trade advice. Display only: not used by signals or paper trading.</div>`;
+  renderPMIntelPane();
+  if (!box._intelBound) {
+    box._intelBound = true;
+    box.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-intel-tab]"); if (!b) return;
+      PM.intelTab = b.getAttribute("data-intel-tab");
+      box.querySelectorAll("[data-intel-tab]").forEach((x) => { const on = x === b; x.classList.toggle("on", on); x.setAttribute("aria-pressed", String(on)); });
+      renderPMIntelPane();
+    });
+  }
+}
+function renderPMIntelPane() {
+  const pane = pmEl("pm-in-pane"); const d = PM.intel; if (!pane || !d) return;
+  const c = (d.categories || []).find((x) => x.id === PM.intelTab); if (!c) { pane.innerHTML = ""; return; }
+  const macro = (PM.data && PM.data.macro) || [];
+  const keys = { oil: ["BRENT", "WTI"], inr: ["USDINR"], gold: ["GOLD"] }[c.id] || [];
+  const strip = keys.map((k) => macro.find((q) => q && q.key === k)).filter(Boolean).map((q) => `<div class="pm-in-q"><div class="pm-in-qk">${pmEsc(q.label)}</div><div class="pm-in-qv">${q.value == null ? "—" : pmNum(q.value, 2)}</div><div class="pm-in-qc">${q.value == null ? pmFreshBadge(q.freshness) : `<span class="${pmCls(q.changePct)}">${pmPct(q.changePct)}</span>${q.freshness && q.freshness !== "LIVE" ? ` · ${pmEsc(q.freshness)}` : ""}`}</div></div>`).join("");
+  const segTxt = (c.pos.length ? `<span class="up">+ ${pmEsc(c.pos.join(", "))}</span>` : "") + (c.pos.length && c.neg.length ? " · " : "") + (c.neg.length ? `<span class="dn">− ${pmEsc(c.neg.join(", "))}</span>` : "");
+  const items = c.items.map((it) => {
+    const href = /^https?:\/\//i.test(it.link || "") ? it.link : "";
+    const title = href ? `<a href="${pmAttr(href)}" target="_blank" rel="noopener">${pmEsc(it.title)}</a>` : pmEsc(it.title);
+    return `<div class="pm-in-it">${pmDirArrow(it.dir)}<div class="pm-in-ib"><div class="pm-in-ti">${title}</div><div class="pm-in-m">`
+      + (it.status ? `<span class="pm-in-st ${it.status.toLowerCase()}">${it.status}</span>` : "")
+      + `<span class="pm-in-tier ${it.tier === "OFFICIAL" ? "off" : "med"}">${it.tier}</span>${pmEsc(it.source)} · ${pmAge(it.ageH)}${it.alsoIn ? ` · +${it.alsoIn} more source${it.alsoIn > 1 ? "s" : ""}` : ""}`
+      + `</div>${it.note ? `<div class="pm-in-why">${pmEsc(it.note)}</div>` : ""}</div></div>`;
+  }).join("");
+  pane.innerHTML = `${strip ? `<div class="pm-in-strip">${strip}</div>` : ""}
+    <div class="pm-in-sum"><span class="pm-in-pill ${pmToneCls(c.tone)}">${pmEsc(c.tone)}</span> ${pmEsc(c.summary)}${segTxt ? `<div class="pm-in-segs">${segTxt}</div>` : ""}</div>
+    ${c.id === "trump" ? `<div class="pm-in-legend">Status: <span class="pm-in-st implemented">IMPLEMENTED</span> Federal Register · <span class="pm-in-st signed">SIGNED</span> White House · <span class="pm-in-st announced">ANNOUNCED</span> USTR · <span class="pm-in-st proposal">PROPOSAL</span> / <span class="pm-in-st statement">STATEMENT</span> media report, not yet official</div>` : ""}
+    <div class="pm-in-items">${items || `<div class="pm-in-none">No fresh ${pmEsc(c.label)} news since ${pmIst(d.windowStart)}.</div>`}</div>`;
 }
 
 async function renderPMTimeline() {
