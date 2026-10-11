@@ -8170,7 +8170,7 @@ function startIndexNewsLive() {
 // Market-context only — it never trades. Every value shows its own freshness;
 // missing data renders as DATA UNAVAILABLE (never faked). The layout is the 1:1
 // master composition; CSS reflows it for tablet / laptop / TV / mobile.
-const PM = { built: false, liveTimer: null, data: null, health: null, intel: null, intelAt: 0, intelTab: null };
+const PM = { built: false, liveTimer: null, data: null, health: null, intel: null, intelAt: 0, intelTab: null, heat: null, heatAt: 0, heatSel: null };
 
 function pmEl(id) { return document.getElementById(id); }
 function pmNum(v, dec) { if (v == null || !isFinite(v)) return "—"; return Number(v).toLocaleString("en-IN", { minimumFractionDigits: dec || 0, maximumFractionDigits: dec || 0 }); }
@@ -8209,7 +8209,7 @@ function initPremarket() {
     <div class="pm-grid">
       <section class="pm-panel a-s"><div class="pm-ph"><span class="pm-num">1</span><h2>Overall Market Sentiment</h2><span class="pm-sub">(Pre-Market)</span><span class="pm-r" id="pm-sent-fr"></span></div><div id="pm-sentiment"></div></section>
       <section class="pm-panel a-p"><div class="pm-ph"><span class="pm-num">2</span><h2>Index Direction Probability</h2><span class="pm-sub">(Next Session)</span></div><div class="pm-prob-wrap" id="pm-prob"></div></section>
-      <section class="pm-panel a-e"><div class="pm-ph"><span class="pm-num">3</span><h2>India Market Sector Analysis</h2><span class="pm-r" id="pm-sector-fr"></span></div><div class="pm-scroll"><table id="pm-sector"></table></div><div class="pm-note" id="pm-sector-note"></div></section>
+      <section class="pm-panel a-e"><div class="pm-ph"><span class="pm-num">3</span><h2>India Market Sector Analysis</h2><span class="pm-r" id="pm-sector-fr"></span></div><div class="pm-scroll"><table id="pm-sector"></table></div><div class="pm-note" id="pm-sector-note"></div><div id="pm-heat"></div></section>
       <section class="pm-panel a-f"><div class="pm-ph"><span class="pm-num">4</span><h2>FII Positioning — Index Futures</h2><span class="pm-r" id="pm-fii-fr"></span></div><div id="pm-fii"></div></section>
       <section class="pm-panel a-b"><div class="pm-ph"><span class="pm-num">5</span><h2>Bank Leaders</h2><span class="pm-sub">High NIFTY Impact</span><span class="pm-r" id="pm-bank-fr"></span></div><div id="pm-banks"></div></section>
       <section class="pm-panel a-m"><div class="pm-ph"><span class="pm-num">6</span><h2>Top Index Movers</h2><span class="pm-r" id="pm-mv-fr"></span></div><div id="pm-movers"></div></section>
@@ -8248,6 +8248,7 @@ async function loadPremarket() {
     if (h) { PM.health = h; renderPMExtStatus(h); }
     renderPMTimeline();
     loadPMIntel();
+    loadPMHeat();
   } catch (e) { /* keep last render */ }
 }
 
@@ -8402,6 +8403,54 @@ function renderPMNews(n) {
   const box = pmEl("pm-news"); if (!box) return;
   if (!n.items || !n.items.length) { box.innerHTML = `<div class="pm-na">DATA UNAVAILABLE</div>`; return; }
   box.innerHTML = n.items.map((it) => `<a class="pm-nrow" href="${pmEsc(it.link || "#")}" target="_blank" rel="noopener"><span class="pm-tm">${pmEsc(it.time)}</span><span class="pm-imp ${it.impact}">${it.impact}</span><span class="pm-nti"><span class="pm-tag">${pmEsc(it.category)}</span>${pmEsc(it.title)}</span><span class="pm-src2">${pmEsc(it.source)}</span></a>`).join("");
+}
+
+// ---- 09:13 sector heatmap (inside panel 3). The server takes one snapshot each trading morning at
+// 09:13 (pre-open price vs previous close); before that the latest earlier snapshot is shown with its date.
+async function loadPMHeat(force) {
+  if (!force && Date.now() - PM.heatAt < 60000) return;
+  PM.heatAt = Date.now();
+  try {
+    const d = await fetch("/api/sector-heatmap", { screen: "premarket" }).then((r) => r.json());
+    if (!d || d.error) return;
+    const key = d.snapshot ? d.snapshot.date + ":" + d.snapshot.takenAt : "none";
+    if (PM.heat && PM.heat._key === key) return;
+    d._key = key; PM.heat = d; renderPMHeat(d);
+  } catch { /* keep last render */ }
+}
+function pmHeatCol(v) {
+  const x = Math.max(-1, Math.min(1, v));
+  const mix = (a, b, t) => Math.round(a + (b - a) * t);
+  return x >= 0 ? `rgb(${mix(27, 19, x)},${mix(37, 154, x)},${mix(64, 99, x)})` : `rgb(${mix(27, 180, -x)},${mix(37, 35, -x)},${mix(64, 47, -x)})`;
+}
+function pmHeatPct(v) { return (v > 0 ? "+" : "") + v.toFixed(2) + "%"; }
+function renderPMHeat(d) {
+  const box = pmEl("pm-heat"); if (!box) return;
+  const s = d.snapshot;
+  const head = (badge) => `<div class="pm-heat-hd"><span class="pm-heat-t">Sector Heatmap</span><span class="pm-heat-sub">09:13 · pre-open price vs previous close</span>${badge}</div>`;
+  if (!s) { box.innerHTML = head("") + `<div class="pm-na">The first heatmap is taken at 09:13 on the next trading morning.</div>`; return; }
+  const when = new Date(s.takenAt * 1000).toLocaleString("en-IN", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
+  const badge = `<span class="pm-heat-b ${d.isToday ? "today" : "old"}">${d.isToday ? "TODAY " : ""}${pmEsc(when)}</span>`;
+  const older = d.isToday ? "" : `<div class="pm-heat-old">Showing the last snapshot. Today's is taken at 09:13.</div>`;
+  if (s.status !== "OK") { box.innerHTML = head(badge) + older + `<div class="pm-na">${s.status === "FAILED" ? "Heatmap could not be taken (quotes unavailable)." : pmEsc(s.note || "Pre-open prices were not available at 09:13.")}</div>`; return; }
+  const secs = s.sectors || [];
+  if (!PM.heatSel || !secs.some((x) => x.name === PM.heatSel)) PM.heatSel = secs[0] && secs[0].name;
+  const up = secs.filter((x) => x.avg > 0).length;
+  box.innerHTML = head(badge) + older + `
+    <div class="pm-heat-sum"><span>Sectors up <b>${up} / ${secs.length}</b></span><span>Stocks up / down <b>${s.stocksUp} / ${s.stocksDown}</b></span>${secs.length ? `<span>Strongest <b>${pmEsc(secs[0].name)} ${pmHeatPct(secs[0].avg)}</b></span><span>Weakest <b>${pmEsc(secs[secs.length - 1].name)} ${pmHeatPct(secs[secs.length - 1].avg)}</b></span>` : ""}</div>
+    <div class="pm-heat-grid">${secs.map((x) => `<button type="button" class="pm-heat-tile" data-heat="${pmAttr(x.name)}" aria-pressed="${x.name === PM.heatSel}" style="background:${pmHeatCol(x.avg)}"><span class="n">${pmEsc(x.name)}</span><span class="v">${pmHeatPct(x.avg)}</span><span class="b">A ${x.adv} · D ${x.dec} of ${x.n}</span></button>`).join("")}</div>
+    <div id="pm-heat-det"></div>
+    <div class="pm-heat-leg"><span>−1%</span><span class="lg"></span><span>+1%</span><span>Sector % = average of its stocks · A / D = stocks up / down · ${s.quoted} of ${s.listed} stocks quoted · NSE sector index lists</span></div>`;
+  renderPMHeatDetail();
+  if (!box._heatBound) {
+    box._heatBound = true;
+    box.addEventListener("click", (e) => { const b = e.target.closest("[data-heat]"); if (!b) return; PM.heatSel = b.getAttribute("data-heat"); box.querySelectorAll("[data-heat]").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); renderPMHeatDetail(); });
+  }
+}
+function renderPMHeatDetail() {
+  const el = pmEl("pm-heat-det"); const s = PM.heat && PM.heat.snapshot; if (!el || !s) return;
+  const x = (s.sectors || []).find((y) => y.name === PM.heatSel); if (!x) { el.innerHTML = ""; return; }
+  el.innerHTML = `<div class="pm-heat-dh">${pmEsc(x.name)} · ${x.n} stocks · ${pmHeatPct(x.avg)}</div><div class="pm-heat-stocks">${x.stocks.map((k) => `<span class="pm-heat-sk" style="background:${pmHeatCol(k.pct)}" title="${pmAttr(k.s)} ${pmNum(k.prev, 2)} → ${pmNum(k.price, 2)}"><span>${pmEsc(k.s)}</span><span>${pmHeatPct(k.pct)}</span></span>`).join("")}</div>`;
 }
 
 // ---- 11 Global News Intelligence (/api/news/intel): fresh-only news by category with a

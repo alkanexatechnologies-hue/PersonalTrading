@@ -5180,6 +5180,30 @@ body.pm-fullwidth #tab-flow { display:none !important; }
 .pm-cta small{font-weight:500;opacity:.85;font-size:10px}
 
 
+/* 3b 09:13 sector heatmap (inside panel 3) */
+#pm-heat{margin-top:12px;display:grid;gap:8px}
+.pm-heat-hd{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.pm-heat-t{font-size:12.5px;font-weight:800;color:#e6ecf5}
+.pm-heat-sub{font-size:10.5px;color:#8395b3}
+.pm-heat-b{margin-left:auto;font-size:10px;font-weight:800;padding:2px 8px;border-radius:999px;border:1px solid currentColor;white-space:nowrap}
+.pm-heat-b.today{color:var(--amb)} .pm-heat-b.old{color:#8395b3}
+.pm-heat-old{font-size:11px;color:#8395b3}
+.pm-heat-sum{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11.5px;color:#8395b3} .pm-heat-sum b{color:#e6ecf5}
+.pm-heat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:6px}
+.pm-heat-tile{font:inherit;color:#fff;text-align:left;border:1px solid transparent;border-radius:8px;padding:7px 9px;min-height:64px;display:flex;flex-direction:column;justify-content:space-between;cursor:pointer;min-width:0}
+.pm-heat-tile:focus-visible{outline:2px solid #3b82f6;outline-offset:2px}
+.pm-heat-tile[aria-pressed="true"]{border-color:#fff}
+.pm-heat-tile .n{font-size:11.5px;font-weight:800;line-height:1.2}
+.pm-heat-tile .v{font-size:16px;font-weight:800;font-variant-numeric:tabular-nums}
+.pm-heat-tile .b{font-size:10px;opacity:.9}
+#pm-heat-det{background:#111a2e;border:1px solid #1b2540;border-radius:9px;padding:8px 10px}
+.pm-heat-dh{font-size:11.5px;font-weight:800;margin-bottom:6px}
+.pm-heat-stocks{display:flex;flex-wrap:wrap;gap:4px}
+.pm-heat-sk{display:inline-flex;gap:8px;align-items:center;border-radius:6px;padding:4px 8px;font-size:11px;font-weight:700;color:#fff;white-space:nowrap;font-variant-numeric:tabular-nums}
+.pm-heat-leg{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:10px;color:#8395b3}
+.pm-heat-leg .lg{width:110px;height:7px;border-radius:4px;background:linear-gradient(90deg,#b4232f,#3a2430,#1b2540,#1d4b3a,#139a63)}
+@media (max-width:760px){ .pm-heat-grid{grid-template-columns:repeat(2,minmax(0,1fr))} .pm-heat-tile{min-height:60px} .pm-heat-b{margin-left:0} }
+
 /* 11 global news intelligence */
 .pm-in-dir{background:#111a2e;border:1px solid #1b2540;border-radius:10px;padding:10px 12px;display:grid;gap:8px}
 .pm-in-dh{display:flex;flex-wrap:wrap;gap:8px;align-items:center}

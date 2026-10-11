@@ -198,6 +198,7 @@ import {
 import { writeBaseline as writeStrategyBaseline, checkStrategyIntegrity } from "../qa/strategyIntegrity";
 import { getMarketNews } from "../news/news";
 import { getNewsIntel } from "../news/intel";
+import { takeSnapshot as takeHeatSnapshot, saveSnapshot as saveHeatSnapshot, readSnapshot as readHeatSnapshot, latestSnapshot as latestHeatSnapshot } from "../sentiment/sectorHeatmap";
 import { buildPremarketOverview } from "../sentiment/overview";
 import { todaySnapshots } from "../sentiment/snapshotStore";
 import { getMarketDataHealth, fetchMarketData, marketDataProviderName, MdKey } from "../sentiment/marketDataProvider";
@@ -8165,6 +8166,14 @@ router.get("/news/intel", async (req: Request, res: Response) => {
   }
 });
 
+// 09:13 sector heatmap (Market Sentiment → India Market Sector Analysis). Today's snapshot once
+// taken, otherwise the most recent earlier one (the UI labels its date). Display only.
+router.get("/sector-heatmap", (_req: Request, res: Response) => {
+  const today = istDateStr();
+  const snap = readHeatSnapshot(today) || latestHeatSnapshot(today);
+  res.json({ today, snapshot: snap, isToday: !!snap && snap.date === today });
+});
+
 // ===================== 09:10 Market & Global Sentiment desk (READ-ONLY) =====================
 // Market-context intelligence only — it never trades, never emits CE/PE orders,
 // and never touches the Market Command gates. Live feeds (indices/VIX/macro) come
@@ -9738,6 +9747,28 @@ export function startHourlyScheduler() {
       sampleBusy = false;
     }
   }, 60 * 1000);
+
+  // 09:13 SECTOR HEATMAP: one batched quote for every NSE sector-index stock, weekdays 09:13–09:14:45.
+  // Retries every 15 s inside that window while the feed shows no pre-open prices or fails; the
+  // last attempt is kept. Never taken outside the window (a later picture would not be pre-open).
+  let heatBusy = false;
+  setInterval(async () => {
+    const ist = new Date(Date.now() + 19800_000), wd = ist.getUTCDay();
+    const secOfDay = ist.getUTCHours() * 3600 + ist.getUTCMinutes() * 60 + ist.getUTCSeconds();
+    if (heatBusy || wd === 0 || wd === 6 || secOfDay < 9 * 3600 + 13 * 60 || secOfDay > 9 * 3600 + 14 * 60 + 45 || !jobOn("sectorHeatmap")) return;
+    const date = istDateStr();
+    const have = readHeatSnapshot(date);
+    if (have && have.status === "OK") return;
+    heatBusy = true;
+    try {
+      const prov: any = getProvider();
+      const gq = typeof prov.getQuotes === "function" ? (syms: string[]) => prov.getQuotes(syms) : null;
+      if (!gq) return;
+      const snap = await takeHeatSnapshot(gq, date);
+      if (!have || snap.status === "OK" || have.status === "FAILED") saveHeatSnapshot(snap);
+      console.log(`[sector-heatmap] ${date} ${snap.status} quoted ${snap.quoted}/${snap.listed}, at prev close ${snap.atPrevClose}`);
+    } catch (e: any) { console.log("[sector-heatmap] failed:", e?.message || e); } finally { heatBusy = false; }
+  }, 15 * 1000);
 
   // 1-MINUTE OI LOG: every minute 09:15–15:30 record each index's chain summary + ATM ±10 strikes
   // (CSV under DATA_DIR/oi-minute/<date>/). Reuses the shared OI cache; refreshes it only when the
