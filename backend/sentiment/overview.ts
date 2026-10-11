@@ -85,7 +85,7 @@ async function quoteReal(sym: string, label: string, key: string, marketOpen: bo
     const fresh = hit.q.value == null ? "UNAVAILABLE" : quoteFreshness(hit.q.ts, marketOpen);
     return { ...hit.q, key, label, freshness: fresh };
   }
-  const built = await qGate(async (): Promise<Quote> => {
+  const run = async (): Promise<Quote> => {
     if (marketOpen) {
       // MARKET OPEN → only a LIVE quote (today's move). NEVER fall back to the
       // daily close here: a prior session's direction shown as "today" is
@@ -125,10 +125,33 @@ async function quoteReal(sym: string, label: string, key: string, marketOpen: bo
       }
     } catch { /* nothing available */ }
     return { key, label, value: null, change: null, changePct: null, ts: null, freshness: "UNAVAILABLE", source: null };
-  });
+  };
+  // Live single quotes go through the quote gate (Dhan Quote API ≈1 req/s); the closed-market
+  // path reads daily candles (Data API), which dhanClient already paces per category.
+  const built = marketOpen ? await qGate(run) : await run();
   // Only cache real values long; keep retrying an UNAVAILABLE sooner.
   _qCache.set(sym, { ts: built.value != null ? Date.now() : Date.now() - (ttl - 15_000), q: built });
   return built;
+}
+
+// MARKET OPEN: one batched /marketfeed/ohlc call for every overview symbol (same lookup and
+// parser as getQuote, so values are identical) instead of ~13 serial single quotes 400 ms apart.
+// Fills the per-symbol cache that quoteReal reads; symbols the batch misses fall back to the
+// single-quote path inside quoteReal.
+async function prefetchLive(syms: string[]): Promise<void> {
+  const need = syms.filter((s) => { const h = _qCache.get(s); return !h || Date.now() - h.ts >= Q_TTL_OPEN; });
+  if (!need.length) return;
+  const p: any = getProvider();
+  if (typeof p.getQuotes !== "function") return;
+  try {
+    const qs: Record<string, any> = await qGate(() => p.getQuotes(need));
+    for (const s0 of need) {
+      const q: any = qs?.[s0];
+      if (!q || q.price == null) continue;
+      const mt = q.marketTime && q.marketTime > 0 ? q.marketTime : null;
+      _qCache.set(s0, { ts: Date.now(), q: mkQuote(s0, s0, q.price, q.change ?? null, q.changePercent ?? q.changePct ?? null, mt, true) });
+    }
+  } catch { /* quoteReal falls back to single quotes */ }
 }
 
 // One batched last-price call (ONE Dhan request) per 30 min while closed — see quoteReal.
@@ -165,19 +188,28 @@ export async function buildPremarketOverview(): Promise<PremarketOverview> {
   const now = Date.now();
   const marketOpen = marketOpenNow(now);
 
+  // Independent sources start together (they used to run one after another).
+  const mdKeys: MdKey[] = ["GIFTNIFTY","USDINR","DXY","US10Y","BRENT","WTI","GOLD","CBOEVIX","SPX","NASDAQ","DOW","USFUT","NIKKEI","HANGSENG","SHANGHAI","KOSPI","TAIWAN","FTSE","DAX","CAC"];
+  const mdP = fetchMarketData(mdKeys);
+  const fiiP = getFiiFutures(20);
+  const newsP = getMarketNews();
+  const vixP = getIndiaVix();
+  [mdP, fiiP, newsP, vixP].forEach((pr) => (pr as Promise<unknown>).catch(() => null));
+
   // ---- Indian indices + VIX (REAL, Dhan) ----
-  if (!marketOpen) await refreshClosedLtp([...INDICES.map((i) => i.sym), ...LARGECAPS]);
+  const allSyms = [...INDICES.map((i) => i.sym), ...LARGECAPS];
+  if (marketOpen) await prefetchLive(allSyms);
+  else await refreshClosedLtp(allSyms);
   const idxQuotes = await Promise.all(INDICES.map((i) => quoteReal(i.sym, i.label, i.key, marketOpen)));
   const idxByKey: Record<string, Quote> = Object.fromEntries(idxQuotes.map((q) => [q.key, q]));
   let vixQuote: Quote = { key: "INDIA VIX", label: "INDIA VIX", value: null, change: null, changePct: null, ts: null, freshness: "UNAVAILABLE", source: null };
   try {
-    const v: any = await getIndiaVix();
+    const v: any = await vixP;
     if (v && v.available && v.value != null) vixQuote = { key: "INDIA VIX", label: "INDIA VIX", value: v.value, change: v.change ?? null, changePct: v.changePct ?? null, ts: v.ts ?? null, freshness: quoteFreshness(v.ts ?? null, marketOpen), source: "DHAN" };
   } catch { /* unavailable */ }
 
   // ---- External macro / global / GIFT (provider; UNAVAILABLE until key set) ----
-  const mdKeys: MdKey[] = ["GIFTNIFTY","USDINR","DXY","US10Y","BRENT","WTI","GOLD","CBOEVIX","SPX","NASDAQ","DOW","USFUT","NIKKEI","HANGSENG","SHANGHAI","KOSPI","TAIWAN","FTSE","DAX","CAC"];
-  const md = await fetchMarketData(mdKeys);
+  const md = await mdP;
 
   // ---- Strip (order matches the mockup) ----
   const strip: Quote[] = [
@@ -230,7 +262,7 @@ export async function buildPremarketOverview(): Promise<PremarketOverview> {
   // ---- News (REAL RSS, classified) ----
   let newsItems: any[] = []; let newsFresh: Freshness = "UNAVAILABLE";
   try {
-    const n = await getMarketNews();
+    const n = await newsP;
     if (Array.isArray(n.items)) {
       newsItems = n.items.slice(0, 12).map((it: any) => ({
         time: it.ago || "", impact: it.impact === "high" ? "HIGH" : "MEDIUM",
@@ -242,7 +274,7 @@ export async function buildPremarketOverview(): Promise<PremarketOverview> {
   const newsLean = newsItems.length ? clamp(newsItems.filter((n) => n.impact === "HIGH").reduce((a, n) => a + (n.sentiment === "positive" ? 1 : n.sentiment === "negative" ? -1 : 0), 0) / Math.max(1, newsItems.filter((n) => n.impact === "HIGH").length), -1, 1) : null;
 
   // ---- FII futures (provider / NSE; UNAVAILABLE until source) ----
-  const fii = await getFiiFutures(20);
+  const fii = await fiiP;
   const fiiLean = fiiLeanOf(fii);
   const fiiPct = fii.rows[0]?.longPct;
 

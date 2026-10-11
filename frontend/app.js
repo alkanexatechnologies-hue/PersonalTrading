@@ -67,11 +67,11 @@ async function init() {
   // Dashboard critical path) - load them after the cockpit fetch is in flight.
   loadSymbolsAndWatchlist().then(startWatchlistAutoRefresh);
 
-  setTimeout(() => loadIndexDesk(), 1500);
+  setTimeout(() => whenWatchlistVisible(loadIndexDesk), 1500);
   setTimeout(() => startIndexStrip(), 2500);
   // Trader Mind removed from upper cockpit strip; tab version still loads on demand.
-  setTimeout(() => loadWatchlistBadges(), 4500);
-  setTimeout(() => loadWatchlistScan(), 6500); // heavy per-symbol scan — last, after the cheaper loaders
+  setTimeout(() => whenWatchlistVisible(loadWatchlistBadges), 4500);
+  setTimeout(() => whenWatchlistVisible(loadWatchlistScan), 6500); // heavy per-symbol scan — last, after the cheaper loaders
 
   // Heavy scans are staggered so Dhan is not hammered on login (no hang).
   setTimeout(() => loadTopPicks(true), 2500);
@@ -1014,7 +1014,10 @@ async function loadWatchlistScan() {
 // Full-screen trading views hide the watchlist sidebar. Its 60s refresh fires ~20
 // slow per-stock /api/signal calls that occupy all 6 browser connections for
 // 20–30s, so those screens' own live refreshes time out and keep showing old data.
-const TRADING_FULLSCREEN = ["mc-fullwidth", "ot-fullwidth", "te-fullwidth", "oia-fullwidth", "mcs-fullwidth", "ma-fullwidth", "lqa-fullwidth"];
+const TRADING_FULLSCREEN = ["mc-fullwidth", "ot-fullwidth", "te-fullwidth", "oia-fullwidth", "mcs-fullwidth", "ma-fullwidth", "lqa-fullwidth", "pm-fullwidth"];
+// First-load watchlist work waits while a full-screen screen (watchlist hidden) is open, so it
+// doesn't compete with that screen's first load for Dhan and browser connections.
+function whenWatchlistVisible(fn) { if (onTradingFullscreen()) setTimeout(() => whenWatchlistVisible(fn), 10000); else fn(); }
 function onTradingFullscreen() { return TRADING_FULLSCREEN.some((c) => document.body.classList.contains(c)); }
 
 // Auto-refresh watchlist prices/signals every 60s while the market is open.

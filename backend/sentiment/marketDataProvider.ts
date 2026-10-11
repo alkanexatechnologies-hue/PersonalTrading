@@ -119,6 +119,14 @@ export async function fetchMarketData(keys: MdKey[]): Promise<Record<string, Quo
     const provider = getMarketDataProvider();
     inflight = provider.getQuote(allKeys()).finally(() => { inflight = null; });
   }
+  // Stale-while-revalidate: with a copy under 10 min old, answer now and let the refresh land
+  // in the cache for the next call (Yahoo takes ~3 s). Each quote keeps its own provider
+  // timestamp/freshness, so an older value is still labelled as such on screen.
+  if (cache.at && Date.now() - cache.at < 10 * 60_000 && keys.every((k) => cache.data[k])) {
+    inflight.then((f) => { cache = { at: Date.now(), data: { ...cache.data, ...f } }; }).catch(() => null);
+    for (const k of keys) out[k] = cache.data[k]!;
+    return out;
+  }
   let fetched: Partial<Record<MdKey, Quote>> = {};
   try { fetched = await inflight; } catch { fetched = {}; }
   cache = { at: Date.now(), data: { ...cache.data, ...fetched } };

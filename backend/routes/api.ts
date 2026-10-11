@@ -9748,6 +9748,11 @@ export function startHourlyScheduler() {
     }
   }, 60 * 1000);
 
+  // Warm the Market Sentiment overview once after boot, so the first viewer after a restart or
+  // redeploy doesn't wait for cold quotes / candles / Yahoo (~6 s). Normal 30 s cache after that.
+  setTimeout(() => { cached("premarket:overview", 30_000, () => buildPremarketOverview()).catch(() => null); }, 15_000);
+  setTimeout(() => { getNewsIntel().catch(() => null); }, 20_000);
+
   // 09:13 SECTOR HEATMAP: one batched quote for every NSE sector-index stock, weekdays 09:13–09:14:45.
   // Retries every 15 s inside that window while the feed shows no pre-open prices or fails; the
   // last attempt is kept. Never taken outside the window (a later picture would not be pre-open).
