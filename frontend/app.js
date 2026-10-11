@@ -5768,7 +5768,8 @@ function initMarketCommand() {
   });
 
   // Fold the panels above the chart (VIX / direction / news cards, sentiment, breakout bar) up or
-  // down so the chart gets the room; the FINAL DECISION bar always stays visible. Remembered.
+  // down; the chart moves up but keeps its size (mcFitPanes measures as if unfolded). The FINAL
+  // DECISION bar always stays visible. Remembered.
   const foldBtn = el("mc-fold");
   const applyFold = (on) => {
     const wrap = el("panel-marketcommand")?.querySelector(".mc-wrap"); if (!wrap || !foldBtn) return;
@@ -9715,9 +9716,13 @@ function mcFitPanes(force = true) {
   if (!area || !cc || !MC.chart) return;
   const fs = !!document.querySelector("#panel-marketcommand .mc-wrap.mc-fullscreen-active");
   if (window.innerWidth <= 900 && !fs) { [cc, rb, mb].forEach((e) => e && (e.style.height = "")); MC.chart.applyOptions({ height: cc.clientHeight || 360 }); if (MC.rsiChart && rb) MC.rsiChart.applyOptions({ height: rb.clientHeight || 100 }); if (MC.macdChart && mb) MC.macdChart.applyOptions({ height: mb.clientHeight || 120 }); return; }
-  // space from the top of the price chart to the bottom of the visible chart area
+  // space from the top of the price chart to the bottom of the visible chart area. With the top
+  // panels folded the chart keeps its unfolded size: measure with them shown (same task, no paint).
+  const wrapEl = area.closest(".mc-wrap"), folded = !!(wrapEl && wrapEl.classList.contains("mc-top-folded"));
+  if (folded) wrapEl.classList.remove("mc-top-folded");
   const above = cc.getBoundingClientRect().top - area.getBoundingClientRect().top + area.scrollTop;
   const avail = Math.floor(area.clientHeight - above - 4);
+  if (folded) wrapEl.classList.add("mc-top-folded");
   if (!(avail > 0)) return;
   const rsiH = MC.show.rsi && rb ? Math.max(50, Math.min(120, Math.round(avail * 0.16))) : 0;
   const macdH = MC.show.macd && mb ? Math.max(64, Math.min(130, Math.round(avail * 0.2))) : 0;
