@@ -77,7 +77,15 @@ export interface FiiRow {
   netValueCr: number | null;   // ₹ Cr (when available)
   close: number | null;        // underlying close
   positionType: FiiPositionType | null;
+  longPct?: number | null;     // FII index-futures longs as % of their long+short
+  opt?: FiiOptions | null;     // FII index options (contracts), NSE participant file only
 }
+
+/** FII index-option positions for one day (no. of contracts, NSE participant-wise OI). */
+export interface FiiOptions { callLong: number; callShort: number; putLong: number; putShort: number }
+
+/** One participant's index-futures position on the latest day (NSE participant-wise OI). */
+export interface ParticipantFut { type: "FII" | "DII" | "Client" | "Pro"; long: number; short: number; net: number; longPct: number }
 
 export interface FiiSummary {
   available: boolean;
@@ -92,6 +100,10 @@ export interface FiiSummary {
   rows: FiiRow[];
   freshness: Freshness;
   note: string;
+  source?: string;                       // where the rows came from
+  asOf?: string | null;                  // yyyy-mm-dd of the newest row
+  participants?: ParticipantFut[];       // latest day, all four participant types
+  options?: (FiiOptions & { netCall: number; netPut: number; chgNetCall: number | null; chgNetPut: number | null }) | null;
 }
 
 /** One index's model probability + the evidence behind it. */

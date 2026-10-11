@@ -2,7 +2,7 @@ import { getProvider } from "../data";
 import { getIndiaVix } from "../data/dhanProvider";
 import { getMarketNews } from "../news/news";
 import { fetchMarketData, marketDataConfigured, MdKey } from "./marketDataProvider";
-import { getFiiFutures } from "./fiiFutures";
+import { getFiiFutures, fiiLeanOf } from "./fiiFutures";
 import { computeProbability, overallBiasFromLeans, ProbInputs } from "./probability";
 import { saveSnapshot, currentSlot, slotNeedsSnapshot } from "./snapshotStore";
 import type { Quote, Freshness, BankRow, MoverRow, SectorRow, OverallSentiment, IndexProbability, Bias, Direction, SentimentSnapshot } from "./types";
@@ -243,7 +243,8 @@ export async function buildPremarketOverview(): Promise<PremarketOverview> {
 
   // ---- FII futures (provider / NSE; UNAVAILABLE until source) ----
   const fii = await getFiiFutures(20);
-  const fiiLean = fii.available && fii.pressure ? (fii.pressure === "UPWARD" ? 0.6 : fii.pressure === "DOWNWARD" ? -0.6 : 0) : null;
+  const fiiLean = fiiLeanOf(fii);
+  const fiiPct = fii.rows[0]?.longPct;
 
   // ---- Global bias from the external indices that resolved ----
   const us = [md.SPX, md.NASDAQ, md.DOW, md.USFUT];
@@ -271,7 +272,8 @@ export async function buildPremarketOverview(): Promise<PremarketOverview> {
   };
   factor(indexLean, "NIFTY holding up", "NIFTY under pressure");
   factor(globalLean, "Global markets supportive", "Weak global cues");
-  factor(fiiLean, "FII futures supportive", "FII building shorts");
+  factor(fiiLean, fiiPct != null ? `FIIs net long index futures (${fiiPct}% long)` : "FII futures supportive",
+    fiiPct != null && fiiPct < 40 ? `FIIs net short index futures (${fiiPct}% long)` : "FII building shorts");
   factor(bankingLean, "Banking heavyweights positive", "Banking heavyweights dragging");
   factor(breadthLean, "Breadth positive", "Breadth negative");
   factor(newsLean, "News flow positive", "Negative news flow");

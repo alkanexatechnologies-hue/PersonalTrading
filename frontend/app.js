@@ -8356,12 +8356,23 @@ function renderPMFii(f) {
   const fr = pmEl("pm-fii-fr"); if (fr) fr.innerHTML = pmFreshBadge(f.freshness);
   const box = pmEl("pm-fii"); if (!box) return;
   if (!f.available) { box.innerHTML = `<div class="pm-na">FII FUTURES — DATA UNAVAILABLE</div><div class="pm-note">${pmEsc(f.note || "")}</div>`; return; }
-  const rowsHtml = f.rows.slice(0, 8).map((r) => `<tr><td>${pmEsc(r.date)}</td><td class="num">${pmNum(r.longQty)}</td><td class="num">${pmNum(r.shortQty)}</td><td class="num ${pmCls(r.netPos)}">${r.netPos != null ? (r.netPos >= 0 ? "+" : "") + pmNum(r.netPos) : "—"}</td><td class="num ${pmCls(r.dailyChange)}">${r.dailyChange != null ? (r.dailyChange >= 0 ? "+" : "") + pmNum(r.dailyChange) : "—"}</td><td>${pmFiiPill(r.positionType)}</td></tr>`).join("");
-  box.innerHTML = `<div class="pm-scroll"><table><thead><tr><th>Date</th><th class="num">Long</th><th class="num">Short</th><th class="num">Net</th><th class="num">Δ Day</th><th>Type</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>
+  const sgn = (v) => v != null ? (v >= 0 ? "+" : "") + pmNum(v) : "—";
+  const asOf = f.asOf ? new Date(f.asOf + "T00:00:00Z").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }) : "—";
+  const rowsHtml = f.rows.slice(0, 8).map((r) => `<tr><td>${pmEsc(r.date)}</td><td class="num">${pmNum(r.longQty)}</td><td class="num">${pmNum(r.shortQty)}</td><td class="num">${r.longPct != null ? r.longPct.toFixed(1) + "%" : "—"}</td><td class="num ${pmCls(r.netPos)}">${sgn(r.netPos)}</td><td class="num ${pmCls(r.dailyChange)}">${sgn(r.dailyChange)}</td><td>${pmFiiPill(r.positionType)}</td></tr>`).join("");
+  const parts = (f.participants || []).map((p) => `<tr><td>${pmEsc(p.type)}</td><td class="num">${pmNum(p.long)}</td><td class="num">${pmNum(p.short)}</td><td class="num">${p.longPct.toFixed(1)}%</td><td class="num ${pmCls(p.net)}">${sgn(p.net)}</td></tr>`).join("");
+  const o = f.options;
+  box.innerHTML = `<div class="pm-fii-asof">As on <b>${asOf}</b> · ${pmEsc(f.source || "")} · contracts</div>
+    <div class="pm-scroll"><table><thead><tr><th>Date</th><th class="num">Long</th><th class="num">Short</th><th class="num">Long %</th><th class="num">Net</th><th class="num">Δ Day</th><th>Type</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>
     <div class="pm-fii-anal"><div><div class="pm-k">What are FIIs doing?</div><div class="pm-v ${f.behaviour && /SHORT BUILD|LONG UNW/.test(f.behaviour) ? "dn" : "up"}">${f.behaviour || "—"}</div></div>
-      <div><div class="pm-k">Directional Pressure</div><div class="pm-v ${f.pressure === "DOWNWARD" ? "dn" : f.pressure === "UPWARD" ? "up" : "neu"}">${f.pressure || "—"}</div></div>
-      <div><div class="pm-k">Current Net</div><div class="pm-v ${pmCls(f.currentNet)}">${f.currentNet != null ? (f.currentNet >= 0 ? "+" : "") + pmNum(f.currentNet) : "—"}</div></div>
+      <div><div class="pm-k">Directional Pressure (5 days)</div><div class="pm-v ${f.pressure === "DOWNWARD" ? "dn" : f.pressure === "UPWARD" ? "up" : "neu"}">${f.pressure || "—"}${f.change5d != null ? ` <span class="pm-fii-sm">${sgn(f.change5d)}</span>` : ""}</div></div>
+      <div><div class="pm-k">Current Net</div><div class="pm-v ${pmCls(f.currentNet)}">${sgn(f.currentNet)}</div></div>
       <div><div class="pm-k">Bias</div><div class="pm-v">${pmBias(f.bias)}</div></div></div>
+    ${o ? `<div class="pm-fii-h">FII index options</div>
+    <div class="pm-fii-opt">
+      <div><div class="pm-k">Calls bought / sold</div><div class="pm-v">${pmNum(o.callLong)} / ${pmNum(o.callShort)}</div><div class="pm-fii-sm">Net <span class="${pmCls(o.netCall)}">${sgn(o.netCall)}</span> · Δ day <span class="${pmCls(o.chgNetCall)}">${sgn(o.chgNetCall)}</span></div></div>
+      <div><div class="pm-k">Puts bought / sold</div><div class="pm-v">${pmNum(o.putLong)} / ${pmNum(o.putShort)}</div><div class="pm-fii-sm">Net <span class="${pmCls(o.netPut)}">${sgn(o.netPut)}</span> · Δ day <span class="${pmCls(o.chgNetPut)}">${sgn(o.chgNetPut)}</span></div></div>
+    </div>` : ""}
+    ${parts ? `<div class="pm-fii-h">Index futures by participant</div><div class="pm-scroll"><table><thead><tr><th>Type</th><th class="num">Long</th><th class="num">Short</th><th class="num">Long %</th><th class="num">Net</th></tr></thead><tbody>${parts}</tbody></table></div>` : ""}
     <div class="pm-note">${pmEsc(f.note || "")}</div>`;
 }
 function pmFiiPill(t) { if (!t) return "—"; const cls = /LONG BUILD/.test(t) ? "strong" : /SHORT COV/.test(t) ? "mod" : /NEUTRAL/.test(t) ? "neu" : "weak"; return `<span class="pm-pill ${cls}">${t}</span>`; }

@@ -1,7 +1,8 @@
 import fs from "fs";
 import path from "path";
 import { DATA_DIR } from "../config/dataDir";
-import type { FiiRow, FiiSummary, FiiPositionType, Bias } from "./types";
+import type { FiiRow, FiiSummary, FiiPositionType, Bias, FiiOptions } from "./types";
+import { loadParticipantOi } from "./nseParticipantOi";
 
 // ============================ FII index-futures positioning ============================
 // The FII long/short in index futures is published by NSE (daily participant-wise
@@ -9,7 +10,7 @@ import type { FiiRow, FiiSummary, FiiPositionType, Bias } from "./types";
 //   1. FII_DATA_URL  — a JSON endpoint you point at: an array of
 //      { date:"yyyy-mm-dd", longQty:number, shortQty:number, close?:number,
 //        netValueCr?:number }  (newest or oldest first — we sort).
-//   2. NSE public participant OI CSV (best-effort; NSE often blocks server calls).
+//   2. NSE participant-wise OI CSV (nseParticipantOi.ts) — validated per day.
 // Parsed rows are cached daily under DATA_DIR/sentiment. If neither source yields
 // data, the section reports DATA UNAVAILABLE — FII positioning is NEVER inferred
 // or fabricated. NSE's participant file is an AGGREGATE index-futures figure (not
@@ -41,6 +42,26 @@ export function classifyFii(netToday: number, netPrev: number | null, closeChg: 
   return closeChg != null && closeChg > 0 ? "LONG UNWINDING" : "SHORT BUILDUP";
 }
 
+/** Classify from the two legs: which side moved more, and which way. Uses the real
+ *  long/short changes, so it never needs the index close. Pure + tested. */
+export function classifyFiiLegs(dLong: number, dShort: number): FiiPositionType {
+  if (Math.abs(dLong) < 1000 && Math.abs(dShort) < 1000) return "NEUTRAL";
+  if (Math.abs(dLong) >= Math.abs(dShort)) return dLong > 0 ? "LONG BUILDUP" : "LONG UNWINDING";
+  return dShort > 0 ? "SHORT BUILDUP" : "SHORT COVERING";
+}
+
+/** Lean (-1..+1) for the overall sentiment: where FIIs stand (long % of their index
+ *  futures, 50% = flat) plus which way they moved over 5 sessions. A week of short
+ *  covering while still ~90% short is therefore near neutral, not "supportive". */
+export function fiiLeanOf(f: Pick<FiiSummary, "available" | "pressure" | "rows">): number | null {
+  if (!f.available) return null;
+  const pct = f.rows[0]?.longPct;
+  const level = pct != null ? ((pct - 50) / 50) * 0.5 : 0;
+  const trend = f.pressure === "UPWARD" ? 0.3 : f.pressure === "DOWNWARD" ? -0.3 : 0;
+  if (pct == null && !f.pressure) return null;
+  return Math.round(Math.max(-1, Math.min(1, level + trend)) * 100) / 100;
+}
+
 /** Build the summary (behaviour / pressure / bias / N-day changes) from real rows. */
 export function summariseFii(rows: FiiRow[]): FiiSummary {
   if (!rows.length) {
@@ -66,14 +87,14 @@ export function summariseFii(rows: FiiRow[]): FiiSummary {
 
   return {
     available: true, currentNet, prevNet, change5d, change10d, change20d,
-    behaviour, pressure, bias, rows: sorted,
+    behaviour, pressure, bias, rows: sorted, asOf: sorted[0]?.date ?? null,
     freshness: "DELAYED", // published end-of-day, so never LIVE
     note: "Aggregate NSE index-futures participant OI (per-index split not published).",
   };
 }
 
 /** Compute netPos/dailyChange/type across a raw list (oldest→newest ok; we sort). */
-export function enrichFiiRows(raw: { date: string; longQty: number | null; shortQty: number | null; close?: number | null; netValueCr?: number | null }[]): FiiRow[] {
+export function enrichFiiRows(raw: { date: string; longQty: number | null; shortQty: number | null; close?: number | null; netValueCr?: number | null; opt?: FiiOptions | null }[]): FiiRow[] {
   const asc = [...raw].sort((a, b) => a.date.localeCompare(b.date)); // oldest first for change calc
   const out: FiiRow[] = [];
   for (let i = 0; i < asc.length; i++) {
@@ -83,10 +104,17 @@ export function enrichFiiRows(raw: { date: string; longQty: number | null; short
     const prevNet = prev ? prev.netPos : null;
     const dailyChange = netPos != null && prevNet != null ? netPos - prevNet : null;
     const closeChg = prev && prev.close != null && r.close != null ? (r.close as number) - prev.close : null;
+    // Both legs known today and yesterday → classify from the legs; else the net + close rule.
+    const legs = prev && prev.longQty != null && prev.shortQty != null && r.longQty != null && r.shortQty != null;
+    const positionType = netPos == null ? null
+      : legs ? (prev ? classifyFiiLegs((r.longQty as number) - (prev.longQty as number), (r.shortQty as number) - (prev.shortQty as number)) : null)
+      : classifyFii(netPos, prevNet, closeChg);
+    const tot = r.longQty != null && r.shortQty != null ? r.longQty + r.shortQty : 0;
     out.push({
       date: r.date, longQty: r.longQty, shortQty: r.shortQty, netPos, dailyChange,
-      netValueCr: r.netValueCr ?? null, close: r.close ?? null,
-      positionType: netPos != null ? classifyFii(netPos, prevNet, closeChg) : null,
+      netValueCr: r.netValueCr ?? null, close: r.close ?? null, positionType,
+      longPct: tot > 0 ? Math.round(((r.longQty as number) / tot) * 1000) / 10 : null,
+      opt: r.opt ?? null,
     });
   }
   return out;
@@ -115,12 +143,36 @@ export async function getFiiFutures(sessions = 20): Promise<FiiSummary> {
   if (raw.length) {
     const enriched = enrichFiiRows(raw);
     writeCache(enriched);
-    return summariseFii(enriched.slice(-sessions));
+    const s = summariseFii(enriched.slice(-sessions)); s.source = "FII_DATA_URL"; return s;
   }
+  // NSE participant-wise OI (validated per day). One extra older day so the oldest shown has a change.
+  try {
+    const nse = await loadParticipantOi(sessions + 1);
+    if (nse.days.length) {
+      const enriched = enrichFiiRows(nse.days.map((d) => ({ date: d.date, longQty: d.fut.FII.long, shortQty: d.fut.FII.short, opt: d.opt.FII })));
+      const s = summariseFii(enriched.slice(-sessions));
+      const last = nse.days[nse.days.length - 1], prev = nse.days[nse.days.length - 2];
+      s.source = "NSE participant-wise OI";
+      s.participants = (["FII", "DII", "Client", "Pro"] as const).map((t) => {
+        const { long, short } = last.fut[t];
+        return { type: t, long, short, net: long - short, longPct: long + short > 0 ? Math.round((long / (long + short)) * 1000) / 10 : 0 };
+      });
+      const o = last.opt.FII, po = prev ? prev.opt.FII : null;
+      const netCall = o.callLong - o.callShort, netPut = o.putLong - o.putShort;
+      s.options = { ...o, netCall, netPut,
+        chgNetCall: po ? netCall - (po.callLong - po.callShort) : null, chgNetPut: po ? netPut - (po.putLong - po.putShort) : null };
+      // Published after the close: current if it is the latest weekday file that could exist.
+      const ageDays = (Date.now() - Date.parse(last.date + "T13:00:00Z")) / 86400000;
+      s.freshness = ageDays <= 4 ? "DELAYED" : "STALE";
+      s.note = `NSE participant-wise OI as on ${fmtDate(last.date)} (end of day, contracts). All index futures combined; NSE does not split NIFTY / BANK NIFTY / FIN NIFTY.`;
+      return s;
+    }
+  } catch { /* fall through */ }
   // No live source — serve cache if we have it (still real, just older).
   const cached = readCache();
   if (cached.length) { const s = summariseFii(cached.slice(-sessions)); s.freshness = "STALE"; return s; }
   return summariseFii([]);
 }
 
+function fmtDate(d: string): string { const [y, m, dd] = d.split("-"); return `${dd} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][+m - 1]} ${y}`; }
 function numOrNull(v: any): number | null { if (v == null || v === "") return null; const n = Number(String(v).replace(/,/g, "")); return Number.isFinite(n) ? n : null; }
