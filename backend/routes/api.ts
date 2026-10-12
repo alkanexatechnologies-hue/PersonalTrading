@@ -198,6 +198,10 @@ import {
 import { writeBaseline as writeStrategyBaseline, checkStrategyIntegrity } from "../qa/strategyIntegrity";
 import { getMarketNews } from "../news/news";
 import { getNewsIntel } from "../news/intel";
+import { commandRoute, type CCInputs } from "../sentiment/commandCenter";
+import { DATA_DIR } from "../config/dataDir";
+import { readModel as readContribModel, refreshModelIfDue as refreshContribModel } from "../sentiment/niftyWeights";
+import { logPrediction, resolveDay as resolvePredictionDay, report as predictionReport, argmaxClass, type PredictionRecord } from "../sentiment/predictionLog";
 import { refillSnapshot as refillHeatSnapshot, takeSnapshot as takeHeatSnapshot, saveSnapshot as saveHeatSnapshot, readSnapshot as readHeatSnapshot, latestSnapshot as latestHeatSnapshot } from "../sentiment/sectorHeatmap";
 import { buildPremarketOverview } from "../sentiment/overview";
 import { todaySnapshots } from "../sentiment/snapshotStore";
@@ -8203,6 +8207,75 @@ router.get("/premarket/overview", async (req: Request, res: Response) => {
     res.json({ available: false, error: e?.message || "overview failed" });
   }
 });
+// ===================== Market Sentiment · Prediction Command Center =====================
+// Composed from EXISTING caches/engines only (overview, shared option-chain cache, arbiter decision,
+// 09:13 heat map, contribution model, prediction log). The arbiter stays the single source of the
+// trade decision; the Command Center can only display it or downgrade it to BLOCK TRADE on stale data.
+function marketPhaseIST(nowMs = Date.now()): "PRE_OPEN" | "OPEN" | "CLOSED" {
+  const d = new Date(nowMs + 19800_000), wd = d.getUTCDay(), m = d.getUTCHours() * 60 + d.getUTCMinutes();
+  if (wd === 0 || wd === 6) return "CLOSED";
+  return m >= 9 * 60 && m < 9 * 60 + 15 ? "PRE_OPEN" : m >= 9 * 60 + 15 && m < 15 * 60 + 30 ? "OPEN" : "CLOSED";
+}
+// Last in-market constituent moves (after the close Dhan quotes reset change to 0, so the session
+// view keeps the last in-market reading, labelled with its time). Survives restarts (DATA_DIR).
+const CONTRIB_LAST = path.join(DATA_DIR, "sentiment", "contrib-last.json");
+let _contribLast: { date: string; ts: number; moves: Record<string, number | null> } | null = null;
+try { _contribLast = JSON.parse(fs.readFileSync(CONTRIB_LAST, "utf-8")); } catch { _contribLast = null; }
+async function constituentMoves(phase: string): Promise<{ moves: Record<string, number | null>; ts: number } | null> {
+  const model = readContribModel(); if (!model) return null;
+  const today = istDateStr();
+  if (phase === "OPEN") {
+    const prov: any = getProvider(); if (typeof prov.getQuotes !== "function") return null;
+    const q = await prov.getQuotes(model.constituents.map((s) => s + ".NS"));
+    const moves: Record<string, number | null> = {};
+    for (const s of model.constituents) { const x = q[s + ".NS"]; moves[s] = x && x.previousClose > 0 ? x.changePercent : null; }
+    _contribLast = { date: today, ts: Math.floor(Date.now() / 1000), moves };
+    try { fs.mkdirSync(path.dirname(CONTRIB_LAST), { recursive: true }); fs.writeFileSync(CONTRIB_LAST, JSON.stringify(_contribLast)); } catch { /* best-effort */ }
+    return { moves, ts: _contribLast.ts };
+  }
+  return _contribLast && _contribLast.date === today ? { moves: _contribLast.moves, ts: _contribLast.ts } : null;
+}
+function lastLedgerDecision(index: string): any | null {
+  for (let back = 0; back < 6; back++) {
+    const day = new Date(Date.now() + 19800_000 - back * 86400_000).toISOString().slice(0, 10);
+    const rows = ledgerFor(index, day).filter((r) => r.type === "decision" && r.timeframe === "5m");
+    if (rows.length) return rows[rows.length - 1];
+  }
+  return null;
+}
+async function gatherCommandInputs(): Promise<CCInputs> {
+  const nowSec = Math.floor(Date.now() / 1000), phase = marketPhaseIST();
+  const niftyDef = findSymbolDef("^NSEI")!, bankDef = findSymbolDef("^NSEBANK");
+  const [ov, oi, c5] = await Promise.all([
+    cached("premarket:overview", 30_000, () => buildPremarketOverview()).catch(() => null),
+    getOiCached(niftyDef).catch(() => null),
+    getCandlesCached("^NSEI", "5m").catch(() => [] as any[]),
+  ]);
+  let decision: any = null;
+  if (phase === "OPEN") { try { decision = await getDecision(indexDefOf(niftyDef), decisionDeps); } catch { decision = null; } }
+  if (!decision) decision = latestDecision(indexDefOf(niftyDef).index) || lastLedgerDecision(indexDefOf(niftyDef).index);
+  const bankDecision = bankDef ? (latestDecision(indexDefOf(bankDef).index) || lastLedgerDecision(indexDefOf(bankDef).index)) : null;
+  const strip: any[] = (ov as any)?.strip || [];
+  const nq = strip.find((q) => q.key === "NIFTY"), vq = strip.find((q) => q.key === "INDIA VIX");
+  const glob = (ov as any)?.global ? [...(ov as any).global.us, ...(ov as any).global.asia, ...(ov as any).global.europe].filter((q: any) => q.changePct != null) : [];
+  const oiAny: any = oi;
+  return {
+    nowSec, phase,
+    nifty: { live: nq?.value ?? null, liveTs: nq?.ts ?? (ov as any)?.ts ?? null, prevClose: nq?.value != null && nq?.change != null ? Math.round((nq.value - nq.change) * 100) / 100 : null, prevCloseDate: null },
+    candles5: (c5 as any[]) || [],
+    vix: vq?.value != null ? { value: vq.value, ts: vq.ts ?? (ov as any)?.ts ?? null } : null,
+    oi: oiAny && oiAny.available ? { asOf: oiAny.asOf ?? null, expiry: oiAny.expiry ?? null, pcr: oiAny.pcr ?? null, maxPain: oiAny.maxPain ?? null, strikes: (oiAny.topStrikes || []).map((x: any) => ({ strike: x.strike, ceOi: x.ceOi, peOi: x.peOi, ceChg: x.ceChg, peChg: x.peChg })) } : null,
+    decision, bankDecision,
+    probability: { nifty: (ov as any)?.probability?.[0] ?? null, bank: (ov as any)?.probability?.[1] ?? null, ts: (ov as any)?.ts ?? null },
+    predictionReport: (() => { try { return predictionReport(); } catch { return null; } })(),
+    overview: ov ? { positives: (ov as any).overall?.positives || [], negatives: (ov as any).overall?.negatives || [], globalPcts: glob.map((q: any) => q.changePct), globalTs: glob.reduce((m: number, q: any) => Math.max(m, q.ts || 0), 0) || null, fii: (ov as any).fii || null } : null,
+    heat: readHeatSnapshot(istDateStr()),
+    model: readContribModel(),
+    liveMoves: await constituentMoves(phase).catch(() => null),
+  };
+}
+router.get("/premarket/command", commandRoute(gatherCommandInputs, 30_000));
+
 // Market Sentiment Brief for the Market Command strip — CONTEXT ONLY (never read by
 // the arbiter or the paper engine). Global/oil/FX come from the external provider
 // (keyless Yahoo by default, 60s cache, zero Dhan calls); Indian sentiment reuses the
@@ -9764,6 +9837,53 @@ export function startHourlyScheduler() {
   // redeploy doesn't wait for cold quotes / candles / Yahoo (~6 s). Normal 30 s cache after that.
   setTimeout(() => { cached("premarket:overview", 30_000, () => buildPremarketOverview()).catch(() => null); }, 15_000);
   setTimeout(() => { getNewsIntel().catch(() => null); }, 20_000);
+
+  // PREDICTION LOG: once per closed 5-minute NIFTY candle (09:20–15:20) record the research model's
+  // prediction with its inputs and their ages; resolve due 15/30/60-minute outcomes. Display-only data.
+  let predBusy = false, predLastT = 0;
+  setInterval(async () => {
+    if (predBusy || !isTradingTimeIST()) return;
+    predBusy = true;
+    try {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const c5 = ((await getCandlesCached("^NSEI", "5m").catch(() => [])) as any[]) || [];
+      const closed = c5.filter((b) => b.time + 300 <= nowSec);
+      const lastBar = closed[closed.length - 1];
+      const t = lastBar ? lastBar.time + 300 : 0;
+      const m = new Date((t + 19800) * 1000), mins = m.getUTCHours() * 60 + m.getUTCMinutes();
+      if (lastBar && t > predLastT && mins >= 9 * 60 + 20 && mins <= 15 * 60 + 20 && nowSec - t < 240) {
+        predLastT = t;
+        const ov: any = await cached("premarket:overview", 30_000, () => buildPremarketOverview()).catch(() => null);
+        const p = ov?.probability?.[0];
+        const vq = ov?.strip?.find((q: any) => q.key === "INDIA VIX");
+        if (p && p.available && p.upside != null) {
+          const tot = (p.upside + p.downside + p.range) || 1;
+          const probs = { UP: p.upside / tot, DOWN: p.downside / tot, SIDEWAYS: p.range / tot };
+          const dec = latestDecision("NIFTY");
+          const rec: PredictionRecord = {
+            id: `NIFTY|${t}`, index: "NIFTY", t, loggedAt: nowSec, modelVersion: "probability.ts fixed-weights v1",
+            probs, predicted: argmaxClass(probs), spot: lastBar.close, vix: vq?.value ?? null, regime: dec?.regime ?? null,
+            inputs: { factors: p.factors, bias: p.bias, overviewSlot: ov.slot, fiiAsOf: ov.fii?.asOf ?? null },
+            inputAgeSec: { overview: ov.ts ? nowSec - ov.ts : null, vix: vq?.ts ? nowSec - vq.ts : null, candle: nowSec - t },
+          };
+          logPrediction(rec);
+        }
+      }
+      resolvePredictionDay(istDateStr(), c5.map((b) => ({ time: b.time, close: b.close })), nowSec);
+    } catch (e: any) { console.log("[prediction-log]", e?.message || e); } finally { predBusy = false; }
+  }, 30 * 1000);
+
+  // CONTRIBUTION MODEL: weekly refit + walk-forward validation, after the close (or at boot when missing).
+  let contribBusy = false;
+  const contribTick = async () => {
+    const d = new Date(Date.now() + 19800_000), mins = d.getUTCHours() * 60 + d.getUTCMinutes();
+    const cur = readContribModel();
+    if (contribBusy || (cur && (mins < 16 * 60 || mins > 22 * 60))) return;
+    contribBusy = true;
+    try { const m = await refreshContribModel((s, days) => getProvider().getCandles(s, "5m", days) as any); if (m && m !== cur) console.log(`[contrib-model] ${m.version} fitted, validation ${m.validation?.pass ? "PASS" : "FAIL"} (${m.validation?.sessions} sessions)`); }
+    catch (e: any) { console.log("[contrib-model]", e?.message || e); } finally { contribBusy = false; }
+  };
+  setTimeout(contribTick, 60_000); setInterval(contribTick, 30 * 60_000);
 
   // 09:13 FULL REFRESH (weekdays): after the 09:08 pre-open price fix, rebuild the Market Sentiment
   // overview and news intelligence with every cache bypassed (Dhan quotes, Yahoo, news), so anyone
