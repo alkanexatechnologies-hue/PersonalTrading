@@ -27,6 +27,7 @@ function oimShell() {
       <div class="oimm-r1"><section class="oimm-card" id="oimm-chart"><div class="oimm-hd"><h3 id="oimm-ctitle">OI by strike</h3><span class="oimm-spot" id="oimm-spot"></span></div><div class="oimm-leg" id="oimm-leg"></div><canvas id="oimm-canvas"></canvas><div class="oimm-empty" id="oimm-cmsg" hidden></div></section>
         <section class="oimm-card" id="oimm-sum"></section></div>
       <section class="oimm-card oimm-read" id="oimm-read"></section>
+      <section class="oimm-card oimm-bat" id="oimm-bat"></section>
       <div class="oimm-r2"><section class="oimm-card ce" id="oimm-ce"></section><section class="oimm-card pe" id="oimm-pe"></section></div>
       <div class="oimm-r3"><section class="oimm-card" id="oimm-heat"></section><section class="oimm-card" id="oimm-tl"></section><section class="oimm-card" id="oimm-top5"></section></div>
       <div class="oimm-foot" id="oimm-foot"></div>
@@ -81,7 +82,7 @@ function oimRender(d) {
     document.getElementById("oimm-cmsg").hidden = false; document.getElementById("oimm-cmsg").textContent = d.reason || "No data";
     const c = document.getElementById("oimm-canvas"); if (c) c.getContext("2d").clearRect(0, 0, c.width, c.height);
     set("oimm-sum", `<div class="oimm-hd"><h3>1-minute summary</h3></div><div class="oimm-empty">${why}</div>${d.collecting === false ? "" : `<div class="oimm-note">Snapshots are captured each minute from 09:15 to 15:30 on trading days. Past minutes are never back-filled.</div>`}`);
-    ["oimm-ce", "oimm-pe", "oimm-heat", "oimm-tl", "oimm-top5", "oimm-read"].forEach((id) => set(id, ""));
+    ["oimm-ce", "oimm-pe", "oimm-heat", "oimm-tl", "oimm-top5", "oimm-read", "oimm-bat"].forEach((id) => set(id, ""));
     set("oimm-foot", foot); set("oimm-spot", ""); return;
   }
   document.getElementById("oimm-cmsg").hidden = true;
@@ -114,6 +115,7 @@ function oimRender(d) {
   };
   set("oimm-ce", legTbl("CE")); set("oimm-pe", legTbl("PE"));
   set("oimm-read", oimReadHtml(d.read));
+  set("oimm-bat", (d.battles || []).map((b) => oimBattleHtml(b)).join(""));
   // heatmap
   const h = d.heat, mx = Math.max(1, ...h.rows.flatMap((r) => r.cells.map((c) => Math.abs(c || 0))));
   const cell = (v) => { if (v == null) return `<td class="na">—</td>`; const a = Math.min(0.85, 0.12 + (Math.abs(v) / mx) * 0.7); const col = v >= 0 ? "22,199,132" : "234,57,67"; return `<td style="background:rgba(${col},${a.toFixed(2)})">${oimK(v, true)}</td>`; };
@@ -229,4 +231,22 @@ function oimReadHtml(r) {
         <div><span>Support being written</span><b class="up">${r.supportWritten ? oimN(r.supportWritten.strike) : "—"}</b><em>${r.supportWritten ? oimK(r.supportWritten.chg, true) + " put OI" : "no fresh put writing"}</em></div></div>
       <div class="oimm-fast"><span>Fastest premiums <i>(${oimEsc(r.speed.from || "—")} → ${oimEsc(r.speed.to)}, ATM ±4)</i></span><div class="oimm-fg"><div>${fast(r.speed.ce, "CE")}</div><div>${fast(r.speed.pe, "PE")}</div></div></div>
     </div><div class="oimm-note warn">${oimEsc(r.caveat)}</div>`;
+}
+
+function oimBattleHtml(b) {
+  if (!b) return "";
+  const W = { PUT: ["up", "PUT"], CALL: ["dn", "CALL"], BALANCED: ["neu", "BALANCED"], EVEN: ["neu", "EVEN"], "BOTH REDUCING": ["mut", "BOTH REDUCING"], "NO DATA": ["mut", "—"] };
+  const pill = (w, sub) => { const [c, t] = W[w] || ["mut", w]; return `<span class="oimm-win ${c}">${t}${sub ? ` <i>${sub}</i>` : ""}</span>`; };
+  const holds = (r) => r.totalWinner === "PUT" ? pill("PUT", `support · ${r.pcr != null ? r.pcr.toFixed(2) + "×" : ""}`) : r.totalWinner === "CALL" ? pill("CALL", `resistance · ${r.pcr ? (1 / r.pcr).toFixed(2) + "×" : ""}`) : pill(r.totalWinner, r.pcr != null ? `P/C ${r.pcr.toFixed(2)}` : "");
+  const side = (x, cls, bigger) => `<td class="num sep">${oimK(x.prev)}</td><td class="num ${oimC(x.added)}">${x.added == null ? "—" : oimK(x.added, true)}</td><td class="num tot ${cls}${bigger ? " big" : ""}">${oimK(x.total)}</td>`;
+  const rows = b.rows.map((r) => { const ceBig = (r.ce.total || 0) > (r.pe.total || 0);
+    return `<tr class="${r.atm ? "atm" : ""}"><td class="stk">${oimN(r.strike)}${r.atm ? " <b>ATM</b>" : ""}</td>${side(r.ce, "ce", ceBig)}${side(r.pe, "pe", !ceBig)}<td class="sep">${holds(r)}</td><td>${pill(r.windowWinner)}</td></tr>`; }).join("");
+  const t = b.totals;
+  const totRow = `<tr class="tot"><td class="stk">ATM ±4 total</td>${side({ prev: t.cePrev, added: t.ceAdded, total: t.ceTotal }, "ce", t.ceTotal > t.peTotal)}${side({ prev: t.pePrev, added: t.peAdded, total: t.peTotal }, "pe", t.peTotal >= t.ceTotal)}<td class="sep">${holds(t)}</td><td>${pill(t.windowWinner)}</td></tr>`;
+  if (!b.from) return `<div class="oimm-bblk"><div class="oimm-hd"><h3>${b.windowMin}-min strike battle — Call vs Put</h3></div><div class="oimm-empty">${oimEsc(b.note)}</div></div>`;
+  return `<div class="oimm-bblk"><div class="oimm-hd"><h3><span class="oimm-wtag">${b.windowMin} MIN</span> ATM ±4 strike battle — Call vs Put <span class="mut">(${oimEsc(b.from)} → ${oimEsc(b.to)}: previous OI + added OI = total OI)</span></h3>${b.aligned ? "" : `<span class="oimm-tag warn">${oimEsc(b.note)}</span>`}</div>
+    <div class="oimm-tw"><table class="oimm-t oimm-bt"><thead><tr><th class="stk" rowspan="2">Strike</th><th colspan="3" class="grp ce">CALL OI</th><th colspan="3" class="grp pe">PUT OI</th><th rowspan="2" class="sep">Holds the strike<br><span class="mut">(total OI)</span></th><th rowspan="2">Adding now<br><span class="mut">(this window)</span></th></tr>
+      <tr><th class="num sep">Previous</th><th class="num">+ Added</th><th class="num">= Total</th><th class="num sep">Previous</th><th class="num">+ Added</th><th class="num">= Total</th></tr></thead>
+    <tbody>${rows}${totRow}</tbody></table></div>
+    ${b.windowMin === 15 ? `<div class="oimm-note">${oimEsc(b.rules)} PUT holding a strike = support there; CALL holding = resistance. The larger total at each strike is highlighted.</div>` : ""}</div>`;
 }

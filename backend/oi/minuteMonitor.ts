@@ -227,6 +227,8 @@ export function buildView(snaps: MinuteSnap[], opts: { windowMin: number; around
     timeline: minuteTimeline(hist, 10, range),
     heat: { side: opts.heatSide || "CE", strikes: heatStrikes, rows: heatmap(hist, opts.heatSide || "CE", heatStrikes, 6) },
     read: marketRead(hist, step),
+    battle: atm != null ? strikeBattle(pair, atm, step, 4) : null,
+    battles: atm != null ? [1, 5, 15].map((w) => ({ windowMin: w, ...strikeBattle(pickPrevious(hist, hist.length - 1, w), atm, step, 4) })) : [],
     minutes: snaps.map((s) => s.minute),   // the whole day, so replay can move forward again from any minute
     stats: opts.stats || {},
   };
@@ -323,4 +325,41 @@ export function marketRead(hist: MinuteSnap[], step: number) {
     speed: { from: sp.prev?.minute ?? null, to: cur.minute, aligned: sp.aligned, note: sp.note, ce: fast("CE"), pe: fast("PE") },
     caveat: "Context only — this OI read is not back-tested and does not predict price. The arbiter alone decides trades.",
   };
+}
+
+// ---------------- ATM ± 4 strike battle: Call vs Put at the same strike ----------------
+// For each strike: Previous OI + Added OI (this window) = Total OI, call and put side by side.
+// Winner by TOTAL OI (who holds the strike):  put ≥ 1.2 × call → PUT (support)  ·  call ≥ 1.2 × put → CALL (resistance)  ·  else BALANCED
+// Winner THIS WINDOW (who is adding):        the side whose addition is ≥ 1.5 × the other's (and > 0) · both ≤ 0 → BOTH REDUCING · else EVEN
+export type Winner = "PUT" | "CALL" | "BALANCED" | "EVEN" | "BOTH REDUCING" | "NO DATA";
+export function totalWinner(ce: number | null, pe: number | null): { winner: Winner; ratio: number | null } {
+  if (ce == null || pe == null || (ce <= 0 && pe <= 0)) return { winner: "NO DATA", ratio: null };
+  const ratio = ce > 0 ? Math.round((pe / ce) * 100) / 100 : null;
+  if (ce <= 0 || pe >= 1.2 * ce) return { winner: "PUT", ratio };
+  if (ce >= 1.2 * pe) return { winner: "CALL", ratio };
+  return { winner: "BALANCED", ratio };
+}
+export function windowWinner(ceChg: number | null, peChg: number | null): Winner {
+  if (ceChg == null || peChg == null) return "NO DATA";
+  if (ceChg <= 0 && peChg <= 0) return "BOTH REDUCING";
+  if (peChg > 0 && peChg >= 1.5 * Math.max(ceChg, 0)) return "PUT";
+  if (ceChg > 0 && ceChg >= 1.5 * Math.max(peChg, 0)) return "CALL";
+  return "EVEN";
+}
+export function strikeBattle(p: Pair, atm: number, step: number, n = 4) {
+  const rows = legChanges(p, { min: atm - n * step, max: atm + n * step });
+  const leg = (k: number, side: Side) => rows.find((r) => r.strike === k && r.side === side);
+  const out: any[] = [];
+  for (let k = atm + n * step; k >= atm - n * step; k -= step) {          // high strikes first, like the levels table
+    const c = leg(k, "CE"), q = leg(k, "PE"); if (!c && !q) continue;
+    const ce = { prev: c?.prevOi ?? null, added: c?.oiChg ?? null, total: c?.curOi ?? null, ltp: c?.curLtp ?? null, ltpChgPct: c?.ltpChgPct ?? null, cls: c?.cls ?? "INCONCLUSIVE", status: c?.status ?? "MISSING" };
+    const pe = { prev: q?.prevOi ?? null, added: q?.oiChg ?? null, total: q?.curOi ?? null, ltp: q?.curLtp ?? null, ltpChgPct: q?.ltpChgPct ?? null, cls: q?.cls ?? "INCONCLUSIVE", status: q?.status ?? "MISSING" };
+    const tw = totalWinner(ce.total, pe.total);
+    out.push({ strike: k, atm: k === atm, ce, pe, totalWinner: tw.winner, pcr: tw.ratio, windowWinner: windowWinner(ce.added, pe.added) });
+  }
+  const sum = (f: (r: any) => number | null) => out.reduce((a, r) => a + (f(r) ?? 0), 0);
+  const tot = { cePrev: sum((r) => r.ce.prev), ceAdded: sum((r) => r.ce.added), ceTotal: sum((r) => r.ce.total), pePrev: sum((r) => r.pe.prev), peAdded: sum((r) => r.pe.added), peTotal: sum((r) => r.pe.total) };
+  const tw = totalWinner(tot.ceTotal, tot.peTotal);
+  return { from: p.prev?.minute ?? null, to: p.cur.minute, aligned: p.aligned, note: p.note, atm, rows: out, totals: { ...tot, totalWinner: tw.winner, pcr: tw.ratio, windowWinner: windowWinner(tot.ceAdded, tot.peAdded) },
+    rules: "Total OI winner: a side with ≥ 1.2 × the other's OI holds the strike (PUT = support, CALL = resistance). This-window winner: the side adding ≥ 1.5 × the other." };
 }

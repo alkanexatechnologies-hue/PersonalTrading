@@ -152,3 +152,21 @@ test("session window 09:15–15:12: later minutes are not stored or shown", () =
   const v: any = buildView([snap(T0, () => [10000, 10000]), snap(T0 + 60, () => [10100, 10000]), snap(late, () => [20000, 10000])], { windowMin: 1, nowSec: late });
   assert.equal(v.samples, 2); assert.equal(v.window.curMinute, istMinute(T0 + 60));
 });
+
+import { totalWinner, windowWinner, strikeBattle } from "./minuteMonitor";
+test("strike battle: prev + added = total for both sides; winners by fixed ratios", () => {
+  assert.deepEqual(totalWinner(100, 130), { winner: "PUT", ratio: 1.3 });
+  assert.deepEqual(totalWinner(130, 100), { winner: "CALL", ratio: 0.77 });
+  assert.equal(totalWinner(100, 110).winner, "BALANCED");
+  assert.equal(windowWinner(100, 200), "PUT");
+  assert.equal(windowWinner(300, 100), "CALL"); assert.equal(windowWinner(100, 120), "EVEN");
+  assert.equal(windowWinner(-5, -10), "BOTH REDUCING"); assert.equal(windowWinner(50, -10), "CALL");
+  const a = snap(T0, (k) => [10000, k === 22350 ? 20000 : 8000]), b = snap(T0 + 60, (k) => [k === 22400 ? 13000 : 10000, k === 22350 ? 21000 : 8000]);
+  const bt = strikeBattle(pickPrevious([a, b], 1, 1), 22350, 50, 2);
+  assert.deepEqual(bt.rows.map((r: any) => r.strike), [22450, 22400, 22350, 22300, 22250]);
+  const r400 = bt.rows.find((r: any) => r.strike === 22400);
+  assert.equal(r400.ce.prev + r400.ce.added, r400.ce.total); assert.equal(r400.windowWinner, "CALL"); assert.equal(r400.totalWinner, "CALL");
+  const r350 = bt.rows.find((r: any) => r.strike === 22350);
+  assert.equal(r350.totalWinner, "PUT"); assert.equal(r350.pcr, 2.1); assert.equal(r350.windowWinner, "PUT"); assert.equal(r350.atm, true);
+  assert.equal(bt.totals.ceAdded, 3000); assert.equal(bt.totals.peAdded, 1000);
+});

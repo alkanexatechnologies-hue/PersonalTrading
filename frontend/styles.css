@@ -7448,3 +7448,20 @@ body.lqa-fullwidth .content { padding-left: 0; padding-right: 0; }
 .oimm-fx .up{color:#16c784} .oimm-fx .dn{color:#ea3943}
 @media (max-width:1100px){ .oimm-rd{grid-template-columns:minmax(0,1fr) minmax(0,1fr)} .oimm-fast{grid-column:1/-1} }
 @media (max-width:760px){ .oimm-rd,.oimm-fg{grid-template-columns:minmax(0,1fr)} }
+.oimm-bt th.stk,.oimm-bt td.stk{text-align:center;font-weight:800;color:#e6ecf5;background:#141f38;white-space:nowrap}
+.oimm-bt td.stk b{font-size:9px;color:#7fb0ff}
+.oimm-bt tr.atm td{background:#16294a} .oimm-bt tr.atm td.stk{background:#1d3566}
+.oimm-bt td.tot{font-weight:800} .oimm-bt td.tot.ce{color:#ff9aa1} .oimm-bt td.tot.pe{color:#7ef0bf}
+.oimm-bt td.tot.big.ce{background:rgba(234,57,67,.18)} .oimm-bt td.tot.big.pe{background:rgba(22,199,132,.18)}
+.oimm-bt tr.tot td{border-top:2px solid #2f5ea8;font-weight:800;background:#111a2e}
+.oimm-bt td.ltp span{font-size:10px;margin-left:2px}
+.oimm-win{display:inline-block;font-size:10px;font-weight:900;border-radius:5px;padding:1px 6px;border:1px solid currentColor;white-space:nowrap}
+.oimm-win i{font-style:normal;font-weight:600;opacity:.85}
+.oimm-win.up{color:#16c784;background:rgba(22,199,132,.1)} .oimm-win.dn{color:#ea3943;background:rgba(234,57,67,.1)} .oimm-win.neu{color:#f2b03a} .oimm-win.mut{color:#8395b3}
+.oimm-bt th.grp{text-align:center;border-bottom:1px solid #24314f} .oimm-bt th.grp.ce{color:#ff9aa1} .oimm-bt th.grp.pe{color:#7ef0bf}
+.oimm-bt .sep{border-left:1px solid #24314f} .oimm-bt thead th .mut{font-weight:500;text-transform:none}
+@media (max-width:760px){ .oimm-bt{font-size:11px} .oimm-bt td,.oimm-bt th{padding:3px 3px} .oimm-win i{display:none} }
+.oimm-bat{gap:10px} .oimm-bblk{display:grid;gap:4px} .oimm-bblk+.oimm-bblk{border-top:1px dashed #24314f;padding-top:8px}
+.oimm-wtag{display:inline-block;background:#1d4ed8;color:#fff;border-radius:5px;padding:0 6px;font-size:11px;margin-right:4px}
+@media (min-width:1600px){ .oimm-bat{grid-template-columns:repeat(3,minmax(0,1fr))} .oimm-bblk+.oimm-bblk{border-top:0;padding-top:0;border-left:1px dashed #24314f;padding-left:8px}
+  .oimm-bat .oimm-bt{font-size:10.5px} .oimm-bat .oimm-bt td,.oimm-bat .oimm-bt th{padding:2px 3px} .oimm-bat .oimm-win i{display:none} }
