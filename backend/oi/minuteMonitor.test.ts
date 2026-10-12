@@ -130,3 +130,25 @@ test("minute OI log: parsed per index, chain age sets Dhan fetch time, repeated 
   assert.equal(r.snaps[1].providerT, r.snaps[1].captureT - 5);
   assert.equal(r.snaps[0].source, "minute-log"); assert.equal(r.snaps[0].expiry, "2026-10-13");
 });
+
+import { marketRead } from "./minuteMonitor";
+test("market read: put writing leans up, call writing leans down, big two-sided exits = closing", () => {
+  const mk = (ce: (k: number, m: number) => number, pe: (k: number, m: number) => number, cl: (m: number) => number, pl: (m: number) => number, spot: (m: number) => number) =>
+    [0, 5, 10, 15].map((m) => snap(T0 + m * 60, (k) => [ce(k, m), pe(k, m)], () => [cl(m), pl(m)], spot(m)));
+  const up = marketRead(mk(() => 10000, (k, m) => 10000 + m * 800, () => 100, (m) => 100 - m, (m) => 22350 + m), 50) as any;
+  assert.equal(up.lean, "UP"); assert.equal(up.spotAgrees, true); assert.equal(up.supportWritten.strike != null, true);
+  const dn = marketRead(mk((k, m) => 10000 + m * 800, () => 10000, (m) => 100 - m, () => 100, (m) => 22350 + m), 50) as any;
+  assert.equal(dn.lean, "DOWN"); assert.equal(dn.spotAgrees, false);
+  const cls = marketRead(mk((k, m) => 50000 - m * 2000, (k, m) => (k === 22250 ? 50000 + m * 10 : 50000 - m * 2000), () => 100, (m) => 100 - m, () => 22350), 50) as any;
+  assert.equal(cls.lean, "POSITIONS CLOSING");
+  assert.equal(up.speed.ce.length > 0 || up.speed.pe.length > 0, true);
+  assert.match(up.caveat, /not back-tested/);
+});
+
+test("session window 09:15–15:12: later minutes are not stored or shown", () => {
+  const late = Math.floor(Date.parse("2026-10-13T09:45:05Z") / 1000);   // 15:15 IST
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "oimw-"));
+  assert.deepEqual(recordSnapshot(snap(late, () => [1, 1]), root), { ok: false, reason: "OUTSIDE_WINDOW" });
+  const v: any = buildView([snap(T0, () => [10000, 10000]), snap(T0 + 60, () => [10100, 10000]), snap(late, () => [20000, 10000])], { windowMin: 1, nowSec: late });
+  assert.equal(v.samples, 2); assert.equal(v.window.curMinute, istMinute(T0 + 60));
+});

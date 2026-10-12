@@ -22,10 +22,13 @@ export type OiClass = "POSSIBLE WRITING" | "POSSIBLE LONG BUILDUP" | "UNWINDING"
 const IST = 19800;
 export const istMinute = (t: number) => new Date((t + IST) * 1000).toISOString().slice(11, 16);
 export const istDate = (t: number) => new Date((t + IST) * 1000).toISOString().slice(0, 10);
+/** The monitor's session window (user rule): snapshots, views and the market read cover 09:15–15:12 IST only. */
+export const SESSION_FROM = "09:15", SESSION_TO = "15:12";
+export const inSession = (minute: string) => minute >= SESSION_FROM && minute <= SESSION_TO;
 const num = (v: any): number | null => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
 
 // ---------------- capture ----------------
-export type AcceptResult = { ok: true } | { ok: false; reason: "SAME_FETCH" | "SAME_MINUTE" | "UNCHANGED_DATA" | "NO_STRIKES" | "OUT_OF_ORDER" };
+export type AcceptResult = { ok: true } | { ok: false; reason: "SAME_FETCH" | "SAME_MINUTE" | "UNCHANGED_DATA" | "NO_STRIKES" | "OUT_OF_ORDER" | "OUTSIDE_WINDOW" };
 /** Decide whether a new chain reading becomes a stored minute snapshot. */
 export function acceptSnapshot(prev: MinuteSnap | null, next: MinuteSnap): AcceptResult {
   if (!next.strikes.length || next.strikes.every((s) => s.ceOi == null && s.peOi == null)) return { ok: false, reason: "NO_STRIKES" };
@@ -68,6 +71,7 @@ export function loadDay(date: string, symbol: string, expiry: string, root = ROO
 }
 /** Store a reading if it is a genuine new minute. Returns why it was skipped otherwise. */
 export function recordSnapshot(s: MinuteSnap, root = ROOT): AcceptResult {
+  if (!inSession(s.minute)) return { ok: false, reason: "OUTSIDE_WINDOW" };
   const date = istDate(s.captureT), arr = loadDay(date, s.symbol, s.expiry, root);
   const r = acceptSnapshot(arr[arr.length - 1] || null, s);
   const sk = `${s.symbol}|${s.expiry}`, st = _stats.get(sk) || {};
@@ -186,7 +190,8 @@ export function heatmap(snaps: MinuteSnap[], side: Side, strikes: number[], minu
 
 /** Full screen payload for one symbol + expiry, as of snapshot index `atIdx` (replay) or the latest. */
 export function buildView(snaps: MinuteSnap[], opts: { windowMin: number; around?: number; atIdx?: number; minStrike?: number; maxStrike?: number; heatSide?: Side; stats?: Record<string, number>; nowSec?: number }) {
-  if (!snaps.length) return { available: false, reason: "No snapshots yet for this expiry today — collection starts automatically in market hours (one per minute).", samples: 0 };
+  snaps = snaps.filter((x) => inSession(x.minute));
+  if (!snaps.length) return { available: false, reason: `No snapshots yet for this expiry today — collection runs ${SESSION_FROM}–${SESSION_TO} IST, one per minute.`, samples: 0 };
   const idx = opts.atIdx != null ? Math.max(0, Math.min(snaps.length - 1, opts.atIdx)) : snaps.length - 1;
   const hist = snaps.slice(0, idx + 1), cur = hist[hist.length - 1];
   const spot = cur.spot, ks = cur.strikes.map((s) => s.strike);
@@ -221,6 +226,7 @@ export function buildView(snaps: MinuteSnap[], opts: { windowMin: number; around
     top5m: { aligned: pair5.aligned, note: pair5.note, rows: rows5 },
     timeline: minuteTimeline(hist, 10, range),
     heat: { side: opts.heatSide || "CE", strikes: heatStrikes, rows: heatmap(hist, opts.heatSide || "CE", heatStrikes, 6) },
+    read: marketRead(hist, step),
     minutes: snaps.map((s) => s.minute),   // the whole day, so replay can move forward again from any minute
     stats: opts.stats || {},
   };
@@ -249,6 +255,7 @@ export function parseMinuteLog(symbol: string, summaryCsv: string, strikesCsv: s
   }
   const out: MinuteSnap[] = [];
   for (const [t, m] of [...byMin.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    if (!inSession(t)) continue;   // outside 09:15–15:12
     const md = meta.get(t); if (!md || !md.expiry) { stats.NO_META = (stats.NO_META || 0) + 1; continue; }
     const captureT = Math.floor(Date.parse(`${m.date}T${t}:00Z`) / 1000) - IST;
     const s: MinuteSnap = { symbol, expiry: md.expiry, providerT: captureT - md.age, captureT, minute: t, spot: md.spot ?? m.spot, pcr: md.pcr, maxPain: md.maxPain, strikes: m.rows.sort((a, b) => a.strike - b.strike), source: "minute-log" };
@@ -270,3 +277,50 @@ export function loadMinuteLog(date: string, symbol: string, root = LOG_ROOT): { 
   } catch { return { snaps: [], stats: {} }; }
 }
 export function minuteLogDays(root = LOG_ROOT): string[] { try { return fs.readdirSync(root).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().reverse(); } catch { return []; } }
+
+// ---------------- market read: OI lean + premium speed (context only, not back-tested) ----------------
+// Over the last ~15 min (ATM ± 8 strikes): call vs put OI classified as POSSIBLE WRITING, plus net OI.
+//   put writing ≥ 1.5 × call writing (and > 0)  → OI leans UP   (support being written below spot)
+//   call writing ≥ 1.5 × put writing (and > 0)  → OI leans DOWN (resistance being written above spot)
+//   both sides' OI falling and fresh writing < 25 % of the exits → POSITIONS CLOSING (checked first)
+//   otherwise                                    → MIXED
+// Spot over the same window is shown as agreeing or not. Fastest premiums: largest % change over ~5 min
+// (and ₹ per minute) among ATM ± 4 strikes on each side.
+export function marketRead(hist: MinuteSnap[], step: number) {
+  if (hist.length < 2) return { available: false, reason: "Needs at least two snapshots" };
+  const cur = hist[hist.length - 1], spot = cur.spot;
+  if (spot == null) return { available: false, reason: "Spot unavailable" };
+  const atm = cur.strikes.reduce((b, k) => (Math.abs(k.strike - spot) < Math.abs(b.strike - spot) ? k : b), cur.strikes[0]).strike;
+  const p15 = pickPrevious(hist, hist.length - 1, 15), p5 = pickPrevious(hist, hist.length - 1, 5);
+  const base = p15.prev ? p15 : p5.prev ? p5 : pickPrevious(hist, hist.length - 1, 1);
+  if (!base.prev) return { available: false, reason: base.note };
+  const rows = legChanges(base, { min: atm - 8 * step, max: atm + 8 * step });
+  const sum = (side: Side, f: (r: LegChange) => boolean) => rows.filter((r) => r.side === side && r.oiChg != null && f(r)).reduce((a, r) => a + (r.oiChg as number), 0);
+  const cw = sum("CE", (r) => r.cls === "POSSIBLE WRITING" && (r.oiChg as number) > 0), pw = sum("PE", (r) => r.cls === "POSSIBLE WRITING" && (r.oiChg as number) > 0);
+  const cNet = sum("CE", () => true), pNet = sum("PE", () => true);
+  const spotChg = base.prev.spot != null ? Math.round((spot - base.prev.spot) * 100) / 100 : null;
+  let lean: "UP" | "DOWN" | "POSITIONS CLOSING" | "MIXED" = "MIXED", why = "";
+  const closing = cNet < 0 && pNet < 0 && cw + pw < 0.25 * (Math.abs(cNet) + Math.abs(pNet));
+  if (closing) { lean = "POSITIONS CLOSING"; why = `Call OI ${cNet.toLocaleString("en-IN")} and put OI ${pNet.toLocaleString("en-IN")} — both sides exiting far more than any fresh writing; no OI lean`; }
+  else if (pw > 0 && pw >= 1.5 * cw) { lean = "UP"; why = `Put writing ${pw.toLocaleString("en-IN")} vs call writing ${cw.toLocaleString("en-IN")} — support being written below spot`; }
+  else if (cw > 0 && cw >= 1.5 * pw) { lean = "DOWN"; why = `Call writing ${cw.toLocaleString("en-IN")} vs put writing ${pw.toLocaleString("en-IN")} — resistance being written above spot`; }
+  else if (cNet < 0 && pNet < 0) { lean = "POSITIONS CLOSING"; why = `Call OI ${cNet.toLocaleString("en-IN")} and put OI ${pNet.toLocaleString("en-IN")} — both sides exiting, no OI lean`; }
+  else why = `Call writing ${cw.toLocaleString("en-IN")} vs put writing ${pw.toLocaleString("en-IN")} — no side dominates`;
+  const spotAgrees = spotChg == null || lean === "MIXED" || lean === "POSITIONS CLOSING" ? null : lean === "UP" ? spotChg >= 0 : spotChg <= 0;
+  // nearest walls being written
+  const top = (side: Side) => rows.filter((r) => r.side === side && r.cls === "POSSIBLE WRITING" && (r.oiChg as number) > 0).sort((a, b) => (b.oiChg as number) - (a.oiChg as number))[0] || null;
+  const cTop = top("CE"), pTop = top("PE");
+  // premium speed over ~5 min (falls back to the 1-min pair)
+  const sp = p5.prev ? p5 : pickPrevious(hist, hist.length - 1, 1);
+  const fast = (side: Side) => !sp.prev ? [] : legChanges(sp, { min: atm - 4 * step, max: atm + 4 * step })
+    .filter((r) => r.side === side && r.ltpChgPct != null && r.prevLtp != null && r.curLtp != null)
+    .sort((a, b) => Math.abs(b.ltpChgPct as number) - Math.abs(a.ltpChgPct as number)).slice(0, 3)
+    .map((r) => ({ strike: r.strike, side, prevLtp: r.prevLtp, curLtp: r.curLtp, chgPct: r.ltpChgPct, perMin: sp.actualSec ? Math.round((((r.curLtp as number) - (r.prevLtp as number)) / (sp.actualSec / 60)) * 100) / 100 : null, oiCls: r.cls }));
+  return {
+    available: true, atm, from: base.prev.minute, to: cur.minute, windowNote: base.note, aligned: base.aligned, windowMin: base.windowMin,
+    lean, why, spotChg, spotAgrees, callWriting: cw, putWriting: pw, callNet: cNet, putNet: pNet,
+    resistanceWritten: cTop ? { strike: cTop.strike, chg: cTop.oiChg } : null, supportWritten: pTop ? { strike: pTop.strike, chg: pTop.oiChg } : null,
+    speed: { from: sp.prev?.minute ?? null, to: cur.minute, aligned: sp.aligned, note: sp.note, ce: fast("CE"), pe: fast("PE") },
+    caveat: "Context only — this OI read is not back-tested and does not predict price. The arbiter alone decides trades.",
+  };
+}

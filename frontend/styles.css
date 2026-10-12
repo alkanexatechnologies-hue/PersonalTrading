@@ -7432,3 +7432,19 @@ body.lqa-fullwidth .content { padding-left: 0; padding-right: 0; }
   .oimm-sidewrap[open]>summary{margin-bottom:6px} }
 .oimm-r2 .oimm-cls{white-space:normal;max-width:118px}
 .oimm-step button[aria-pressed="true"]{background:#1d4ed8;border-color:#1d4ed8}
+.oimm-read{border:1px solid #2f5ea8;background:#0e1830}
+.oimm-rd{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,.9fr) minmax(0,1.5fr);gap:8px}
+.oimm-lean{border-radius:9px;padding:8px 10px;display:grid;gap:3px;border:2px solid #6b5520;background:#2a2108}
+.oimm-lean.up{border-color:#1d6b4b;background:#0f2a22} .oimm-lean.dn{border-color:#7a2633;background:#2a1118}
+.oimm-lean span{font-size:10px;color:#8395b3;text-transform:uppercase;font-weight:800} .oimm-lean b{font-size:22px;font-weight:900}
+.oimm-lean.up b{color:#16c784} .oimm-lean.dn b{color:#ea3943} .oimm-lean.neu b{color:#f2b03a} .oimm-lean em{font-style:normal;font-size:11px;color:#cfd8e6}
+.oimm-agree{font-size:11.5px;font-weight:800} .oimm-agree.ok{color:#16c784} .oimm-agree.no{color:#f2b03a}
+.oimm-walls{display:grid;gap:6px} .oimm-walls>div{background:#111a2e;border:1px solid #1b2540;border-radius:8px;padding:6px 8px;display:grid}
+.oimm-walls span,.oimm-fast>span{font-size:10px;color:#8395b3;text-transform:uppercase;font-weight:800} .oimm-walls b{font-size:18px;font-weight:900} .oimm-walls em{font-style:normal;font-size:10.5px;color:#8395b3}
+.oimm-walls b.up{color:#16c784} .oimm-walls b.dn{color:#ea3943} .oimm-fast i{font-style:normal;text-transform:none;font-weight:600}
+.oimm-fg{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:4px}
+.oimm-fx{display:grid;grid-template-columns:auto auto;justify-content:space-between;background:#111a2e;border:1px solid #1b2540;border-radius:7px;padding:4px 7px;margin-bottom:4px}
+.oimm-fx b{font-size:12.5px} .oimm-fx span{font-weight:900;font-size:12.5px} .oimm-fx em{grid-column:1/-1;font-style:normal;font-size:10px;color:#8395b3}
+.oimm-fx .up{color:#16c784} .oimm-fx .dn{color:#ea3943}
+@media (max-width:1100px){ .oimm-rd{grid-template-columns:minmax(0,1fr) minmax(0,1fr)} .oimm-fast{grid-column:1/-1} }
+@media (max-width:760px){ .oimm-rd,.oimm-fg{grid-template-columns:minmax(0,1fr)} }

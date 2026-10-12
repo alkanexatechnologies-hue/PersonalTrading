@@ -26,6 +26,7 @@ function oimShell() {
     <div class="oimm-main">
       <div class="oimm-r1"><section class="oimm-card" id="oimm-chart"><div class="oimm-hd"><h3 id="oimm-ctitle">OI by strike</h3><span class="oimm-spot" id="oimm-spot"></span></div><div class="oimm-leg" id="oimm-leg"></div><canvas id="oimm-canvas"></canvas><div class="oimm-empty" id="oimm-cmsg" hidden></div></section>
         <section class="oimm-card" id="oimm-sum"></section></div>
+      <section class="oimm-card oimm-read" id="oimm-read"></section>
       <div class="oimm-r2"><section class="oimm-card ce" id="oimm-ce"></section><section class="oimm-card pe" id="oimm-pe"></section></div>
       <div class="oimm-r3"><section class="oimm-card" id="oimm-heat"></section><section class="oimm-card" id="oimm-tl"></section><section class="oimm-card" id="oimm-top5"></section></div>
       <div class="oimm-foot" id="oimm-foot"></div>
@@ -80,7 +81,7 @@ function oimRender(d) {
     document.getElementById("oimm-cmsg").hidden = false; document.getElementById("oimm-cmsg").textContent = d.reason || "No data";
     const c = document.getElementById("oimm-canvas"); if (c) c.getContext("2d").clearRect(0, 0, c.width, c.height);
     set("oimm-sum", `<div class="oimm-hd"><h3>1-minute summary</h3></div><div class="oimm-empty">${why}</div>${d.collecting === false ? "" : `<div class="oimm-note">Snapshots are captured each minute from 09:15 to 15:30 on trading days. Past minutes are never back-filled.</div>`}`);
-    ["oimm-ce", "oimm-pe", "oimm-heat", "oimm-tl", "oimm-top5"].forEach((id) => set(id, ""));
+    ["oimm-ce", "oimm-pe", "oimm-heat", "oimm-tl", "oimm-top5", "oimm-read"].forEach((id) => set(id, ""));
     set("oimm-foot", foot); set("oimm-spot", ""); return;
   }
   document.getElementById("oimm-cmsg").hidden = true;
@@ -100,7 +101,7 @@ function oimRender(d) {
       <div class="oimm-bx"><span>PCR (OI)</span><b>${d.pcr != null ? d.pcr.toFixed(2) : "—"}</b><em class="${oimC(pcrChg)}">${pcrChg != null ? (pcrChg > 0 ? "▲ +" : pcrChg < 0 ? "▼ " : "") + pcrChg.toFixed(2) : ""}</em></div>
       <div class="oimm-bx"><span>Max pain</span><b>${oimN(d.maxPain)}</b><em></em></div>
     </div>
-    <div class="oimm-clock"><span>Dhan fetch <b>${oimT(d.clocks.providerT)}</b></span><span>Captured <b>${oimT(d.clocks.captureT)}</b></span><span>${d.isToday && OIM.mode === "live" ? `age <b class="${d.stale ? "dn" : ""}">${d.clocks.ageSec}s</b>${d.stale ? " STALE" : ""}` : "replay"}</span><span>${d.samples} snapshots since ${oimEsc(d.firstMinute)}</span><span>source <b>${d.source === "minute-log" ? "app minute OI log (to the minute)" : "1-min monitor"}</b></span>${d.marketOpen === false && d.isToday ? "<span><b>market closed</b> — last session minute shown</span>" : ""}</div>
+    <div class="oimm-clock"><span>Dhan fetch <b>${oimT(d.clocks.providerT)}</b></span><span>Captured <b>${oimT(d.clocks.captureT)}</b></span><span>${d.isToday && OIM.mode === "live" ? `age <b class="${d.stale ? "dn" : ""}">${d.clocks.ageSec}s</b>${d.stale ? " STALE" : ""}` : "replay"}</span><span>${d.samples} snapshots since ${oimEsc(d.firstMinute)}</span><span>source <b>${d.source === "minute-log" ? "app minute OI log (to the minute)" : "1-min monitor"}</b></span><span>window <b>${oimEsc((d.session && d.session.from) || "09:15")}–${oimEsc((d.session && d.session.to) || "15:12")}</b>${d.session && !d.session.inSession && d.isToday ? " · outside window — last minute shown" : ""}</span></div>
     <div class="oimm-note">${oimEsc(d.clocks.note)}${Object.keys(d.stats || {}).length ? ` Skipped readings: ${Object.entries(d.stats).map(([k, v]) => `${k.toLowerCase().replace(/_/g, " ")} ${v}`).join(", ")}.` : ""}</div>`);
   const legTbl = (side) => {
     const rows = side === "CE" ? d.topCE : d.topPE, nmS = side === "CE" ? "call" : "put";
@@ -112,6 +113,7 @@ function oimRender(d) {
       </tbody></table></div>`;
   };
   set("oimm-ce", legTbl("CE")); set("oimm-pe", legTbl("PE"));
+  set("oimm-read", oimReadHtml(d.read));
   // heatmap
   const h = d.heat, mx = Math.max(1, ...h.rows.flatMap((r) => r.cells.map((c) => Math.abs(c || 0))));
   const cell = (v) => { if (v == null) return `<td class="na">—</td>`; const a = Math.min(0.85, 0.12 + (Math.abs(v) / mx) * 0.7); const col = v >= 0 ? "22,199,132" : "234,57,67"; return `<td style="background:rgba(${col},${a.toFixed(2)})">${oimK(v, true)}</td>`; };
@@ -187,7 +189,8 @@ function oimSchedule() {
   clearTimeout(OIM.tick);
   const ms = 60_000 - (Date.now() % 60_000) + 15_000;
   OIM.tick = setTimeout(() => {
-    const on = document.getElementById("panel-oianalysis")?.classList.contains("active") && OIA.screen === "minute" && OIM.mode === "live";
+    const hm = new Date(Date.now() + 19800000).toISOString().slice(11, 16);   // IST
+    const on = document.getElementById("panel-oianalysis")?.classList.contains("active") && OIA.screen === "minute" && OIM.mode === "live" && hm >= "09:15" && hm <= "15:13";
     if (on && !document.hidden) loadOiMinute();
     oimSchedule();
   }, ms > 60_000 ? ms - 60_000 : ms);
@@ -212,3 +215,18 @@ function oimPlay() {
 }
 // show the minute under the slider while dragging (the data loads when it is released)
 document.addEventListener("input", (e) => { if (e.target && e.target.matches && e.target.matches('#oimm-side input[data-om="at"]')) { const m = (OIM.d && OIM.d.minutes || [])[Number(e.target.value)]; const l = document.getElementById("oimm-rmin"); if (l && m) l.textContent = m; } });
+
+function oimReadHtml(r) {
+  if (!r || !r.available) return `<div class="oimm-hd"><h3>Market read <span class="mut">(OI + premium)</span></h3></div><div class="oimm-empty">${oimEsc((r && r.reason) || "Needs more snapshots")}</div>`;
+  const cls = r.lean === "UP" ? "up" : r.lean === "DOWN" ? "dn" : "neu";
+  const word = r.lean === "UP" ? "OI LEANS UP" : r.lean === "DOWN" ? "OI LEANS DOWN" : r.lean;
+  const agree = r.spotAgrees == null ? "" : r.spotAgrees ? `<span class="oimm-agree ok">✓ spot agrees (${r.spotChg > 0 ? "+" : ""}${oimN(r.spotChg, 1)})</span>` : `<span class="oimm-agree no">✗ spot disagrees (${r.spotChg > 0 ? "+" : ""}${oimN(r.spotChg, 1)}) — wait for confirmation</span>`;
+  const fast = (list, side) => list.length ? list.map((x) => `<div class="oimm-fx"><b>${oimN(x.strike)} ${side}</b><span class="${oimC(x.chgPct)}">${oimP(x.chgPct)}</span><em>₹${oimN(x.prevLtp, 2)} → ₹${oimN(x.curLtp, 2)}${x.perMin != null ? ` · ${x.perMin > 0 ? "+" : x.perMin < 0 ? "−" : ""}₹${oimN(Math.abs(x.perMin), 2)}/min` : ""}</em></div>`).join("") : `<div class="oimm-note">—</div>`;
+  return `<div class="oimm-hd"><h3>Market read <span class="mut">(OI + premium · ${oimEsc(r.from)} → ${oimEsc(r.to)})</span></h3>${r.aligned ? "" : `<span class="oimm-tag warn">${oimEsc(r.windowNote)}</span>`}</div>
+    <div class="oimm-rd">
+      <div class="oimm-lean ${cls}"><span>Direction from OI</span><b>${oimEsc(word)}</b>${agree}<em>${oimEsc(r.why)}</em></div>
+      <div class="oimm-walls"><div><span>Resistance being written</span><b class="dn">${r.resistanceWritten ? oimN(r.resistanceWritten.strike) : "—"}</b><em>${r.resistanceWritten ? oimK(r.resistanceWritten.chg, true) + " call OI" : "no fresh call writing"}</em></div>
+        <div><span>Support being written</span><b class="up">${r.supportWritten ? oimN(r.supportWritten.strike) : "—"}</b><em>${r.supportWritten ? oimK(r.supportWritten.chg, true) + " put OI" : "no fresh put writing"}</em></div></div>
+      <div class="oimm-fast"><span>Fastest premiums <i>(${oimEsc(r.speed.from || "—")} → ${oimEsc(r.speed.to)}, ATM ±4)</i></span><div class="oimm-fg"><div>${fast(r.speed.ce, "CE")}</div><div>${fast(r.speed.pe, "PE")}</div></div></div>
+    </div><div class="oimm-note warn">${oimEsc(r.caveat)}</div>`;
+}

@@ -115,7 +115,7 @@ import { notificationStatusLive } from "../integrations/notificationService";
 import { recordConnectionTest, recordConnectionSuccess, getConnectionStatus } from "../data/connectionStatusTracker";
 import { lookupDhanSecurity, lookupDhanOption } from "../data/dhanInstruments";
 import { fnoMovers, indexPivots, runIndicatorCheck, readIndicatorCheck } from "../data/dhanInsights";
-import { snapFromChain, recordSnapshot as recordMinuteSnapshot, loadDay as loadMinuteDay, listDays as listMinuteDays, buildView as buildMinuteView, captureStats as minuteCaptureStats, loadMinuteLog, minuteLogDays } from "../oi/minuteMonitor";
+import { snapFromChain, recordSnapshot as recordMinuteSnapshot, loadDay as loadMinuteDay, listDays as listMinuteDays, buildView as buildMinuteView, captureStats as minuteCaptureStats, loadMinuteLog, minuteLogDays, inSession as minuteInSession, istMinute as istMinuteOf, SESSION_FROM as MM_FROM, SESSION_TO as MM_TO } from "../oi/minuteMonitor";
 const MINUTE_MONITOR_SYMBOLS = ["^NSEI", "^NSEBANK", "^CNXFIN"];
 import { dhanCompanyInfo } from "../data/dhanDataApis";
 import { fetchDhanCandles, DhanBacktestInterval } from "../data/dhanHistorical";
@@ -5852,9 +5852,10 @@ router.get("/oi-monitor", requirePermission("oiAnalysis"), (req: Request, res: R
     const n = (k: string) => (req.query[k] != null && req.query[k] !== "" && Number.isFinite(Number(req.query[k])) ? Number(req.query[k]) : undefined);
     const windowMin = [1, 5, 15, 30].includes(Number(req.query.window)) ? Number(req.query.window) : 1;
     const view: any = buildMinuteView(snaps, { windowMin, around: n("around"), atIdx: n("at"), minStrike: n("min"), maxStrike: n("max"), heatSide: req.query.heat === "PE" ? "PE" : "CE", stats: monExp.length ? minuteCaptureStats(def.symbol, expiry) : log!.stats });
-    if (view.available && !isMarketOpenIST()) view.stale = false;   // after hours the last minute is the session's last, not stale
+    const nowMin = istMinuteOf(Math.floor(Date.now() / 1000));
+    if (view.available && (!isMarketOpenIST() || !minuteInSession(nowMin))) view.stale = false;   // outside 09:15–15:12 the last minute is final, not stale   // after hours the last minute is the session's last, not stale
     res.json({ ...view, name: def.name, date, today, isToday: date === today, marketOpen: isMarketOpenIST(), days: days.slice(0, 15), expiries,
-      source: monExp.length ? "monitor" : "minute-log", collecting: MINUTE_MONITOR_SYMBOLS.includes(def.symbol),
+      source: monExp.length ? "monitor" : "minute-log", session: { from: MM_FROM, to: MM_TO, inSession: isMarketOpenIST() && minuteInSession(nowMin) }, collecting: MINUTE_MONITOR_SYMBOLS.includes(def.symbol),
       note: "Display only — OI addition is never called writing on its own; premium and spot must agree. Not used by signals, the arbiter or paper trading." });
   } catch (e: any) { res.json({ available: false, reason: e?.message || "oi-monitor failed" }); }
 });
@@ -9897,7 +9898,7 @@ export function startHourlyScheduler() {
   setInterval(() => { if (isTradingTimeIST() && jobOn("oiChangeSnapshot")) refreshOiChangeSnapshot(); }, 3 * 60 * 1000);
   // 1-minute OI monitor: capture one snapshot per index per minute (aligned to :05 s) in market hours.
   const minuteTick = async () => {
-    if (!isMarketOpenIST()) return;
+    if (!isMarketOpenIST() || !minuteInSession(istMinuteOf(Math.floor(Date.now() / 1000)))) return;   // 09:15–15:12 only
     for (const sym of MINUTE_MONITOR_SYMBOLS) {
       const def = findSymbolDef(sym); if (!def) continue;
       try { const chain = await withDhanPriority("low", () => getOiFresh(def)); const snp = snapFromChain(def.symbol, chain, Math.floor(Date.now() / 1000)); if (snp) recordMinuteSnapshot(snp); }
