@@ -42,6 +42,7 @@ export interface CCInputs {
   heat: HeatSnapshot | null;
   model: ModelFile | null;
   liveMoves: { moves: Record<string, number | null>; ts: number } | null;   // NIFTY constituents % vs prev close
+  sparks?: Record<string, number[]>;                // today's 5-min closes per strip index (display only)
 }
 
 // ---------------- price kinds ----------------
@@ -123,6 +124,21 @@ export function buildLevels(inp: CCInputs, spot: number | null): { levels: Level
     : afterHours ? "Option chain read after the close — Dhan's after-hours chain can differ from the session's final OI; treat OI levels as provisional until 09:15"
     : null;
   return { levels: lv, atr: atr != null ? r1(atr) : null, note };
+}
+
+/** Levels in price order (highest first), same-price levels merged, spot inserted in place. */
+export interface SeqRow { spot?: true; price: number; kinds: string[]; status?: LevelStatus; evidence?: string; methods?: string[]; side?: "resistance" | "support"; distance?: number }
+export function levelSequence(levels: Level[], spot: number | null): SeqRow[] {
+  const merged: SeqRow[] = [];
+  for (const l of [...levels].sort((a, b) => b.price - a.price)) {
+    const m = merged.find((x) => Math.abs(x.price - l.price) < 0.01);
+    const kind = l.kind.replace(" zone", "");
+    if (m) { m.kinds.push(kind); m.methods!.push(`${l.method} · ${l.invalidation}`); continue; }
+    merged.push({ price: l.price, kinds: [kind], status: l.status, evidence: l.evidence, methods: [`${l.method} · ${l.invalidation}`],
+      side: spot != null && l.price > spot ? "resistance" : "support", distance: spot != null ? r1(l.price - spot) : undefined });
+  }
+  if (spot == null) return merged;
+  return [...merged.filter((x) => x.price > spot), { spot: true, price: spot, kinds: ["NIFTY spot"] }, ...merged.filter((x) => x.price <= spot)];
 }
 
 // ---------------- master decision (display + guard only) ----------------
@@ -263,7 +279,7 @@ export function buildCommandCenter(inp: CCInputs) {
       freshness,
     },
     b: explanation(inp, contrib, levels, dec),
-    c: { spot, spotTs: prices.live?.ts ?? prices.lastTraded?.ts ?? null, atr, levels, note: levelsNote, oi: inp.oi ? { asOf: inp.oi.asOf, expiry: inp.oi.expiry, pcr: inp.oi.pcr, maxPain: inp.oi.maxPain } : null },
+    c: { spot, spotTs: prices.live?.ts ?? prices.lastTraded?.ts ?? null, atr, levels, sequence: levelSequence(levels, spot), note: levelsNote, oi: inp.oi ? { asOf: inp.oi.asOf, expiry: inp.oi.expiry, pcr: inp.oi.pcr, maxPain: inp.oi.maxPain } : null },
     d: {
       action: dec.action, reason: dec.reason, guard: dec.guard,
       candle: dec.decision?.candleIso || null, setup: dec.decision?.setupLabel || null, direction: dec.decision?.direction || null,
@@ -275,6 +291,7 @@ export function buildCommandCenter(inp: CCInputs) {
       gates: ["Closed 5-min candle only", "S1 no new entries after 14:00", "Option R:R ≥ 2 after costs", "Paper: 1 % capital risk/trade, one open index-options trade, 15-min cooldown after a stop-out"],
     },
     contributions: contrib,
+    sparks: inp.sparks || {},
     heat: inp.heat ? { date: inp.heat.date, takenAt: inp.heat.takenAt, refilledAt: inp.heat.refilledAt ?? null, status: inp.heat.status, sectors: inp.heat.sectors.map((s) => ({ name: s.name, avg: s.avg, adv: s.adv, dec: s.dec, n: s.n })) } : null,
   };
 }

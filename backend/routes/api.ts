@@ -8272,7 +8272,19 @@ async function gatherCommandInputs(): Promise<CCInputs> {
     heat: readHeatSnapshot(istDateStr()),
     model: readContribModel(),
     liveMoves: await constituentMoves(phase).catch(() => null),
+    sparks: await stripSparks().catch(() => ({})),
   };
+}
+// Today's 5-min closes for the strip mini-charts (shared candle cache; refreshed at most every 2 min).
+let _sparks: { at: number; v: Record<string, number[]> } | null = null;
+async function stripSparks(): Promise<Record<string, number[]>> {
+  if (_sparks && Date.now() - _sparks.at < 120_000) return _sparks.v;
+  const today = istDateStr(), v: Record<string, number[]> = {};
+  for (const [k, sym] of [["NIFTY", "^NSEI"], ["BANKNIFTY", "^NSEBANK"], ["FINNIFTY", "^CNXFIN"], ["SENSEX", "^BSESN"]] as const) {
+    try { const c = (await getCandlesCached(sym, "5m")) as any[]; v[k] = c.filter((x) => new Date((x.time + 19800) * 1000).toISOString().slice(0, 10) === today).map((x) => x.close); } catch { /* skip */ }
+  }
+  _sparks = { at: Date.now(), v };
+  return v;
 }
 router.get("/premarket/command", commandRoute(gatherCommandInputs, 30_000));
 

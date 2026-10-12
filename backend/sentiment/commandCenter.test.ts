@@ -175,3 +175,12 @@ test("route: ?force=true bypasses the cache, at most once per 20 s", async () =>
   await h({}, fakeRes()); await h({ query: { force: "true" } }, fakeRes()); await h({ query: { force: "true" } }, fakeRes());
   assert.equal(calls, 2);
 });
+
+import { levelSequence } from "./commandCenter";
+test("levels in price sequence: highest first, same price merged, spot inserted with distances", () => {
+  const L = (kind: string, price: number) => ({ kind, price, method: "m", evidence: "e", invalidation: "i", ts: 1, status: "FAR" as const });
+  const seq = levelSequence([L("Immediate support", 22350), L("Upside breakout zone", 22500), L("Reversal-down zone", 22500), L("Day high", 22651.1), L("Downside breakdown zone", 22300)], 22363.35);
+  assert.deepEqual(seq.map((r) => (r.spot ? "SPOT" : r.kinds.join("+"))), ["Day high", "Upside breakout+Reversal-down", "SPOT", "Immediate support", "Downside breakdown"]);
+  assert.equal(seq[1].distance, 136.7); assert.equal(seq[1].side, "resistance"); assert.equal(seq[3].side, "support");
+  assert.equal(levelSequence([L("x", 1)], null).length, 1);
+});
