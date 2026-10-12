@@ -285,9 +285,13 @@ export type CommandCenter = ReturnType<typeof buildCommandCenter>;
 export function commandRoute(gather: () => Promise<CCInputs>, ttlMs = 30_000) {
   let cache: { at: number; v: CommandCenter } | null = null;
   let inflight: Promise<CommandCenter> | null = null;
-  return async (_req: any, res: any) => {
+  let forcedAt = 0;
+  return async (req: any, res: any) => {
     try {
-      if (cache && Date.now() - cache.at < ttlMs) return res.json({ ...cache.v, cached: true });
+      // ?force=true (Refresh button) bypasses the cache at most once per 20 s
+      const force = String(req?.query?.force) === "true" && Date.now() - forcedAt > 20_000;
+      if (force) forcedAt = Date.now();
+      if (!force && cache && Date.now() - cache.at < ttlMs) return res.json({ ...cache.v, cached: true });
       if (!inflight) inflight = gather().then((inp) => buildCommandCenter(inp)).finally(() => { inflight = null; });
       const v = await inflight;
       cache = { at: Date.now(), v };

@@ -168,3 +168,10 @@ test("after the close, an after-hours option chain is flagged as provisional", (
   assert.match(cc.c.note!, /after the close/);
   assert.equal(cc.a.freshness.oi, "AFTER-HOURS");
 });
+
+test("route: ?force=true bypasses the cache, at most once per 20 s", async () => {
+  let calls = 0;
+  const h = commandRoute(async () => { calls++; return base(); }, 60_000);
+  await h({}, fakeRes()); await h({ query: { force: "true" } }, fakeRes()); await h({ query: { force: "true" } }, fakeRes());
+  assert.equal(calls, 2);
+});

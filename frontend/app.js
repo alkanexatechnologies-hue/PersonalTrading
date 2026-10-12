@@ -8191,7 +8191,7 @@ function startIndexNewsLive() {
 // Market-context only — it never trades. Every value shows its own freshness;
 // missing data renders as DATA UNAVAILABLE (never faked). The layout is the 1:1
 // master composition; CSS reflows it for tablet / laptop / TV / mobile.
-const PM = { built: false, liveTimer: null, data: null, health: null, intel: null, intelAt: 0, intelTab: null, heat: null, heatAt: 0, heatSel: null };
+const PM = { built: false, liveTimer: null, data: null, health: null, intel: null, intelAt: 0, intelTab: null, heat: null, heatAt: 0, heatSel: null, cmd: null, cmdAt: 0 };
 
 function pmEl(id) { return document.getElementById(id); }
 function pmNum(v, dec) { if (v == null || !isFinite(v)) return "—"; return Number(v).toLocaleString("en-IN", { minimumFractionDigits: dec || 0, maximumFractionDigits: dec || 0 }); }
@@ -8222,6 +8222,7 @@ function initPremarket() {
       </div>
       <div class="pm-live"><button type="button" class="scr-refresh" id="pm-refresh" title="Reload all Market Sentiment data now (fresh quotes, global markets, news)">⟳ Refresh</button><span class="pm-livebadge" id="pm-livebadge">● —</span><span class="pm-t" id="pm-clock">—</span><span class="pm-d" id="pm-date">—</span></div>
     </div>
+    <section class="pm-cmd" id="pm-cmd" aria-label="Prediction Command Center"><div class="pm-na">Loading the Prediction Command Center…</div></section>
     <div class="pm-substrip">
       <span id="pm-updated" class="pm-upd">Last Update: — · Next Sentiment Update: —</span>
       <span class="pm-913" id="pm-913"></span>
@@ -8232,7 +8233,7 @@ function initPremarket() {
     <div class="pm-grid">
       <section class="pm-panel a-s"><div class="pm-ph"><span class="pm-num">1</span><h2>Overall Market Sentiment</h2><span class="pm-sub">(Pre-Market)</span><span class="pm-r" id="pm-sent-fr"></span></div><div id="pm-sentiment"></div></section>
       <section class="pm-panel a-p"><div class="pm-ph"><span class="pm-num">2</span><h2>Index Direction Probability</h2><span class="pm-sub">(Next Session)</span></div><div class="pm-prob-wrap" id="pm-prob"></div></section>
-      <section class="pm-panel a-e"><div class="pm-ph"><span class="pm-num">3</span><h2>India Market Sector Analysis</h2><span class="pm-r" id="pm-sector-fr"></span></div><div class="pm-scroll"><table id="pm-sector"></table></div><div class="pm-note" id="pm-sector-note"></div><div id="pm-heat"></div></section>
+      <section class="pm-panel a-e"><div class="pm-ph"><span class="pm-num">3</span><h2>India Market Sector Analysis</h2><span class="pm-r" id="pm-sector-fr"></span></div><div class="pm-scroll"><table id="pm-sector"></table></div><div class="pm-note" id="pm-sector-note"></div></section>
       <section class="pm-panel a-f"><div class="pm-ph"><span class="pm-num">4</span><h2>FII Positioning — Index Futures</h2><span class="pm-r" id="pm-fii-fr"></span></div><div id="pm-fii"></div></section>
       <section class="pm-panel a-b"><div class="pm-ph"><span class="pm-num">5</span><h2>Bank Leaders</h2><span class="pm-sub">High NIFTY Impact</span><span class="pm-r" id="pm-bank-fr"></span></div><div id="pm-banks"></div></section>
       <section class="pm-panel a-m"><div class="pm-ph"><span class="pm-num">6</span><h2>Top Index Movers</h2><span class="pm-r" id="pm-mv-fr"></span></div><div id="pm-movers"></div></section>
@@ -8296,8 +8297,8 @@ async function loadPremarket(force) {
     if (d && !d.error) { PM.data = d; renderPremarket(d); }
     if (h) { PM.health = h; renderPMExtStatus(h); }
     renderPMTimeline();
-    if (force) await Promise.all([loadPMIntel(true), loadPMHeat(true)]);
-    else { loadPMIntel(); loadPMHeat(); }
+    if (force) await Promise.all([loadPMIntel(true), loadPMHeat(true), loadPMCommand(true)]);
+    else { loadPMIntel(); loadPMHeat(); loadPMCommand(); }
   } catch (e) { /* keep last render */ }
 }
 
@@ -8452,6 +8453,97 @@ function renderPMNews(n) {
   const box = pmEl("pm-news"); if (!box) return;
   if (!n.items || !n.items.length) { box.innerHTML = `<div class="pm-na">DATA UNAVAILABLE</div>`; return; }
   box.innerHTML = n.items.map((it) => `<a class="pm-nrow" href="${pmEsc(it.link || "#")}" target="_blank" rel="noopener"><span class="pm-tm">${pmEsc(it.time)}</span><span class="pm-imp ${it.impact}">${it.impact}</span><span class="pm-nti"><span class="pm-tag">${pmEsc(it.category)}</span>${pmEsc(it.title)}</span><span class="pm-src2">${pmEsc(it.source)}</span></a>`).join("");
+}
+
+// ---- Prediction Command Center (top of Market Sentiment). Data: /api/premarket/command, built on
+// the server from existing engines (arbiter decision, shared OI cache, 09:13 heat map, contribution
+// model, prediction log). Loaded inside the existing 20 s refresh; the server caches 30 s.
+async function loadPMCommand(force) {
+  if (!force && Date.now() - PM.cmdAt < 15000) return;
+  PM.cmdAt = Date.now();
+  try {
+    const d = await fetch("/api/premarket/command" + (force ? "?force=true" : ""), { screen: "premarket" }).then((r) => r.json());
+    if (!d) return;
+    PM.cmd = d; renderPMCommand(d);
+  } catch { if (!PM.cmd) { const b = pmEl("pm-cmd"); if (b) b.innerHTML = `<div class="pm-na">Command Center unavailable — retrying.</div>`; } }
+}
+function pmT(sec) { return sec ? new Date(sec * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }) : "—"; }
+function pmDirCls(d) { return /BULL|UP|CE/.test(d || "") ? "up" : /BEAR|DOWN|PE/.test(d || "") ? "dn" : "neu"; }
+function pmFresh(v) { const c = v === "FRESH" ? "ok" : v === "MISSING" ? "bad" : /STALE|AFTER/.test(v || "") ? "warn" : "mut"; return `<span class="pm-cc-fr ${c}">${pmEsc(v)}</span>`; }
+function renderPMCommand(d) {
+  const box = pmEl("pm-cmd"); if (!box) return;
+  if (d.error) { box.innerHTML = `<div class="pm-na">${pmEsc(d.error)}</div>`; return; }
+  const a = d.a, p = d.prices, c = d.c, dd = d.d, b = d.b;
+  const phase = d.phase === "OPEN" ? '<span class="pm-cc-pill ok">MARKET OPEN</span>' : d.phase === "PRE_OPEN" ? '<span class="pm-cc-pill warn">PRE-OPEN</span>' : '<span class="pm-cc-pill mut">MARKET CLOSED · last session</span>';
+  const n = (v, dec) => (v == null ? "—" : pmNum(v, dec == null ? 2 : dec));
+  const sg = (v) => (v == null ? "—" : (v > 0 ? "+" : "") + pmNum(v, 1));
+  // prices: every kind labelled with its own time
+  const price = [
+    p.live ? `<span>Live/latest <b>${n(p.live.value)}</b> <i>${pmT(p.live.ts)}</i></span>` : `<span class="bad">No live price</span>`,
+    p.previousClose ? `<span>Previous close <b>${n(p.previousClose.value)}</b></span>` : "",
+    p.lastTraded ? `<span>Last traded <b>${n(p.lastTraded.value)}</b> <i>${pmT(p.lastTraded.ts)}</i></span>` : "",
+    p.officialClose ? `<span>Official close <b>${n(p.officialClose.value)}</b> <i>${pmT(p.officialClose.ts)}</i></span>` : "",
+  ].filter(Boolean).join("");
+  const adj = p.closingAdjustment ? `<div class="pm-cc-note">ⓘ ${pmEsc(p.closingAdjustment.note)}.</div>` : "";
+  // A
+  const pr = a.probabilities, hz = pr.horizons.map((h) => `${h.h}m: n=${h.n}`).join(" · ");
+  const probTile = `<div class="pm-cc-t"><div class="k">Up / Down / Sideways</div><div class="v mut">${pmEsc(pr.status)}</div><div class="s">${pr.model ? `model ${pr.model.up} / ${pr.model.down} / ${pr.model.sideways} · not validated` : "model unavailable"}</div><div class="s">${pmEsc(hz)} scored</div></div>`;
+  const ms = a.moveSize;
+  const moveTile = `<div class="pm-cc-t"><div class="k">Typical move 15 / 30 / 60 min</div><div class="v">${ms ? `±${ms.h15} / ±${ms.h30} / ±${ms.h60}` : "—"}</div><div class="s">${ms ? "VIX-implied 1σ · size only, no direction" : "needs VIX + price"}</div></div>`;
+  const tiles = [
+    `<div class="pm-cc-t"><div class="k">Regime</div><div class="v">${pmEsc(a.regime.label)}</div><div class="s">${pmEsc(a.regime.detail || "")}</div></div>`,
+    `<div class="pm-cc-t"><div class="k">NIFTY bias</div><div class="v ${pmDirCls(a.niftyBias.direction)}">${pmEsc(a.niftyBias.direction)}</div><div class="s">${pmEsc(a.niftyBias.source)}${a.niftyBias.candle ? " · " + pmEsc(a.niftyBias.candle.slice(11)) : ""}</div></div>`,
+    `<div class="pm-cc-t"><div class="k">BANK NIFTY bias</div><div class="v ${pmDirCls(a.bankBias.direction)}">${pmEsc(a.bankBias.direction)}</div><div class="s">${pmEsc(a.bankBias.source)}${a.bankBias.candle ? " · " + pmEsc(a.bankBias.candle.slice(11)) : ""}</div></div>`,
+    probTile, moveTile,
+  ].join("");
+  const scoreTiles = a.scores.map((x) => `<div class="pm-cc-t" title="${pmAttr(x.formula)}"><div class="k">${pmEsc(x.label)}${x.experimental ? ' <span class="pm-cc-exp">EXPERIMENTAL</span>' : ""}</div><div class="v ${x.value == null ? "mut" : pmCls(x.value)}">${x.value == null ? "hidden" : (x.value > 0 ? "+" : "") + x.value + (x.key === "heat" ? "%" : "")}</div><div class="s">${pmEsc(x.value == null ? x.formula : x.inputs)}</div><div class="s dim">${pmEsc(x.formula)}</div></div>`).join("");
+  const fr = Object.entries(a.freshness).map(([k, v]) => `<span>${pmEsc(k)} ${pmFresh(v)}</span>`).join("");
+  // B
+  const li = (arr, cls) => (arr && arr.length ? `<ul>${arr.map((x) => `<li class="${cls || ""}">${pmEsc(x)}</li>`).join("")}</ul>` : `<div class="pm-in-none">None</div>`);
+  // C
+  const lv = (c.levels || []).map((l) => `<tr><td>${pmEsc(l.kind)}</td><td class="num"><b>${n(l.price)}</b></td><td><span class="pm-cc-st ${l.status.toLowerCase()}">${pmEsc(l.status)}</span></td><td class="pm-cc-ev">${pmEsc(l.method)}<br>${pmEsc(l.evidence)} · ${pmT(l.ts)}<br><i>${pmEsc(l.invalidation)}</i></td></tr>`).join("");
+  // D
+  const big = dd.action;
+  const plan = dd.plan && dd.option ? `<div class="pm-cc-plan">
+      <span>Strike <b>${pmEsc(dd.option.strike + " " + dd.option.side)}</b> · ${pmEsc(dd.option.expiry || "")}</span>
+      <span>Entry <b>₹${n(dd.option.entry)}</b> (LTP ₹${n(dd.option.ltp)})</span><span>SL <b class="dn">₹${n(dd.option.stopLoss)}</b></span>
+      <span>T1 <b class="up">₹${n(dd.option.target1)}</b>${dd.option.target2 != null ? ` · T2 ₹${n(dd.option.target2)}` : ""}</span>
+      <span>R:R after costs <b>1:${n(dd.option.netRR ?? dd.option.rr)}</b></span>
+      <span>Spot entry ${n(dd.plan.entry)} · SL ${n(dd.plan.stopLoss)} · T1 ${n(dd.plan.target1)}</span>
+      ${dd.distanceToOpposing ? `<span>Next opposing level <b>${n(dd.distanceToOpposing.level)}</b> (${pmEsc(dd.distanceToOpposing.kind)}, ${dd.distanceToOpposing.points} pts)</span>` : ""}
+    </div>` : "";
+  const cands = (dd.candidates || []).map((x) => `<li>${pmEsc(x.setup)} · ${pmEsc(x.direction)} · ${pmEsc(x.state)}${x.block ? ` — <i>${pmEsc(x.block)}</i>` : ""}</li>`).join("");
+  // contributions
+  const k = d.contributions;
+  const cRows = (rows, cls) => rows.map((r) => `<li><b>${pmEsc(r.symbol)}</b> ${r.pct > 0 ? "+" : ""}${pmNum(r.pct, 2)}% → <span class="${cls}">${r.points > 0 ? "+" : ""}${r.points}</span></li>`).join("");
+  const cBlock = (v) => v ? `<div class="pm-cc-cb"><div class="pm-cc-h">${pmEsc(v.label)} · ${pmT(v.ts)} · ${v.explainedPoints > 0 ? "+" : ""}${v.explainedPoints} pts (${v.covered} stocks)</div>
+      <div class="pm-cc-2"><div><div class="k">Top + contributors</div><ul>${cRows(v.top.filter((r) => r.points > 0), "up")}</ul></div><div><div class="k">Top − contributors</div><ul>${cRows(v.bottom.filter((r) => r.points < 0), "dn")}</ul></div></div></div>` : "";
+  const contrib = !k || !k.available ? `<div class="pm-in-none">Stock contributions hidden: ${pmEsc((k && k.reason) || "unavailable")}</div>`
+    : `${cBlock(k.preopen)}${cBlock(k.session) || (d.phase === "OPEN" ? "" : `<div class="pm-in-none">Session contributions: no in-market reading saved yet today.</div>`)}
+       <div class="pm-cc-note">${pmEsc(k.model.label)} — ${pmEsc(k.model.note)} Validated on ${k.model.validation.sessions} unseen sessions (${pmEsc(k.model.validation.testedFrom)} → ${pmEsc(k.model.validation.testedTo)}): median error ${k.model.validation.intraMedian} pts intraday, ${k.model.validation.gapMedian} pts at the open.</div>`;
+  box.innerHTML = `
+    <div class="pm-cc-hd"><span class="pm-cc-title">Prediction Command Center</span>${phase}<span class="pm-cc-upd">updated ${pmT(d.generatedAt)}${d.cached ? " · cached" : ""}</span></div>
+    <div class="pm-cc-prices">${price}</div>${adj}
+    <div class="pm-cc-grid">${tiles}</div>
+    <div class="pm-cc-grid">${scoreTiles}</div>
+    <div class="pm-cc-fresh">Data: ${fr}</div>
+    <div class="pm-cc-dec ${pmDirCls(big)}"><div class="pm-cc-big">${pmEsc(big)}</div><div><div class="pm-cc-why">${pmEsc(dd.reason || "")}</div><div class="s">Arbiter${dd.candle ? " · " + pmEsc(dd.candle) : ""}${dd.setup ? " · " + pmEsc(dd.setup) : ""}${dd.guard ? ` · <b>guard: ${pmEsc(dd.guard)}</b>` : ""}</div></div></div>
+    ${plan}
+    ${cands ? `<details class="pm-cc-det"><summary>Setups the arbiter evaluated</summary><ul>${cands}</ul></details>` : ""}
+    <div class="pm-cc-2">
+      <div class="pm-cc-box"><div class="pm-cc-h">Why · ${pmEsc(b.why)}</div>
+        <div class="k">Bullish factors</div>${li(b.bullish, "up")}<div class="k">Bearish factors</div>${li(b.bearish, "dn")}
+        <div class="k">Contradictions</div>${li(b.contradictions, "warn")}<div class="k">What would invalidate it</div>${li(b.invalidation)}
+        <div class="pm-cc-note">${pmEsc(b.oiDisclaimer)}</div></div>
+      <div class="pm-cc-box"><div class="pm-cc-h">Critical NIFTY levels · spot ${n(c.spot)} at ${pmT(c.spotTs)}${c.atr ? ` · ATR ${c.atr}` : ""}${c.oi ? ` · OI ${pmEsc(c.oi.expiry || "")} PCR ${c.oi.pcr ?? "—"} max pain ${c.oi.maxPain ?? "—"}` : ""}</div>
+        ${c.note ? `<div class="pm-cc-note warn">${pmEsc(c.note)}</div>` : ""}
+        <div class="pm-scroll"><table class="pm-cc-lv"><thead><tr><th>Level</th><th class="num">Price</th><th>Status</th><th>Method · evidence · invalidation</th></tr></thead><tbody>${lv || '<tr><td colspan="4">No levels — source data unavailable</td></tr>'}</tbody></table></div>
+        <div class="pm-cc-note">An OI level alone never makes a trade: entries come only from the arbiter after a closed 5-minute candle confirms.</div></div>
+    </div>
+    <div class="pm-cc-box"><div class="pm-cc-h">Stock contributions to NIFTY</div>${contrib}</div>
+    <div id="pm-heat"></div>
+    <div class="pm-cc-note">Gates the arbiter enforces: ${pmEsc((dd.gates || []).join(" · "))}. Advisory only — no order is placed.</div>`;
+  if (PM.heat) renderPMHeat(PM.heat);   // the heat map lives inside this section; re-attach after re-render
 }
 
 // ---- 09:13 sector heatmap (inside panel 3). The server takes one snapshot each trading morning at

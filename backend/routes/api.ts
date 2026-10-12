@@ -9880,7 +9880,7 @@ export function startHourlyScheduler() {
     const cur = readContribModel();
     if (contribBusy || (cur && (mins < 16 * 60 || mins > 22 * 60))) return;
     contribBusy = true;
-    try { const m = await refreshContribModel((s, days) => getProvider().getCandles(s, "5m", days) as any); if (m && m !== cur) console.log(`[contrib-model] ${m.version} fitted, validation ${m.validation?.pass ? "PASS" : "FAIL"} (${m.validation?.sessions} sessions)`); }
+    try { const m = await refreshContribModel((s, days) => getProvider().getCandles(s, "5m", days) as any); if (m && (!cur || m.fittedAt !== cur.fittedAt)) console.log(`[contrib-model] ${m.version} fitted, validation ${m.validation?.pass ? "PASS" : "FAIL"} (${m.validation?.sessions} sessions)`); }
     catch (e: any) { console.log("[contrib-model]", e?.message || e); } finally { contribBusy = false; }
   };
   setTimeout(contribTick, 60_000); setInterval(contribTick, 30 * 60_000);
