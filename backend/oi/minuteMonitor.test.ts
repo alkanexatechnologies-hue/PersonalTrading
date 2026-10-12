@@ -170,3 +170,36 @@ test("strike battle: prev + added = total for both sides; winners by fixed ratio
   assert.equal(r350.totalWinner, "PUT"); assert.equal(r350.pcr, 2.1); assert.equal(r350.windowWinner, "PUT"); assert.equal(r350.atm, true);
   assert.equal(bt.totals.ceAdded, 3000); assert.equal(bt.totals.peAdded, 1000);
 });
+
+import { winnerNow, priceContext } from "./minuteMonitor";
+test("winning now: follows price every minute with market-derived bands (support lost on a fall, resistance lost on a rise)", () => {
+  const ctx = { noise1: 8, move5: 40, recentSpots: [] as number[] };   // typical 1-min move 8 pts, 5-min move 40 pts
+  assert.equal(winnerNow(22300, "PUT", 22400, 22410, 0, 500, ctx).side, "BULLS");               // 100 above: holding
+  assert.equal(winnerNow(22300, "PUT", 22330, 22350, 0, 500, ctx).side, "UNDER ATTACK");        // falling, within the 5-min move
+  assert.equal(winnerNow(22300, "PUT", 22295, 22305, 0, 0, ctx).side, "UNDER ATTACK");          // below by less than the 1-min noise
+  const br = winnerNow(22300, "PUT", 22285, 22320, 0, -4000, ctx);
+  assert.equal(br.side, "BEARS"); assert.match(br.label, /SUPPORT BROKEN NOW/); assert.match(br.detail, /breakdown confirmed/);
+  assert.match(winnerNow(22300, "PUT", 22250, 22270, 0, 900, ctx).detail, /may defend/);
+  assert.equal(winnerNow(22400, "CALL", 22300, 22290, 300, 0, ctx).side, "BEARS");
+  assert.equal(winnerNow(22400, "CALL", 22380, 22360, 300, 0, ctx).side, "UNDER ATTACK");
+  const up = winnerNow(22400, "CALL", 22420, 22395, -3000, 0, ctx);
+  assert.equal(up.side, "BULLS"); assert.match(up.label, /RESISTANCE BROKEN NOW/); assert.match(up.detail, /breakout confirmed/);
+  // a fast market gets wider bands from its own moves: the same 15-pt cross is only "under attack"
+  assert.equal(winnerNow(22300, "PUT", 22285, 22320, 0, -4000, { noise1: 25, move5: 90, recentSpots: [] }).side, "UNDER ATTACK");
+  // no history: pure price, no band
+  assert.equal(winnerNow(22300, "PUT", 22299, 22301, 0, 0).side, "BEARS");
+  assert.equal(winnerNow(22400, "BALANCED", 22410, 22395, 0, 0, ctx).side, "BALANCED");
+});
+
+test("whipsaw: crossing a strike back and forth is reported, the side still follows the latest price", () => {
+  const r = winnerNow(22300, "PUT", 22320, 22290, 0, 0, { noise1: 5, move5: 20, recentSpots: [22310, 22290, 22312, 22288, 22320] });
+  assert.equal(r.whipsaw, 4); assert.match(r.label, /WHIPSAW \(crossed 4× in 10 min\)/);
+  assert.equal(r.side, "BULLS");   // latest price is back above the support → follows the market, with the whipsaw warning
+});
+
+test("price context is computed from real 1-min and 5-min spot moves", () => {
+  const s = Array.from({ length: 31 }, (_, i) => snap(T0 + i * 60, () => [10000, 10000], () => [100, 100], 22300 + (i % 2 ? 10 : 0)));
+  const c = priceContext(s);
+  assert.equal(c.noise1, 10); assert.equal(c.move5, 10); assert.equal(c.recentSpots.length, 11);
+  assert.equal(priceContext([s[0]]).noise1, null);
+});

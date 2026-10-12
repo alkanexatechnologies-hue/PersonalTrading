@@ -228,7 +228,7 @@ export function buildView(snaps: MinuteSnap[], opts: { windowMin: number; around
     heat: { side: opts.heatSide || "CE", strikes: heatStrikes, rows: heatmap(hist, opts.heatSide || "CE", heatStrikes, 6) },
     read: marketRead(hist, step),
     battle: atm != null ? strikeBattle(pair, atm, step, 4) : null,
-    battles: atm != null ? [1, 5, 15].map((w) => ({ windowMin: w, ...strikeBattle(pickPrevious(hist, hist.length - 1, w), atm, step, 4) })) : [],
+    battles: atm != null ? (() => { const ctx = priceContext(hist); return [1, 5, 15].map((w) => ({ windowMin: w, ...strikeBattle(pickPrevious(hist, hist.length - 1, w), atm, step, 4, ctx) })); })() : [],
     minutes: snaps.map((s) => s.minute),   // the whole day, so replay can move forward again from any minute
     stats: opts.stats || {},
   };
@@ -346,7 +346,59 @@ export function windowWinner(ceChg: number | null, peChg: number | null): Winner
   if (ceChg > 0 && ceChg >= 1.5 * Math.max(peChg, 0)) return "CALL";
   return "EVEN";
 }
-export function strikeBattle(p: Pair, atm: number, step: number, n = 4) {
+/** Who is winning at a strike right now — OI holder combined with where spot is and where it is going.
+ *  PUT-held strike = support: spot above → BULLS (holding); falling and within 0.3 % → UNDER ATTACK; crossed below in
+ *  this window → BEARS (support broken now); already below → BEARS (below support). CALL-held = resistance, mirrored.
+ *  The holder's OI change in the window tells whether writers are defending (adding) or exiting (covering). */
+export type NowSide = "BULLS" | "BEARS" | "UNDER ATTACK" | "BALANCED" | "NO DATA";
+export interface PriceCtx { noise1: number | null; move5: number | null; recentSpots: number[] }
+/** Market-derived price thresholds (no fixed points or %): median 1-min spot move over the last 15 min and median
+ *  5-min move over the last 30 min, from real snapshots; recent spots (last 10 min) for whipsaw counting. */
+export function priceContext(hist: MinuteSnap[]): PriceCtx {
+  const med = (a: number[]) => { if (!a.length) return null; const b = [...a].sort((x, y) => x - y); return b[Math.floor(b.length / 2)]; };
+  const sp = hist.filter((x) => x.spot != null);
+  const cur = sp[sp.length - 1]; if (!cur) return { noise1: null, move5: null, recentSpots: [] };
+  const d1: number[] = [], d5: number[] = [];
+  for (let i = sp.length - 1; i > 0; i--) {
+    const a = sp[i], b = sp[i - 1];
+    if (cur.captureT - a.captureT > 15 * 60) break;
+    if (a.captureT - b.captureT <= 80) d1.push(Math.abs((a.spot as number) - (b.spot as number)));      // real ~1-min pairs only
+  }
+  for (let i = sp.length - 1; i >= 0; i--) {
+    const a = sp[i]; if (cur.captureT - a.captureT > 30 * 60) break;
+    const b = [...sp].reverse().find((x) => a.captureT - x.captureT >= 270 && a.captureT - x.captureT <= 330);
+    if (b) d5.push(Math.abs((a.spot as number) - (b.spot as number)));
+  }
+  return { noise1: d1.length >= 3 ? med(d1) : null, move5: d5.length >= 3 ? med(d5) : null, recentSpots: sp.filter((x) => cur.captureT - x.captureT <= 10 * 60).map((x) => x.spot as number) };
+}
+export function winnerNow(strike: number, holder: Winner, spotNow: number | null, spotPrev: number | null, ceChg: number | null, peChg: number | null, ctx: PriceCtx = { noise1: null, move5: null, recentSpots: [] }): { side: NowSide; label: string; detail: string; whipsaw: number } {
+  if (spotNow == null) return { whipsaw: 0, side: "NO DATA", label: "—", detail: "spot unavailable" };
+  const falling = spotPrev != null && spotNow < spotPrev, rising = spotPrev != null && spotNow > spotPrev;
+  // thresholds come from the market's own recent movement; with too little history: pure price (buffer 0, no "near")
+  const buf = ctx.noise1 ?? 0, near = ctx.move5 != null && Math.abs(spotNow - strike) <= ctx.move5;
+  let crosses = 0; for (let i = 1; i < ctx.recentSpots.length; i++) if (Math.sign(ctx.recentSpots[i] - strike) !== Math.sign(ctx.recentSpots[i - 1] - strike) && ctx.recentSpots[i] !== strike) crosses++;
+  const ws = crosses >= 2 ? ` · WHIPSAW (crossed ${crosses}× in 10 min)` : "";
+  const f = (v: number | null) => (v == null ? "n/a" : `${v > 0 ? "+" : ""}${v.toLocaleString("en-IN")}`);
+  if (holder === "PUT") {
+    if (spotNow >= strike - buf) {
+      if (spotNow < strike || (falling && near)) return { whipsaw: crosses, side: "UNDER ATTACK", label: "SUPPORT UNDER ATTACK" + ws, detail: `spot falling to ${strike} · put OI ${f(peChg)}${peChg != null && peChg > 0 ? " — writers defending" : peChg != null && peChg < 0 ? " — writers exiting, weak" : ""}` };
+      return { whipsaw: crosses, side: "BULLS", label: "BULLS · SUPPORT HOLDING" + ws, detail: `spot above ${strike} put wall · put OI ${f(peChg)}` };
+    }
+    const now = spotPrev != null && spotPrev >= strike - buf;
+    return { whipsaw: crosses, side: "BEARS", label: (now ? "BEARS · SUPPORT BROKEN NOW" : "BEARS · BELOW SUPPORT") + ws, detail: `spot below ${strike} put wall · put OI ${f(peChg)}${peChg != null && peChg < 0 ? " — put writers covering, breakdown confirmed" : peChg != null && peChg > 0 ? " — put writers still adding, may defend" : ""}` };
+  }
+  if (holder === "CALL") {
+    if (spotNow <= strike + buf) {
+      if (spotNow > strike || (rising && near)) return { whipsaw: crosses, side: "UNDER ATTACK", label: "RESISTANCE UNDER ATTACK" + ws, detail: `spot rising to ${strike} · call OI ${f(ceChg)}${ceChg != null && ceChg > 0 ? " — writers defending" : ceChg != null && ceChg < 0 ? " — writers exiting, weak" : ""}` };
+      return { whipsaw: crosses, side: "BEARS", label: "BEARS · RESISTANCE HOLDING" + ws, detail: `spot below ${strike} call wall · call OI ${f(ceChg)}` };
+    }
+    const now = spotPrev != null && spotPrev <= strike + buf;
+    return { whipsaw: crosses, side: "BULLS", label: (now ? "BULLS · RESISTANCE BROKEN NOW" : "BULLS · ABOVE RESISTANCE") + ws, detail: `spot above ${strike} call wall · call OI ${f(ceChg)}${ceChg != null && ceChg < 0 ? " — call writers covering, breakout confirmed" : ceChg != null && ceChg > 0 ? " — call writers still adding, may defend" : ""}` };
+  }
+  return { whipsaw: crosses, side: holder === "BALANCED" ? "BALANCED" : "NO DATA", label: holder === "BALANCED" ? "BALANCED" : "—", detail: holder === "BALANCED" ? "call and put OI similar — no side holds this strike" : "no OI" };
+}
+
+export function strikeBattle(p: Pair, atm: number, step: number, n = 4, ctx?: PriceCtx) {
   const rows = legChanges(p, { min: atm - n * step, max: atm + n * step });
   const leg = (k: number, side: Side) => rows.find((r) => r.strike === k && r.side === side);
   const out: any[] = [];
@@ -355,11 +407,19 @@ export function strikeBattle(p: Pair, atm: number, step: number, n = 4) {
     const ce = { prev: c?.prevOi ?? null, added: c?.oiChg ?? null, total: c?.curOi ?? null, ltp: c?.curLtp ?? null, ltpChgPct: c?.ltpChgPct ?? null, cls: c?.cls ?? "INCONCLUSIVE", status: c?.status ?? "MISSING" };
     const pe = { prev: q?.prevOi ?? null, added: q?.oiChg ?? null, total: q?.curOi ?? null, ltp: q?.curLtp ?? null, ltpChgPct: q?.ltpChgPct ?? null, cls: q?.cls ?? "INCONCLUSIVE", status: q?.status ?? "MISSING" };
     const tw = totalWinner(ce.total, pe.total);
-    out.push({ strike: k, atm: k === atm, ce, pe, totalWinner: tw.winner, pcr: tw.ratio, windowWinner: windowWinner(ce.added, pe.added) });
+    out.push({ strike: k, atm: k === atm, ce, pe, totalWinner: tw.winner, pcr: tw.ratio, windowWinner: windowWinner(ce.added, pe.added),
+      now: winnerNow(k, tw.winner, p.cur.spot, p.prev?.spot ?? null, ce.added, pe.added, ctx) });
   }
   const sum = (f: (r: any) => number | null) => out.reduce((a, r) => a + (f(r) ?? 0), 0);
   const tot = { cePrev: sum((r) => r.ce.prev), ceAdded: sum((r) => r.ce.added), ceTotal: sum((r) => r.ce.total), pePrev: sum((r) => r.pe.prev), peAdded: sum((r) => r.pe.added), peTotal: sum((r) => r.pe.total) };
   const tw = totalWinner(tot.ceTotal, tot.peTotal);
-  return { from: p.prev?.minute ?? null, to: p.cur.minute, aligned: p.aligned, note: p.note, atm, rows: out, totals: { ...tot, totalWinner: tw.winner, pcr: tw.ratio, windowWinner: windowWinner(tot.ceAdded, tot.peAdded) },
-    rules: "Total OI winner: a side with ≥ 1.2 × the other's OI holds the strike (PUT = support, CALL = resistance). This-window winner: the side adding ≥ 1.5 × the other." };
+  const sp = p.cur.spot;
+  const nearSup = sp == null ? null : out.filter((r) => r.totalWinner === "PUT" && r.strike <= sp).sort((a, b) => b.strike - a.strike)[0] || null;
+  const nearRes = sp == null ? null : out.filter((r) => r.totalWinner === "CALL" && r.strike >= sp).sort((a, b) => a.strike - b.strike)[0] || null;
+  const broken = out.filter((r) => /BROKEN NOW/.test(r.now.label));
+  const verdict = broken.length ? broken.map((r) => `${r.strike}: ${r.now.label}`).join(" · ")
+    : `Spot ${sp != null ? sp.toFixed(2) : "—"} · nearest support ${nearSup ? `${nearSup.strike} (${nearSup.now.side === "UNDER ATTACK" ? "under attack" : "holding"})` : "none held by puts"} · nearest resistance ${nearRes ? `${nearRes.strike} (${nearRes.now.side === "UNDER ATTACK" ? "under attack" : "holding"})` : "none held by calls"}`;
+  return { from: p.prev?.minute ?? null, to: p.cur.minute, aligned: p.aligned, note: p.note, atm, rows: out, spot: sp, spotPrev: p.prev?.spot ?? null, verdict,
+    thresholds: { breakBuffer: ctx?.noise1 ?? null, attackZone: ctx?.move5 ?? null }, totals: { ...tot, totalWinner: tw.winner, pcr: tw.ratio, windowWinner: windowWinner(tot.ceAdded, tot.peAdded) },
+    rules: "Holds the strike: a side with ≥ 1.2 × the other's OI (PUT = support, CALL = resistance). Adding now: the side adding ≥ 1.5 × the other. Winning now: the holder plus price, recomputed every minute — a support is lost to BEARS once spot is below it by more than the market's typical 1-min move, a resistance is lost to BULLS once spot is above it by that much; inside that band, or within the typical 5-min move and heading toward it = UNDER ATTACK. Both bands come from the last 15–30 min of real spot moves." };
 }
