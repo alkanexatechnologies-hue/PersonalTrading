@@ -7465,3 +7465,6 @@ body.lqa-fullwidth .content { padding-left: 0; padding-right: 0; }
 .oimm-wtag{display:inline-block;background:#1d4ed8;color:#fff;border-radius:5px;padding:0 6px;font-size:11px;margin-right:4px}
 @media (min-width:1600px){ .oimm-bat{grid-template-columns:repeat(3,minmax(0,1fr))} .oimm-bblk+.oimm-bblk{border-top:0;padding-top:0;border-left:1px dashed #24314f;padding-left:8px}
   .oimm-bat .oimm-bt{font-size:10.5px} .oimm-bat .oimm-bt td,.oimm-bat .oimm-bt th{padding:2px 3px} .oimm-bat .oimm-win i{display:none} }
+.oimm-chk{display:grid;gap:2px;font-size:11px;color:#cfd8e6;border:1px solid #24314f;border-radius:8px;padding:6px 8px;background:#111a2e}
+.oimm-chk .k{font-size:10px;font-weight:800;text-transform:uppercase;color:#8395b3;display:flex;gap:6px;align-items:center}
+.oimm-chk.up{border-color:#1d6b4b} .oimm-chk.neu{border-color:#6b5520} .oimm-chk.dn{border-color:#7a2633} .oimm-chk .mut{color:#8395b3;font-size:10px}

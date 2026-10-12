@@ -115,6 +115,7 @@ import { notificationStatusLive } from "../integrations/notificationService";
 import { recordConnectionTest, recordConnectionSuccess, getConnectionStatus } from "../data/connectionStatusTracker";
 import { lookupDhanSecurity, lookupDhanOption } from "../data/dhanInstruments";
 import { fnoMovers, indexPivots, runIndicatorCheck, readIndicatorCheck } from "../data/dhanInsights";
+import { reconcileDay, readReconcile, latestReconcile, NSE_FO_SYMBOL } from "../oi/oiReconcile";
 import { snapFromChain, recordSnapshot as recordMinuteSnapshot, loadDay as loadMinuteDay, listDays as listMinuteDays, buildView as buildMinuteView, captureStats as minuteCaptureStats, loadMinuteLog, minuteLogDays, inSession as minuteInSession, istMinute as istMinuteOf, SESSION_FROM as MM_FROM, SESSION_TO as MM_TO } from "../oi/minuteMonitor";
 const MINUTE_MONITOR_SYMBOLS = ["^NSEI", "^NSEBANK", "^CNXFIN"];
 import { dhanCompanyInfo } from "../data/dhanDataApis";
@@ -5855,9 +5856,26 @@ router.get("/oi-monitor", requirePermission("oiAnalysis"), (req: Request, res: R
     const nowMin = istMinuteOf(Math.floor(Date.now() / 1000));
     if (view.available && (!isMarketOpenIST() || !minuteInSession(nowMin))) view.stale = false;   // outside 09:15–15:12 the last minute is final, not stale   // after hours the last minute is the session's last, not stale
     res.json({ ...view, name: def.name, date, today, isToday: date === today, marketOpen: isMarketOpenIST(), days: days.slice(0, 15), expiries,
+      check: (() => { const r = readReconcile(date); const x = r?.indices?.[def.symbol]; return x ? { date: r.date, ...x, note: r.note } : null; })(),
       source: monExp.length ? "monitor" : "minute-log", session: { from: MM_FROM, to: MM_TO, inSession: isMarketOpenIST() && minuteInSession(nowMin) }, collecting: MINUTE_MONITOR_SYMBOLS.includes(def.symbol),
       note: "Display only — OI addition is never called writing on its own; premium and spot must agree. Not used by signals, the arbiter or paper trading." });
   } catch (e: any) { res.json({ available: false, reason: e?.message || "oi-monitor failed" }); }
+});
+
+// Daily OI accuracy check vs NSE's official F&O bhavcopy (run each evening; ?run=true after 18:00 IST, at most once a minute).
+let _reconRunAt = 0;
+async function runOiReconcile(date: string) {
+  const chains: Record<string, any> = {};
+  for (const sym of Object.keys(NSE_FO_SYMBOL)) { const def = findSymbolDef(sym); if (!def) continue; try { chains[sym] = await withDhanPriority("low", () => dhanOiAnalysis(def)); } catch { /* skip index */ } }
+  return reconcileDay(date, chains);
+}
+router.get("/oi-reconcile", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  try {
+    const today = new Date(Date.now() + 19800000).toISOString().slice(0, 10), hm = new Date(Date.now() + 19800000).toISOString().slice(11, 16);
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : today;
+    if (req.query.run === "true" && date === today && hm >= "18:00" && Date.now() - _reconRunAt > 60_000) { _reconRunAt = Date.now(); return res.json(await runOiReconcile(date)); }
+    res.json(readReconcile(date) || latestReconcile() || { available: false, reason: "No check yet — it runs each trading evening after NSE publishes the bhavcopy (about 18:00 IST)." });
+  } catch (e: any) { res.json({ available: false, reason: e?.message || "reconcile failed" }); }
 });
 
 router.get("/oi-analysis/strike-history", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
@@ -9907,6 +9925,13 @@ export function startHourlyScheduler() {
   };
   const scheduleMinute = () => { const ms = 60_000 - (Date.now() % 60_000) + 5_000; setTimeout(() => { minuteTick().finally(scheduleMinute); }, ms); };
   scheduleMinute();
+  // OI accuracy check vs NSE official bhavcopy: trading days 18:15–23:30 IST, once per day (retries every 10 min until published).
+  setInterval(() => {
+    const ist = new Date(Date.now() + 19800000), d = ist.toISOString().slice(0, 10), hm = ist.toISOString().slice(11, 16), wd = ist.getUTCDay();
+    if (wd === 0 || wd === 6 || hm < "18:15" || hm > "23:30" || readReconcile(d)?.available) return;
+    if (!loadMinuteLog(d, "^NSEI").snaps.length && !listMinuteDays("^NSEI").some((x) => x.date === d)) return;   // no session today (holiday)
+    runOiReconcile(d).catch(() => {});
+  }, 10 * 60 * 1000);
   // Indicator cross-check vs Dhan /data/technical (NIFTY 5-min), every 15 min in market hours. Display only.
   setInterval(() => { if (isTradingTimeIST()) runIndicatorCheck().catch(() => {}); }, 15 * 60 * 1000);
 

@@ -103,6 +103,7 @@ function oimRender(d) {
       <div class="oimm-bx"><span>Max pain</span><b>${oimN(d.maxPain)}</b><em></em></div>
     </div>
     <div class="oimm-clock"><span>Dhan fetch <b>${oimT(d.clocks.providerT)}</b></span><span>Captured <b>${oimT(d.clocks.captureT)}</b></span><span>${d.isToday && OIM.mode === "live" ? `age <b class="${d.stale ? "dn" : ""}">${d.clocks.ageSec}s</b>${d.stale ? " STALE" : ""}` : "replay"}</span><span>${d.samples} snapshots since ${oimEsc(d.firstMinute)}</span><span>source <b>${d.source === "minute-log" ? "app minute OI log (to the minute)" : "1-min monitor"}</b></span><span>window <b>${oimEsc((d.session && d.session.from) || "09:15")}–${oimEsc((d.session && d.session.to) || "15:12")}</b>${d.session && !d.session.inSession && d.isToday ? " · outside window — last minute shown" : ""}</span></div>
+    ${oimCheckHtml(d.check, d.date)}
     <div class="oimm-note">${oimEsc(d.clocks.note)}${Object.keys(d.stats || {}).length ? ` Skipped readings: ${Object.entries(d.stats).map(([k, v]) => `${k.toLowerCase().replace(/_/g, " ")} ${v}`).join(", ")}.` : ""}</div>`);
   const legTbl = (side) => {
     const rows = side === "CE" ? d.topCE : d.topPE, nmS = side === "CE" ? "call" : "put";
@@ -249,4 +250,13 @@ function oimBattleHtml(b) {
       <tr><th class="num sep">Previous</th><th class="num">+ Added</th><th class="num">= Total</th><th class="num sep">Previous</th><th class="num">+ Added</th><th class="num">= Total</th></tr></thead>
     <tbody>${rows}${totRow}</tbody></table></div>
     ${b.windowMin === 15 ? `<div class="oimm-note">${oimEsc(b.rules)} PUT holding a strike = support there; CALL holding = resistance. The larger total at each strike is highlighted.</div>` : ""}</div>`;
+}
+
+// Daily accuracy check vs NSE's official end-of-day F&O bhavcopy (runs each trading evening).
+function oimCheckHtml(c, date) {
+  if (!c) return `<div class="oimm-chk"><span class="k">Data check vs NSE official</span><span class="mut">${oimEsc(date)}: runs after NSE publishes the bhavcopy (about 18:00 IST).</span></div>`;
+  const cls = c.status === "GOOD" ? "up" : c.status === "FAIR" ? "neu" : "dn";
+  return `<div class="oimm-chk ${cls}" title="${oimEsc(c.note || "")}"><span class="k">Data check vs NSE official · ${oimEsc(c.date)} <b class="oimm-win ${cls}">${oimEsc(c.status)}</b></span>
+    <span>Premiums exact <b>${c.ltpOk}/${c.n}</b> · OI median gap <b>${c.median}%</b>${c.nearMedian != null ? ` (near spot <b>${c.nearMedian}%</b>, max ${c.nearMax}%)` : ""} · <b>${c.within5}/${c.n}</b> legs within 5%</span>
+    <span class="mut">Intraday OI is the exchange's live broadcast; NSE's final OI is reconciled after the close.${c.worst && c.worst[0] ? ` Largest gap ${oimEsc(c.worst[0].key)} ${c.worst[0].oiDiffPct}%.` : ""}</span></div>`;
 }
