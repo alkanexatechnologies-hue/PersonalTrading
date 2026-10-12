@@ -184,3 +184,13 @@ test("levels in price sequence: highest first, same price merged, spot inserted 
   assert.equal(seq[1].distance, 136.7); assert.equal(seq[1].side, "resistance"); assert.equal(seq[3].side, "support");
   assert.equal(levelSequence([L("x", 1)], null).length, 1);
 });
+
+import { wallStrength } from "./commandCenter";
+test("CONFIRMED after two closes beyond; wall strength relative to the median", () => {
+  const t0 = ist(10, 0);
+  assert.equal(levelStatus(22400, "below", [bar(t0, 22380, 22390, 22370, 22385), bar(t0 + 300, 22390, 22410, 22388, 22405), bar(t0 + 600, 22405, 22420, 22400, 22415)], 20), "CONFIRMED");
+  assert.equal(wallStrength(20, [5, 10, 10, 20]), "Strong"); assert.equal(wallStrength(12, [5, 10, 10, 20]), "Moderate"); assert.equal(wallStrength(5, [5, 10, 10, 20]), "Weak");
+  const { levels } = buildLevels(base(), 22380);
+  assert.ok(levels.filter((l) => /OI/.test(l.method)).every((l) => l.strength));
+  assert.equal(levels.find((l) => l.kind === "Day high")!.strength, "Session");
+});

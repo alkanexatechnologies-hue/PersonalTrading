@@ -106,9 +106,11 @@ export function evaluateInputs(d: InputData): MarketInput[] {
     const ceExc = (ceChg - ceExp) / atm.cePrevClose, peExc = (peChg - peExp) / atm.pePrevClose;
     const spike = ceExc > 0.15 && peExc > 0.15 ? "Both sides (IV)" : ceExc > 0.15 ? "CE spike (IV)" : peExc > 0.15 ? "PE spike (IV)" : "No spike";
     add({ key: "spike", label: "Option premium spike", value: spike, status: age(d.oi!.asOf, now, 300), impact: spike === "No spike" ? "Neutral" : "Caution", reason: `ATM ${atm.strike}: CE ${sgn((ceChg / atm.cePrevClose) * 100, 1)}%, PE ${sgn((peChg / atm.pePrevClose) * 100, 1)}% vs previous close; spike = rise beyond what delta × spot move explains by > 15 %`, ts: d.oi!.asOf, source: "Dhan option chain" });
+  } else missing("spike", "Option premium spike", "Dhan option chain", "ATM previous closes unavailable");
+  if (atm && atm.ceLtp && atm.peLtp) {
     const rel = (atm.ceLtp - atm.peLtp) / ((atm.ceLtp + atm.peLtp) / 2);
     add({ key: "atm", label: "ATM CE vs PE premium", value: `CE ₹${fmt(atm.ceLtp)} vs PE ₹${fmt(atm.peLtp)}`, status: age(d.oi!.asOf, now, 300), impact: rel > 0.1 ? "Positive" : rel < -0.1 ? "Negative" : "Neutral", reason: `${atm.strike}: CE ${rel >= 0 ? "richer" : "cheaper"} than PE by ${fmt(Math.abs(rel) * 100, 0)} % (±10 % = neutral)`, ts: d.oi!.asOf, source: "Dhan option chain" });
-  } else { missing("spike", "Option premium spike", "Dhan option chain", "ATM prices or previous closes unavailable"); missing("atm", "ATM CE vs PE premium", "Dhan option chain", "ATM prices unavailable"); }
+  } else missing("atm", "ATM CE vs PE premium", "Dhan option chain", "ATM prices unavailable");
   // 9–10 trend
   const t5 = tfDirection(d.c5, now, 300), t15 = tfDirection(d.c15, now, 900), t60 = tfDirection(d.c60, now, 3600);
   const tfs = [t5, t15, t60];
@@ -161,14 +163,14 @@ export function simulate(inputs: MarketInput[], overrides: Record<string, Impact
 
 // ---- 09:25 snapshot (immutable) + revisions ----
 const DIR = path.join(DATA_DIR, "sentiment", "inputs");
-export interface DayRecord { date: string; snapshot: { at: number; inputs: MarketInput[]; tally: ReturnType<typeof tally> } | null; revisions: { at: number; trigger: string; changes: { key: string; from: string; to: string }[]; tally: ReturnType<typeof tally> }[] }
+export interface DayRecord { date: string; snapshot: { at: number; inputs: MarketInput[]; tally: ReturnType<typeof tally>; features?: unknown } | null; revisions: { at: number; trigger: string; changes: { key: string; from: string; to: string }[]; tally: ReturnType<typeof tally> }[] }
 const file = (d: string) => path.join(DIR, `${d}.json`);
 export function readDay(d: string): DayRecord { try { return JSON.parse(fs.readFileSync(file(d), "utf-8")); } catch { return { date: d, snapshot: null, revisions: [] }; } }
 function writeDay(r: DayRecord) { try { fs.mkdirSync(DIR, { recursive: true }); fs.writeFileSync(file(r.date), JSON.stringify(r)); } catch { /* best-effort */ } }
 /** Stores the 09:25 snapshot once; returns false if one already exists (never overwritten). */
-export function saveSnapshot(date: string, at: number, inputs: MarketInput[]): boolean {
+export function saveSnapshot(date: string, at: number, inputs: MarketInput[], features?: unknown): boolean {
   const r = readDay(date); if (r.snapshot) return false;
-  r.snapshot = { at, inputs, tally: tally(inputs) }; writeDay(r); return true;
+  r.snapshot = { at, inputs, tally: tally(inputs), features }; writeDay(r); return true;
 }
 /** Records a revision when any input's impact or status changed versus the latest known state. */
 export function recordRevision(date: string, at: number, inputs: MarketInput[], trigger: string): boolean {

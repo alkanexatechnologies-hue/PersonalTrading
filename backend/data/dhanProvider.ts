@@ -404,6 +404,7 @@ export async function dhanChainForExpiry(def: SymbolDef, expiryOffset = 0): Prom
         // against the instrument master and compute a real day change.
         ceSecId: ce.security_id != null ? String(ce.security_id) : null, peSecId: pe.security_id != null ? String(pe.security_id) : null,
         cePrevClose: ltpOrNull(ce.previous_close_price), pePrevClose: ltpOrNull(pe.previous_close_price),
+        ceBid: ltpOrNull(ce.top_bid_price), ceAsk: ltpOrNull(ce.top_ask_price), peBid: ltpOrNull(pe.top_bid_price), peAsk: ltpOrNull(pe.top_ask_price),
       };
     }).filter((s: any) => s.strike > 0).sort((a: any, b: any) => a.strike - b.strike);
 
@@ -520,6 +521,9 @@ export async function dhanOiAnalysis(def: SymbolDef, indexSpot?: number | null):
       peGamma: s.peGamma ?? null,
       ceVega: s.ceVega ?? null,
       peVega: s.peVega ?? null,
+      cePrevClose: s.cePrevClose ?? null,
+      pePrevClose: s.pePrevClose ?? null,
+      ceBid: s.ceBid ?? null, ceAsk: s.ceAsk ?? null, peBid: s.peBid ?? null, peAsk: s.peAsk ?? null,
     }));
 
     if (!all.length) return fail("Empty option chain.");

@@ -43,6 +43,7 @@ export interface CCInputs {
   model: ModelFile | null;
   liveMoves: { moves: Record<string, number | null>; ts: number } | null;   // NIFTY constituents % vs prev close
   sparks?: Record<string, number[]>;                // today's 5-min closes per strip index (display only)
+  extras?: Record<string, unknown>;                 // inputs / premium / strikes / news / similar sessions (built by the route)
 }
 
 // ---------------- price kinds ----------------
@@ -67,11 +68,12 @@ export function atr14(bars: Bar[]): number | null {
   const tr = bars.slice(1).map((b, i) => Math.max(b.high - b.low, Math.abs(b.high - bars[i].close), Math.abs(b.low - bars[i].close)));
   const last = tr.slice(-14); return last.reduce((a, b) => a + b, 0) / last.length;
 }
-export type LevelStatus = "FAR" | "APPROACHING" | "BREAKING" | "RECLAIMING" | "REJECTING";
+export type LevelStatus = "FAR" | "APPROACHING" | "BREAKING" | "CONFIRMED" | "RECLAIMING" | "REJECTING";
 /** side = which side of the level price sits on when the level is "intact" ("below" for resistance). */
 export function levelStatus(level: number, side: "below" | "above", closed: Bar[], atr: number | null): LevelStatus {
-  const b = closed[closed.length - 1], p = closed[closed.length - 2]; if (!b) return "FAR";
+  const b = closed[closed.length - 1], p = closed[closed.length - 2], pp = closed[closed.length - 3]; if (!b) return "FAR";
   const beyond = (x: number) => (side === "below" ? x > level : x < level);
+  if (p && beyond(b.close) && beyond(p.close) && (!pp || !beyond(pp.close))) return "CONFIRMED";   // two closes beyond
   const wick = side === "below" ? b.high >= level : b.low <= level;
   if (beyond(b.close) && (!p || !beyond(p.close))) return "BREAKING";
   if (!beyond(b.close) && p && beyond(p.close)) return "RECLAIMING";
@@ -80,7 +82,12 @@ export function levelStatus(level: number, side: "below" | "above", closed: Bar[
   return "FAR";
 }
 
-export interface Level { kind: string; price: number; method: string; evidence: string; invalidation: string; ts: number | null; status: LevelStatus }
+export interface Level { kind: string; price: number; method: string; evidence: string; invalidation: string; ts: number | null; status: LevelStatus; strength?: "Strong" | "Moderate" | "Weak" | "Session" }
+/** OI wall strength relative to the median OI of the strikes considered. */
+export function wallStrength(oi: number, peers: number[]): "Strong" | "Moderate" | "Weak" {
+  const s = [...peers].sort((a, b) => a - b), med = s.length ? s[Math.floor(s.length / 2)] : 0;
+  return med <= 0 ? "Moderate" : oi >= 2 * med ? "Strong" : oi >= 1.2 * med ? "Moderate" : "Weak";
+}
 export function buildLevels(inp: CCInputs, spot: number | null): { levels: Level[]; atr: number | null; note: string | null } {
   const closed = inp.candles5.filter((b) => b.time + 300 <= inp.nowSec && istDay(b.time) === istDay(inp.nowSec) && istHm(b.time) <= "15:20");
   const atr = atr14(inp.candles5.filter((b) => b.time + 300 <= inp.nowSec));
@@ -113,11 +120,15 @@ export function buildLevels(inp: CCInputs, spot: number | null): { levels: Level
       lv.push({ kind: "Reversal-up zone", price: peWall.strike, method: "Reclaim of the largest put-OI strike after a break below it", evidence: `PE OI ${L(peWall.peOi)}`, invalidation: `Void while 5-min closes stay below ${peWall.strike}`, ts, status: levelStatus(peWall.strike, "above", closed, atr) });
     }
   }
+  if (o && o.strikes.length) {
+    const ce = o.strikes.map((x) => x.ceOi), pe = o.strikes.map((x) => x.peOi);
+    for (const l of lv) { const s = o.strikes.find((x) => x.strike === l.price); if (s) l.strength = /resistance|breakout|reversal-down/i.test(l.kind) ? wallStrength(s.ceOi, ce) : wallStrength(s.peOi, pe); }
+  }
   const today = inp.candles5.filter((b) => istDay(b.time) === istDay(inp.nowSec) && b.time + 300 <= inp.nowSec);
   if (today.length) {
     const hi = Math.max(...today.map((b) => b.high)), lo = Math.min(...today.map((b) => b.low)), t = today[today.length - 1].time + 300;
-    lv.push({ kind: "Day high", price: r2(hi), method: "Highest traded value of today's closed 5-min bars", evidence: `${today.length} bars`, invalidation: "—", ts: t, status: levelStatus(hi, "below", closed, atr) });
-    lv.push({ kind: "Day low", price: r2(lo), method: "Lowest traded value of today's closed 5-min bars", evidence: `${today.length} bars`, invalidation: "—", ts: t, status: levelStatus(lo, "above", closed, atr) });
+    lv.push({ kind: "Day high", price: r2(hi), method: "Highest traded value of today's closed 5-min bars", evidence: `${today.length} bars`, invalidation: "—", ts: t, status: levelStatus(hi, "below", closed, atr), strength: "Session" });
+    lv.push({ kind: "Day low", price: r2(lo), method: "Lowest traded value of today's closed 5-min bars", evidence: `${today.length} bars`, invalidation: "—", ts: t, status: levelStatus(lo, "above", closed, atr), strength: "Session" });
   }
   const afterHours = !!(o && o.asOf != null && inp.phase === "CLOSED" && (() => { const d = new Date((o.asOf! + 19800) * 1000); const m = d.getUTCHours() * 60 + d.getUTCMinutes(); return m >= 15 * 60 + 30 || m < 9 * 60; })());
   const note = !o ? "Option chain unavailable — OI levels not shown"
@@ -127,14 +138,14 @@ export function buildLevels(inp: CCInputs, spot: number | null): { levels: Level
 }
 
 /** Levels in price order (highest first), same-price levels merged, spot inserted in place. */
-export interface SeqRow { spot?: true; price: number; kinds: string[]; status?: LevelStatus; evidence?: string; methods?: string[]; side?: "resistance" | "support"; distance?: number }
+export interface SeqRow { spot?: true; price: number; kinds: string[]; status?: LevelStatus; strength?: string; evidence?: string; methods?: string[]; side?: "resistance" | "support"; distance?: number }
 export function levelSequence(levels: Level[], spot: number | null): SeqRow[] {
   const merged: SeqRow[] = [];
   for (const l of [...levels].sort((a, b) => b.price - a.price)) {
     const m = merged.find((x) => Math.abs(x.price - l.price) < 0.01);
     const kind = l.kind.replace(" zone", "");
     if (m) { m.kinds.push(kind); m.methods!.push(`${l.method} · ${l.invalidation}`); continue; }
-    merged.push({ price: l.price, kinds: [kind], status: l.status, evidence: l.evidence, methods: [`${l.method} · ${l.invalidation}`],
+    merged.push({ price: l.price, kinds: [kind], status: l.status, strength: l.strength, evidence: l.evidence, methods: [`${l.method} · ${l.invalidation}`],
       side: spot != null && l.price > spot ? "resistance" : "support", distance: spot != null ? r1(l.price - spot) : undefined });
   }
   if (spot == null) return merged;
@@ -286,12 +297,14 @@ export function buildCommandCenter(inp: CCInputs) {
       plan: dec.decision && (dec.decision.finalAction === "BUY_CE" || dec.decision.finalAction === "BUY_PE" || dec.decision.finalAction === "HOLD") ? dec.decision.plan : null,
       option: dec.decision && (dec.decision.finalAction === "BUY_CE" || dec.decision.finalAction === "BUY_PE" || dec.decision.finalAction === "HOLD") ? dec.decision.option : null,
       evidence: dec.decision?.evidence?.note || null,
+      evidenceStatus: dec.decision?.evidence ? { samples: (dec.decision.evidence as any).samples ?? null, netEvR: (dec.decision.evidence as any).netEvR ?? null, passes: (dec.decision.evidence as any).passes ?? null, label: `Backtest evidence for ${dec.decision.setupLabel || "the setup"}: ${(dec.decision.evidence as any).netEvR != null ? ((dec.decision.evidence as any).netEvR > 0 ? "+" : "") + (dec.decision.evidence as any).netEvR + "R per trade after costs" : "—"} (n=${(dec.decision.evidence as any).samples ?? "?"}) — not a win probability` } : null,
       candidates: (dec.decision?.candidates || []).map((c) => ({ setup: c.label, direction: c.direction, state: c.state, block: c.blockReason, evidence: c.evidence })),
       distanceToOpposing: dec.distanceToOpposing,
-      gates: ["Closed 5-min candle only", "S1 no new entries after 14:00", "Option R:R ≥ 2 after costs", "Paper: 1 % capital risk/trade, one open index-options trade, 15-min cooldown after a stop-out"],
+      gates: ["Closed 5-min candle only", "S1 no new entries after 14:00", "Option R:R ≥ 2 after costs", "Paper: 1 % capital risk / trade", "One open index-options trade", "15-min cooldown after a stop-out"],
     },
     contributions: contrib,
     sparks: inp.sparks || {},
+    x: inp.extras || {},
     heat: inp.heat ? { date: inp.heat.date, takenAt: inp.heat.takenAt, refilledAt: inp.heat.refilledAt ?? null, status: inp.heat.status, sectors: inp.heat.sectors.map((s) => ({ name: s.name, avg: s.avg, adv: s.adv, dec: s.dec, n: s.n })) } : null,
   };
 }

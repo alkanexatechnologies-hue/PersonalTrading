@@ -551,6 +551,11 @@ export interface OiStrike {
   peGamma?: number | null;
   ceVega?: number | null;
   peVega?: number | null;
+  // Previous session's closing premium (Dhan chain previous_close_price) — for day change / spike checks.
+  cePrevClose?: number | null;
+  pePrevClose?: number | null;
+  // Best bid / ask (Dhan chain top_bid_price / top_ask_price) — for spread.
+  ceBid?: number | null; ceAsk?: number | null; peBid?: number | null; peAsk?: number | null;
 }
 
 export interface OiAnalysis {

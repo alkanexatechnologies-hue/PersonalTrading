@@ -202,6 +202,11 @@ import { commandRoute, type CCInputs } from "../sentiment/commandCenter";
 import { DATA_DIR } from "../config/dataDir";
 import { readModel as readContribModel, refreshModelIfDue as refreshContribModel } from "../sentiment/niftyWeights";
 import { logPrediction, resolveDay as resolvePredictionDay, report as predictionReport, argmaxClass, type PredictionRecord } from "../sentiment/predictionLog";
+import { evaluateInputs, saveSnapshot as saveInputSnapshot, recordRevision as recordInputRevision, readDay as readInputDay, simulate as simulateInputs, CRUDE_THRESHOLD_INR, type InputData, type Impact } from "../sentiment/marketInputs";
+import { findSimilar, readLibrary, saveLibrary, buildLibrary, buildHistory, topByCoef, IT_NAMES, BANK_NAMES, type Features } from "../sentiment/similarScenarios";
+import { premiumAnalysis, strikeComparison } from "../sentiment/optionPremium";
+import { newsRows, newsTabs, newMajor } from "../sentiment/newsImpact";
+import { mcxCrudeLive, giftOvernightLive } from "../sentiment/dhanMarketExtras";
 import { refillSnapshot as refillHeatSnapshot, takeSnapshot as takeHeatSnapshot, saveSnapshot as saveHeatSnapshot, readSnapshot as readHeatSnapshot, latestSnapshot as latestHeatSnapshot } from "../sentiment/sectorHeatmap";
 import { buildPremarketOverview } from "../sentiment/overview";
 import { todaySnapshots } from "../sentiment/snapshotStore";
@@ -8286,7 +8291,91 @@ async function stripSparks(): Promise<Record<string, number[]>> {
   _sparks = { at: Date.now(), v };
   return v;
 }
-router.get("/premarket/command", commandRoute(gatherCommandInputs, 30_000));
+// ---- Market Input Selection / similar sessions / premiums / strikes / news (built from the same caches) ----
+let _mcx: { at: number; v: any } | null = null, _gift: { at: number; v: any } | null = null;
+async function cachedMcx() { if (!_mcx || Date.now() - _mcx.at > 60_000) _mcx = { at: Date.now(), v: await mcxCrudeLive().catch(() => null) }; return _mcx.v; }
+async function cachedGift() { if (!_gift || Date.now() - _gift.at > 600_000) _gift = { at: Date.now(), v: await giftOvernightLive().catch(() => null) }; return _gift.v; }
+async function gatherInputData(base: CCInputs, ov: any, oiAny: any, intel: any): Promise<InputData> {
+  const coefs = base.model?.coefs || {};
+  const pick = (names: string[]) => topByCoef(names, coefs).map((s) => ({ s, pct: base.liveMoves?.moves[s] ?? null, coef: coefs[s] || 0 }));
+  const [c15, c60, crude, gift] = await Promise.all([
+    getCandlesCached("^NSEI", "15m").catch(() => []), getCandlesCached("^NSEI", "60m").catch(() => []), cachedMcx(), cachedGift(),
+  ]);
+  const fii = ov?.fii, dii = (fii?.participants || []).find((x: any) => x.type === "DII");
+  const fresh3h = (intel?.categories || []).flatMap((c: any) => c.items || []).filter((i: any) => i.ageH != null && i.ageH <= 3);
+  return {
+    nowSec: base.nowSec, crude,
+    itMoves: base.liveMoves ? pick(IT_NAMES) : null, bankMoves: base.liveMoves ? pick(BANK_NAMES) : null, movesTs: base.liveMoves?.ts ?? null,
+    oi: oiAny && oiAny.available ? { asOf: oiAny.asOf ?? null, spot: oiAny.underlying, strikes: oiAny.topStrikes || [] } : null,
+    spotPrevClose: base.nifty.prevClose,
+    c5: base.candles5 as any, c15: (c15 as any[]) || [], c60: (c60 as any[]) || [],
+    fii: fii && fii.available ? { asOf: fii.asOf ?? null, netChange: fii.rows?.[0]?.dailyChange ?? null, longPct: fii.rows?.[0]?.longPct ?? null, diiNet: dii ? dii.net : null } : null,
+    gift,
+    news: intel ? { positive: fresh3h.filter((i: any) => i.dir > 0).length, negative: fresh3h.filter((i: any) => i.dir < 0).length, ts: intel.asOf ?? null } : null,
+  };
+}
+/** Today's similar-session features from live data (same definitions as the library). */
+function todayFeatures(base: CCInputs, inputs: ReturnType<typeof evaluateInputs>, data: InputData, vixPct: number | null): Features {
+  const today = istDateStr(), day = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(0, 10), hm = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(11, 16);
+  const b1 = base.candles5.find((b) => day(b.time) === today && hm(b.time) === "09:15"), b2 = base.candles5.find((b) => day(b.time) === today && hm(b.time) === "09:20");
+  const pc = base.nifty.prevClose, w = (rows: any[] | null) => { const v = (rows || []).filter((r) => r.pct != null); const s = v.reduce((a, r) => a + r.coef, 0); return s ? Math.round((v.reduce((a, r) => a + r.coef * r.pct, 0) / s) * 100) / 100 : null; };
+  return { gapPct: pc && b1 ? Math.round((b1.open / pc - 1) * 10000) / 100 : null, first2: b1 && b2 ? `${b1.close >= b1.open ? "G" : "R"}${b2.close >= b2.open ? "G" : "R"}` : null,
+    move925Pct: b1 && b2 ? Math.round((b2.close / b1.open - 1) * 10000) / 100 : null, itPct: w(data.itMoves), bankPct: w(data.bankMoves),
+    crude: data.crude?.value ?? null, giftNightPct: data.gift?.nightPct ?? null, vixPct, fiiNet: data.fii?.netChange ?? null };
+}
+async function gatherCommandAll(): Promise<CCInputs> {
+  const base = await gatherCommandInputs();
+  try {
+    const ov: any = _cache.get("premarket:overview")?.v || null;
+    const oiAny: any = await getOiCached(findSymbolDef("^NSEI")!).catch(() => null);
+    const intel = await getNewsIntel().catch(() => null);
+    const data = await gatherInputData(base, ov, oiAny, intel);
+    const inputs = evaluateInputs(data);
+    const day = readInputDay(istDateStr());
+    const vq = (ov?.strip || []).find((q: any) => q.key === "INDIA VIX");
+    const lib = readLibrary();
+    const feats = (day.snapshot?.features as Features | undefined) || null;
+    const similar = lib ? (feats ? { ...findSimilar(feats, istDateStr(), lib.rows), validation: lib.validation, from: "09:25 snapshot" } : { available: false, reason: "Matched after the 09:25 snapshot", validation: lib.validation }) : { available: false, reason: "History library not built yet (builds after the close)" };
+    const spot = oiAny?.underlying ?? base.nifty.live;
+    const d: any = base.decision;
+    const side = d?.finalAction === "BUY_CE" ? "CE" : d?.finalAction === "BUY_PE" ? "PE" : d?.direction === "BULLISH" ? "CE" : d?.direction === "BEARISH" ? "PE" : null;
+    const traded = d?.finalAction === "BUY_CE" || d?.finalAction === "BUY_PE";
+    const rows = newsRows(intel);
+    base.extras = {
+      crudeRule: `₹${CRUDE_THRESHOLD_INR.toLocaleString("en-IN")} per barrel on Dhan MCX CRUDEOIL (≈ $101; MCX follows WTI)`,
+      inputs: { current: inputs, snapshot: day.snapshot, revisions: day.revisions.map((r: any) => ({ at: r.at, trigger: r.trigger, changes: r.changes, tally: r.tally })) },
+      premium: oiAny?.available && spot ? premiumAnalysis(oiAny.topStrikes || [], spot, base.nifty.prevClose) : null,
+      strikes: side && oiAny?.available ? { side, reference: !traded, note: traded ? "Arbiter trade — its strike is SELECTED" : "Reference only — the arbiter has no trade now", rows: strikeComparison(oiAny.topStrikes || [], spot, side, traded ? d.plan : null, traded ? d.option?.strike ?? null : null, d?.option?.costPerUnit ?? 2.73) } : null,
+      news: { rows: rows.slice(0, 12), tabs: newsTabs(rows), window: "last 3 hours (headlines without a publish time are excluded)" },
+      similar,
+      vixPct: vq?.changePct ?? null,
+    };
+  } catch (e: any) { base.extras = { error: `Extras unavailable: ${e?.message || e}` }; }
+  return base;
+}
+router.get("/premarket/command", commandRoute(gatherCommandAll, 30_000));
+// What-if scenario: overrides { key: impact } on a COPY of the 09:25 inputs (or current ones before
+// 09:25). Marked SIMULATED; the stored snapshot is never changed.
+router.post("/premarket/scenario", async (req: Request, res: Response) => {
+  try {
+    const overrides = (req.body && req.body.overrides) || {};
+    const ok = ["Positive", "Negative", "Mixed", "Neutral", "Caution"];
+    const clean: Record<string, Impact> = {}; for (const [k, v] of Object.entries(overrides)) if (ok.includes(String(v))) clean[k] = v as Impact;
+    const day = readInputDay(istDateStr());
+    let base = day.snapshot?.inputs || null;
+    if (!base) { const all = await gatherCommandAll(); base = (all.extras as any)?.inputs?.current || []; }
+    const sim = simulateInputs(base!, clean);
+    const lib = readLibrary(), f = day.snapshot?.features as Features | undefined;
+    let similar: any = null;
+    if (lib && f) {
+      const g = { ...f }; const set = (k: string, pos: number, neg: number, fld: keyof Features) => { if (clean[k] === "Positive") (g as any)[fld] = pos; else if (clean[k] === "Negative") (g as any)[fld] = neg; };
+      set("crude", CRUDE_THRESHOLD_INR - 500, CRUDE_THRESHOLD_INR + 500, "crude"); set("it", 0.5, -0.5, "itPct"); set("bank", 0.5, -0.5, "bankPct"); set("global", 0.5, -0.5, "giftNightPct"); set("fii", 10000, -10000, "fiiNet");
+      if (clean.first2 === "Positive") g.first2 = "GG"; else if (clean.first2 === "Negative") g.first2 = "RR";
+      similar = findSimilar(g, istDateStr(), lib.rows);
+    }
+    res.json({ ...sim, base: day.snapshot ? "09:25 snapshot" : "current inputs (no snapshot yet)", similar });
+  } catch (e: any) { res.json({ error: e?.message || "scenario failed" }); }
+});
 
 // Market Sentiment Brief for the Market Command strip — CONTEXT ONLY (never read by
 // the arbiter or the paper engine). Global/oil/FX come from the external provider
@@ -9884,6 +9973,41 @@ export function startHourlyScheduler() {
       resolvePredictionDay(istDateStr(), c5.map((b) => ({ time: b.time, close: b.close })), nowSec);
     } catch (e: any) { console.log("[prediction-log]", e?.message || e); } finally { predBusy = false; }
   }, 30 * 1000);
+
+  // MARKET INPUTS: immutable 09:25 snapshot (09:25:30–09:40 window) + revisions on each closed 5-min
+  // candle (09:30–15:20) and on new major headlines. Library of similar sessions rebuilt after the close.
+  let inBusy = false, inLastT = 0; const seenNews = new Set<string>();
+  setInterval(async () => {
+    const ist = new Date(Date.now() + 19800_000), wd = ist.getUTCDay(), sec = ist.getUTCHours() * 3600 + ist.getUTCMinutes() * 60 + ist.getUTCSeconds();
+    if (inBusy || wd === 0 || wd === 6 || sec < 9 * 3600 + 25 * 60 + 30 || sec > 15 * 3600 + 25 * 60) return;
+    inBusy = true;
+    try {
+      const date = istDateStr(), all = await gatherCommandAll(), x: any = all.extras || {};
+      const inputs = x.inputs?.current; if (!inputs) return;
+      const day = readInputDay(date);
+      if (!day.snapshot && sec <= 9 * 3600 + 40 * 60) {
+        const data = await gatherInputData(all, _cache.get("premarket:overview")?.v, await getOiCached(findSymbolDef("^NSEI")!).catch(() => null), await getNewsIntel().catch(() => null));
+        if (saveInputSnapshot(date, Math.floor(Date.now() / 1000), inputs, todayFeatures(all, inputs, data, x.vixPct ?? null))) console.log(`[inputs] ${date} 09:25 snapshot saved`);
+        (x.news?.rows || []).forEach((r: any) => seenNews.add(r.id));
+        return;
+      }
+      if (!day.snapshot) return;
+      const lastBar = all.candles5.filter((b) => b.time + 300 <= all.nowSec).pop();
+      if (lastBar && lastBar.time !== inLastT) { inLastT = lastBar.time; recordInputRevision(date, all.nowSec, inputs, "5-min re-evaluation"); }
+      for (const n of newMajor(x.news?.rows || [], seenNews)) { seenNews.add(n.id); recordInputRevision(date, all.nowSec, inputs, `major news: ${n.headline.slice(0, 120)}`); }
+    } catch (e: any) { console.log("[inputs]", e?.message || e); } finally { inBusy = false; }
+  }, 30 * 1000);
+  let libBusy = false;
+  const libTick = async () => {
+    const ist = new Date(Date.now() + 19800_000), mins = ist.getUTCHours() * 60 + ist.getUTCMinutes(), today = istDateStr();
+    const lib = readLibrary(), builtDay = lib ? new Date((lib.builtAt + 19800) * 1000).toISOString().slice(0, 10) : null;
+    if (libBusy || (lib && (builtDay === today || mins < 16 * 60 + 30 || mins > 23 * 60))) return;
+    const model = readContribModel(); if (!model) return;
+    libBusy = true;
+    try { const h = await buildHistory((s, d) => getProvider().getCandles(s, "5m", d) as any, model.coefs, 365); const f = saveLibrary(buildLibrary(h)); console.log(`[scenarios] library ${f.rows.length} sessions · ${f.validation.note}`); }
+    catch (e: any) { console.log("[scenarios]", e?.message || e); } finally { libBusy = false; }
+  };
+  setTimeout(libTick, 180_000); setInterval(libTick, 30 * 60_000);
 
   // CONTRIBUTION MODEL: weekly refit + walk-forward validation, after the close (or at boot when missing).
   let contribBusy = false;
