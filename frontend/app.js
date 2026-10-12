@@ -6349,7 +6349,8 @@ function initTradeExec() {
     const bs = tp.bestSetup || {};
     const f = d.confirmationFlow || {};
     const snap = d.snapshot || {};
-    const expiry = d.expiry || (d.oi && d.oi.expiry) || (d.optionMatrix && d.optionMatrix.expiry) || null;
+    // The arbiter's own contract when its plan is shown (it can pick the next expiry near expiry day).
+    const expiry = (tp.bestSetup && tp.bestSetup.expiry) || d.expiry || (d.oi && d.oi.expiry) || (d.optionMatrix && d.optionMatrix.expiry) || null;
     const body = {
       symbol: TE.sym, type, strike, expiry,
       entry: bs.entryPremium ?? null, sl: bs.stopPremium ?? null, target: bs.targetPremium ?? null,
@@ -7068,15 +7069,18 @@ function renderTEPlan(d) {
     line("SL", bs.stopPremium != null ? "₹" + teNum(bs.stopPremium, 2) : (tp.stopLoss != null ? teNum(tp.stopLoss, 2) : "—"), "te-down") +
     line("Target", bs.targetPremium != null ? "₹" + teNum(bs.targetPremium, 2) : (tp.target1 != null ? teNum(tp.target1, 2) : "—"), "te-up") +
     line("R:R", bs.rr != null ? "1:" + bs.rr : "—") +
+    line("Plan from", tp.arbiterPlan ? `<b class="te-up">Arbiter ${tp.arbiterPlan.action}</b> <span class="te-muted">${tp.arbiterPlan.setup} · ${tp.arbiterPlan.candle} close${bs.expiry ? " · exp " + bs.expiry : ""}</span>` : `<span class="te-muted">reference only — the arbiter has no trade</span>`) +
     line("Room", f.room && f.room.pts != null ? f.room.pts + " pts → " + (f.room.nextLabel || "") : "—");
   const execBody = teEl("te-exec-body");
   if (execBody) {
-    const act = f.action || tp.action || "—";
+    // The real decision is the trade plan's action (arbiter-gated); the checklist is shown as context only.
+    const act = tp.action === "TAKE" ? "TRADE" : (tp.action || f.action || "—");
     const passed = Array.isArray(f.gates) ? f.gates.filter((g) => g.status === "PASS" || g.status === "TRADE").length : 0;
     const total = Array.isArray(f.gates) ? f.gates.filter((g) => g.status !== "OFF").length : 0;
     execBody.innerHTML =
       line("Final Action", `<b class="${act === "TRADE" ? "te-up" : "te-amber"}" style="${act === "TRADE" ? "" : "color:var(--te-amber)"}">${act}</b>`) +
-      line("Reason", `<span class="te-muted">${f.reason || tp.waitReason || "—"}</span>`) +
+      line("Reason", `<span class="te-muted">${tp.action === "TAKE" ? (bs.note || "Arbiter trade") : (tp.waitReason || f.reason || "—")}</span>`) +
+      line("Checklist", `<span class="te-muted">${f.action || "—"}${f.action === "TRADE" && tp.action !== "TAKE" ? " (not enough on its own)" : ""}</span>`) +
       line("Gates Passed", `${passed} / ${total}`) +
       line("EMA21", (f.ema21 && f.ema21.state) || "—") +
       line("Cooldown", cd.active ? cd.reason || "ACTIVE" : "Not active") +

@@ -31,3 +31,8 @@ test("EOD square-off labelled Target Hit is shown as EOD Exit; summary totals", 
   const s = summarizeAudit([r, auditTrade(trade(), [dec("WAIT", 3)])]);
   assert.equal(s.blocked, 1); assert.equal(s.blockedPoints, -19.3); assert.equal(s.relabelled, 1);
 });
+
+test("arbiter-sourced log entries count as automatic", () => {
+  assert.equal(auditTrade(trade({ remarks: "Arbiter BUY_PE · Momentum continuation (10:50 close) · checklist agrees" }), [dec("BUY_PE", 3)]).source, "AUTO");
+  assert.equal(auditTrade(trade({ remarks: "Manual log · BEARISH" }), [dec("BUY_PE", 3)]).source, "MANUAL");
+});

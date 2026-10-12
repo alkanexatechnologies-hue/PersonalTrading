@@ -41,7 +41,7 @@ export function auditTrade(t0: TradeRow, ledger: any[] | null): AuditRow {
   return {
     id: t.id, date: t.date, time: t.time, index: t.index, type: t.type, strike: t.strike ?? null, entry, sl, target: t.target ?? null, rr: t.rr ?? null,
     status: t.status, points: t.exitPrice != null && entry != null ? Math.round((t.exitPrice - entry) * 100) / 100 : null,
-    source: /Auto signal/.test(t.remarks || "") ? "AUTO" : "MANUAL",
+    source: /Auto signal|^Arbiter /.test(t.remarks || "") ? "AUTO" : "MANUAL",
     arbiter: dec ? { action: dec.finalAction, candle: String(dec.candleIso).slice(11, 16) } : null, arbiterRecorded: !!ledger, checks, verdict,
   };
 }

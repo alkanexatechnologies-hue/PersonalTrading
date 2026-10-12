@@ -5041,7 +5041,26 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
       snapshot, // provenance: every field above is from this one snapshot
       cooldown: null as any,          // post-trade cooldown (populated below)
       confirmationFlow: null as any,  // MTS-free confirmation flow (populated below)
+      arbiterPlan: null as any,       // the arbiter's own trade when it is a fresh BUY (single decision source)
     };
+    // Single decision source: when the arbiter's latest CLOSED-candle decision for this index is a BUY (≤ 15 min old)
+    // with a verified option plan, Trade Execution shows and logs exactly that trade — same strike, expiry, entry,
+    // stop-loss and target — instead of building a second plan of its own.
+    const arbNow: any = isHistorical ? null : latestDecision(indexDefOf(def).index);
+    const arbFresh = !!(arbNow && /^BUY_(CE|PE)$/.test(arbNow.finalAction || "") && nowSec - Number(arbNow.candleTime || 0) <= 15 * 60 && arbNow.option?.available && arbNow.option.strike != null);
+    if (arbFresh) {
+      const o = arbNow.option, e = Number(o.entry ?? o.ltp), sl = Number(o.stopLoss), t1 = Number(o.target1);
+      const validA = e > 0 && sl > 0.05 && sl < e && t1 > e;
+      tradePlan.arbiterPlan = { key: arbNow.key, action: arbNow.finalAction, setup: arbNow.setupLabel || arbNow.setup, candle: String(arbNow.candleIso || "").slice(11, 16), reason: arbNow.reason, option: o, spotPlan: arbNow.plan };
+      tradePlan.preferredStrike = `${o.strike} ${o.side}`; (tradePlan as any).optionType = o.side;
+      tradePlan.bestSetup = {
+        strike: o.strike, side: o.side, entryPremium: e, stopPremium: sl, targetPremium: t1,
+        riskPts: Math.round((e - sl) * 100) / 100, rewardPts: Math.round((t1 - e) * 100) / 100, rr: o.netRR ?? o.rr ?? null,
+        meets1to2: true, valid: validA, invalidReason: validA ? null : "Arbiter option plan has no valid stop / target", premiumNoise: null,
+        responsiveness: o.delta != null ? Math.abs(o.delta) : null, responding: null, expiry: o.expiry ?? null,
+        note: `Arbiter ${arbNow.finalAction} (${arbNow.setupLabel || arbNow.setup}, ${String(arbNow.candleIso || "").slice(11, 16)} close): ${o.strike} ${o.side} @ ₹${e}, SL ₹${sl}, T1 ₹${t1}${o.target2 ? `, T2 ₹${o.target2}` : ""} (R:R 1:${o.netRR ?? o.rr} after costs).`,
+      } as any;
+    }
 
     // ---- Direction-change learning record (deduped per symbol) -------------
     let lastDirectionChange = null as any;
@@ -5216,18 +5235,17 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
     // One gate for both the screen and the auto-log: the checklist's TRADE stands only when the option plan is sane
     // (see analyzeStrikes valid) AND the arbiter itself is BUY on the same side on a recent closed candle.
     const tradeGate = (() => {
-      const bs0 = strikeAnalysis?.bestSetup;
-      const side0: "CE" | "PE" = strikeAnalysis?.primary?.side === "PE" ? "PE" : strikeAnalysis?.primary?.side === "CE" ? "CE" : (marketView.direction === "BEARISH" ? "PE" : "CE");
-      if (!bs0) return { ok: false, reason: "No option plan for the best strike" };
-      if (!bs0.valid) return { ok: false, reason: bs0.invalidReason || "Option plan not valid" };
-      const arb0 = latestDecision(indexDefOf(def).index), want0 = side0 === "CE" ? "BUY_CE" : "BUY_PE";
-      if (!arb0 || (arb0 as any).finalAction !== want0 || nowSec - Number((arb0 as any).candleTime || 0) > 15 * 60)
-        return { ok: false, reason: `Checklist passed, but the arbiter is ${(arb0 as any)?.finalAction || "not decided"} — not ${want0}` };
+      if (!arbFresh) {
+        const a0: any = isHistorical ? null : latestDecision(indexDefOf(def).index);
+        return { ok: false, reason: `The arbiter is ${a0?.finalAction || "not decided"}${a0?.reason ? ` — ${String(a0.reason).slice(0, 140)}` : ""}` };
+      }
+      const bs0: any = tradePlan.bestSetup;
+      if (!bs0?.valid) return { ok: false, reason: bs0?.invalidReason || "Arbiter option plan not valid" };
       return { ok: true, reason: "" };
     })();
     if (!isHistorical && finalAction !== "NO TRADE") {
-      if (confirmationFlow.action === "TRADE" && !tradeGate.ok) { effectiveAction = "WAIT"; effectiveWaitReason = `WAIT — ${tradeGate.reason}`; }
-      else if (confirmationFlow.action === "TRADE") { effectiveAction = "TAKE"; effectiveWaitReason = null; }
+      if (tradeGate.ok) { effectiveAction = "TAKE"; effectiveWaitReason = null; }
+      else if (confirmationFlow.action === "TRADE") { effectiveAction = "WAIT"; effectiveWaitReason = `WAIT — checklist passed, but ${tradeGate.reason}`; }
       else if (cooldown.active) { effectiveAction = "WAIT"; effectiveWaitReason = confirmationFlow.reason; } // cooldown wins over stale
       else if (confirmationFlow.action === "DATA UNAVAILABLE") { effectiveAction = "DATA STALE"; effectiveWaitReason = confirmationFlow.reason; }
       else { effectiveAction = displayStale ? "DATA STALE" : "WAIT"; effectiveWaitReason = confirmationFlow.reason; }
@@ -5246,48 +5264,33 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
     // Only log a fresh auto trade inside the trade-entry window (09:20–15:12 IST)
     // AND when the setup carries a real entry/SL/target — never on stale data or
     // outside hours (that produced the pre-market DATA-STALE rows that never close).
-    if (!isHistorical && !displayStale && isTradeEntryWindowIST() && confirmationFlow.action === "TRADE" && !cooldown.active) {
+    // ---- Auto-log the ARBITER's trade (advisory record, never an order): once per arbiter decision, with the
+    // arbiter's own strike / expiry / entry / SL / target. Never on stale data, outside 09:20–15:12, or in cooldown.
+    if (!isHistorical && !displayStale && isTradeEntryWindowIST() && tradeGate.ok && tradePlan.arbiterPlan && !cooldown.active) {
       try {
-        const side: "CE" | "PE" = strikeAnalysis?.primary?.side === "PE" ? "PE"
-          : strikeAnalysis?.primary?.side === "CE" ? "CE"
-          : (optionType === "PE" ? "PE" : optionType === "CE" ? "CE" : (marketView.direction === "BEARISH" ? "PE" : "CE"));
-        const sigStrike = strikeAnalysis?.primary?.strike ?? (typeof strike === "number" ? strike : null);
-        const bs = strikeAnalysis?.bestSetup;
-        const sigEntry = bs?.entryPremium ?? null, sigSl = bs?.stopPremium ?? null, sigTarget = bs?.targetPremium ?? null;
-        // A trade with no real entry/SL/target can never be resolved — skip it.
-        if (!(sigEntry && sigSl && sigTarget)) throw new Error("no resolvable levels");
-        // The plan must be sane against the market's own movement (stop outside one candle's noise, a real stop,
-        // a reachable target with R:R ≥ 1:2) — otherwise it is not logged.
-        if (!bs?.valid) throw new Error(`invalid plan: ${bs?.invalidReason || "unknown"}`);
-        // Single decision source: the arbiter must itself be BUY on the same side for this index on a recent closed
-        // candle. The Trade Execution checklist alone fired on every direction flip (7 Oct: 7 PE trades logged while
-        // the arbiter's only signal that day was a CE).
-        const arb = latestDecision(indexDefOf(def).index);
-        const want = side === "CE" ? "BUY_CE" : "BUY_PE";
-        if (!arb || (arb as any).finalAction !== want || nowSec - Number((arb as any).candleTime || 0) > 15 * 60) throw new Error(`arbiter is not ${want} (${(arb as any)?.finalAction || "no decision"})`);
+        const ap = tradePlan.arbiterPlan, o = ap.option, bs: any = tradePlan.bestSetup;
+        const today = new Date((nowSec + 19800) * 1000).toISOString().slice(0, 10);
+        if (listTradesRaw().some((t) => t.date === today && (t.snapshot as any)?.arbiterKey === ap.key)) throw new Error("already logged");
+        const side: "CE" | "PE" = o.side === "PE" ? "PE" : "CE";
         appendTrade({
           execTs: nowSec, index: def.name, symbol: def.symbol, type: side,
-          strike: sigStrike, expiry: oiChain?.expiry ?? (oiData as any)?.expiry ?? null,
-          entry: sigEntry,
-          sl: sigSl,
-          target: sigTarget,
-          rr: bs?.rr != null ? `1:${bs.rr}` : null,
-          remarks: `Auto signal · ${confirmationFlow.reason}`,
+          strike: o.strike, expiry: o.expiry ?? null,
+          entry: bs.entryPremium, sl: bs.stopPremium, target: bs.targetPremium,
+          rr: bs.rr != null ? `1:${bs.rr}` : null,
+          remarks: `Arbiter ${ap.action} · ${ap.setup} (${ap.candle} close)${confirmationFlow.action === "TRADE" ? " · checklist agrees" : ` · checklist: ${confirmationFlow.reason}`}`,
           // Immutable decision snapshot — reconstruct THIS trade's logic later.
           snapshot: {
             snapshotId: snapshot.id, marketTs: snapshot.marketTs, calcTs: snapshot.calcTs, dataAgeSec: snapshot.dataAgeSec,
+            arbiterKey: ap.key, arbiterReason: ap.reason, arbiterSpotPlan: ap.spotPlan,
             spot: Math.round(spot * 100) / 100, marketState, activePhase: confirmationFlow.activePhase,
             direction: marketView.direction, priceAction: priceActionInput, structure: ms.currentStructure,
             room: roomInput, ema21: { state: ema21State, detail: ema21Detail },
-            gates: confirmationFlow.gates, reason: confirmationFlow.reason,
-            side, strike: sigStrike, optionLtp: bs?.entryPremium ?? null, sl: bs?.stopPremium ?? null,
-            target: bs?.targetPremium ?? null, rr: bs?.rr ?? null,
-            support: nextSup, resistance: nextRes, bos: latestBos,
-            optionDetail: strikeAnalysis?.primary ? `${strikeAnalysis.primary.strike} ${strikeAnalysis.primary.side}` : null,
-            basedOn: marketView.basedOn || null,
-          },
+            gates: confirmationFlow.gates, reason: `${ap.action} — ${ap.reason || ""}`,
+            side, strike: o.strike, optionLtp: bs.entryPremium, sl: bs.stopPremium, target: bs.targetPremium, target2: o.target2 ?? null, rr: bs.rr,
+            support: nextSup, resistance: nextRes, bos: latestBos, optionDetail: `${o.strike} ${o.side}`, basedOn: "arbiter",
+          } as any,
         });
-        const armed = recordExecution({ symbol: def.symbol, execTs: nowSec, side, strike: sigStrike, entry: bs?.entryPremium ?? null, source: "auto-signal" });
+        const armed = recordExecution({ symbol: def.symbol, execTs: nowSec, side, strike: o.strike, entry: bs.entryPremium, source: "auto-signal" });
         tradePlan.cooldown = armed;            // reflect the freshly-armed cooldown
         confirmationFlow.cooldownActive = true;
       } catch { /* logging is best-effort; never blocks the response */ }
