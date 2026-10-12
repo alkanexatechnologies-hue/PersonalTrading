@@ -1,5 +1,7 @@
 import { getProvider } from "../data";
 import { getIndiaVix } from "../data/dhanProvider";
+import { fetchDhanIntradayAllHours } from "../data/dhanHistorical";
+import { candidateDates } from "./nseParticipantOi";
 import { getMarketNews } from "../news/news";
 import { fetchMarketData, marketDataConfigured, MdKey } from "./marketDataProvider";
 import { getFiiFutures, fiiLeanOf } from "./fiiFutures";
@@ -117,10 +119,33 @@ async function quoteReal(sym: string, label: string, key: string, marketOpen: bo
         const last = c[c.length - 1], prev = c.length > 1 ? c[c.length - 2] : null;
         const price = last.close;
         const ageDays = last.time ? (Date.now() / 1000 - last.time) / 86400 : 999;
-        if (price != null && ageDays <= 5) { // within the last few calendar days (covers weekends)
+        if (price != null && prev && prev.close != null && ageDays <= 5) { // a real previous bar, within the last few days (covers weekends)
           const chg = prev && prev.close != null ? round2(price - prev.close) : null;
           const chgPct = prev && prev.close ? round2((price - prev.close) / prev.close * 100) : null;
           return mkQuote(key, label, price, chg, chgPct, last.time ?? null, marketOpen);
+        }
+      }
+    } catch { /* daily candles unavailable — try the fallbacks below */ }
+    // Stocks: NSE's official bhavcopy (5-minute bars do not give the official close for stocks).
+    if (/\.NS$/.test(sym)) {
+      try {
+        const b = await bhavRow(sym.replace(/\.NS$/, ""));
+        if (b) return mkQuote(key, label, b.close, round2(b.close - b.prev), round2((b.close - b.prev) / b.prev * 100), Math.floor(Date.parse(b.date + "T10:00:00Z") / 1000), marketOpen);
+      } catch { /* none */ }
+      return { key, label, value: null, change: null, changePct: null, ts: null, freshness: "UNAVAILABLE", source: null };
+    }
+    // Indices: last two sessions from 5-minute candles (Dhan's daily-candle service can fail while
+    // intraday works). An index's last 5-minute bar close is its session close.
+    try {
+      const c5: any[] = await getProvider().getCandles(sym, "5m", 7);
+      const byDay = new Map<string, any>();
+      for (const x of c5 || []) byDay.set(new Date((x.time + 19800) * 1000).toISOString().slice(0, 10), x);
+      const days = [...byDay.keys()].sort();
+      if (days.length >= 2) {
+        const last = byDay.get(days[days.length - 1]), prev = byDay.get(days[days.length - 2]);
+        const ageDays = (Date.now() / 1000 - last.time) / 86400;
+        if (last.close != null && prev.close && ageDays <= 5) {
+          return mkQuote(key, label, last.close, round2(last.close - prev.close), round2((last.close - prev.close) / prev.close * 100), last.time, marketOpen);
         }
       }
     } catch { /* nothing available */ }
@@ -153,6 +178,63 @@ async function prefetchLive(syms: string[]): Promise<void> {
     }
   } catch { /* quoteReal falls back to single quotes */ }
 }
+
+// ---- NSE bhavcopy (official close + previous close for every stock), the stock fallback while
+// the market is closed and Dhan's daily candles are unavailable. Latest published file, cached 1 h.
+let _bhav: { at: number; date: string; rows: Map<string, { close: number; prev: number }> } | null = null;
+export function parseBhav(csv: string): Map<string, { close: number; prev: number }> {
+  const lines = csv.replace(/\r/g, "").split("\n");
+  const head = (lines[0] || "").split(",").map((h) => h.trim().toUpperCase());
+  const iS = head.indexOf("SYMBOL"), iSer = head.indexOf("SERIES"), iP = head.indexOf("PREV_CLOSE"), iC = head.indexOf("CLOSE_PRICE");
+  const out = new Map<string, { close: number; prev: number }>();
+  if ([iS, iSer, iP, iC].some((i) => i < 0)) return out;
+  for (const l of lines.slice(1)) {
+    const c = l.split(",").map((x) => x.trim());
+    if (c[iSer] !== "EQ") continue;
+    const close = Number(c[iC]), prev = Number(c[iP]);
+    if (close > 0 && prev > 0) out.set(c[iS], { close, prev });
+  }
+  return out;
+}
+async function bhavRow(nseSymbol: string): Promise<{ close: number; prev: number; date: string } | null> {
+  if (!_bhav || Date.now() - _bhav.at > 3600_000) {
+    for (const d of candidateDates(Math.floor(Date.now() / 1000), 5)) {
+      try {
+        const r = await fetch(`https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_${d.slice(8, 10)}${d.slice(5, 7)}${d.slice(0, 4)}.csv`, { headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126.0 Safari/537.36" } as any, signal: AbortSignal.timeout(10000) });
+        if (!r.ok) continue;
+        const rows = parseBhav(await r.text());
+        if (rows.size > 500) { _bhav = { at: Date.now(), date: d, rows }; break; }
+      } catch { /* try the previous day */ }
+    }
+    if (!_bhav) return null;
+  }
+  const x = _bhav.rows.get(nseSymbol);
+  return x ? { ...x, date: _bhav.date } : null;
+}
+
+// ---- GIFT NIFTY from Dhan (IDX_I 5024; trades ~06:30–02:45 IST on NSE IX) ----
+// Value = latest 5-minute bar; change = gap against NIFTY's last session close (what GIFT NIFTY
+// is read for before the open). Cached 60 s. Freshness from the bar's own time.
+const GIFT_SEC = { securityId: "5024", exchangeSegment: "IDX_I", instrument: "INDEX" };
+let _gift: { at: number; close: number; ts: number } | null = null;
+async function giftNifty(niftyRef: number | null): Promise<Quote | null> {
+  try {
+    if (!_gift || Date.now() - _gift.at > 60_000) {
+      const ist = (ms: number) => new Date(ms + 19800_000).toISOString().slice(0, 10);
+      const c = await fetchDhanIntradayAllHours(GIFT_SEC, "5", ist(Date.now() - 4 * 86400_000), ist(Date.now() + 86400_000));
+      const last = c[c.length - 1];
+      if (!last || !(last.close > 0)) return null;
+      _gift = { at: Date.now(), close: last.close, ts: last.time };
+    }
+    const ageMin = (Date.now() / 1000 - _gift.ts) / 60;
+    const freshness: Freshness = ageMin < 10 ? "LIVE" : ageMin < 60 ? "DELAYED" : "STALE";
+    const chg = niftyRef ? round2(_gift.close - niftyRef) : null;
+    return { key: "GIFTNIFTY", label: "GIFT NIFTY", value: round2(_gift.close), change: chg, changePct: niftyRef && chg != null ? round2(chg / niftyRef * 100) : null, ts: _gift.ts, freshness, source: "DHAN · vs NIFTY close" };
+  } catch { return null; }
+}
+
+// India VIX: keep the last good value (≤ 18 h) through Dhan quote hiccups (e.g. 502s), marked STALE.
+let _vixLast: { at: number; q: Quote } | null = null;
 
 // One batched last-price call (ONE Dhan request) per 30 min while closed — see quoteReal.
 let _closedLtp: { at: number; data: Record<string, number> } = { at: 0, data: {} };
@@ -209,13 +291,18 @@ export async function buildPremarketOverview(opts: { force?: boolean } = {}): Pr
     const v: any = await vixP;
     if (v && v.available && v.value != null) vixQuote = { key: "INDIA VIX", label: "INDIA VIX", value: v.value, change: v.change ?? null, changePct: v.changePct ?? null, ts: v.ts ?? null, freshness: quoteFreshness(v.ts ?? null, marketOpen), source: "DHAN" };
   } catch { /* unavailable */ }
+  if (vixQuote.value != null) _vixLast = { at: Date.now(), q: vixQuote };
+  else if (_vixLast && Date.now() - _vixLast.at < 18 * 3600_000) vixQuote = { ..._vixLast.q, freshness: "STALE" };
 
   // ---- External macro / global / GIFT (provider; UNAVAILABLE until key set) ----
   const md = await mdP;
 
   // ---- Strip (order matches the mockup) ----
+  // GIFT NIFTY: Dhan first (Yahoo has no symbol for it); gap vs NIFTY's last session close.
+  const niftyRef = idxByKey.NIFTY?.value != null ? (marketOpen ? (idxByKey.NIFTY.change != null ? round2(idxByKey.NIFTY.value - idxByKey.NIFTY.change) : null) : idxByKey.NIFTY.value) : null;
+  const gift = await giftNifty(niftyRef);
   const strip: Quote[] = [
-    md.GIFTNIFTY, idxByKey.NIFTY, idxByKey.BANKNIFTY, idxByKey.FINNIFTY, idxByKey.SENSEX,
+    gift || md.GIFTNIFTY, idxByKey.NIFTY, idxByKey.BANKNIFTY, idxByKey.FINNIFTY, idxByKey.SENSEX,
     vixQuote, md.USDINR, md.DXY, md.US10Y, md.BRENT, md.GOLD,
   ];
 

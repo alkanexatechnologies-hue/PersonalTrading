@@ -86,6 +86,16 @@ export async function fetchDhanCandles(
     .sort((a, b) => a.time - b.time);
 }
 
+/** Intraday bars WITHOUT the NSE-session filter, for instruments that trade outside 09:15–15:30
+ *  (GIFT NIFTY on NSE IX trades ~06:30–02:45 IST). One request; ranges up to a few days. */
+export async function fetchDhanIntradayAllHours(sec: { securityId: string; exchangeSegment: string; instrument: string }, interval: "5" | "15", fromDate: string, toDate: string): Promise<Candle[]> {
+  const payload = await dhanFetchJson("/charts/intraday", {
+    securityId: sec.securityId, exchangeSegment: sec.exchangeSegment, instrument: sec.instrument,
+    interval: Number(interval), fromDate, toDate,
+  });
+  return toCandles(payload).sort((a, b) => a.time - b.time);
+}
+
 // After the close Dhan's intraday response carries one extra zero-volume bar
 // stamped with the CURRENT wall-clock time (e.g. 19:30 IST, OHLC = last price).
 // It is not a traded candle and skews indicators / charts, so intraday bars
