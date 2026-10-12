@@ -7,7 +7,7 @@
          under the home indicator. Android ignores it harmlessly. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>BC Data Status</title>
-    <link rel="stylesheet" href="styles.css?v=20261012-cp3" />
+    <link rel="stylesheet" href="styles.css?v=20261012-om6" />
     <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   </head>
   <body class="oi-focus">
@@ -2088,12 +2088,16 @@
 
             <!-- sub-screen toggle: Movement (default) | Summary -->
             <div class="oia-subtabs" id="oia-subtabs">
-              <button class="oia-subtab active" data-oia="movement">📊 OI Movement<span class="oia-subtab-q">what is changing right now?</span></button>
+              <button class="oia-subtab active" data-oia="minute">⏱ 1-Min OI Monitor<span class="oia-subtab-q">strike-wise minute changes</span></button>
+              <button class="oia-subtab" data-oia="movement">📊 OI Movement<span class="oia-subtab-q">what is changing right now?</span></button>
               <button class="oia-subtab" data-oia="summary">🧭 OI Summary<span class="oia-subtab-q">what does it indicate?</span></button>
             </div>
 
+            <!-- ===== Screen 0: strike-wise 1-minute OI monitor (oimonitor.js) ===== -->
+            <div class="oia-screen" id="oia-minute"></div>
+
             <!-- ===== Screen 1: OI Movement (dashboard) ===== -->
-            <div class="oia-screen" id="oia-movement">
+            <div class="oia-screen" id="oia-movement" hidden>
               <!-- controls + stats strip -->
               <div class="oiam-bar">
                 <div class="oiam-tf" id="oiam-tf" title="ΔOI change windows, measured from snapshot to snapshot — not tick data. The option chain refreshes roughly every 1–2 minutes, so a window shows OI change over that many snapshots, not exact wall-clock minutes.">
@@ -2567,8 +2571,9 @@
         <div id="dc-body" class="dc-body">Loading…</div>
       </div>
     </div>
-    <script src="app.js?v=20261012-cp2"></script>
+    <script src="app.js?v=20261012-om3"></script>
     <script src="mcsummary.js?v=20261012-dh1"></script>
+    <script src="oimonitor.js?v=20261012-om7"></script>
     <script src="liquidity.js?v=20261007-lqa7"></script>
   </body>
 </html>

@@ -115,6 +115,8 @@ import { notificationStatusLive } from "../integrations/notificationService";
 import { recordConnectionTest, recordConnectionSuccess, getConnectionStatus } from "../data/connectionStatusTracker";
 import { lookupDhanSecurity, lookupDhanOption } from "../data/dhanInstruments";
 import { fnoMovers, indexPivots, runIndicatorCheck, readIndicatorCheck } from "../data/dhanInsights";
+import { snapFromChain, recordSnapshot as recordMinuteSnapshot, loadDay as loadMinuteDay, listDays as listMinuteDays, buildView as buildMinuteView, captureStats as minuteCaptureStats } from "../oi/minuteMonitor";
+const MINUTE_MONITOR_SYMBOLS = ["^NSEI", "^NSEBANK", "^CNXFIN"];
 import { dhanCompanyInfo } from "../data/dhanDataApis";
 import { fetchDhanCandles, DhanBacktestInterval } from "../data/dhanHistorical";
 import { BacktestMode, DEFAULT_BACKTEST_MODE, FullMasterUnavailableError } from "../backtest/backtestMode";
@@ -657,6 +659,14 @@ const getOiCached = async (def: SymbolDef): Promise<OiAnalysis> => {
   _inflight.set(key, p);
   return p;
 };
+
+// The 1-minute OI monitor needs a chain no older than ~50 s. It refreshes the SAME shared cache entry
+// (one Dhan call per index per minute) so every other screen reuses it — no separate polling.
+async function getOiFresh(def: SymbolDef, maxAgeMs = 50_000): Promise<OiAnalysis> {
+  const key = `oi:${def.symbol}`, hit = _cache.get(key);
+  if (hit && Date.now() - hit.ts > maxAgeMs && !_inflight.get(key)) _cache.delete(key);
+  return getOiCached(def);
+}
 
 const VALID_INTERVALS: Interval[] = ["1m", "5m", "15m", "30m", "60m", "1d"];
 
@@ -5824,6 +5834,25 @@ router.get("/oi-analysis/summary", requirePermission("oiAnalysis"), async (req: 
 
 // Per-strike intraday series for the "OI Movement at Selected Strike" chart.
 // Returns the 1-min OI value + LTP series and the per-step OI change. No look-ahead.
+// Strike-wise 1-minute OI change monitor (snapshots captured by the minute collector; replayable).
+router.get("/oi-monitor", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
+  try {
+    const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
+    if (!def || !def.fno) return res.json({ available: false, reason: "Valid F&O index required" });
+    const today = new Date(Date.now() + 19800000).toISOString().slice(0, 10);
+    const days = listMinuteDays(def.symbol);
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : (days.find((d) => d.date === today) ? today : days[0]?.date || today);
+    const expiries = days.find((d) => d.date === date)?.expiries.sort() || [];
+    const expiry = expiries.includes(String(req.query.expiry || "")) ? String(req.query.expiry) : expiries[0] || "";
+    const snaps = expiry ? loadMinuteDay(date, def.symbol, expiry) : [];
+    const n = (k: string) => (req.query[k] != null && req.query[k] !== "" && Number.isFinite(Number(req.query[k])) ? Number(req.query[k]) : undefined);
+    const windowMin = [1, 5, 15, 30].includes(Number(req.query.window)) ? Number(req.query.window) : 1;
+    const view = buildMinuteView(snaps, { windowMin, around: n("around"), atIdx: n("at"), minStrike: n("min"), maxStrike: n("max"), heatSide: req.query.heat === "PE" ? "PE" : "CE", stats: expiry ? minuteCaptureStats(def.symbol, expiry) : {} });
+    res.json({ ...view, name: def.name, date, today, isToday: date === today, days: days.map((d) => d.date).slice(0, 15), expiries, collecting: MINUTE_MONITOR_SYMBOLS.includes(def.symbol),
+      note: "Display only — OI addition is never called writing on its own; premium and spot must agree. Not used by signals, the arbiter or paper trading." });
+  } catch (e: any) { res.json({ available: false, reason: e?.message || "oi-monitor failed" }); }
+});
+
 router.get("/oi-analysis/strike-history", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
   const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
   if (!def) return res.status(400).json({ available: false, error: "Valid F&O symbol required" });
@@ -9860,6 +9889,17 @@ export function startHourlyScheduler() {
   // the /oi-change route handler itself (stale-kickoff, cold-start) are
   // serving an actual request and are deliberately left at the default HIGH.
   setInterval(() => { if (isTradingTimeIST() && jobOn("oiChangeSnapshot")) refreshOiChangeSnapshot(); }, 3 * 60 * 1000);
+  // 1-minute OI monitor: capture one snapshot per index per minute (aligned to :05 s) in market hours.
+  const minuteTick = async () => {
+    if (!isMarketOpenIST()) return;
+    for (const sym of MINUTE_MONITOR_SYMBOLS) {
+      const def = findSymbolDef(sym); if (!def) continue;
+      try { const chain = await withDhanPriority("low", () => getOiFresh(def)); const snp = snapFromChain(def.symbol, chain, Math.floor(Date.now() / 1000)); if (snp) recordMinuteSnapshot(snp); }
+      catch { /* a missed minute stays missing — never back-filled */ }
+    }
+  };
+  const scheduleMinute = () => { const ms = 60_000 - (Date.now() % 60_000) + 5_000; setTimeout(() => { minuteTick().finally(scheduleMinute); }, ms); };
+  scheduleMinute();
   // Indicator cross-check vs Dhan /data/technical (NIFTY 5-min), every 15 min in market hours. Display only.
   setInterval(() => { if (isTradingTimeIST()) runIndicatorCheck().catch(() => {}); }, 15 * 60 * 1000);
 

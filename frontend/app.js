@@ -6405,7 +6405,7 @@ function syncTEFromMC() {
 // ==================== OI ANALYSIS (additive, read-only) ====================
 // Two screens: OI Movement ("what is changing now?") and OI Summary ("what does
 // it indicate?"). Reads /api/oi-analysis/*; never mutates MC/TE or any strategy.
-const OIA = { sym: "^NSEI", screen: "movement", timer: null, loading: false, inited: false, status: null, selStrike: null, selSide: "CALL", lastMv: null, window: 1, mainView: "bar", hmSide: "calls", reqToken: 0 };
+const OIA = { sym: "^NSEI", screen: "minute", timer: null, loading: false, inited: false, status: null, selStrike: null, selSide: "CALL", lastMv: null, window: 1, mainView: "bar", hmSide: "calls", reqToken: 0 };
 function oiaEl(id) { return document.getElementById(id); }
 
 function initOiAnalysis() {
@@ -6452,7 +6452,8 @@ function renderOiaBanner() {
 
 function applyOiaScreen() {
   oiaEl("oia-subtabs")?.querySelectorAll(".oia-subtab").forEach((b) => b.classList.toggle("active", b.getAttribute("data-oia") === OIA.screen));
-  const mv = oiaEl("oia-movement"), sm = oiaEl("oia-summary");
+  const mv = oiaEl("oia-movement"), sm = oiaEl("oia-summary"), mn = oiaEl("oia-minute");
+  if (mn) mn.hidden = OIA.screen !== "minute";
   if (mv) mv.hidden = OIA.screen !== "movement";
   if (sm) sm.hidden = OIA.screen !== "summary";
 }
@@ -6470,7 +6471,9 @@ async function loadOiAnalysis() {
   OIA.loading = true;
   const live = oiaEl("oia-live"); if (live) live.textContent = "…";
   try {
-    if (forScreen === "summary") {
+    if (forScreen === "minute") {
+      if (typeof loadOiMinute === "function") await loadOiMinute();
+    } else if (forScreen === "summary") {
       const d = await fetchJSON(`/api/oi-analysis/summary?symbol=${encodeURIComponent(OIA.sym)}`, 20000);
       if (token !== OIA.reqToken || OIA.screen !== "summary") return; // superseded
       if (d && typeof d.enabled === "boolean") { OIA.status = OIA.status || {}; OIA.status.enabled = d.enabled; renderOiaBanner(); }
@@ -10129,7 +10132,7 @@ function mcDrawLevelRays() {
   let lay = el("mc-lvl-layer");
   if (!lay) { lay = document.createElement("div"); lay.id = "mc-lvl-layer"; lay.className = "mc-lvl-layer"; host.appendChild(lay); }
   const spot = MC.lastData && MC.lastData.spot;
-  let plotW = host.clientWidth; try { plotW -= MC.chart.priceScale("right").width(); } catch {}
+  let plotW = host.clientWidth; try { plotW -= MC.chart.priceScale("right").width(); } catch {} plotW = Math.max(0, plotW);
   const H = host.clientHeight, x1 = plotW - 2;
   // latest candle's x: everything right of it is empty space for bands and tags
   let lastX = null; try { const cs = MC._candles || []; if (cs.length) lastX = MC.chart.timeScale().timeToCoordinate(cs[cs.length - 1].time); } catch {}
