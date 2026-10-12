@@ -6102,10 +6102,14 @@ function otMakeChart(containerId) {
       borderColor: "#2a2e39", timeVisible: true, secondsVisible: false,
       tickMarkFormatter: (t) => fmtIST(t, false), barSpacing: 10, minBarSpacing: 4, rightOffset: 3,
     },
-    rightPriceScale: { borderColor: "#2a2e39", scaleMargins: { top: 0.08, bottom: 0.24 } },
+    // Premiums never go below 0: a small bottom margin (the old 24 % empty band was labelled with negative prices)
+    // and the axis never prints a label below zero.
+    rightPriceScale: { borderColor: "#2a2e39", scaleMargins: { top: 0.08, bottom: 0.06 } },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
   });
-  const candle = chart.addCandlestickSeries({ upColor: "#16c784", downColor: "#ea3943", wickUpColor: "#16c784", wickDownColor: "#ea3943", borderVisible: false });
+  chart.applyOptions({ localization: { timeFormatter: (t) => fmtIST(t, true), priceFormatter: (p) => (p < 0 ? "" : p.toFixed(2)) } });
+  const candle = chart.addCandlestickSeries({ upColor: "#16c784", downColor: "#ea3943", wickUpColor: "#16c784", wickDownColor: "#ea3943", borderVisible: false,
+    autoscaleInfoProvider: (orig) => { const r = orig(); if (r && r.priceRange) r.priceRange.minValue = Math.max(0, r.priceRange.minValue); return r; } });
   const e9 = chart.addLineSeries({ color: "#f0b429", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
   const e21 = chart.addLineSeries({ color: "#2f7dff", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
   try { new ResizeObserver(() => chart.applyOptions({ width: c.clientWidth, height: c.clientHeight || 360 })).observe(c); } catch { /* noop */ }
