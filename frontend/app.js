@@ -8220,11 +8220,12 @@ function initPremarket() {
         <button data-pm-go="aipanalysis"><span class="ico">📉</span>Market Analysis</button>
         <button data-pm-go="dhanbacktest"><span class="ico">🧪</span>Backtest</button>
       </div>
-      <div class="pm-live"><span class="pm-livebadge" id="pm-livebadge">● —</span><span class="pm-t" id="pm-clock">—</span><span class="pm-d" id="pm-date">—</span></div>
+      <div class="pm-live"><button type="button" class="scr-refresh" id="pm-refresh" title="Reload all Market Sentiment data now (fresh quotes, global markets, news)">⟳ Refresh</button><span class="pm-livebadge" id="pm-livebadge">● —</span><span class="pm-t" id="pm-clock">—</span><span class="pm-d" id="pm-date">—</span></div>
     </div>
     <div class="pm-substrip">
       <span id="pm-updated" class="pm-upd">Last Update: — · Next Sentiment Update: —</span>
       <span class="pm-913" id="pm-913"></span>
+      <span class="pm-refat" id="pm-refat"></span>
       <span class="pm-extstatus" id="pm-extstatus">External Data: —</span>
     </div>
     <div class="pm-strip" id="pm-strip"></div>
@@ -8243,6 +8244,7 @@ function initPremarket() {
     </div>
   </div>`;
   root.querySelectorAll("[data-pm-go]").forEach((b) => b.addEventListener("click", () => { const t = b.getAttribute("data-pm-go"); if (typeof switchTab === "function") switchTab(t); }));
+  pmEl("pm-refresh")?.addEventListener("click", pmRefreshNow);
   PM.built = true;
   loadPremarket();
 }
@@ -8275,17 +8277,27 @@ function pmClock() {
   const c = pmEl("pm-clock"), dd = pmEl("pm-date"); if (c) c.textContent = t + " IST"; if (dd) dd.textContent = d;
 }
 
-async function loadPremarket() {
+// Refresh button: rebuild everything server-side without caches (the server allows one forced
+// rebuild per 20 s) and reload every panel; shows when it finished.
+async function pmRefreshNow() {
+  if (PM.refreshing) return;
+  PM.refreshing = true; scrRefreshState("pm-refresh", true);
+  try {
+    await loadPremarket(true);
+    const e = pmEl("pm-refat"); if (e) e.textContent = "⟳ Refreshed " + new Date().toLocaleTimeString("en-IN", { hour12: false, timeZone: "Asia/Kolkata" });
+  } finally { PM.refreshing = false; scrRefreshState("pm-refresh", false); }
+}
+async function loadPremarket(force) {
   try {
     const [d, h] = await Promise.all([
-      fetch("/api/premarket/overview").then((r) => r.json()).catch(() => null),
+      fetch("/api/premarket/overview" + (force ? "?force=true" : "")).then((r) => r.json()).catch(() => null),
       fetch("/api/premarket/health").then((r) => r.json()).catch(() => null),
     ]);
     if (d && !d.error) { PM.data = d; renderPremarket(d); }
     if (h) { PM.health = h; renderPMExtStatus(h); }
     renderPMTimeline();
-    loadPMIntel();
-    loadPMHeat();
+    if (force) await Promise.all([loadPMIntel(true), loadPMHeat(true)]);
+    else { loadPMIntel(); loadPMHeat(); }
   } catch (e) { /* keep last render */ }
 }
 

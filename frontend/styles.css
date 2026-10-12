@@ -5197,6 +5197,8 @@ body.pm-fullwidth #tab-flow { display:none !important; }
 
 
 .pm-913{font-size:11px;font-weight:700;color:var(--grn)}
+.pm-refat{font-size:11px;font-weight:700;color:#7fb0ff}
+.pm-live .scr-refresh{margin:0 0 4px 0;align-self:flex-end}
 /* 3b 09:13 sector heatmap (inside panel 3) */
 #pm-heat{margin-top:12px;display:grid;gap:8px}
 .pm-heat-hd{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
