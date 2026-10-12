@@ -104,6 +104,10 @@ function mcsShell() {
     <section class="mcs-card mcs-chain" id="mcs-chain"></section>
     <section class="mcs-card" id="mcs-topmove"></section>
   </div>
+  <div class="mcs-grid4">
+    <section class="mcs-card mcs-dfno" id="mcs-dfno"></section>
+    <section class="mcs-card mcs-dpiv" id="mcs-dpiv"></section>
+  </div>
   <div class="mcs-foot">Data: existing Dhan connection (Market Command, Market Analysis, Option Terminal endpoints). Expected moves, delta/gamma projections and spike triggers are model estimates, not guarantees. Advisory only — no orders are placed.</div>`;
   mcsEl("mcs-back").onclick = () => { if (typeof switchTab === "function") switchTab("marketcommand"); };
   // ---- LIVE / TESTING mode ----
@@ -753,6 +757,48 @@ function mcsRenderChain() {
   box.querySelectorAll(".mcs-crow").forEach((tr) => (tr.onclick = () => { mcsPickStrike(Number(tr.dataset.k)); mcsEl("mcs-strikes")?.scrollIntoView({ behavior: "smooth", block: "start" }); }));
 }
 
+// ---- Dhan data APIs (display only): market-wide F&O movers, Dhan pivots, indicator cross-check ----
+async function mcsLoadDhan() {
+  const now = Date.now(), sym = MCS.sym, D = (MCS.dhan = MCS.dhan || {});
+  const jobs = [];
+  if (!D.fnoAt || now - D.fnoAt > 60_000) { D.fnoAt = now; jobs.push(fetchJSON("/api/dhan/fno-movers", 30000).then((r) => { if (r && !r.error) D.fno = r; }).catch(() => {})); }
+  if (D.pivSym !== sym || now - (D.pivAt || 0) > 300_000) { D.pivAt = now; D.pivSym = sym; D.piv = null; jobs.push(fetchJSON(`/api/dhan/pivots?symbol=${encodeURIComponent(sym)}`, 30000).then((r) => { if (sym === MCS.sym) D.piv = r; }).catch(() => {})); }
+  if (!D.chkAt || now - D.chkAt > 300_000) { D.chkAt = now; jobs.push(fetchJSON("/api/dhan/indicator-check", 45000).then((r) => { D.chk = r; }).catch(() => {})); }
+  if (!jobs.length) return;
+  await Promise.all(jobs);
+  if (MCS.mode === "LIVE") mcsStable(() => { mcsRenderDhanFno(); mcsRenderDhanPiv(); });
+}
+const MCS_FNO_TABS = [["highestOi", "Highest OI options"], ["topVolume", "Top volume options"], ["futOiGainers", "Futures OI gainers"], ["futOiLosers", "Futures OI losers"]];
+function mcsRenderDhanFno() {
+  const box = mcsEl("mcs-dfno"); if (!box) return;
+  const f = MCS.dhan && MCS.dhan.fno, tab = MCS.fnoTab || "highestOi";
+  const seg = `<span class="mcs-seg">${MCS_FNO_TABS.map(([k, n]) => `<button class="${tab === k ? "on" : ""}" data-f="${k}">${n}</button>`).join("")}</span>`;
+  const L = f && f[tab], rows = (L && L.rows) || [];
+  const opt = tab === "highestOi" || tab === "topVolume";
+  const tbl = rows.length ? `<div class="mcs-tblwrap"><table class="mcs-tbl"><thead><tr><th>Contract</th><th>LTP</th><th>Chg %</th><th>OI</th><th>OI Chg %</th><th>Volume</th>${opt ? "<th>PCR</th>" : ""}</tr></thead><tbody>
+    ${rows.map((r) => `<tr><td><b>${mcsEsc(r.name)}</b></td><td>${mcsN(r.ltp)}</td><td class="${mcsCls(r.changePct)}">${mcsPct(r.changePct)}</td><td>${mcsL(r.oi)}</td><td class="${mcsCls(r.oiChgPct)}">${mcsPct(r.oiChgPct)}</td><td>${mcsL(r.volume)}</td>${opt ? `<td>${r.pcr == null ? "—" : r.pcr.toFixed(2)}</td>` : ""}</tr>`).join("")}</tbody></table></div>`
+    : `<div class="mcs-sub">${f ? mcsEsc((L && L.error) || "No rows from Dhan") : "Loading Dhan F&amp;O movers…"}</div>`;
+  box.innerHTML = `<h4>F&amp;O MOVERS (DHAN) ${seg}</h4>${tbl}<div class="mcs-sub">${mcsEsc(f ? f.source : "")}${L && L.stale ? " · last good copy" : ""}. Display only — not used by signals, the arbiter or paper trading.</div>`;
+  box.querySelectorAll(".mcs-seg button").forEach((b) => (b.onclick = () => { MCS.fnoTab = b.dataset.f; mcsRenderDhanFno(); }));
+}
+function mcsRenderDhanPiv() {
+  const box = mcsEl("mcs-dpiv"); if (!box) return;
+  const p = MCS.dhan && MCS.dhan.piv, c = MCS.dhan && MCS.dhan.chk, spot = MCS.d && MCS.d.spot;
+  let piv = `<div class="mcs-sub">Loading Dhan pivots…</div>`;
+  if (p && !p.available) piv = `<div class="mcs-sub">${mcsEsc(p.reason || "Pivots unavailable")}</div>`;
+  else if (p) {
+    const sets = Object.keys(p.sets);
+    piv = `<div class="mcs-tblwrap"><table class="mcs-tbl mcs-pivtbl"><thead><tr><th>Level</th>${sets.map((k) => `<th>${k}</th>`).join("")}</tr></thead><tbody>${p.keys.map((k) => `<tr class="${k === "PP" ? "pp" : ""}"><td><b>${k}</b></td>${sets.map((s) => { const v = p.sets[s][k]; return `<td class="${spot != null && v != null ? (v > spot ? "dn" : "up") : ""}">${mcsN(v)}</td>`; }).join("")}</tr>`).join("")}</tbody></table></div>
+      <div class="mcs-sub">${mcsEsc(p.index)} · ${mcsEsc(p.note)}${spot != null ? " Red = above spot, green = below." : ""}</div>`;
+  }
+  const t = (sec) => (sec ? new Date(sec * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" }) : "—");
+  const chk = !c || !c.rows || !c.rows.length ? `<div class="mcs-sub">${mcsEsc((c && c.error) || "No check yet — runs every 15 min in market hours.")}</div>`
+    : `<div class="mcs-chk ${c.status === "MATCH" ? "ok" : c.status === "MISMATCH" ? "bad" : ""}">${c.status === "MATCH" ? "✓ All match" : c.status === "MISMATCH" ? `⚠ Differs: ${mcsEsc(c.rows.filter((r) => r.ok === false).map((r) => r.name).join(", "))}` : "No data"} <span class="mcs-sub">${mcsEsc(c.index)} 5-min · candle ${t(c.candle)} · checked ${t(c.at)}</span></div>
+      <div class="mcs-tblwrap"><table class="mcs-tbl"><thead><tr><th>Indicator</th><th>App</th><th>Dhan</th><th>Diff</th><th>Tolerance</th><th></th></tr></thead><tbody>${c.rows.map((r) => `<tr><td>${mcsEsc(r.name)}</td><td>${mcsN(r.app)}</td><td>${mcsN(r.dhan)}</td><td>${mcsN(r.diff)}</td><td>±${mcsN(r.tol)}</td><td>${r.ok == null ? "—" : r.ok ? '<span class="up">✓</span>' : '<span class="dn">✗</span>'}</td></tr>`).join("")}</tbody></table></div>
+      <div class="mcs-sub">${mcsEsc(c.note || "")}</div>`;
+  box.innerHTML = `<h4>DHAN PIVOTS — previous session</h4>${piv}<h4 style="margin-top:8px">INDICATOR CHECK vs DHAN</h4>${chk}`;
+}
+
 function mcsRenderTopMove() {
   const box = mcsEl("mcs-topmove"); const ma = MCS.ma; if (!box) return;
   const top = (list) => (list || []).filter((r) => r.chgPct != null).slice().sort((a, b) => b.chgPct - a.chgPct).slice(0, 5);
@@ -965,11 +1011,12 @@ function mcsLiveOnly(id) {
 function mcsRenderAll() {
   if (MCS.mode === "TEST") {
     mcsStable(() => { mcsRenderHeader(); mcsRenderPreopen(); mcsRenderChart(); mcsRenderLvTable(); mcsRenderKeyRow(); mcsRenderSetups(); mcsRenderLab();
-      ["mcs-optlv", "mcs-analysis", "mcs-fast", "mcs-strikes", "mcs-optCE", "mcs-optPE", "mcs-next5", "mcs-next15", "mcs-movers", "mcs-chain", "mcs-topmove", "mcs-cmd"].forEach(mcsLiveOnly); });
+      ["mcs-optlv", "mcs-analysis", "mcs-fast", "mcs-strikes", "mcs-optCE", "mcs-optPE", "mcs-next5", "mcs-next15", "mcs-movers", "mcs-chain", "mcs-topmove", "mcs-cmd", "mcs-dfno", "mcs-dpiv"].forEach(mcsLiveOnly); });
     return;
   }
   mcsStable(() => { mcsRenderHeader(); mcsRenderPreopen(); mcsRenderChart(); mcsRenderLvTable(); mcsRenderOptLv(); mcsRenderKeyRow(); mcsRenderSetups(); mcsRenderLab(); mcsRenderAnalysis(); mcsRenderLevels(); mcsRenderFast(); mcsRenderStrikes(); mcsRenderOpt("CE"); mcsRenderOpt("PE");
-  mcsRenderNext(5); mcsRenderNext(15); mcsRenderMovers(); mcsRenderChain(); mcsRenderTopMove(); mcsRenderCmd(); });
+  mcsRenderNext(5); mcsRenderNext(15); mcsRenderMovers(); mcsRenderChain(); mcsRenderTopMove(); mcsRenderCmd(); mcsRenderDhanFno(); mcsRenderDhanPiv(); });
+  mcsLoadDhan();
 }
 
 async function mcsRefresh(force) {

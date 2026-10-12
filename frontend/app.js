@@ -2366,6 +2366,36 @@ function openStock(symbol, timeframe) {
   switchTab("stock");
 }
 
+// ---------- company snapshot (Dhan company info: overview, ratios, shareholding) ----------
+async function loadCompanyInfo(symbol) {
+  const box = el("co-card"); if (!box) return;
+  if (/^\^/.test(symbol)) { box.hidden = true; return; }   // indices have no company info
+  box.hidden = false; box.innerHTML = `<div class="wl-sub">Loading company info from Dhan…</div>`;
+  let d = null;
+  try { d = await fetch(`/api/dhan/company?symbol=${encodeURIComponent(symbol)}`).then((r) => r.json()); } catch { d = null; }
+  if (state.active !== symbol) return;
+  if (!d || !d.available) { box.innerHTML = `<div class="card-head"><h3>Company snapshot</h3></div><div class="wl-sub">${(d && d.reason) ? String(d.reason).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])) : "Company info unavailable"}</div>`; return; }
+  const n = (v, dp = 2) => (v == null || !Number.isFinite(Number(v)) ? "—" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: dp }));
+  const ch = (v) => (v == null ? "" : ` <span class="${v > 0 ? "up" : v < 0 ? "down" : ""}">(${v > 0 ? "+" : ""}${n(v)})</span>`);
+  const co = d.CO || {}, ra = d.RATIOS || {}, sh = d.SHP || {};
+  const esc = (t) => String(t == null ? "—" : t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const item = (k, v) => `<div class="co-it"><span>${k}</span><b>${v}</b></div>`;
+  box.innerHTML = `<div class="card-head"><h3>Company snapshot</h3><span class="wl-sub">${esc(co.SECTOR)} · ${esc(co.INDUSTRY)} · Dhan company info</span></div>
+    <div class="co-grid">
+      ${item("Market cap", co.MARKET_CAP != null ? "₹" + n(co.MARKET_CAP, 0) + " cr" : "—")}
+      ${item("P/E", `${n(ra.PE_RATIO)}${ra.PE_TO_SECTOR_PE != null ? ` <span class="wl-sub">${n(ra.PE_TO_SECTOR_PE)}× sector</span>` : ""}`)}
+      ${item("P/B", n(ra.PB_RATIO))}
+      ${item("52-week high / low", `${n(co.FIFTY_TWO_WEEK_HIGH)} / ${n(co.FIFTY_TWO_WEEK_LOW)}`)}
+      ${item("FII holding", `${n(sh.FII_HOLDING)}%${ch(sh.CHANGE_IN_FII_HOLDING)}`)}
+      ${item("DII holding", `${n(sh.DII_HOLDING)}%${ch(sh.CHANGE_IN_DII_HOLDING)}`)}
+      ${item("Promoter", sh.PROMOTER_HOLDING != null ? n(sh.PROMOTER_HOLDING) + "%" : "—")}
+      ${item("Debt / equity", n(ra.DEBT_TO_EQUITY))}
+      ${item("ROCE", ra.ROCE != null ? n(ra.ROCE) + "%" : "—")}
+      ${item("Dividend yield", co.DIVIDEND_YIELD != null ? n(co.DIVIDEND_YIELD) + "%" : "—")}
+    </div>
+    <div class="wl-sub">Holding change is versus the previous shareholding filing (percentage points). Fundamentals are context only — not used by signals.</div>`;
+}
+
 // ---------- symbol selection ----------
 function selectSymbol(symbol) {
   state.active = symbol;
@@ -2379,6 +2409,7 @@ async function loadSymbol(symbol) {
   const meta = state.symbols.find((s) => s.symbol === symbol);
   el("sym-name").textContent = meta ? `${meta.name} (${symbol})` : symbol;
   el("bt-summary").textContent = "Run a backtest to see historical performance of these signals.";
+  loadCompanyInfo(symbol);
   equitySeries.setData([]);
 
   await Promise.all([
@@ -8773,11 +8804,13 @@ function renderPMIntel(d) {
   if (fr) fr.textContent = `News since ${pmIst(d.windowStart)} · updated ${pmIst(d.asOf)}`;
   const box = pmEl("pm-intel"); if (!box) return;
   const cats = d.categories || [];
-  if (!PM.intelTab || !cats.some((c) => c.id === PM.intelTab)) PM.intelTab = (cats.find((c) => c.count) || cats[0] || {}).id;
+  const sn = d.stockNews || [];
+  if (!PM.intelTab || !(cats.some((c) => c.id === PM.intelTab) || (PM.intelTab === "stock" && sn.length))) PM.intelTab = (cats.find((c) => c.count) || cats[0] || {}).id;
   const dir = d.direction || {};
-  const kp = (d.keyPoints || []).map((k) => `<li>${pmDirArrow(k.dir)} <b>${pmEsc(k.label)}:</b> ${pmEsc(k.text)}${k.note ? ` <span class="pm-in-why">→ ${pmEsc(k.note)}</span>` : ""} <span class="pm-in-age">${pmEsc(k.source)} · ${pmAge(k.ageH)}</span></li>`).join("");
+  const kp = (d.keyPoints || []).map((k) => `<li>${pmDirArrow(k.dir)} <b>${pmEsc(k.label)}:</b> ${pmEsc(k.text)}${k.note ? ` <span class="pm-in-why">→ ${pmEsc(k.note)}</span>` : ""} <span class="pm-in-age">${pmEsc(k.source)} · ${k.dateOnly ? "today (date only)" : pmAge(k.ageH)}</span></li>`).join("");
   const seg = (list) => list && list.length ? `<ul>${list.map((s) => `<li><b>${pmEsc(s.name)}</b> <span class="pm-in-why">${pmEsc(s.why)}</span></li>`).join("")}</ul>` : `<div class="pm-in-none">None from fresh news</div>`;
-  const tabs = cats.map((c) => `<button type="button" class="pm-in-tab ${c.id === PM.intelTab ? "on" : ""}" data-intel-tab="${pmAttr(c.id)}" aria-pressed="${c.id === PM.intelTab}">${pmEsc(c.label)}<span class="pm-in-c ${pmToneCls(c.tone)}">${c.count}</span></button>`).join("");
+  const tabs = cats.map((c) => `<button type="button" class="pm-in-tab ${c.id === PM.intelTab ? "on" : ""}" data-intel-tab="${pmAttr(c.id)}" aria-pressed="${c.id === PM.intelTab}">${pmEsc(c.label)}<span class="pm-in-c ${pmToneCls(c.tone)}">${c.count}</span></button>`).join("")
+    + (sn.length ? `<button type="button" class="pm-in-tab ${PM.intelTab === "stock" ? "on" : ""}" data-intel-tab="stock" aria-pressed="${PM.intelTab === "stock"}">Stock news<span class="pm-in-c neu">${sn.length}</span></button>` : "");
   box.innerHTML = `
     <div class="pm-in-dir">
       <div class="pm-in-dh"><span class="pm-in-k">Market direction from news</span><span class="pm-in-pill ${pmToneCls(dir.label || "")}">${pmEsc(dir.label || "—")}</span><span class="pm-in-sc">score ${dir.score > 0 ? "+" : ""}${dir.score ?? "—"} · ${dir.positive ?? 0} positive · ${dir.negative ?? 0} negative categories</span></div>
@@ -8803,6 +8836,12 @@ function renderPMIntel(d) {
 }
 function renderPMIntelPane() {
   const pane = pmEl("pm-in-pane"); const d = PM.intel; if (!pane || !d) return;
+  if (PM.intelTab === "stock") {
+    const tone = (t) => (t === "positive" ? 1 : t === "negative" ? -1 : 0);
+    pane.innerHTML = `<div class="pm-in-sum">Company headlines from Dhan News, dated today (Dhan gives a date, not a time). Sentiment is Dhan's article tone, not a trade call.</div>
+      <div class="pm-in-items">${(d.stockNews || []).map((n) => `<div class="pm-in-it">${pmDirArrow(tone(n.sentiment))}<div class="pm-in-ib"><div class="pm-in-ti">${pmEsc(n.title)}</div><div class="pm-in-m"><span class="pm-in-tier med">${pmEsc(n.symbol || n.stock || "—")}</span>${pmEsc(n.subCategory || "company")} · Dhan News · today (date only) · ${pmEsc(n.sentiment)}</div>${n.text ? `<div class="pm-in-why">${pmEsc(n.text)}</div>` : ""}</div></div>`).join("")}</div>`;
+    return;
+  }
   const c = (d.categories || []).find((x) => x.id === PM.intelTab); if (!c) { pane.innerHTML = ""; return; }
   const macro = (PM.data && PM.data.macro) || [];
   const keys = { oil: ["BRENT", "WTI"], inr: ["USDINR"], gold: ["GOLD"] }[c.id] || [];
@@ -8813,7 +8852,7 @@ function renderPMIntelPane() {
     const title = href ? `<a href="${pmAttr(href)}" target="_blank" rel="noopener">${pmEsc(it.title)}</a>` : pmEsc(it.title);
     return `<div class="pm-in-it">${pmDirArrow(it.dir)}<div class="pm-in-ib"><div class="pm-in-ti">${title}</div><div class="pm-in-m">`
       + (it.status ? `<span class="pm-in-st ${it.status.toLowerCase()}">${it.status}</span>` : "")
-      + `<span class="pm-in-tier ${it.tier === "OFFICIAL" ? "off" : "med"}">${it.tier}</span>${pmEsc(it.source)} · ${pmAge(it.ageH)}${it.alsoIn ? ` · +${it.alsoIn} more source${it.alsoIn > 1 ? "s" : ""}` : ""}`
+      + `<span class="pm-in-tier ${it.tier === "OFFICIAL" ? "off" : "med"}">${it.tier}</span>${pmEsc(it.source)} · ${it.dateOnly ? "today (date only)" : pmAge(it.ageH)}${it.alsoIn ? ` · +${it.alsoIn} more source${it.alsoIn > 1 ? "s" : ""}` : ""}`
       + `</div>${it.note ? `<div class="pm-in-why">${pmEsc(it.note)}</div>` : ""}</div></div>`;
   }).join("");
   pane.innerHTML = `${strip ? `<div class="pm-in-strip">${strip}</div>` : ""}

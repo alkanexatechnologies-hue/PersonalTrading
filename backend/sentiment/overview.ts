@@ -5,6 +5,8 @@ import { candidateDates } from "./nseParticipantOi";
 import { getMarketNews } from "../news/news";
 import { fetchMarketData, marketDataConfigured, MdKey } from "./marketDataProvider";
 import { getFiiFutures, fiiLeanOf } from "./fiiFutures";
+import { dhanMovers } from "../data/dhanDataApis";
+import { readModel } from "./niftyWeights";
 import { computeProbability, overallBiasFromLeans, ProbInputs } from "./probability";
 import { saveSnapshot, currentSlot, slotNeedsSnapshot } from "./snapshotStore";
 import type { Quote, Freshness, BankRow, MoverRow, SectorRow, OverallSentiment, IndexProbability, Bias, Direction, SentimentSnapshot } from "./types";
@@ -328,9 +330,13 @@ export async function buildPremarketOverview(opts: { force?: boolean } = {}): Pr
     const est = w != null && niftyLevel != null && q.changePct != null ? round2(niftyLevel * w / 10000 * q.changePct) : null;
     return { stock: q.label, price: q.value, changePct: q.changePct, weight: w, estImpact: est, direction: dir(q.changePct) };
   });
-  const gainers: MoverRow[] = capRows.filter((r) => (r.changePct ?? 0) > 0).sort((a, b) => (b.estImpact ?? 0) - (a.estImpact ?? 0)).slice(0, 5).map((r, i) => ({ rank: i + 1, ...r }));
-  const losers: MoverRow[] = capRows.filter((r) => (r.changePct ?? 0) < 0).sort((a, b) => (a.estImpact ?? 0) - (b.estImpact ?? 0)).slice(0, 5).map((r, i) => ({ rank: i + 1, ...r }));
-  const moversAvail = capRows.length > 0;
+  let gainers: MoverRow[] = capRows.filter((r) => (r.changePct ?? 0) > 0).sort((a, b) => (b.estImpact ?? 0) - (a.estImpact ?? 0)).slice(0, 5).map((r, i) => ({ rank: i + 1, ...r }));
+  let losers: MoverRow[] = capRows.filter((r) => (r.changePct ?? 0) < 0).sort((a, b) => (a.estImpact ?? 0) - (b.estImpact ?? 0)).slice(0, 5).map((r, i) => ({ rank: i + 1, ...r }));
+  let moversNote = "Ranked by estimated index impact across tracked large-caps.";
+  // Preferred: Dhan market movers — the real NIFTY 50 top gainers / losers by % change.
+  const dm = await niftyMoversFromDhan(niftyLevel);
+  if (dm) { gainers = dm.gainers; losers = dm.losers; moversNote = dm.note; }
+  const moversAvail = gainers.length + losers.length > 0;
 
   // ---- Sector analysis: only sectors we can back with a REAL representative quote ----
   const bankPct = idxByKey.BANKNIFTY?.changePct ?? null;
@@ -431,7 +437,7 @@ export async function buildPremarketOverview(opts: { force?: boolean } = {}): Pr
     ts: Math.floor(now / 1000), slot, marketOpen, strip, overall, probability,
     sectors: { rows: sectorRows, freshness: sectorRows.length ? (marketOpen ? "LIVE" : "CLOSED") : "UNAVAILABLE", note: sectorRows.length ? "Direction from representative constituents; full 12-sector advance/decline breadth needs a constituent feed." : "DATA UNAVAILABLE — sector constituent feed not connected." },
     banks: { rows: bankRows, netImpact: banksAvail ? round2(bankNet) : null, bias: bankingBias, freshness: banksAvail ? (marketOpen ? "LIVE" : "CLOSED") : "UNAVAILABLE", note: "Estimated contribution = reference NIFTY weight × observed % move." },
-    movers: { gainers, losers, freshness: moversAvail ? (marketOpen ? "LIVE" : "CLOSED") : "UNAVAILABLE", note: moversAvail ? "Ranked by estimated index impact across tracked large-caps." : "DATA UNAVAILABLE." },
+    movers: { gainers, losers, freshness: moversAvail ? (marketOpen ? "LIVE" : "CLOSED") : "UNAVAILABLE", note: moversAvail ? moversNote : "DATA UNAVAILABLE." },
     global: { us, asia, europe, bias: globalBias, freshness: globalPcts.length ? "DELAYED" : "UNAVAILABLE" },
     macro: [md.BRENT, md.WTI, md.GOLD, md.USDINR, md.DXY, md.US10Y, vixQuote, md.CBOEVIX],
     fii, news: { items: newsItems, freshness: newsFresh },
@@ -459,4 +465,22 @@ function estMoveText(spot: number | null, vix: number | null, bias: Bias): strin
   if (bias === "BEARISH") return `-${Math.round(band * 0.6)} to -${band} pts`;
   if (bias === "BULLISH") return `+${Math.round(band * 0.6)} to +${band} pts`;
   return `±${band} pts`;
+}
+
+/** NIFTY 50 top gainers / losers from Dhan market movers. Index impact uses the estimated
+ *  contribution model's coefficient when one exists for the stock. Null when Dhan fails. */
+async function niftyMoversFromDhan(niftyLevel: number | null): Promise<{ gainers: MoverRow[]; losers: MoverRow[]; note: string } | null> {
+  try {
+    const [g, l] = await Promise.all((["PRICE_GAINERS", "PRICE_LOSERS"] as const).map((category) =>
+      dhanMovers({ exchangeSegment: "NSE_EQ", instrument: ["EQUITY"], category, universe: "NIFTY_50", limit: 5 })));
+    const coefs = readModel()?.coefs || {};
+    const row = (r: { name: string; symbol: string; ltp: number | null; changePct: number | null }, i: number): MoverRow => {
+      const c = coefs[r.symbol], pct = r.changePct == null ? null : round2(r.changePct);
+      return { rank: i + 1, stock: r.name, price: r.ltp, changePct: pct, weight: c != null ? round2(c * 100) : null,
+        estImpact: c != null && pct != null && niftyLevel != null ? Math.round(((c * pct) / 100) * niftyLevel * 10) / 10 : null, direction: dir(pct) };
+    };
+    const gainers = g.rows.filter((r) => (r.changePct ?? 0) > 0).map(row), losers = l.rows.filter((r) => (r.changePct ?? 0) < 0).map(row);
+    if (!gainers.length && !losers.length) return null;
+    return { gainers, losers, note: `NIFTY 50 top gainers / losers by % change — Dhan market movers${g.stale || l.stale ? " (last good copy)" : ""}. Impact = estimated contribution model, not official weights.` };
+  } catch { return null; }
 }

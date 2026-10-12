@@ -29,6 +29,10 @@ const ALLOWED_PATHS = new Set<string>([
   "/optionchain",           // option chain (strikes, OI, greeks) — Dhan v2 POST
   "/optionchain/expirylist", // expiry dates for an underlying — Dhan v2 POST
   "/RenewToken",            // account auth only: swaps the current Web token for a new 24 h one (no trading)
+  "/data/newsheadline",     // Dhan news headlines (read-only data API)
+  "/data/technical",        // Dhan indicator values for one instrument (read-only)
+  "/data/marketmovers",     // Dhan top gainers / losers / OI movers (read-only)
+  "/data/companyinfo",      // Dhan company overview, ratios, shareholding (read-only)
 ]);
 
 export interface DhanFetchOptions {
@@ -82,6 +86,7 @@ function dhanCategory(basePath: string): DhanCat {
   if (basePath === "/optionchain") return "optionchain";            // the chain itself (1 per 3s)
   if (basePath.startsWith("/optionchain")) return "data";          // expiry list: normal data limit
   if (basePath.startsWith("/charts")) return "data";
+  if (basePath.startsWith("/data/")) return "data";
   return "nontrading";
 }
 

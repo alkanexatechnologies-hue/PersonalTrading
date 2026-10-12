@@ -114,6 +114,8 @@ import { saveTelegramConfig, disconnectTelegram, createInviteLink } from "../int
 import { notificationStatusLive } from "../integrations/notificationService";
 import { recordConnectionTest, recordConnectionSuccess, getConnectionStatus } from "../data/connectionStatusTracker";
 import { lookupDhanSecurity, lookupDhanOption } from "../data/dhanInstruments";
+import { fnoMovers, indexPivots, runIndicatorCheck, readIndicatorCheck } from "../data/dhanInsights";
+import { dhanCompanyInfo } from "../data/dhanDataApis";
 import { fetchDhanCandles, DhanBacktestInterval } from "../data/dhanHistorical";
 import { BacktestMode, DEFAULT_BACKTEST_MODE, FullMasterUnavailableError } from "../backtest/backtestMode";
 import { recordLiveSnapshot } from "../data/liveSnapshotRecorder";
@@ -8167,6 +8169,32 @@ router.get("/news", async (req: Request, res: Response) => {
 // Global News Intelligence (Market Sentiment screen): fresh-only, category-wise news with a
 // rule-based direction + segment summary. Display only — separate from /news, whose bias the
 // paper engine reads. ?force=true bypasses the 5-min cache.
+// Dhan data APIs (read-only, display only): F&O movers, index pivots, indicator cross-check, company info.
+router.get("/dhan/fno-movers", async (_req: Request, res: Response) => {
+  try { res.json(await fnoMovers()); } catch (e: any) { res.json({ error: e?.message || "F&O movers unavailable" }); }
+});
+router.get("/dhan/pivots", async (req: Request, res: Response) => {
+  try { res.json(await indexPivots(String(req.query.symbol || "^NSEI"))); } catch (e: any) { res.json({ available: false, reason: e?.message || "pivots unavailable" }); }
+});
+let _indCheckRunAt = 0;
+router.get("/dhan/indicator-check", async (req: Request, res: Response) => {
+  try {
+    const cur = readIndicatorCheck();
+    if ((req.query.run === "true" || !cur) && Date.now() - _indCheckRunAt > 60_000) { _indCheckRunAt = Date.now(); return res.json(await runIndicatorCheck()); }
+    res.json(cur || { status: "NO DATA", rows: [] });
+  } catch (e: any) { res.json({ status: "NO DATA", rows: [], error: e?.message || "check failed" }); }
+});
+router.get("/dhan/company", async (req: Request, res: Response) => {
+  try {
+    const sym = String(req.query.symbol || "").toUpperCase().replace(/\.NS$/, "").replace(/[^A-Z0-9&-]/g, "");
+    if (!sym) return res.json({ available: false, reason: "symbol required" });
+    const sec = await lookupDhanSecurity(sym);
+    if (!sec || sec.exchangeSegment !== "NSE_EQ") return res.json({ available: false, reason: "Not an NSE equity in the Dhan instrument list" });
+    const r = await dhanCompanyInfo(String(sec.securityId));
+    res.json({ available: true, symbol: sym, ...r.data, at: r.at, stale: r.stale, source: "Dhan company info" });
+  } catch (e: any) { res.json({ available: false, reason: e?.message || "company info unavailable" }); }
+});
+
 router.get("/news/intel", async (req: Request, res: Response) => {
   try {
     res.json(await getNewsIntel(String(req.query.force) === "true"));
@@ -9832,6 +9860,8 @@ export function startHourlyScheduler() {
   // the /oi-change route handler itself (stale-kickoff, cold-start) are
   // serving an actual request and are deliberately left at the default HIGH.
   setInterval(() => { if (isTradingTimeIST() && jobOn("oiChangeSnapshot")) refreshOiChangeSnapshot(); }, 3 * 60 * 1000);
+  // Indicator cross-check vs Dhan /data/technical (NIFTY 5-min), every 15 min in market hours. Display only.
+  setInterval(() => { if (isTradingTimeIST()) runIndicatorCheck().catch(() => {}); }, 15 * 60 * 1000);
 
   // Daily log retention sweep — archives files >90d (gzip into data/log/archive),
   // deletes archives >1yr ONLY if LOG_ARCHIVE_DELETE=1. Runs once/day after close.

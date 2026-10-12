@@ -1,3 +1,4 @@
+import { dhanNews, type DhanNews, type DhanNewsCat } from "../data/dhanDataApis";
 // Global News Intelligence — fresh, category-wise news for the Market Sentiment screen.
 //
 // Ten categories (oil, rupee, Trump, RBI, Indian market, tax, gold, sentiment, Fed,
@@ -19,7 +20,9 @@ export type IntelCat = "oil" | "inr" | "trump" | "rbi" | "india" | "tax" | "gold
 export type Tier = "OFFICIAL" | "MEDIA";
 export type TrumpStatus = "IMPLEMENTED" | "SIGNED" | "ANNOUNCED" | "PROPOSAL" | "STATEMENT";
 
-export interface RawItem { title: string; link: string; source: string; epoch: number; tier: Tier; official?: "fedreg" | "whitehouse" | "ustr" | "rbi" | "fed" | "eia" }
+export interface RawItem { title: string; link: string; source: string; epoch: number; tier: Tier; official?: "fedreg" | "whitehouse" | "ustr" | "rbi" | "fed" | "eia";
+  /** Dhan headlines carry a publish DATE only: epoch is that day's 00:00 IST and the UI shows "today", never an age. */
+  dateOnly?: boolean; sentiment?: "positive" | "negative" | "neutral" }
 export interface IntelItem extends RawItem {
   ageH: number; dir: -1 | 0 | 1; note: string | null; pos: string[]; neg: string[];
   status?: TrumpStatus; alsoIn: number;
@@ -31,11 +34,14 @@ export interface IntelCategory {
 export interface IntelResult {
   asOf: number; windowStart: number; windowHours: number;
   direction: { score: number; label: string; positive: number; negative: number };
-  keyPoints: { cat: IntelCat; label: string; dir: -1 | 0 | 1; text: string; note: string | null; source: string; ageH: number }[];
+  keyPoints: { cat: IntelCat; label: string; dir: -1 | 0 | 1; text: string; note: string | null; source: string; ageH: number; dateOnly?: boolean }[];
   segments: { positive: { name: string; why: string }[]; negative: { name: string; why: string }[] };
   categories: IntelCategory[];
   sources: { name: string; ok: boolean; items: number }[];
+  /** Company headlines from Dhan (orders won, results, management) — today's date only. */
+  stockNews?: StockNews[];
 }
+export interface StockNews { date: string; title: string; text: string; stock: string | null; symbol: string | null; sentiment: "positive" | "negative" | "neutral"; subCategory: string }
 
 // ---------------- categories ----------------
 interface CatDef { id: IntelCat; label: string; weight: number; queries: string[]; include?: RegExp; exclude?: RegExp; officialInclude?: RegExp }
@@ -213,6 +219,7 @@ export function buildIntel(raw: Record<IntelCat, RawItem[]>, nowSec: number, sou
     });
     const items: IntelItem[] = merged.map((r) => {
       const rule = applyRules(def.id, r.title);
+      if (rule.dir === 0 && !rule.note && r.sentiment && r.sentiment !== "neutral") { rule.dir = r.sentiment === "positive" ? 1 : -1; rule.note = `Dhan article sentiment: ${r.sentiment}`; }
       const it: IntelItem = { ...r, ageH: Math.round(((nowSec - r.epoch) / 3600) * 10) / 10, ...rule };
       if (def.id === "trump") it.status = trumpStatus(r);
       return it;
@@ -251,7 +258,7 @@ export function buildIntel(raw: Record<IntelCat, RawItem[]>, nowSec: number, sou
     .sort((a, b) => wOf(b.id) * (Math.abs(b.dir) + 0.5) - wOf(a.id) * (Math.abs(a.dir) + 0.5))
     .slice(0, 6).map((c) => {
       const top = c.items.find((i) => i.dir === c.dir && i.dir !== 0 && i.note) || c.items.find((i) => i.note) || c.items[0];
-      return { cat: c.id, label: c.label, dir: c.dir, text: top.title, note: top.note, source: top.source, ageH: top.ageH };
+      return { cat: c.id, label: c.label, dir: c.dir, text: top.title, note: top.note, source: top.source, ageH: top.ageH, dateOnly: top.dateOnly };
     });
 
   // segments across categories, weighted by category weight; a segment on both sides nets out
@@ -278,6 +285,29 @@ export function buildIntel(raw: Record<IntelCat, RawItem[]>, nowSec: number, sou
 function fmtIst(sec: number): string {
   const d = new Date((sec + IST) * 1000);
   return `${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()]} ${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")} IST`;
+}
+
+// ---------------- Dhan news (date-only items) ----------------
+const DHAN_MACRO: DhanNewsCat[] = ["CURRENCY", "COMMODITIES", "GLOBAL_ECONOMY", "INDIAN_ECONOMY", "EQUITY_MARKETS", "GOVERNMENT_POLICY_AND_REGULATION", "GLOBAL", "INTERNATIONAL_TRADE"];
+const DHAN_NOISE = /block trade|large[- ]trade|bulk deal|stocks to watch/i;
+const istDate = (sec: number) => new Date((sec + IST) * 1000).toISOString().slice(0, 10);
+const istMidnight = (date: string) => Math.floor(Date.parse(date + "T00:00:00Z") / 1000) - IST;
+/** Dhan macro headlines → intel categories. Only today's IST date (no time is given, so older
+ *  dates cannot be shown as fresh). Category = the first matching category rule by weight. */
+export function dhanToRaw(items: DhanNews[], nowSec: number): { cat: IntelCat; item: RawItem }[] {
+  const today = istDate(nowSec), out: { cat: IntelCat; item: RawItem }[] = [];
+  for (const n of items) {
+    if (n.date !== today || DHAN_NOISE.test(n.title) || isJunk(n.title)) continue;
+    const def = [...CATS].sort((a, b) => b.weight - a.weight).find((c) => c.include && c.include.test(n.title) && !(c.exclude && c.exclude.test(n.title)));
+    if (!def) continue;
+    out.push({ cat: def.id, item: { title: n.title, link: "", source: "Dhan News", epoch: istMidnight(n.date), tier: "MEDIA", dateOnly: true, sentiment: n.sentiment } });
+  }
+  return out;
+}
+export function dhanStockNews(items: DhanNews[], nowSec: number): StockNews[] {
+  const today = istDate(nowSec);
+  return items.filter((n) => n.date === today && !DHAN_NOISE.test(n.title)).slice(0, 25)
+    .map((n) => ({ date: n.date, title: n.title, text: n.text.slice(0, 280), stock: n.stock, symbol: n.symbol, sentiment: n.sentiment, subCategory: n.subCategory }));
 }
 
 // ---------------- network ----------------
@@ -308,10 +338,20 @@ async function fetchIntel(): Promise<IntelResult> {
     const items = t ? parseRss(t, "Google News", "MEDIA") : [];
     raw[c.id].push(...items); sources.push({ name: `News search: ${c.label}`, ok: !!t, items: items.length });
   })());
+  let stockNews: StockNews[] = [];
+  jobs.push((async () => {
+    try {
+      const [macro, co] = await Promise.all([dhanNews(DHAN_MACRO, 50), dhanNews(["COMPANIES"], 40)]);
+      const mapped = dhanToRaw(macro.items, now);
+      for (const m of mapped) raw[m.cat].push(m.item);
+      stockNews = dhanStockNews(co.items, now);
+      sources.push({ name: "Dhan News", ok: true, items: mapped.length + stockNews.length });
+    } catch { sources.push({ name: "Dhan News", ok: false, items: 0 }); }
+  })());
   await Promise.allSettled(jobs);
   const merged = new Map<string, { name: string; ok: boolean; items: number }>();
   for (const s of sources) { const p = merged.get(s.name); if (p) { p.ok = p.ok || s.ok; p.items += s.items; } else merged.set(s.name, { ...s }); }
-  return buildIntel(raw, now, [...merged.values()]);
+  return { ...buildIntel(raw, now, [...merged.values()]), stockNews };
 }
 
 let cache: { at: number; data: IntelResult } | null = null;

@@ -6544,6 +6544,9 @@ body.mcs-fullwidth .watchlist, body.mcs-fullwidth #watchlist { display: none !im
 .mcs-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
 .mcs-grid3 { display: grid; grid-template-columns: 1fr 1fr 1.4fr; gap: 8px; margin-bottom: 8px; }
 .mcs-grid4 { display: grid; grid-template-columns: 1.6fr 1fr; gap: 8px; margin-bottom: 8px; }
+.mcs-pivtbl tr.pp td { background: rgba(127,176,255,.12); font-weight: 700; }
+.mcs-pivtbl td.up { color: #16c784; } .mcs-pivtbl td.dn { color: #ea3943; }
+.mcs-chk { font-size: 12px; font-weight: 700; margin: 4px 0; } .mcs-chk.ok { color: var(--grn); } .mcs-chk.bad { color: var(--amb); }
 .mcs-chhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
 .mcs-tfs { display: flex; gap: 4px; margin-left: auto; }
 .mcs-toggles { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; color: var(--muted); }
@@ -7332,3 +7335,10 @@ body.lqa-fullwidth .content { padding-left: 0; padding-right: 0; }
 @media (prefers-reduced-motion: reduce) { .mc-macd-early { animation: none; } }
 .mc-macd-toast.early { bottom: 316px; border-color: #f59e0b; }
 @media (max-width: 900px) { .mc-macd-early { right: 8px; font-size: 11px; top: 36px; } }
+
+/* Selected Stock — company snapshot (Dhan company info) */
+.co-card .co-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:6px 0}
+.co-card .co-it{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:8px;padding:6px 8px;min-width:0}
+.co-card .co-it span{display:block;font-size:11px;color:#8395b3} .co-card .co-it b span.up{color:#16c784;display:inline} .co-card .co-it b span.down{color:#ea3943;display:inline} .co-card .co-it b span{display:inline} .co-card .co-it b{font-size:14px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+@media (max-width:1024px){.co-card .co-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:600px){.co-card .co-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.co-card .co-it span{font-size:12px}}
