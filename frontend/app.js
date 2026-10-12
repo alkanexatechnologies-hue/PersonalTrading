@@ -8260,17 +8260,24 @@ function initPremarket() {
       <span class="pm-extstatus" id="pm-extstatus">External Data: —</span>
     </div>
     <div class="pm-strip" id="pm-strip"></div>
+    <div class="pmx-key" id="pmx-key" aria-label="Key points"></div>
     <div class="pmx-grid">
-      <section class="pmx-pn a-in" id="pmx-in"><div class="pm-na">Loading market inputs…</div></section>
-      <section class="pmx-pn a-cmd" id="pmx-1"></section>
-      <section class="pmx-pn a-lvl" id="pmx-3"></section>
-      <section class="pmx-pn a-why" id="pmx-2"></section>
-      <section class="pmx-pn a-news" id="pmx-news"></section>
-      <section class="pmx-pn a-prem" id="pmx-prem"></section>
-      <section class="pmx-pn a-sim" id="pmx-sim"></section>
-      <section class="pmx-pn a-dec" id="pmx-4"></section>
-      <section class="pmx-pn a-strk" id="pmx-strk"></section>
-      <section class="pmx-pn a-heat" id="pmx-heatbox"><div id="pmx-5"></div><div class="pmx-ctr"><div id="pmx-pos"></div><div id="pmx-neg"></div></div></section>
+      <div class="pmx-col c1">
+        <section class="pmx-pn a-in" id="pmx-in"><div class="pm-na">Loading market inputs…</div></section>
+        <section class="pmx-pn a-strk" id="pmx-strk"></section>
+        <section class="pmx-pn a-prem" id="pmx-prem"></section>
+      </div>
+      <div class="pmx-col c2">
+        <section class="pmx-pn a-cmd" id="pmx-1"></section>
+        <section class="pmx-pn a-why" id="pmx-2"></section>
+        <section class="pmx-pn a-heat" id="pmx-heatbox"><div id="pmx-5"></div><div class="pmx-ctr"><div id="pmx-pos"></div><div id="pmx-neg"></div></div></section>
+        <section class="pmx-pn a-sim" id="pmx-sim"></section>
+      </div>
+      <div class="pmx-col c3">
+        <section class="pmx-pn a-lvl" id="pmx-3"></section>
+        <section class="pmx-pn a-dec" id="pmx-4"></section>
+        <section class="pmx-pn a-news" id="pmx-news"></section>
+      </div>
     </div>
     <details class="pmx-more" id="pmx-more"><summary>More detail — Global markets · Macro &amp; risk · FII / DII · Sector strength · News flash · Sentiment timeline · and all earlier panels</summary>
     <div class="pmx-row pmx-r4"><section class="pmx-pn" id="pmx-7"></section><section class="pmx-pn" id="pmx-8"></section><section class="pmx-pn" id="pmx-9"></section><section class="pmx-pn" id="pmx-10"></section><section class="pmx-pn" id="pmx-11"></section></div>
@@ -8561,6 +8568,7 @@ function renderPMCommand(d) {
     (c.note ? `<div class="pmx-note warn">${pmEsc(c.note)}</div>` : "") +
     `<div class="pm-scroll"><table class="pmx-lv"><thead><tr><th>Level</th><th class="num">Price</th><th>Strength</th><th>Status</th><th class="num">Distance</th><th>Evidence</th></tr></thead><tbody>${seq || '<tr><td colspan="6">No levels — source data unavailable</td></tr>'}</tbody></table></div>
     <div class="pmx-note">OI strikes within 1 % of spot · PCR ${c.oi ? c.oi.pcr ?? "—" : "—"} · max pain ${c.oi ? c.oi.maxPain ?? "—" : "—"} · hover a row for method &amp; invalidation. OI alone never triggers a trade.</div>`);
+  { const sp = document.querySelector("#pmx-3 tr.pmx-spot"); if (sp) { sp.previousElementSibling?.classList.add("near"); sp.nextElementSibling?.classList.add("near"); } }
   // 4 · Master trade decision (arbiter)
   const o = dd.option, pl = dd.plan;
   const reasons = [dd.reason, ...(dd.candidates || []).map((x) => `${x.setup}: ${x.block || x.state}`)].filter(Boolean).slice(0, 3);
@@ -8593,8 +8601,37 @@ function renderPMCommand(d) {
     (k && k.available ? `<div class="pmx-note">${pmEsc(k.model.label)} — not official weights · validated ${k.model.validation.sessions} sessions, median error ${k.model.validation.intraMedian} pts</div>` : ""));
   pmxRenderStrength();
   pmxRenderExtras(d);
+  PM.cmd = d; pmxRenderKey();
   if (PM.data) renderPMStrip(PM.data.strip);   // add the mini-charts now that sparks are here
 }
+// ---- Key points strip: the few things that matter, in one highlighted line (all from data already loaded)
+function pmxInputTally(list) {
+  const a = (list || []).filter((i) => i.status === "ACTIVE");
+  const p = a.filter((i) => i.impact === "Positive").length, n = a.filter((i) => i.impact === "Negative").length;
+  return { positive: p, negative: n, counted: a.length, lean: p - n >= 3 ? "BULLISH" : n - p >= 3 ? "BEARISH" : "MIXED" };
+}
+function pmxRenderKey() {
+  const box = pmEl("pmx-key"), d = PM.cmd; if (!box || !d || d.error) return;
+  const a = d.a, c = d.c, dd = d.d, ms = a.moveSize, pr = a.probabilities;
+  const seq = c.sequence || [], si = seq.findIndex((r) => r.spot);
+  const nr = si > 0 ? seq[si - 1] : null, ns = si >= 0 && si < seq.length - 1 ? seq[si + 1] : null;
+  const ins = PM.x && PM.x.inputs, snap = ins && ins.snapshot, t = snap ? snap.tally : ins ? pmxInputTally(ins.current) : null;
+  const nd = PM.intel && PM.intel.direction;
+  const chip = (k, v, cls, sub, big) => `<div class="pmx-kc ${cls || ""}${big ? " big" : ""}"><span class="k">${k}</span><b class="${String(v).replace(/<[^>]+>/g, "").length > 11 ? "sm" : ""}">${v}</b>${sub ? `<span class="s">${sub}</span>` : ""}</div>`;
+  const n = (v) => (v == null ? "—" : pmNum(v, 0));
+  box.innerHTML = [
+    chip("Decision", pmEsc(dd.action), pmDirCls(dd.action), pmEsc(dd.setup || (dd.reason || "").slice(0, 40)), true),
+    chip("NIFTY bias", pmEsc(a.niftyBias.direction), pmDirCls(a.niftyBias.direction), "arbiter 5-min"),
+    chip("Spot", n(c.spot), "", d.phase === "CLOSED" ? "closed" : "live"),
+    chip("Next resistance", nr ? n(nr.price) : "—", "dn", nr ? `+${n(nr.price - c.spot)} · ${pmEsc(nr.strength || "")}` : ""),
+    chip("Next support", ns ? n(ns.price) : "—", "up", ns ? `−${n(c.spot - ns.price)} · ${pmEsc(ns.strength || "")}` : ""),
+    pr.model ? chip("Move odds (research)", `▲${pr.model.up}% ▼${pr.model.down}%`, pr.model.down > pr.model.up ? "dn" : pr.model.up > pr.model.down ? "up" : "", `sideways ${pr.model.sideways}%`) : "",
+    ms ? chip("Typical 15-min move", `±${ms.h15}`, "", `60 min ±${ms.h60}`) : "",
+    t ? chip("Inputs lean", pmEsc(t.lean), pmDirCls(t.lean), `${t.positive}+ / ${t.negative}− of ${t.counted}`) : "",
+    nd ? chip("News", pmEsc(nd.label), /NEG/.test(nd.label) ? "dn" : /POS/.test(nd.label) ? "up" : "neu", `score ${nd.score > 0 ? "+" : ""}${nd.score}`) : "",
+  ].join("");
+}
+
 // ---- panels fed by /premarket/command extras (inputs, similar sessions, news impact, premiums, strikes)
 function pmxRenderExtras(d) {
   const x = d.x || {};
@@ -8616,11 +8653,11 @@ function pmxRenderInputs() {
   const rows = list.map((i) => {
     const sel = mode === "manual" ? `<select class="pmx-sel" data-ov="${pmAttr(i.key)}" aria-label="${pmAttr(i.label)} scenario impact">${PMX_IMP.map((v) => `<option ${((ov[i.key] || i.impact) === v) ? "selected" : ""}>${v}</option>`).join("")}</select>` : `<span class="pmx-imp2 ${pmxImpCls(i.impact)}">${pmEsc(i.impact)}</span>`;
     const simd = mode === "manual" && ov[i.key] && ov[i.key] !== i.impact;
-    return `<tr title="${pmAttr(i.reason + " · " + i.source + (i.ts ? " · " + pmT(i.ts) : ""))}"><td>${i.id}</td><td>${pmEsc(i.label)}</td><td class="val">${pmEsc(i.value)}</td><td><span class="pmx-st ${i.status.toLowerCase()}">${pmEsc(i.status)}</span></td><td>${sel}${simd ? ' <b class="pmx-simtag">SIMULATED</b>' : ""}</td></tr>`;
+    const hl = i.status === "UNAVAILABLE" ? "off" : i.status === "ACTIVE" && i.impact === "Positive" ? "hp" : i.status === "ACTIVE" && i.impact === "Negative" ? "hn" : "";
+    return `<tr class="${hl}" title="${pmAttr(i.reason + " · " + i.source + (i.ts ? " · " + pmT(i.ts) : ""))}"><td>${i.id}</td><td>${pmEsc(i.label)}</td><td class="val">${pmEsc(i.value)}</td><td><span class="pmx-st ${i.status.toLowerCase()}">${pmEsc(i.status)}</span></td><td>${sel}${simd ? ' <b class="pmx-simtag">SIMULATED</b>' : ""}</td></tr>`;
   }).join("");
   const t = (snap && view === "snap" && mode === "auto" ? snap.tally : null) || null;
-  const tallyOf = (arr) => { const a = arr.filter((i) => i.status === "ACTIVE"); const p = a.filter((i) => i.impact === "Positive").length, n = a.filter((i) => i.impact === "Negative").length; return { positive: p, negative: n, counted: a.length, lean: p - n >= 3 ? "BULLISH" : n - p >= 3 ? "BEARISH" : "MIXED" }; };
-  const tl = t || tallyOf(list);
+  const tl = t || pmxInputTally(list);
   const tallyHtml = `<div class="pmx-tally">Active inputs: <b class="up">${tl.positive} positive</b> · <b class="dn">${tl.negative} negative</b> of ${tl.counted} → lean <b class="${pmDirCls(tl.lean)}">${pmEsc(tl.lean)}</b> <span class="mut">(a count, not a probability)</span></div>`;
   const simHtml = mode === "manual" ? `<div class="pmx-simbar"><button type="button" class="pmx-btn" data-sim="run">Compare scenario</button><button type="button" class="pmx-btn ghost" data-sim="reset">Reset</button>${sim ? `<span class="pmx-simres">SIMULATED (${pmEsc(sim.base)}): <b class="up">${sim.tally.positive}+</b> / <b class="dn">${sim.tally.negative}−</b> → <b>${pmEsc(sim.tally.lean)}</b> · actual stays unchanged</span>` : `<span class="mut">Change any impact, then Compare. Nothing is saved over the automatic record.</span>`}</div>` : "";
   const revs = ins.revisions && ins.revisions.length && mode === "auto" ? `<details class="pmx-revs"><summary>Revisions (${ins.revisions.length})</summary><ul>${ins.revisions.slice(-8).reverse().map((r) => `<li><b>${pmT(r.at)}</b> ${pmEsc(r.trigger)}${r.changes.length ? " — " + r.changes.map((c) => `${pmEsc(c.key)}: ${pmEsc(c.from)} → ${pmEsc(c.to)}`).join("; ") : ""}</li>`).join("")}</ul></details>` : "";
@@ -8659,7 +8696,7 @@ function pmxRenderNewsImpact() {
   const n = (PM.x || {}).news; if (!n) { pmxSet("pmx-news", pmxH(6, "News impact") + `<div class="pm-in-none">News unavailable</div>`); return; }
   const tab = PM.niTab || "All";
   const tabs = Object.entries(n.tabs).map(([k, v]) => `<button type="button" data-ni="${k}" aria-pressed="${tab === k}">${k} (${v})</button>`).join("");
-  const rows = n.rows.filter((r) => tab === "All" || r.impact === tab).slice(0, 9).map((r) => `<tr title="${pmAttr((r.interpretation || "") + " · " + r.affected.join(", "))}"><td class="num">${r.ageH < 1 ? Math.max(1, Math.round(r.ageH * 60)) + "m" : r.ageH.toFixed(1) + "h"}</td><td><a href="${pmAttr(/^https?:/.test(r.link) ? r.link : "#")}" target="_blank" rel="noopener">${pmEsc(r.headline)}</a><div class="pmx-src">${pmEsc(r.source)} · <span class="${r.kind === "CONFIRMED FACT" ? "up" : "mut"}">${pmEsc(r.kind)}</span> · ${pmEsc(r.affected.join(", "))}</div></td><td><span class="pmx-imp2 ${pmxImpCls(r.impact)}">${pmEsc(r.impact)}</span><div class="pmx-src">${pmEsc(r.strength)}</div></td></tr>`).join("");
+  const rows = n.rows.filter((r) => tab === "All" || r.impact === tab).slice(0, 9).map((r) => `<tr class="${r.strength === "High" ? "hi" : r.strength === "Low" ? "lo" : ""}" title="${pmAttr((r.interpretation || "") + " · " + r.affected.join(", "))}"><td class="num">${r.ageH < 1 ? Math.max(1, Math.round(r.ageH * 60)) + "m" : r.ageH.toFixed(1) + "h"}</td><td><a href="${pmAttr(/^https?:/.test(r.link) ? r.link : "#")}" target="_blank" rel="noopener">${pmEsc(r.headline)}</a><div class="pmx-src">${pmEsc(r.source)} · <span class="${r.kind === "CONFIRMED FACT" ? "up" : "mut"}">${pmEsc(r.kind)}</span> · ${pmEsc(r.affected.join(", "))}</div></td><td><span class="pmx-imp2 ${pmxImpCls(r.impact)}">${pmEsc(r.impact)}</span><div class="pmx-src">${pmEsc(r.strength)}</div></td></tr>`).join("");
   pmxSet("pmx-news", pmxH(6, "News impact", pmEsc(n.window)) + `<div class="pmx-seg pmx-tabs" role="group">${tabs}</div><div class="pm-scroll"><table class="pmx-ct pmx-nt"><thead><tr><th class="num">Age</th><th>Headline</th><th>Impact</th></tr></thead><tbody>${rows || '<tr><td colspan="3">No headlines in this tab</td></tr>'}</tbody></table></div><div class="pmx-note">Impact text is the app's interpretation; official releases are marked CONFIRMED FACT. A new major headline triggers a logged reassessment of the inputs.</div>`);
   const box = pmEl("pmx-news");
   if (box && !box._bound) { box._bound = true; box.addEventListener("click", (e) => { const b = e.target.closest("[data-ni]"); if (!b) return; PM.niTab = b.getAttribute("data-ni"); pmxRenderNewsImpact(); }); }
@@ -8789,7 +8826,7 @@ async function loadPMIntel(force) {
     const d = await fetch("/api/news/intel" + (force ? "?force=true" : ""), { screen: "premarket" }).then((r) => r.json());
     if (!d || d.error || !Array.isArray(d.categories)) throw new Error((d && d.error) || "bad response");
     if (PM.intel && PM.intel.asOf === d.asOf) return;
-    PM.intel = d; renderPMIntel(d); if (PM.newsTab === "intel") pmxRenderNews();
+    PM.intel = d; renderPMIntel(d); if (PM.newsTab === "intel") pmxRenderNews(); pmxRenderKey();
   } catch (e) {
     if (!PM.intel) { const box = pmEl("pm-intel"); if (box) box.innerHTML = `<div class="pm-na">News sources unreachable. Retrying in a minute.</div>`; }
   }
