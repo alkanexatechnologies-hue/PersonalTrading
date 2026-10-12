@@ -5624,11 +5624,7 @@ async function fetchTradePremiumCandles(def: any, type: TradeType, strike: numbe
   const underlying = (def?.nseSymbol || String(def?.symbol || "").replace(/\.NS$/i, "")).toUpperCase();
   const now = Math.floor(Date.now() / 1000);
   const start = now - 2 * 24 * 3600;
-  const gp = growwProviderForOptionTerminal();
-  try {
-    const inst = await findOption(underlying, type, strike, expiry);
-    if (gp && inst) { const c = await growwOptionCandles(gp, inst.tradingSymbol, start, now, interval); if (c && c.length) return c as any; }
-  } catch { /* fall through to Dhan */ }
+  // Dhan premium candles — the same source as the Option Terminal chart the trade was taken from.
   try {
     const dhanOpt = await lookupDhanOption(underlying, type, strike, expiry);
     if (dhanOpt) return (await dhanOptionCandles(dhanOpt.securityId, start, now, interval, dhanOpt.exchangeSegment)) as any;
@@ -7551,31 +7547,7 @@ router.get("/option-candles", async (req: Request, res: Response) => {
     const inst = await findOption(underlying, type, strike, expiry); // Groww symbol + lot/display
     const now = Math.floor(Date.now() / 1000);
     const start = now - 5 * 24 * 3600; // last ~5 days
-    // Groww covers NSE options only. For BSE indices (SENSEX/BANKEX) skip it entirely
-    // and go straight to Dhan — trying Groww there always returns nothing and just
-    // wastes an API call + adds rate-limit pressure.
-    const growwSupports = !/SENSEX|BANKEX|BANKNIFTY/i.test(underlying); // SENSEX/BANKEX (BSE) + BANK NIFTY → Dhan directly (user request)
-    // OPTION TERMINAL: prefer Groww premium candles (real volume, friendlier rate
-    // limits) when a Groww token is connected. Everything else stays on Dhan.
-    const gp = growwProviderForOptionTerminal();
-    if (gp && inst && growwSupports) {
-      try {
-        const candles = await growwOptionCandles(gp, inst.tradingSymbol, start, now, interval);
-        // Only return from Groww when it ACTUALLY has candles. If it returns none —
-        // e.g. SENSEX / BSE options Groww doesn't cover — fall through to Dhan
-        // instead of dead-ending with an empty chart. (Fixes SENSEX OT chart.)
-        if (candles.length > 0) {
-          return res.json({
-            available: true, source: "groww", tradingSymbol: inst.tradingSymbol,
-            underlying, name: def?.name || underlying, type, strike, expiry, interval, lotSize: inst.lotSize ?? null,
-            candles,
-          });
-        }
-      } catch (ge: any) {
-        console.error("[option-candles] Groww failed, falling back to Dhan:", ge?.message || ge);
-      }
-    }
-    // Dhan fallback: needs the option's own numeric securityId (a Groww symbol → DH-905).
+    // Option Terminal premium candles: Dhan only (no Groww connection needed on this screen); needs the option's numeric securityId.
     const dhanOpt = await lookupDhanOption(underlying, type, strike, expiry);
     if (!dhanOpt) return res.json({ available: false, source: "dhan", message: `${underlying} ${strike} ${type} (${expiry}) — contract नहीं मिला।` });
     const candles = await dhanOptionCandles(dhanOpt.securityId, start, now, interval, dhanOpt.exchangeSegment);
@@ -7614,17 +7586,9 @@ router.get("/option-structure", async (req: Request, res: Response) => {
     try {
       const now = Math.floor(Date.now() / 1000);
       const start = now - 5 * 24 * 3600; // same window the existing /api/option-candles uses
-      // Prefer Groww premium candles for the Option Terminal (same source as the
-      // chart); fall back to Dhan when Groww isn't connected or errors.
+      // Same Dhan premium candles as the Option Terminal chart (Dhan only — no Groww on this screen).
       let candles: any[] | null = null;
-      const gp = growwProviderForOptionTerminal();
-      const inst = await findOption(underlying, type, strike, expiry);
-      const growwSupports = !/SENSEX|BANKEX|BANKNIFTY/i.test(underlying); // SENSEX/BANKEX (BSE) + BANK NIFTY → Dhan directly (user request)
-      if (gp && inst && growwSupports) {
-        try { candles = await growwOptionCandles(gp, inst.tradingSymbol, start, now, interval); }
-        catch { candles = null; }
-      }
-      if (!candles || !candles.length) {
+      {
         const dhanOpt = await lookupDhanOption(underlying, type, strike, expiry);
         if (!dhanOpt) return { available: false, reason: "contract not found" };
         candles = await dhanOptionCandles(dhanOpt.securityId, start, now, interval, dhanOpt.exchangeSegment);

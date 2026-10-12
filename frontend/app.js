@@ -6143,8 +6143,7 @@ function initOptionTerminal() {
   });
   otEl("ot-open-command")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("marketcommand"); });
   otEl("ot-open-tradeexec")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("tradeexec"); });
-  otEl("ot-groww-btn")?.addEventListener("click", otConnectGroww);
-  otGrowwStatus();
+  // Option Terminal runs on Dhan only — no Groww connection on this screen.
 }
 
 // ---- Groww connection (Option Terminal premium data ONLY) ----
