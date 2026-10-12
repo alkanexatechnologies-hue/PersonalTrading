@@ -2,7 +2,7 @@
 // Strike-wise OI change between real minute snapshots (/api/oi-monitor). Display only.
 // Every number comes from stored snapshots; a window whose two snapshots are not the stated
 // distance apart is flagged with its real interval. Replay walks the same stored minutes.
-const OIM = { win: 1, around: 10, min: null, max: null, heat: "CE", date: "", expiry: "", mode: "live", at: null, showChg: true, showOi: true, d: null, req: 0 };
+const OIM = { play: false, speed: 4000, playT: null, win: 1, around: 10, min: null, max: null, heat: "CE", date: "", expiry: "", mode: "live", at: null, showChg: true, showOi: true, d: null, req: 0 };
 const OIM_SYMS = [["^NSEI", "NIFTY"], ["^NSEBANK", "BANK NIFTY"], ["^CNXFIN", "FIN NIFTY"], ["^NSEMDCP50", "MIDCAP"], ["^BSESN", "SENSEX"]];
 
 function oimEsc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
@@ -58,8 +58,9 @@ function oimSide(d) {
     <div class="oimm-note">Minute history exists only for the expiry the shared chain tracks (nearest).</div>
     <label class="oimm-lb">Day<select data-om="date">${days.length ? days.map((x) => `<option value="${x}" ${x === d.date ? "selected" : ""}>${x}${x === d.today ? " (today)" : ""}</option>`).join("") : `<option>${oimEsc(d.today || "today")}</option>`}</select></label>
     <h4>View mode</h4>${seg("View mode", [["live", "Live"], ["replay", "Replay"]], OIM.mode, "data-om-mode")}
-    ${OIM.mode === "replay" && nMin ? `<div class="oimm-replay"><input type="range" min="0" max="${nMin - 1}" value="${d.atIdx ?? nMin - 1}" data-om="at" aria-label="Replay minute"><div class="oimm-note">Minute <b>${oimEsc((d.minutes || [])[d.atIdx] || "—")}</b> of ${oimEsc(d.firstMinute || "")}–${oimEsc((d.minutes || [])[nMin - 1] || "")}</div>
-      <div class="oimm-step"><button type="button" data-om-step="-1">◀ 1 min</button><button type="button" data-om-step="1">1 min ▶</button></div></div>` : ""}
+    ${OIM.mode === "replay" && nMin ? `<div class="oimm-replay"><input type="range" min="0" max="${nMin - 1}" value="${d.atIdx ?? nMin - 1}" data-om="at" aria-label="Replay minute"><div class="oimm-note">Minute <b id="oimm-rmin">${oimEsc((d.minutes || [])[d.atIdx] || "—")}</b> of ${oimEsc(d.firstMinute || "")}–${oimEsc((d.minutes || [])[nMin - 1] || "")}</div>
+      <div class="oimm-step"><button type="button" data-om-step="-1" aria-label="Back one minute">◀ 1 min</button><button type="button" data-om-play aria-pressed="${!!OIM.play}">${OIM.play ? "⏸ Pause" : "▶ Play"}</button><button type="button" data-om-step="1" aria-label="Forward one minute">1 min ▶</button></div>
+      <label class="oimm-lb">Speed<select data-om="speed">${[[2000, "Fast (2 s / min)"], [4000, "Normal (4 s / min)"], [8000, "Slow (8 s / min)"]].map(([v, l]) => `<option value="${v}" ${OIM.speed === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>` : ""}
     <h4>Compare window</h4>${seg("Window", [[1, "1 min"], [5, "5 min"], [15, "15 min"], [30, "30 min"]], OIM.win, "data-om-win")}
     <h4>Strike range <button type="button" class="oimm-link" data-om-reset>Reset</button></h4>
     <div class="oimm-rng"><label>Min<div class="oimm-stp"><button type="button" data-om-rng="min:-1">−</button><b>${oimN(d.range && d.range.min)}</b><button type="button" data-om-rng="min:1">+</button></div></label>
@@ -158,13 +159,14 @@ function oimDrawChart(d) {
 function oimClick(e) {
   const t = e.target.closest("button"); if (!t) return;
   const a = (k) => t.getAttribute(k);
-  if (a("data-om-sym")) { OIA.sym = a("data-om-sym"); OIM.min = OIM.max = null; OIM.expiry = ""; OIM.at = null; if (typeof syncOIAFromMC === "function") syncOIAFromMC(true); }
-  else if (a("data-om-mode")) { OIM.mode = a("data-om-mode"); OIM.at = OIM.mode === "replay" && OIM.d && OIM.d.minutes ? OIM.d.minutes.length - 1 : null; }
+  if (a("data-om-sym")) { oimStop(); OIA.sym = a("data-om-sym"); OIM.min = OIM.max = null; OIM.expiry = ""; OIM.at = null; if (typeof syncOIAFromMC === "function") syncOIAFromMC(true); }
+  else if (a("data-om-mode")) { oimStop(); OIM.mode = a("data-om-mode"); OIM.at = OIM.mode === "replay" && OIM.d && OIM.d.minutes ? OIM.d.minutes.length - 1 : null; }
   else if (a("data-om-win")) OIM.win = Number(a("data-om-win"));
   else if (a("data-om-around")) { OIM.around = Number(a("data-om-around")); OIM.min = OIM.max = null; }
   else if (a("data-om-heat")) OIM.heat = a("data-om-heat");
   else if (t.hasAttribute("data-om-reset")) { OIM.min = OIM.max = null; OIM.around = 10; }
-  else if (a("data-om-step")) { const n = (OIM.d && OIM.d.minutes || []).length; OIM.at = Math.max(0, Math.min(n - 1, (OIM.at ?? n - 1) + Number(a("data-om-step")))); }
+  else if (t.hasAttribute("data-om-play")) { OIM.play ? oimStop() : oimPlay(); return; }
+  else if (a("data-om-step")) { oimStop(); const n = (OIM.d && OIM.d.minutes || []).length; OIM.at = Math.max(0, Math.min(n - 1, (OIM.at ?? n - 1) + Number(a("data-om-step")))); }
   else if (a("data-om-rng")) { const [k, dir] = a("data-om-rng").split(":"); const d = OIM.d || {}; const st = d.step || 50; const r = d.range || {}; OIM.min = OIM.min ?? r.min ?? null; OIM.max = OIM.max ?? r.max ?? null; if (k === "min" && OIM.min != null) OIM.min += Number(dir) * st; if (k === "max" && OIM.max != null) OIM.max += Number(dir) * st; if (OIM.min != null && OIM.max != null && OIM.min > OIM.max) [OIM.min, OIM.max] = [OIM.max, OIM.min]; }
   else return;
   loadOiMinute();
@@ -172,8 +174,9 @@ function oimClick(e) {
 function oimChange(e) {
   const k = e.target.getAttribute("data-om"); if (!k) return;
   if (k === "expiry") OIM.expiry = e.target.value;
-  else if (k === "date") { OIM.date = e.target.value; OIM.expiry = ""; OIM.at = null; if (OIM.date !== (OIM.d && OIM.d.today)) OIM.mode = "replay"; }
-  else if (k === "at") OIM.at = Number(e.target.value);
+  else if (k === "date") { oimStop(); OIM.date = e.target.value; OIM.expiry = ""; OIM.at = null; if (OIM.date !== (OIM.d && OIM.d.today)) OIM.mode = "replay"; }
+  else if (k === "at") { oimStop(); OIM.at = Number(e.target.value); }
+  else if (k === "speed") { OIM.speed = Number(e.target.value) || 4000; return; }
   else if (k === "showOi" || k === "showChg") { OIM[k] = e.target.checked; if (OIM.d) oimDrawChart(OIM.d); return; }
   loadOiMinute();
 }
@@ -190,3 +193,22 @@ function oimSchedule() {
   }, ms > 60_000 ? ms - 60_000 : ms);
 }
 oimSchedule();
+
+// Replay auto-play: one stored minute every OIM.speed ms until the last minute, then stops.
+function oimStop() { if (OIM.play && OIM.d && OIM.d.atIdx != null) OIM.at = OIM.d.atIdx; OIM.play = false; clearTimeout(OIM.playT); const b = document.querySelector("#oimm-side [data-om-play]"); if (b) { b.textContent = "▶ Play"; b.setAttribute("aria-pressed", "false"); } }
+function oimPlay() {
+  const n = (OIM.d && OIM.d.minutes || []).length; if (!n) return;
+  if ((OIM.at ?? n - 1) >= n - 1) OIM.at = 0;               // at the end → start from the first minute
+  OIM.play = true;
+  const step = async () => {
+    if (!OIM.play || OIM.mode !== "replay") return oimStop();
+    await loadOiMinute();
+    const m = (OIM.d && OIM.d.minutes || []).length;
+    if (!OIM.play) return;
+    if (OIM.at >= m - 1) return oimStop();
+    OIM.at += 1; OIM.playT = setTimeout(step, OIM.speed);
+  };
+  step();
+}
+// show the minute under the slider while dragging (the data loads when it is released)
+document.addEventListener("input", (e) => { if (e.target && e.target.matches && e.target.matches('#oimm-side input[data-om="at"]')) { const m = (OIM.d && OIM.d.minutes || [])[Number(e.target.value)]; const l = document.getElementById("oimm-rmin"); if (l && m) l.textContent = m; } });

@@ -221,7 +221,7 @@ export function buildView(snaps: MinuteSnap[], opts: { windowMin: number; around
     top5m: { aligned: pair5.aligned, note: pair5.note, rows: rows5 },
     timeline: minuteTimeline(hist, 10, range),
     heat: { side: opts.heatSide || "CE", strikes: heatStrikes, rows: heatmap(hist, opts.heatSide || "CE", heatStrikes, 6) },
-    minutes: hist.map((s) => s.minute),
+    minutes: snaps.map((s) => s.minute),   // the whole day, so replay can move forward again from any minute
     stats: opts.stats || {},
   };
 }
