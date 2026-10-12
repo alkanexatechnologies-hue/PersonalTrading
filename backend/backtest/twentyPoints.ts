@@ -18,8 +18,10 @@ export const istHm = (t: number) => new Date((t + IST) * 1000).toISOString().sli
 
 // ---------------- data ----------------
 const CACHE = path.join(DATA_DIR, "backtest-rolling");
+/** Full fields (OHLC, strike, spot, OI, IV, volume) — the research dataset. v1 files (OHLC/strike/spot only) stay readable. */
+const FIELDS = ["open", "high", "low", "close", "strike", "spot", "oi", "iv", "volume"];
 async function fetchSeries(from: string, to: string, type: "CALL" | "PUT", rel: number): Promise<any> {
-  const f = path.join(CACHE, `NIFTY-${from}-${to}-${type}-${rel}.json`);
+  const f = path.join(CACHE, `NIFTY-${from}-${to}-${type}-${rel}-v2.json`);
   try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { /* fetch */ }
   const cfg = loadDhanConfig();
   const strike = rel === 0 ? "ATM" : rel > 0 ? `ATM+${rel}` : `ATM${rel}`;
@@ -28,7 +30,7 @@ async function fetchSeries(from: string, to: string, type: "CALL" | "PUT", rel: 
     if (attempt) await new Promise((r) => setTimeout(r, 1500 * attempt));
     try {
       const r = await dhanFetch("/charts/rollingoption", { method: "POST", accessToken: cfg.accessToken, clientId: cfg.clientId,
-        body: { exchangeSegment: "NSE_FNO", interval: "5", securityId: 13, instrument: "OPTIDX", expiryFlag: "WEEK", expiryCode: 1, strike, drvOptionType: type, requiredData: ["open", "high", "low", "close", "strike", "spot"], fromDate: from, toDate: to } });
+        body: { exchangeSegment: "NSE_FNO", interval: "5", securityId: 13, instrument: "OPTIDX", expiryFlag: "WEEK", expiryCode: 1, strike, drvOptionType: type, requiredData: FIELDS, fromDate: from, toDate: to } });
       status = r.status;
       const j: any = await r.json().catch(() => null);
       const x = j?.data?.[type === "CALL" ? "ce" : "pe"];
