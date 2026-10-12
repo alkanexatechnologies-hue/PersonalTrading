@@ -5289,6 +5289,57 @@ body.pm-fullwidth #tab-flow { display:none !important; }
   .pmx-b3,.pmx-s4,.pmx-dec,.pmx-sbg{grid-template-columns:minmax(0,1fr) minmax(0,1fr)} .pmx-b3 .pmx-bx:first-child,.pmx-dec .pmx-dbox{grid-column:1/-1}
   .pmx-hm{grid-template-columns:repeat(3,minmax(0,1fr))} .pmx-sb{grid-template-columns:72px minmax(0,1fr) 46px}
   .pmx-seg button,.pmx-ht{min-height:40px} .pmx-more>summary{min-height:44px} }
+/* Market Sentiment reference layout grid (pmx-grid) */
+.pmx-grid{display:grid;gap:8px;margin-bottom:8px;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr) minmax(0,1fr);
+  grid-template-areas:"in cmd lvl" "in why news" "prem sim dec" "strk heat dec"}
+.pmx-grid .a-in{grid-area:in} .pmx-grid .a-cmd{grid-area:cmd} .pmx-grid .a-lvl{grid-area:lvl} .pmx-grid .a-why{grid-area:why}
+.pmx-grid .a-news{grid-area:news} .pmx-grid .a-prem{grid-area:prem} .pmx-grid .a-sim{grid-area:sim} .pmx-grid .a-dec{grid-area:dec}
+.pmx-grid .a-strk{grid-area:strk} .pmx-grid .a-heat{grid-area:heat}
+.pmx-grid .a-dec .pmx-dbox .dw{font-size:24px}
+.pmx-ctr{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}
+.pmx-in td{white-space:normal} .pmx-in td.val{font-variant-numeric:tabular-nums;color:#e6ecf5}
+.pmx-in td:first-child{color:#5f6f8e;width:16px}
+.pmx-st{font-size:8.5px;font-weight:800;border-radius:4px;padding:0 4px;border:1px solid currentColor;white-space:nowrap}
+.pmx-st.active{color:var(--grn)} .pmx-st.unavailable{color:#5f6f8e} .pmx-st.stale{color:var(--amb)} .pmx-st.neutral{color:#8395b3}
+.pmx-imp2{font-size:10px;font-weight:800;white-space:nowrap} .pmx-imp2.up{color:var(--grn)} .pmx-imp2.dn{color:var(--red)} .pmx-imp2.neu{color:var(--amb)} .pmx-imp2.mut{color:#8395b3}
+.pmx-sel{font:inherit;font-size:11px;background:#111a2e;color:#e6ecf5;border:1px solid #24314f;border-radius:5px;padding:1px 3px;max-width:100%}
+.pmx-simtag{font-size:8.5px;font-weight:900;color:#f0abfc;border:1px solid currentColor;border-radius:4px;padding:0 4px;letter-spacing:.04em}
+.pmx-inmeta{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;font-size:10px;color:#8395b3}
+.pmx-tally{font-size:10.5px;color:#cfd8e6}
+.pmx-simbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:10.5px}
+.pmx-btn{font:inherit;font-size:10.5px;font-weight:800;background:#1d4ed8;color:#fff;border:0;border-radius:6px;padding:4px 10px;cursor:pointer;min-height:26px}
+.pmx-btn.ghost{background:transparent;border:1px solid #24314f;color:#9fb0cc} .pmx-btn:disabled{opacity:.6}
+.pmx-simres{color:#f0abfc}
+.pmx-revs{font-size:10px;color:#8395b3} .pmx-revs summary{cursor:pointer} .pmx-revs ul{margin:3px 0 0;padding-left:14px}
+.pmx-avg td{font-weight:800;background:#111a2e}
+.pmx-tabs{flex-wrap:wrap} .pmx-tabs button{padding:3px 7px}
+.pmx-nt a{color:#e6ecf5;text-decoration:none} .pmx-nt a:hover{text-decoration:underline} .pmx-nt td{white-space:normal}
+.pmx-src{font-size:9.5px;color:#8395b3;margin-top:1px}
+.pmx-prem{display:grid;grid-template-columns:minmax(0,1fr);gap:6px}
+.pmx-spkbox .big{display:inline} .pmx-spkbox{grid-template-columns:auto minmax(0,1fr);align-items:baseline;column-gap:8px} .pmx-spkbox .k{grid-column:1/-1}
+.pmx-atm td{background:#16294a}
+.pmx-spk2{font-size:8px;color:var(--amb);border:1px solid currentColor;border-radius:3px;padding:0 3px}
+.pmx-spkbox{border:1px solid #1b2540;border-radius:8px;padding:8px;background:#111a2e;display:grid;gap:3px}
+.pmx-spkbox .big{font-size:14px;font-weight:900;color:#cfd8e6} .pmx-spkbox.on{border-color:var(--amb)} .pmx-spkbox.on .big{color:var(--amb)}
+.a-strk tr:not(.pmx-whyr) td{border-bottom:0} .a-strk td.why{font-size:10px;color:#8395b3;white-space:normal;padding-top:0}
+.a-news .pm-scroll{max-height:300px;overflow-y:auto}
+/* compact density for the reference grid */
+.pmx-grid{gap:6px} .pmx-grid .pmx-pn{padding:6px 8px;gap:4px}
+.pmx-grid .pmx-pn td{padding:2px 4px;line-height:1.3} .pmx-grid .pmx-pn th{padding:2px 4px}
+.pmx-in td:nth-child(2){white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0;width:40%}
+.pmx-in .pmx-st{font-size:8px}
+.pmx-grid .pmx-lv .ev{max-width:120px} .pmx-grid .pmx-ul{gap:1px} .pmx-grid .pmx-ck{gap:0}
+.pmx-grid .pmx-dbox{padding:6px 8px;gap:2px} .pmx-grid .a-dec .pmx-dbox .dw{font-size:22px}
+.a-prem td,.a-prem th{padding-left:3px;padding-right:3px}
+.pmx-grid .pm-scroll{overflow-x:auto;max-width:100%}
+@media (max-width:1280px){ .pmx-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  grid-template-areas:"cmd cmd" "lvl dec" "in dec" "why news" "prem strk" "sim sim" "heat heat"} }
+@media (min-width:761px) and (max-width:1100px){ .pmx-grid{grid-template-areas:"cmd cmd" "lvl lvl" "in dec" "why news" "prem prem" "strk strk" "sim sim" "heat heat"} }
+@media (max-width:760px){ .pmx-grid{grid-template-columns:minmax(0,1fr);grid-template-areas:"cmd" "lvl" "dec" "in" "why" "strk" "prem" "news" "sim" "heat"}
+  .pmx-ctr,.pmx-prem{grid-template-columns:minmax(0,1fr)} .pmx-btn{min-height:40px} .pmx-sel{font-size:16px;min-height:36px}
+  .pmx-in td,.pmx-nt td{font-size:12px}
+  .a-prem th:nth-child(5),.a-prem td:nth-child(5),.a-prem th:nth-child(6),.a-prem td:nth-child(6){display:none}
+  .a-strk tr:not(.pmx-whyr) th:nth-child(6),.a-strk tr:not(.pmx-whyr) td:nth-child(6),.a-strk tr:not(.pmx-whyr) th:nth-child(7),.a-strk tr:not(.pmx-whyr) td:nth-child(7){display:none} }
 /* Prediction Command Center (top of Market Sentiment) */
 .pm-cmd{background:#0d1424;border:1px solid #24345a;border-radius:12px;padding:12px 14px;margin-bottom:10px;display:grid;gap:10px}
 .pm-cc-hd{display:flex;flex-wrap:wrap;gap:8px;align-items:center}

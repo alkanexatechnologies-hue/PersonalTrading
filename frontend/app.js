@@ -8229,11 +8229,21 @@ function initPremarket() {
       <span class="pm-extstatus" id="pm-extstatus">External Data: —</span>
     </div>
     <div class="pm-strip" id="pm-strip"></div>
-    <div class="pmx-row pmx-r1"><section class="pmx-pn" id="pmx-1"><div class="pm-na">Loading the Prediction Command Center…</div></section><section class="pmx-pn" id="pmx-2"></section><section class="pmx-pn" id="pmx-3"></section></div>
-    <div class="pmx-row pmx-r2"><section class="pmx-pn" id="pmx-4"></section><section class="pmx-pn" id="pmx-5"></section></div>
-    <div class="pmx-row pmx-r3"><section class="pmx-pn" id="pmx-pos"></section><section class="pmx-pn" id="pmx-neg"></section><section class="pmx-pn" id="pmx-6"></section></div>
+    <div class="pmx-grid">
+      <section class="pmx-pn a-in" id="pmx-in"><div class="pm-na">Loading market inputs…</div></section>
+      <section class="pmx-pn a-cmd" id="pmx-1"></section>
+      <section class="pmx-pn a-lvl" id="pmx-3"></section>
+      <section class="pmx-pn a-why" id="pmx-2"></section>
+      <section class="pmx-pn a-news" id="pmx-news"></section>
+      <section class="pmx-pn a-prem" id="pmx-prem"></section>
+      <section class="pmx-pn a-sim" id="pmx-sim"></section>
+      <section class="pmx-pn a-dec" id="pmx-4"></section>
+      <section class="pmx-pn a-strk" id="pmx-strk"></section>
+      <section class="pmx-pn a-heat" id="pmx-heatbox"><div id="pmx-5"></div><div class="pmx-ctr"><div id="pmx-pos"></div><div id="pmx-neg"></div></div></section>
+    </div>
+    <details class="pmx-more" id="pmx-more"><summary>More detail — Global markets · Macro &amp; risk · FII / DII · Sector strength · News flash · Sentiment timeline · and all earlier panels</summary>
     <div class="pmx-row pmx-r4"><section class="pmx-pn" id="pmx-7"></section><section class="pmx-pn" id="pmx-8"></section><section class="pmx-pn" id="pmx-9"></section><section class="pmx-pn" id="pmx-10"></section><section class="pmx-pn" id="pmx-11"></section></div>
-    <details class="pmx-more" id="pmx-more"><summary>More detail — Overall sentiment · Index direction probability · Sector table · FII full history &amp; index-wise · Bank leaders · Top movers · Global News Intelligence (10 categories)</summary>
+    <div class="pmx-row"><section class="pmx-pn" id="pmx-6"></section></div>
     <div class="pm-grid">
       <section class="pm-panel a-s"><div class="pm-ph"><span class="pm-num">1</span><h2>Overall Market Sentiment</h2><span class="pm-sub">(Pre-Market)</span><span class="pm-r" id="pm-sent-fr"></span></div><div id="pm-sentiment"></div></section>
       <section class="pm-panel a-p"><div class="pm-ph"><span class="pm-num">2</span><h2>Index Direction Probability</h2><span class="pm-sub">(Next Session)</span></div><div class="pm-prob-wrap" id="pm-prob"></div></section>
@@ -8476,7 +8486,7 @@ async function loadPMCommand(force) {
 function pmT(sec) { return sec ? new Date(sec * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }) : "—"; }
 function pmDirCls(d) { return /BULL|UP|CE/.test(d || "") ? "up" : /BEAR|DOWN|PE/.test(d || "") ? "dn" : "neu"; }
 function pmFresh(v) { const c = v === "FRESH" ? "ok" : v === "MISSING" ? "bad" : /STALE|AFTER/.test(v || "") ? "warn" : "mut"; return `<span class="pm-cc-fr ${c}">${pmEsc(v)}</span>`; }
-function pmxH(n, title, right) { return `<h2 class="pmx-h"><i>${n}</i>${title}${right ? `<span class="pmx-r">${right}</span>` : ""}</h2>`; }
+function pmxH(n, title, right) { return `<h2 class="pmx-h">${n ? `<i>${n}</i>` : ""}${title}${right ? `<span class="pmx-r">${right}</span>` : ""}</h2>`; }
 function pmxSet(id, html) { const e = pmEl(id); if (e) e.innerHTML = html; }
 function pmxSpark(arr) {
   if (!arr || arr.length < 2) return "";
@@ -8494,7 +8504,7 @@ function renderPMCommand(d) {
   const adj = p.closingAdjustment ? `<div class="pmx-note">ⓘ ${pmEsc(p.closingAdjustment.note)} (last traded ${n(p.lastTraded && p.lastTraded.value)} → official close ${n(p.officialClose && p.officialClose.value)}).</div>` : "";
   const scoreTile = (x) => `<div class="pmx-sc" title="${pmAttr(x.formula)}"><div class="k">${pmEsc(x.label)}${x.experimental ? ' <b class="pmx-exp">EXP</b>' : ""}</div><div class="v ${x.value == null ? "mut" : pmCls(x.value)}">${x.value == null ? "hidden" : (x.value > 0 ? "+" : "") + x.value + (x.key === "heat" ? "%" : "")}</div><div class="s">${pmEsc(x.value == null ? "input missing" : x.inputs)}</div></div>`;
   const nh = pr.horizons.map((h) => h.n).join("/");
-  pmxSet("pmx-1", pmxH(1, "Prediction Command Center", `<span class="pmx-tag">${pmEsc(pr.status)}</span> updated ${pmT(d.generatedAt)}`) + `
+  pmxSet("pmx-1", pmxH(2, "Prediction Command Center", `<span class="pmx-tag">${pmEsc(pr.status)}</span> updated ${pmT(d.generatedAt)}`) + `
     <div class="pmx-b3">
       <div class="pmx-bx"><div class="k">Market regime</div><div class="big neu">${pmEsc(a.regime.label)}</div><div class="s">${pmEsc(a.regime.detail || "")}</div></div>
       <div class="pmx-bx"><div class="k">NIFTY 50 bias</div><div class="big ${pmDirCls(a.niftyBias.direction)}">${pmEsc(a.niftyBias.direction)}</div><div class="s">${pmEsc(a.niftyBias.source)}${a.niftyBias.candle ? " · " + pmEsc(a.niftyBias.candle.slice(11, 16)) : ""}</div></div>
@@ -8508,70 +8518,162 @@ function renderPMCommand(d) {
     <div class="pmx-fresh">${Object.entries(a.freshness).map(([k, v]) => `<span>${pmEsc(k)} ${pmFresh(v)}</span>`).join("")}</div>${adj}`);
   // 2 · Why
   const li = (arr) => (arr && arr.length ? `<ol class="pmx-nl">${arr.map((x) => `<li>${pmEsc(x)}</li>`).join("")}</ol>` : `<div class="pm-in-none">None now</div>`);
-  pmxSet("pmx-2", pmxH(2, "Why this view?") + `<div class="pmx-why">${pmEsc(b.why)}</div>
+  pmxSet("pmx-2", pmxH(3, "Why this view?") + `<div class="pmx-why">${pmEsc(b.why)}</div>
     <div class="k up">▲ Bullish factors</div>${li(b.bullish)}<div class="k dn">▼ Bearish factors</div>${li(b.bearish)}
     <div class="k neu">◆ Contradictory signals</div>${li(b.contradictions)}<div class="k">⚠ Would invalidate this view</div>${li(b.invalidation)}
     <div class="pmx-note">${pmEsc(b.oiDisclaimer)}</div>`);
   // 3 · Levels in price sequence
   const seq = (c.sequence || []).map((r) => r.spot
-    ? `<tr class="pmx-spot"><td>▶ NIFTY spot</td><td class="num">${n(r.price)}</td><td>${d.phase === "CLOSED" ? "CLOSED" : "LIVE"}</td><td class="ev">${d.phase === "CLOSED" ? "official close" : "at " + pmT(c.spotTs)}</td></tr>`
-    : `<tr class="${r.side === "resistance" ? "rs" : "sp"}" title="${pmAttr((r.methods || []).join(" | "))}"><td>${pmEsc(r.kinds.join(" · "))}</td><td class="num">${n(r.price)}</td><td><span class="pm-cc-st ${String(r.status).toLowerCase()}">${pmEsc(r.status)}</span></td><td class="ev">${pmEsc(r.evidence)} <span class="dist">${sg(r.distance, 0)} pts</span></td></tr>`).join("");
-  pmxSet("pmx-3", pmxH(3, "Critical NIFTY levels", `Spot <b>${n(c.spot)}</b> ${d.phase === "CLOSED" ? "(CLOSED)" : pmT(c.spotTs)}`) +
+    ? `<tr class="pmx-spot"><td>▶ NIFTY spot</td><td class="num">${n(r.price)}</td><td>—</td><td>${d.phase === "CLOSED" ? "CLOSED" : "LIVE"}</td><td class="num">0</td><td class="ev">${d.phase === "CLOSED" ? "official close" : "at " + pmT(c.spotTs)}</td></tr>`
+    : `<tr class="${r.side === "resistance" ? "rs" : "sp"}" title="${pmAttr((r.methods || []).join(" | "))}"><td>${pmEsc(r.kinds.join(" · "))}</td><td class="num">${n(r.price)}</td><td class="str ${pmEsc(String(r.strength || "").toLowerCase())}">${pmEsc(r.strength || "—")}</td><td><span class="pm-cc-st ${String(r.status).toLowerCase()}">${pmEsc(r.status)}</span></td><td class="num ${pmCls(r.distance)}">${sg(r.distance, 0)}</td><td class="ev">${pmEsc(r.evidence)}</td></tr>`).join("");
+  pmxSet("pmx-3", pmxH(4, "Critical NIFTY levels", `Spot <b>${n(c.spot)}</b> ${d.phase === "CLOSED" ? "(CLOSED)" : pmT(c.spotTs)}`) +
     (c.note ? `<div class="pmx-note warn">${pmEsc(c.note)}</div>` : "") +
-    `<div class="pm-scroll"><table class="pmx-lv"><thead><tr><th>Level</th><th class="num">Price</th><th>Status</th><th>Evidence</th></tr></thead><tbody>${seq || '<tr><td colspan="4">No levels — source data unavailable</td></tr>'}</tbody></table></div>
+    `<div class="pm-scroll"><table class="pmx-lv"><thead><tr><th>Level</th><th class="num">Price</th><th>Strength</th><th>Status</th><th class="num">Distance</th><th>Evidence</th></tr></thead><tbody>${seq || '<tr><td colspan="6">No levels — source data unavailable</td></tr>'}</tbody></table></div>
     <div class="pmx-note">OI strikes within 1 % of spot · PCR ${c.oi ? c.oi.pcr ?? "—" : "—"} · max pain ${c.oi ? c.oi.maxPain ?? "—" : "—"} · hover a row for method &amp; invalidation. OI alone never triggers a trade.</div>`);
   // 4 · Master trade decision (arbiter)
   const o = dd.option, pl = dd.plan;
-  const reasons = [dd.reason, ...(dd.candidates || []).map((x) => `${x.setup}: ${x.block || x.state}`)].filter(Boolean).slice(0, 4);
+  const reasons = [dd.reason, ...(dd.candidates || []).map((x) => `${x.setup}: ${x.block || x.state}`)].filter(Boolean).slice(0, 3);
   const det = (k, v) => `<tr><td>${k}</td><td class="num">${v}</td></tr>`;
-  pmxSet("pmx-4", pmxH(4, "Master trade decision <span class=\"mut\">(arbiter only)</span>") + `<div class="pmx-dec">
-    <div class="pmx-dbox ${pmDirCls(dd.action)}"><div class="dw">${pmEsc(dd.action)}</div><div class="s">${pmEsc(dd.candle || "")}${dd.setup ? " · " + pmEsc(dd.setup) : ""}${dd.guard ? ` · guard: ${pmEsc(dd.guard)}` : ""}</div></div>
-    <div><div class="k">Key reasons</div><ul class="pmx-ul">${reasons.map((r) => `<li>${pmEsc(r)}</li>`).join("")}</ul></div>
-    <div><div class="k">Trade details (if triggered)</div><table class="pmx-td">
+  const ev = dd.evidenceStatus;
+  const inval = (b.invalidation || []).concat((dd.candidates || []).filter((x) => x.block).map((x) => `${x.setup}: ${x.block}`)).slice(0, 3);
+  pmxSet("pmx-4", pmxH(10, "Master trade decision <span class=\"mut\">(arbiter only)</span>") + `
+    <div class="pmx-dbox ${pmDirCls(dd.action)}"><div class="dw">${pmEsc(dd.action)}</div><div class="s">${pmEsc(dd.reason || "")}</div>
+      <div class="s">${pmEsc(dd.candle || "")}${dd.setup ? " · setup: " + pmEsc(dd.setup) : ""}${dd.guard ? ` · guard: ${pmEsc(dd.guard)}` : ""}</div>
+      <div class="pmx-ev">${ev ? pmEsc(ev.label) : "Evidence: no active setup — no win-rate is claimed"}</div></div>
+    <table class="pmx-td">
+      ${det("Entry trigger (spot)", pl ? `${n(pl.entry)}${dd.distanceToOpposing ? ` · next opposing ${n(dd.distanceToOpposing.level)} (${dd.distanceToOpposing.points} pts)` : ""}` : "—")}
       ${det("Strike / expiry", o ? pmEsc(o.strike + " " + o.side + " · " + (o.expiry || "")) : "—")}
-      ${det("Entry (option LTP)", o ? `₹${n(o.entry)} (₹${n(o.ltp)})` : "—")}
-      ${det("Stop loss", o ? `₹${n(o.stopLoss)} · spot ${n(pl && pl.stopLoss)}` : "—")}
+      ${det("Option LTP", o ? `₹${n(o.ltp)} at ${pmEsc((dd.candle || "").slice(11, 16))}` : "—")}
       ${det("Target 1 / 2", o ? `₹${n(o.target1)} / ${o.target2 != null ? "₹" + n(o.target2) : "—"}` : "—")}
-      ${det("R:R after costs", o ? `1:${n(o.netRR ?? o.rr)}` : "—")}
-      ${det("Next opposing level", dd.distanceToOpposing ? `${n(dd.distanceToOpposing.level)} (${dd.distanceToOpposing.points} pts)` : "—")}</table></div>
-    <div><div class="k">Risk controls (actual)</div><ul class="pmx-ck">${(dd.gates || []).map((g) => `<li>${pmEsc(g)}</li>`).join("")}<li class="info">15-min trend context: Setup Signals only</li></ul></div>
-  </div><div class="pmx-note">Advisory only — no order is placed. The Command Center can only downgrade a stale decision to BLOCK TRADE; it never creates one.</div>`);
+      ${det("Stop loss", o ? `₹${n(o.stopLoss)} · spot ${n(pl && pl.stopLoss)}` : "—")}
+      ${det("Reward : risk (after costs)", o ? `${n(o.netRR ?? o.rr)} : 1` : "—")}</table>
+    <div class="pmx-2c"><div><div class="k up">Why this trade?</div><ul class="pmx-ul">${reasons.map((r) => `<li>${pmEsc(r)}</li>`).join("")}</ul></div>
+      <div><div class="k dn">Invalidation</div><ul class="pmx-ul">${inval.map((r) => `<li>${pmEsc(r)}</li>`).join("") || "<li>—</li>"}</ul></div></div>
+    <div class="k">Risk controls (actual)</div><ul class="pmx-ck">${(dd.gates || []).map((g) => `<li>${pmEsc(g)}</li>`).join("")}<li class="info">15-min trend context: Setup Signals only</li></ul>
+    <div class="pmx-note">Advisory only — no order is placed. The arbiter is the only decision; this screen can only downgrade a stale one to BLOCK TRADE.</div>`);
   // contributors + sector strength
   const k = d.contributions;
   const view = k && k.available ? (k.session || k.preopen) : null;
   const ctab = (rows, cls) => `<table class="pmx-ct"><thead><tr><th>#</th><th>Stock</th><th class="num">Change</th><th class="num">Index pts</th></tr></thead><tbody>${rows.map((r, i) => `<tr><td>${i + 1}</td><td>${pmEsc(r.symbol)}</td><td class="num ${pmCls(r.pct)}">${sg(r.pct)}%</td><td class="num ${cls}">${sg(r.points, 1)}</td></tr>`).join("") || '<tr><td colspan="4">—</td></tr>'}</tbody></table>`;
   const lbl = view ? `${pmEsc(view.label)} · ${pmT(view.ts)}` : "";
   const why = !k || !k.available ? pmEsc((k && k.reason) || "unavailable") : "No in-market reading yet today";
-  pmxSet("pmx-pos", `<h2 class="pmx-h up">Top 5 positive NIFTY contributors<span class="pmx-r">${lbl}</span></h2>` + (view ? ctab(view.top.filter((r) => r.points > 0), "up") : `<div class="pm-in-none">${why}</div>`));
-  pmxSet("pmx-neg", `<h2 class="pmx-h dn">Top 5 negative NIFTY contributors<span class="pmx-r">${lbl}</span></h2>` + (view ? ctab(view.bottom.filter((r) => r.points < 0), "dn") : `<div class="pm-in-none">${why}</div>`) +
+  pmxSet("pmx-pos", `<h2 class="pmx-h up">Top 5 positive contributors<span class="pmx-r">${lbl}</span></h2>` + (view ? ctab(view.top.filter((r) => r.points > 0), "up") : `<div class="pm-in-none">${why}</div>`));
+  pmxSet("pmx-neg", `<h2 class="pmx-h dn">Top 5 negative contributors<span class="pmx-r">${lbl}</span></h2>` + (view ? ctab(view.bottom.filter((r) => r.points < 0), "dn") : `<div class="pm-in-none">${why}</div>`) +
     (k && k.available ? `<div class="pmx-note">${pmEsc(k.model.label)} — not official weights · validated ${k.model.validation.sessions} sessions, median error ${k.model.validation.intraMedian} pts</div>` : ""));
   pmxRenderStrength();
+  pmxRenderExtras(d);
   if (PM.data) renderPMStrip(PM.data.strip);   // add the mini-charts now that sparks are here
 }
+// ---- panels fed by /premarket/command extras (inputs, similar sessions, news impact, premiums, strikes)
+function pmxRenderExtras(d) {
+  const x = d.x || {};
+  if (x.error) { pmxSet("pmx-in", pmxH(1, "Market input selection") + `<div class="pm-na">${pmEsc(x.error)}</div>`); return; }
+  PM.x = x;
+  pmxRenderInputs(); pmxRenderSim(); pmxRenderNewsImpact(); pmxRenderPremium(x.premium); pmxRenderStrikes(x.strikes);
+}
+const PMX_IMP = ["Positive", "Negative", "Mixed", "Neutral", "Caution"];
+function pmxImpCls(i) { return i === "Positive" ? "up" : i === "Negative" ? "dn" : i === "Caution" ? "neu" : i === "Mixed" ? "neu" : "mut"; }
+function pmxRenderInputs() {
+  const x = PM.x || {}, ins = x.inputs || {}, snap = ins.snapshot;
+  const mode = PM.inMode || "auto", view = PM.inView || (snap ? "snap" : "now");
+  const list = snap && (mode === "manual" || view === "snap") ? snap.inputs : (ins.current || []);
+  const sim = PM.sim;
+  const head = pmxH(1, "Market input selection <span class=\"mut\">(auto at 09:25)</span>", `<span class="pmx-seg" role="group"><button type="button" data-in-mode="auto" aria-pressed="${mode === "auto"}">Auto</button><button type="button" data-in-mode="manual" aria-pressed="${mode === "manual"}">Manual scenario</button></span>`);
+  const snapLine = snap ? `09:25 snapshot taken ${pmT(snap.at)} · ${ins.revisions.length} revision${ins.revisions.length === 1 ? "" : "s"} since` : "09:25 snapshot not taken yet today (taken automatically on a trading session)";
+  const viewSeg = mode === "auto" && snap ? `<span class="pmx-seg" role="group"><button type="button" data-in-view="snap" aria-pressed="${view === "snap"}">09:25</button><button type="button" data-in-view="now" aria-pressed="${view === "now"}">Now</button></span>` : "";
+  const ov = PM.overrides || {};
+  const rows = list.map((i) => {
+    const sel = mode === "manual" ? `<select class="pmx-sel" data-ov="${pmAttr(i.key)}" aria-label="${pmAttr(i.label)} scenario impact">${PMX_IMP.map((v) => `<option ${((ov[i.key] || i.impact) === v) ? "selected" : ""}>${v}</option>`).join("")}</select>` : `<span class="pmx-imp2 ${pmxImpCls(i.impact)}">${pmEsc(i.impact)}</span>`;
+    const simd = mode === "manual" && ov[i.key] && ov[i.key] !== i.impact;
+    return `<tr title="${pmAttr(i.reason + " · " + i.source + (i.ts ? " · " + pmT(i.ts) : ""))}"><td>${i.id}</td><td>${pmEsc(i.label)}</td><td class="val">${pmEsc(i.value)}</td><td><span class="pmx-st ${i.status.toLowerCase()}">${pmEsc(i.status)}</span></td><td>${sel}${simd ? ' <b class="pmx-simtag">SIMULATED</b>' : ""}</td></tr>`;
+  }).join("");
+  const t = (snap && view === "snap" && mode === "auto" ? snap.tally : null) || null;
+  const tallyOf = (arr) => { const a = arr.filter((i) => i.status === "ACTIVE"); const p = a.filter((i) => i.impact === "Positive").length, n = a.filter((i) => i.impact === "Negative").length; return { positive: p, negative: n, counted: a.length, lean: p - n >= 3 ? "BULLISH" : n - p >= 3 ? "BEARISH" : "MIXED" }; };
+  const tl = t || tallyOf(list);
+  const tallyHtml = `<div class="pmx-tally">Active inputs: <b class="up">${tl.positive} positive</b> · <b class="dn">${tl.negative} negative</b> of ${tl.counted} → lean <b class="${pmDirCls(tl.lean)}">${pmEsc(tl.lean)}</b> <span class="mut">(a count, not a probability)</span></div>`;
+  const simHtml = mode === "manual" ? `<div class="pmx-simbar"><button type="button" class="pmx-btn" data-sim="run">Compare scenario</button><button type="button" class="pmx-btn ghost" data-sim="reset">Reset</button>${sim ? `<span class="pmx-simres">SIMULATED (${pmEsc(sim.base)}): <b class="up">${sim.tally.positive}+</b> / <b class="dn">${sim.tally.negative}−</b> → <b>${pmEsc(sim.tally.lean)}</b> · actual stays unchanged</span>` : `<span class="mut">Change any impact, then Compare. Nothing is saved over the automatic record.</span>`}</div>` : "";
+  const revs = ins.revisions && ins.revisions.length && mode === "auto" ? `<details class="pmx-revs"><summary>Revisions (${ins.revisions.length})</summary><ul>${ins.revisions.slice(-8).reverse().map((r) => `<li><b>${pmT(r.at)}</b> ${pmEsc(r.trigger)}${r.changes.length ? " — " + r.changes.map((c) => `${pmEsc(c.key)}: ${pmEsc(c.from)} → ${pmEsc(c.to)}`).join("; ") : ""}</li>`).join("")}</ul></details>` : "";
+  pmxSet("pmx-in", head + `<div class="pmx-inmeta">${pmEsc(snapLine)} ${viewSeg}</div>
+    <div class="pm-scroll"><table class="pmx-in"><thead><tr><th>#</th><th>Input</th><th>Current value</th><th>Status</th><th>Impact</th></tr></thead><tbody>${rows || '<tr><td colspan="5">Inputs unavailable</td></tr>'}</tbody></table></div>
+    ${tallyHtml}${simHtml}${revs}<div class="pmx-note">Crude rule: ${pmEsc(x.crudeRule || "")}. Hover a row for the reason, source and time. All inputs come from Dhan, NSE files and the news feeds.</div>`);
+  const box = pmEl("pmx-in");
+  if (box && !box._bound) {
+    box._bound = true;
+    box.addEventListener("click", async (e) => {
+      const m = e.target.closest("[data-in-mode]"); if (m) { PM.inMode = m.getAttribute("data-in-mode"); pmxRenderInputs(); return; }
+      const v = e.target.closest("[data-in-view]"); if (v) { PM.inView = v.getAttribute("data-in-view"); pmxRenderInputs(); return; }
+      const b = e.target.closest("[data-sim]"); if (!b) return;
+      if (b.getAttribute("data-sim") === "reset") { PM.overrides = {}; PM.sim = null; pmxRenderInputs(); pmxRenderSim(); return; }
+      try { b.disabled = true; PM.sim = await fetch("/api/premarket/scenario", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ overrides: PM.overrides || {} }), screen: "premarket" }).then((r) => r.json()); }
+      catch { PM.sim = null; } finally { pmxRenderInputs(); pmxRenderSim(); }
+    });
+    box.addEventListener("change", (e) => { const s = e.target.closest("[data-ov]"); if (!s) return; PM.overrides = { ...(PM.overrides || {}), [s.getAttribute("data-ov")]: s.value }; pmxRenderInputs(); });
+  }
+}
+function pmxRenderSim() {
+  const x = PM.x || {}, simd = PM.sim && PM.sim.similar ? PM.sim.similar : null;
+  const r = simd || x.similar;
+  const v = (x.similar && x.similar.validation) || (r && r.validation);
+  const head = pmxH(5, "Historical similar scenarios", simd ? '<b class="pmx-simtag">SIMULATED</b>' : (r && r.rows ? `top ${r.rows.length} of ${r.compared} past sessions` : ""));
+  if (!r || !r.rows) { pmxSet("pmx-sim", head + `<div class="pm-in-none">${pmEsc((r && r.reason) || "Unavailable")}</div>${v ? `<div class="pmx-note warn">${pmEsc(v.note)}</div>` : ""}`); return; }
+  const sg = (v2) => (v2 == null ? "—" : (v2 > 0 ? "+" : "") + pmNum(v2, 0));
+  const rows = r.rows.map((x2, i) => `<tr title="${pmAttr("Matched: " + x2.matched.join(", "))}"><td>${i + 1}</td><td>${pmEsc(x2.date)}</td><td class="num">${x2.similarity}%</td><td>${x2.matched.length}/${x2.compared}</td><td class="num ${pmCls(x2.outcome.m15)}">${sg(x2.outcome.m15)}</td><td class="num ${pmCls(x2.outcome.m30)}">${sg(x2.outcome.m30)}</td><td class="num ${pmCls(x2.outcome.m60)}">${sg(x2.outcome.m60)}</td><td class="num"><span class="up">${sg(x2.outcome.maxUp)}</span> / <span class="dn">${sg(x2.outcome.maxDown)}</span></td></tr>`).join("");
+  const av = r.averages;
+  pmxSet("pmx-sim", head + `<div class="pm-scroll"><table class="pmx-ct"><thead><tr><th>#</th><th>Date</th><th class="num">Similarity</th><th>Conditions</th><th class="num">15m</th><th class="num">30m</th><th class="num">60m</th><th class="num">Max ↑ / ↓</th></tr></thead><tbody>${rows}
+    <tr class="pmx-avg"><td></td><td>Average</td><td></td><td></td><td class="num">${sg(av.m15)}</td><td class="num">${sg(av.m30)}</td><td class="num">${sg(av.m60)}</td><td class="num">${sg(av.maxUp)} / ${sg(av.maxDown)}</td></tr></tbody></table></div>
+    <div class="pmx-note">NIFTY points after 09:25. Library ${r.library} sessions · today's conditions available ${r.completeness.available}/${r.completeness.of} · ${pmEsc(r.note)}</div>
+    ${v ? `<div class="pmx-note warn">${pmEsc(v.note)}</div>` : ""}`);
+}
+function pmxRenderNewsImpact() {
+  const n = (PM.x || {}).news; if (!n) { pmxSet("pmx-news", pmxH(6, "News impact") + `<div class="pm-in-none">News unavailable</div>`); return; }
+  const tab = PM.niTab || "All";
+  const tabs = Object.entries(n.tabs).map(([k, v]) => `<button type="button" data-ni="${k}" aria-pressed="${tab === k}">${k} (${v})</button>`).join("");
+  const rows = n.rows.filter((r) => tab === "All" || r.impact === tab).slice(0, 9).map((r) => `<tr title="${pmAttr((r.interpretation || "") + " · " + r.affected.join(", "))}"><td class="num">${r.ageH < 1 ? Math.max(1, Math.round(r.ageH * 60)) + "m" : r.ageH.toFixed(1) + "h"}</td><td><a href="${pmAttr(/^https?:/.test(r.link) ? r.link : "#")}" target="_blank" rel="noopener">${pmEsc(r.headline)}</a><div class="pmx-src">${pmEsc(r.source)} · <span class="${r.kind === "CONFIRMED FACT" ? "up" : "mut"}">${pmEsc(r.kind)}</span> · ${pmEsc(r.affected.join(", "))}</div></td><td><span class="pmx-imp2 ${pmxImpCls(r.impact)}">${pmEsc(r.impact)}</span><div class="pmx-src">${pmEsc(r.strength)}</div></td></tr>`).join("");
+  pmxSet("pmx-news", pmxH(6, "News impact", pmEsc(n.window)) + `<div class="pmx-seg pmx-tabs" role="group">${tabs}</div><div class="pm-scroll"><table class="pmx-ct pmx-nt"><thead><tr><th class="num">Age</th><th>Headline</th><th>Impact</th></tr></thead><tbody>${rows || '<tr><td colspan="3">No headlines in this tab</td></tr>'}</tbody></table></div><div class="pmx-note">Impact text is the app's interpretation; official releases are marked CONFIRMED FACT. A new major headline triggers a logged reassessment of the inputs.</div>`);
+  const box = pmEl("pmx-news");
+  if (box && !box._bound) { box._bound = true; box.addEventListener("click", (e) => { const b = e.target.closest("[data-ni]"); if (!b) return; PM.niTab = b.getAttribute("data-ni"); pmxRenderNewsImpact(); }); }
+}
+function pmxRenderPremium(pr) {
+  if (!pr) { pmxSet("pmx-prem", pmxH(7, "Option premium analysis") + `<div class="pm-in-none">Option chain unavailable</div>`); return; }
+  const sp = (v) => (v == null ? "—" : `${v}%`), ch = (v) => (v == null ? "" : ` <span class="${pmCls(v)}">${v > 0 ? "+" : ""}${v}%</span>`);
+  const spk = (l) => (l.spike === "NONE" || l.spike === "NO DATA" ? "" : ` <b class="pmx-spk2">${pmEsc(l.spike)}</b>`);
+  const rows = pr.rows.map((r) => `<tr class="${r.atm ? "pmx-atm" : ""}"><td>${r.strike}${r.atm ? " (ATM)" : ""}</td><td class="num">${r.ce.ltp == null ? "—" : "₹" + pmNum(r.ce.ltp, 2)}${ch(r.ce.chgPct)}${spk(r.ce)}</td><td class="num">${r.pe.ltp == null ? "—" : "₹" + pmNum(r.pe.ltp, 2)}${ch(r.pe.chgPct)}${spk(r.pe)}</td><td class="num">${r.ce.iv == null ? "—" : pmNum(r.ce.iv, 1)} / ${r.pe.iv == null ? "—" : pmNum(r.pe.iv, 1)}</td><td class="num">${sp(r.ce.spreadPct)} / ${sp(r.pe.spreadPct)}</td><td>${pmEsc(r.ce.liquidity)}</td></tr>`).join("");
+  const dt = pr.detection;
+  pmxSet("pmx-prem", pmxH(7, "Option premium analysis", `spot ${pr.spotChangePct > 0 ? "+" : ""}${pr.spotChangePct}% vs prev close`) + `<div class="pmx-prem">
+    <div class="pm-scroll"><table class="pmx-ct"><thead><tr><th>Strike</th><th class="num">CE (chg)</th><th class="num">PE (chg)</th><th class="num">IV CE / PE</th><th class="num">Spread CE / PE</th><th>Liquidity</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="pmx-spkbox ${dt.label === "No spike" ? "" : "on"}"><div class="k">Premium spike detection</div><div class="big">${pmEsc(dt.label)}</div><div class="s">${pmEsc(dt.driver)}</div>${dt.withoutSpot ? '<div class="s neu">Spike without spot confirmation</div>' : ""}${dt.lowLiquidity ? '<div class="s neu">Low-liquidity spike present</div>' : ""}</div>
+  </div><div class="pmx-note">${pmEsc(pr.rule)} · spread = ${pmEsc(pr.spread)}.</div>`);
+}
+function pmxRenderStrikes(st) {
+  if (!st) { pmxSet("pmx-strk", pmxH(8, "Strike selection") + `<div class="pm-in-none">No direction from the arbiter — no strike comparison.</div>`); return; }
+  const rows = st.rows.map((r) => `<tr class="${r.selected ? "pmx-atm" : ""}"><td>${r.strike}</td><td class="${r.type === "CE" ? "up" : "dn"}">${pmEsc(r.type)} <span class="mut">${pmEsc(r.kind)}</span></td><td class="num">${r.ltp == null ? "—" : "₹" + pmNum(r.ltp, 2)}</td><td class="num">${r.delta == null ? "—" : pmNum(r.delta, 2)}</td><td class="num">${r.iv == null ? "—" : pmNum(r.iv, 1)}</td><td>${pmEsc(r.liquidity)}</td><td class="num">${r.spreadPct == null ? "—" : r.spreadPct + "%"}</td><td class="num">${r.rr == null ? "—" : "1:" + pmNum(r.rr, 2)}</td></tr><tr class="pmx-whyr ${r.selected ? "pmx-atm" : ""}"><td colspan="8" class="why">${pmEsc(r.why)}</td></tr>`).join("");
+  pmxSet("pmx-strk", pmxH(8, "Strike selection <span class=\"mut\">(with explanation)</span>", pmEsc(st.note)) + `<div class="pm-scroll"><table class="pmx-ct"><thead><tr><th>Strike</th><th>Type</th><th class="num">LTP</th><th class="num">Delta</th><th class="num">IV</th><th>Liquidity</th><th class="num">Spread</th><th class="num">R:R</th></tr></thead><tbody>${rows}</tbody></table></div><div class="pmx-note">R:R uses the arbiter's spot plan × delta, minus estimated costs. A rising premium alone never selects a strike.</div>`);
+}
+
 // 6 · Sector strength vs NIFTY at 09:13 (heat-map sectors minus the model's 09:13 NIFTY estimate)
 function pmxRenderStrength() {
   const s = PM.heat && PM.heat.snapshot, k = PM.cmd && PM.cmd.contributions;
-  if (!s || s.status !== "OK") { pmxSet("pmx-6", pmxH(6, "Sector strength") + `<div class="pm-in-none">No usable 09:13 snapshot.</div>`); return; }
+  if (!s || s.status !== "OK") { pmxSet("pmx-6", pmxH("", "Sector strength") + `<div class="pm-in-none">No usable 09:13 snapshot.</div>`); return; }
   const base = k && k.available && k.preopen && PM.heat.isToday ? k.preopen.explainedPct : null;
   const rows = s.sectors.map((x) => ({ n: x.name, v: Math.round((x.avg - (base || 0)) * 100) / 100 })).sort((a, b) => b.v - a.v);
   const mx = Math.max(...rows.map((r) => Math.abs(r.v)), 0.01);
   const bar = (r) => `<div class="pmx-sb"><span>${pmEsc(r.n)}</span><i><em class="${r.v >= 0 ? "bu" : "bd"}" style="width:${Math.max(4, (Math.abs(r.v) / mx) * 100)}%"></em></i><b class="${pmCls(r.v)}">${r.v > 0 ? "+" : ""}${r.v.toFixed(2)}%</b></div>`;
   const ref = base != null ? `vs NIFTY at 09:13 (est. ${base > 0 ? "+" : ""}${base}%)` : "sector average at 09:13 (NIFTY estimate unavailable)";
-  pmxSet("pmx-6", pmxH(6, "Sector strength", pmEsc(ref) + (PM.heat.isToday ? "" : " · last snapshot")) + `<div class="pmx-sbg"><div>${rows.filter((r) => r.v >= 0).map(bar).join("")}</div><div>${rows.filter((r) => r.v < 0).map(bar).join("")}</div></div>`);
+  pmxSet("pmx-6", pmxH("", "Sector strength", pmEsc(ref) + (PM.heat.isToday ? "" : " · last snapshot")) + `<div class="pmx-sbg"><div>${rows.filter((r) => r.v >= 0).map(bar).join("")}</div><div>${rows.filter((r) => r.v < 0).map(bar).join("")}</div></div>`);
 }
 // 7–11 · compact bottom row from data the screen already loads
 function pmxRenderBottom(d) {
   if (!d) return;
   const row = (q) => `<tr><td>${pmEsc(q.label)}</td><td class="num">${q.value == null ? "—" : pmNum(q.value, 2)}</td><td class="num ${pmCls(q.changePct)}">${q.value == null ? pmFreshBadge(q.freshness) : pmPct(q.changePct)}</td></tr>`;
   const g = d.global || { us: [], asia: [], europe: [] };
-  pmxSet("pmx-7", pmxH(7, "Global markets", pmBias(g.bias)) + `<table class="pmx-mini">${[...g.us, ...g.asia, ...g.europe].map(row).join("")}</table>`);
-  pmxSet("pmx-8", pmxH(8, "Macro &amp; risk") + `<table class="pmx-mini">${(d.macro || []).map(row).join("")}</table>`);
+  pmxSet("pmx-7", pmxH("", "Global markets", pmBias(g.bias)) + `<table class="pmx-mini">${[...g.us, ...g.asia, ...g.europe].map(row).join("")}</table>`);
+  pmxSet("pmx-8", pmxH("", "Macro &amp; risk") + `<table class="pmx-mini">${(d.macro || []).map(row).join("")}</table>`);
   const f = d.fii || {};
-  if (!f.available) pmxSet("pmx-9", pmxH(9, "FII / DII positioning") + `<div class="pm-na">FII DATA UNAVAILABLE</div>`);
+  if (!f.available) pmxSet("pmx-9", pmxH("", "FII / DII positioning") + `<div class="pm-na">FII DATA UNAVAILABLE</div>`);
   else {
     const o = f.options, sgn = (v) => (v == null ? "—" : (v >= 0 ? "+" : "") + pmNum(v, 0));
     const bars = [...f.rows].reverse().map((r) => { const v = r.dailyChange || 0; return `<i class="${v >= 0 ? "bu" : "bd"}" style="height:${Math.max(2, Math.min(26, Math.abs(v) / 2200))}px" title="${pmAttr(r.date + " " + sgn(v))}"></i>`; }).join("");
-    pmxSet("pmx-9", pmxH(9, "FII / DII positioning", `EOD ${pmEsc(f.asOf || "")}`) + `<table class="pmx-mini">
+    pmxSet("pmx-9", pmxH("", "FII / DII positioning", `EOD ${pmEsc(f.asOf || "")}`) + `<table class="pmx-mini">
       <tr><td>FII index futures net</td><td class="num ${pmCls(f.currentNet)}">${sgn(f.currentNet)}</td><td class="num">${pmEsc(f.behaviour || "")}</td></tr>
       ${o ? `<tr><td>FII index calls (net)</td><td class="num ${pmCls(o.netCall)}">${sgn(o.netCall)}</td><td class="num mut">Δ ${sgn(o.chgNetCall)}</td></tr><tr><td>FII index puts (net)</td><td class="num ${pmCls(o.netPut)}">${sgn(o.netPut)}</td><td class="num mut">Δ ${sgn(o.chgNetPut)}</td></tr>` : ""}
       ${(f.participants || []).filter((x) => x.type !== "FII").map((x) => `<tr><td>${pmEsc(x.type)} index futures</td><td class="num ${pmCls(x.net)}">${sgn(x.net)}</td><td class="num mut">${x.longPct}% long</td></tr>`).join("")}
@@ -8582,7 +8684,7 @@ function pmxRenderBottom(d) {
 }
 function pmxRenderNews() {
   const tab = PM.newsTab || "flash";
-  const head = pmxH(10, "Market news", `<span class="pmx-seg" role="group"><button type="button" data-pmx-news="flash" aria-pressed="${tab === "flash"}">Flash</button><button type="button" data-pmx-news="intel" aria-pressed="${tab === "intel"}">Intelligence</button></span>`);
+  const head = pmxH("", "Market news flash", `<span class="pmx-seg" role="group"><button type="button" data-pmx-news="flash" aria-pressed="${tab === "flash"}">Flash</button><button type="button" data-pmx-news="intel" aria-pressed="${tab === "intel"}">Intelligence</button></span>`);
   let body = "";
   if (tab === "flash") {
     const items = ((PM.data && PM.data.news && PM.data.news.items) || []).slice(0, 7);
@@ -8597,7 +8699,7 @@ function pmxRenderNews() {
 }
 function pmxRenderTimeline(slots) {
   const list = (slots || []).filter((x) => x.date === (slots[slots.length - 1] || {}).date);
-  pmxSet("pmx-11", pmxH(11, "Sentiment timeline", list.length ? pmEsc(list[0].date) : "") + (list.length ? `<ul class="pmx-tl">${list.map((x) => { const bear = /BEAR/.test(x.overall); const txt = (bear ? x.topNegative || x.topPositive : x.topPositive || x.topNegative) || x.fiiContext || ""; return `<li><b>${pmEsc(x.slot)}</b><i class="${pmDirCls(x.overall)}">●</i><span>${pmEsc(txt)}</span><em class="${pmDirCls(x.overall)}">${pmEsc(x.overall)}</em></li>`; }).join("")}</ul>` : `<div class="pm-in-none">First snapshot at 09:10</div>`));
+  pmxSet("pmx-11", pmxH("", "Sentiment timeline", list.length ? pmEsc(list[0].date) : "") + (list.length ? `<ul class="pmx-tl">${list.map((x) => { const bear = /BEAR/.test(x.overall); const txt = (bear ? x.topNegative || x.topPositive : x.topPositive || x.topNegative) || x.fiiContext || ""; return `<li><b>${pmEsc(x.slot)}</b><i class="${pmDirCls(x.overall)}">●</i><span>${pmEsc(txt)}</span><em class="${pmDirCls(x.overall)}">${pmEsc(x.overall)}</em></li>`; }).join("")}</ul>` : `<div class="pm-in-none">First snapshot at 09:10</div>`));
 }
 
 // ---- 09:13 sector heatmap (inside panel 3). The server takes one snapshot each trading morning at
@@ -8624,7 +8726,7 @@ function renderPMHeat(d) {
   const s = d.snapshot, view = PM.heatView || "sectors";
   const when = s ? new Date(s.takenAt * 1000).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }) : "";
   const seg = `<span class="pmx-seg" role="group"><button type="button" data-heat-view="sectors" aria-pressed="${view === "sectors"}">Sectors</button><button type="button" data-heat-view="stocks" aria-pressed="${view === "stocks"}">Constituents</button></span>`;
-  const head = pmxH(5, "09:13 major stock heat map " + seg, s ? `pre-open · ${pmEsc(when)}${d.isToday ? "" : " · last snapshot"}` : "");
+  const head = pmxH(9, "09:13 sector heat map " + seg, s ? `pre-open · ${pmEsc(when)}${d.isToday ? "" : " · last snapshot"}` : "");
   if (!s) { box.innerHTML = head + `<div class="pm-na">The first heat map is taken at 09:13 on the next trading morning.</div>`; pmxRenderStrength(); return; }
   const older = d.isToday ? "" : `<div class="pmx-note warn">${d.todayIssue ? pmEsc(d.todayIssue) + " Showing the last good snapshot." : "Today's snapshot is taken at 09:13."}</div>`;
   if (s.status !== "OK") { box.innerHTML = head + older + `<div class="pm-na">${s.status === "FAILED" ? "Heat map could not be taken (quotes unavailable)." : pmEsc(s.note || "Pre-open prices were not available at 09:13.")}</div>`; pmxRenderStrength(); return; }
