@@ -177,3 +177,16 @@ function oimChange(e) {
   else if (k === "showOi" || k === "showChg") { OIM[k] = e.target.checked; if (OIM.d) oimDrawChart(OIM.d); return; }
   loadOiMinute();
 }
+
+// Promptness: snapshots are captured at hh:mm:05 (three indices, ~3 s apart), so the screen reloads at
+// hh:mm:15 every minute while it is open in Live mode — a new minute shows ~15 s after it starts.
+function oimSchedule() {
+  clearTimeout(OIM.tick);
+  const ms = 60_000 - (Date.now() % 60_000) + 15_000;
+  OIM.tick = setTimeout(() => {
+    const on = document.getElementById("panel-oianalysis")?.classList.contains("active") && OIA.screen === "minute" && OIM.mode === "live";
+    if (on && !document.hidden) loadOiMinute();
+    oimSchedule();
+  }, ms > 60_000 ? ms - 60_000 : ms);
+}
+oimSchedule();

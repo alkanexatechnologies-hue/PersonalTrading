@@ -6500,7 +6500,7 @@ function startOiAnalysisLive() {
   applyOiaScreen();
   loadOiAnalysis();
   if (OIA.timer) clearInterval(OIA.timer);
-  OIA.timer = setInterval(() => { if (oiaEl("panel-oianalysis")?.classList.contains("active")) loadOiAnalysis(); }, 30000);
+  OIA.timer = setInterval(() => { if (oiaEl("panel-oianalysis")?.classList.contains("active") && OIA.screen !== "minute") loadOiAnalysis(); }, 30000);   // the 1-Min monitor reloads on its own minute schedule (oimonitor.js)
 }
 
 async function loadOiaStrikeHistory() {
