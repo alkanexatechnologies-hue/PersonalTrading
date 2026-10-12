@@ -33,6 +33,7 @@ const ALLOWED_PATHS = new Set<string>([
   "/data/technical",        // Dhan indicator values for one instrument (read-only)
   "/data/marketmovers",     // Dhan top gainers / losers / OI movers (read-only)
   "/data/companyinfo",      // Dhan company overview, ratios, shareholding (read-only)
+  "/charts/rollingoption",  // expired-option minute data (ATM-relative strikes) for research backtests (read-only)
 ]);
 
 export interface DhanFetchOptions {
