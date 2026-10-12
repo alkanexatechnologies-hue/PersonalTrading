@@ -108,11 +108,12 @@ export function saveSnapshot(s: HeatSnapshot): void {
 export function readSnapshot(date: string): HeatSnapshot | null {
   try { return JSON.parse(fs.readFileSync(path.join(SNAPS, `${date}.json`), "utf-8")); } catch { return null; }
 }
-/** Newest saved snapshot on or before `date`. */
-export function latestSnapshot(date: string): HeatSnapshot | null {
+/** Newest saved snapshot on or before `date` (only usable ones when `okOnly`). */
+export function latestSnapshot(date: string, okOnly = false): HeatSnapshot | null {
   try {
-    const f = fs.readdirSync(SNAPS).filter((x) => /^\d{4}-\d{2}-\d{2}\.json$/.test(x) && x.slice(0, 10) <= date).sort().pop();
-    return f ? readSnapshot(f.slice(0, 10)) : null;
+    const files = fs.readdirSync(SNAPS).filter((x) => /^\d{4}-\d{2}-\d{2}\.json$/.test(x) && x.slice(0, 10) <= date).sort().reverse();
+    for (const f of files) { const s = readSnapshot(f.slice(0, 10)); if (s && (!okOnly || s.status === "OK")) return s; }
+    return null;
   } catch { return null; }
 }
 

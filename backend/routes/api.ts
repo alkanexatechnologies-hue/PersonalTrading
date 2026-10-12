@@ -8170,8 +8170,12 @@ router.get("/news/intel", async (req: Request, res: Response) => {
 // taken, otherwise the most recent earlier one (the UI labels its date). Display only.
 router.get("/sector-heatmap", (_req: Request, res: Response) => {
   const today = istDateStr();
-  const snap = readHeatSnapshot(today) || latestHeatSnapshot(today);
-  res.json({ today, snapshot: snap, isToday: !!snap && snap.date === today });
+  // Today's 09:13 picture when it is usable; otherwise (holiday, feed or data plan down) the last
+  // good one, with today's outcome passed along so the screen can say why.
+  const t = readHeatSnapshot(today);
+  const snap = t && t.status === "OK" ? t : latestHeatSnapshot(today, true);
+  const todayIssue = t && t.status !== "OK" ? (t.status === "FAILED" ? "Today's 09:13 heatmap could not be taken (quotes unavailable)." : "No pre-open prices at 09:13 today (market holiday or feed not delivering).") : null;
+  res.json({ today, snapshot: snap, isToday: !!snap && snap.date === today, todayIssue });
 });
 
 // ===================== 09:10 Market & Global Sentiment desk (READ-ONLY) =====================

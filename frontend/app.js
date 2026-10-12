@@ -8468,7 +8468,7 @@ function renderPMHeat(d) {
   if (!s) { box.innerHTML = head("") + `<div class="pm-na">The first heatmap is taken at 09:13 on the next trading morning.</div>`; return; }
   const when = new Date(s.takenAt * 1000).toLocaleString("en-IN", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
   const badge = `<span class="pm-heat-b ${d.isToday ? "today" : "old"}">${d.isToday ? "TODAY " : ""}${pmEsc(when)}</span>`;
-  const older = d.isToday ? "" : `<div class="pm-heat-old">Showing the last snapshot. Today's is taken at 09:13.</div>`;
+  const older = d.isToday ? "" : `<div class="pm-heat-old">${d.todayIssue ? pmEsc(d.todayIssue) + " Showing the last good snapshot." : "Showing the last snapshot. Today's is taken at 09:13."}</div>`;
   if (s.status !== "OK") { box.innerHTML = head(badge) + older + `<div class="pm-na">${s.status === "FAILED" ? "Heatmap could not be taken (quotes unavailable)." : pmEsc(s.note || "Pre-open prices were not available at 09:13.")}</div>`; return; }
   const secs = s.sectors || [];
   if (!PM.heatSel || !secs.some((x) => x.name === PM.heatSel)) PM.heatSel = secs[0] && secs[0].name;
