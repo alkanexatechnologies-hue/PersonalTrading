@@ -115,7 +115,7 @@ import { notificationStatusLive } from "../integrations/notificationService";
 import { recordConnectionTest, recordConnectionSuccess, getConnectionStatus } from "../data/connectionStatusTracker";
 import { lookupDhanSecurity, lookupDhanOption } from "../data/dhanInstruments";
 import { fnoMovers, indexPivots, runIndicatorCheck, readIndicatorCheck } from "../data/dhanInsights";
-import { snapFromChain, recordSnapshot as recordMinuteSnapshot, loadDay as loadMinuteDay, listDays as listMinuteDays, buildView as buildMinuteView, captureStats as minuteCaptureStats } from "../oi/minuteMonitor";
+import { snapFromChain, recordSnapshot as recordMinuteSnapshot, loadDay as loadMinuteDay, listDays as listMinuteDays, buildView as buildMinuteView, captureStats as minuteCaptureStats, loadMinuteLog, minuteLogDays } from "../oi/minuteMonitor";
 const MINUTE_MONITOR_SYMBOLS = ["^NSEI", "^NSEBANK", "^CNXFIN"];
 import { dhanCompanyInfo } from "../data/dhanDataApis";
 import { fetchDhanCandles, DhanBacktestInterval } from "../data/dhanHistorical";
@@ -5840,15 +5840,21 @@ router.get("/oi-monitor", requirePermission("oiAnalysis"), (req: Request, res: R
     const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
     if (!def || !def.fno) return res.json({ available: false, reason: "Valid F&O index required" });
     const today = new Date(Date.now() + 19800000).toISOString().slice(0, 10);
-    const days = listMinuteDays(def.symbol);
-    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : (days.find((d) => d.date === today) ? today : days[0]?.date || today);
-    const expiries = days.find((d) => d.date === date)?.expiries.sort() || [];
+    const mon = listMinuteDays(def.symbol);
+    const days = [...new Set([...mon.map((d) => d.date), ...minuteLogDays().filter((d) => loadMinuteLog(d, def.symbol).snaps.length)])].sort().reverse();
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : (days.includes(today) ? today : days[0] || today);
+    // Prefer the monitor's own snapshots (second-level times); otherwise the app's minute OI log for that day.
+    const monExp = mon.find((d) => d.date === date)?.expiries || [];
+    const log = monExp.length ? null : loadMinuteLog(date, def.symbol);
+    const expiries = (monExp.length ? monExp : [...new Set(log!.snaps.map((x) => x.expiry))]).sort();
     const expiry = expiries.includes(String(req.query.expiry || "")) ? String(req.query.expiry) : expiries[0] || "";
-    const snaps = expiry ? loadMinuteDay(date, def.symbol, expiry) : [];
+    const snaps = !expiry ? [] : monExp.length ? loadMinuteDay(date, def.symbol, expiry) : log!.snaps.filter((x) => x.expiry === expiry);
     const n = (k: string) => (req.query[k] != null && req.query[k] !== "" && Number.isFinite(Number(req.query[k])) ? Number(req.query[k]) : undefined);
     const windowMin = [1, 5, 15, 30].includes(Number(req.query.window)) ? Number(req.query.window) : 1;
-    const view = buildMinuteView(snaps, { windowMin, around: n("around"), atIdx: n("at"), minStrike: n("min"), maxStrike: n("max"), heatSide: req.query.heat === "PE" ? "PE" : "CE", stats: expiry ? minuteCaptureStats(def.symbol, expiry) : {} });
-    res.json({ ...view, name: def.name, date, today, isToday: date === today, days: days.map((d) => d.date).slice(0, 15), expiries, collecting: MINUTE_MONITOR_SYMBOLS.includes(def.symbol),
+    const view: any = buildMinuteView(snaps, { windowMin, around: n("around"), atIdx: n("at"), minStrike: n("min"), maxStrike: n("max"), heatSide: req.query.heat === "PE" ? "PE" : "CE", stats: monExp.length ? minuteCaptureStats(def.symbol, expiry) : log!.stats });
+    if (view.available && !isMarketOpenIST()) view.stale = false;   // after hours the last minute is the session's last, not stale
+    res.json({ ...view, name: def.name, date, today, isToday: date === today, marketOpen: isMarketOpenIST(), days: days.slice(0, 15), expiries,
+      source: monExp.length ? "monitor" : "minute-log", collecting: MINUTE_MONITOR_SYMBOLS.includes(def.symbol),
       note: "Display only — OI addition is never called writing on its own; premium and spot must agree. Not used by signals, the arbiter or paper trading." });
   } catch (e: any) { res.json({ available: false, reason: e?.message || "oi-monitor failed" }); }
 });

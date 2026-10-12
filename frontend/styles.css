@@ -7430,3 +7430,4 @@ body.lqa-fullwidth .content { padding-left: 0; padding-right: 0; }
 @media (max-width:1100px){ .oimm-sidewrap{position:static} }
 @media (max-width:760px){ .oimm-sidewrap>summary{display:flex;align-items:center;min-height:44px;padding:0 12px;background:#0d1424;border:1px dashed #2f5ea8;border-radius:10px;color:#cfe0ff;font-weight:700;font-size:13px;cursor:pointer}
   .oimm-sidewrap[open]>summary{margin-bottom:6px} }
+.oimm-r2 .oimm-cls{white-space:normal;max-width:118px}

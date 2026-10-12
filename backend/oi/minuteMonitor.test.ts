@@ -116,3 +116,17 @@ test("snapshot from the shared chain object", () => {
   assert.equal(s.providerT, T0); assert.equal(s.captureT, T0 + 2); assert.equal(s.strikes[0].ceVol, null);
   assert.equal(snapFromChain("^NSEI", { topStrikes: [] }, T0), null);
 });
+
+import { parseMinuteLog } from "./minuteMonitor";
+test("minute OI log: parsed per index, chain age sets Dhan fetch time, repeated chains dropped", () => {
+  const sum = "date,timeIST,symbol,index,spot,expiry,chainAgeSec,pcr,totalCeOi,totalPeOi,ceChgTotal,peChgTotal,support,resistance,maxPain\n"
+    + "2026-10-12,09:15,^NSEI,NIFTY,22600,2026-10-13,0,1.2,0,0,0,0,0,0,22500\n2026-10-12,09:16,^NSEI,NIFTY,22610,2026-10-13,60,1.2,0,0,0,0,0,0,22500\n2026-10-12,09:17,^NSEI,NIFTY,22620,2026-10-13,5,1.3,0,0,0,0,0,0,22500\n2026-10-12,09:15,^NSEBANK,BANKNIFTY,55000,2026-10-27,0,1,0,0,0,0,0,0,55000\n";
+  const hdr = "date,timeIST,index,spot,strike,distFromSpot,ceOi,ceChg,ceVol,ceLtp,ceIv,ceDelta,peOi,peChg,peVol,peLtp,peIv,peDelta\n";
+  const row = (t: string, k: number, ce: number) => `2026-10-12,${t},NIFTY,22600,${k},0,${ce},0,10,50,0,0,1000,0,10,60,0,0\n`;
+  const str = hdr + [22550, 22600, 22650].map((k) => row("09:15", k, 1000)).join("") + [22550, 22600, 22650].map((k) => row("09:16", k, 1000)).join("") + [22550, 22600, 22650].map((k) => row("09:17", k, 1500)).join("");
+  const r = parseMinuteLog("^NSEI", sum, str);
+  assert.deepEqual(r.snaps.map((s) => s.minute), ["09:15", "09:17"]);   // 09:16 = same chain (fetched 60 s earlier)
+  assert.equal(r.stats.SAME_FETCH, 1);
+  assert.equal(r.snaps[1].providerT, r.snaps[1].captureT - 5);
+  assert.equal(r.snaps[0].source, "minute-log"); assert.equal(r.snaps[0].expiry, "2026-10-13");
+});

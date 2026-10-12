@@ -15,7 +15,7 @@ import { DATA_DIR } from "../config/dataDir";
 // Nothing here is used by signals, the arbiter or paper trading.
 
 export interface StrikeRow { strike: number; ceOi: number | null; peOi: number | null; ceLtp: number | null; peLtp: number | null; ceVol: number | null; peVol: number | null }
-export interface MinuteSnap { symbol: string; expiry: string; providerT: number; captureT: number; minute: string; spot: number | null; pcr: number | null; maxPain: number | null; strikes: StrikeRow[] }
+export interface MinuteSnap { symbol: string; expiry: string; providerT: number; captureT: number; minute: string; spot: number | null; pcr: number | null; maxPain: number | null; strikes: StrikeRow[]; source?: "monitor" | "minute-log" }
 export type Side = "CE" | "PE";
 export type OiClass = "POSSIBLE WRITING" | "POSSIBLE LONG BUILDUP" | "UNWINDING" | "INCONCLUSIVE";
 
@@ -225,3 +225,48 @@ export function buildView(snaps: MinuteSnap[], opts: { windowMin: number; around
     stats: opts.stats || {},
   };
 }
+
+// ---------------- the app's existing minute OI log (DATA_DIR/oi-minute/<date>/*.csv) ----------------
+// Real per-minute strike OI written by the OI minute logger since before this monitor existed. Used when the
+// monitor has no snapshots for that day: same duplicate / stale rules, times to the minute (hh:mm:00 IST),
+// Dhan fetch time = minute − the logged chain age.
+export const INDEX_OF: Record<string, string> = { "^NSEI": "NIFTY", "^NSEBANK": "BANKNIFTY", "^CNXFIN": "FINNIFTY", "^NSEMDCP50": "MIDCPNIFTY", "^BSESN": "SENSEX" };
+const LOG_ROOT = path.join(DATA_DIR, "oi-minute");
+const _logCache = new Map<string, { mtime: number; snaps: MinuteSnap[]; stats: Record<string, number> }>();
+const splitCsv = (l: string) => l.split(",");
+export function parseMinuteLog(symbol: string, summaryCsv: string, strikesCsv: string): { snaps: MinuteSnap[]; stats: Record<string, number> } {
+  const idx = INDEX_OF[symbol]; const stats: Record<string, number> = {};
+  const sum = summaryCsv.split("\n"), sh = splitCsv(sum[0] || ""), si = (k: string) => sh.indexOf(k);
+  const meta = new Map<string, { expiry: string; age: number; pcr: number | null; maxPain: number | null; spot: number | null }>();
+  for (const l of sum.slice(1)) { const c = splitCsv(l); if (c[si("index")] !== idx) continue; meta.set(c[si("timeIST")], { expiry: c[si("expiry")], age: Number(c[si("chainAgeSec")]) || 0, pcr: num(c[si("pcr")]), maxPain: num(c[si("maxPain")]), spot: num(c[si("spot")]) }); }
+  const lines = strikesCsv.split("\n"), h = splitCsv(lines[0] || ""), hi = (k: string) => h.indexOf(k);
+  const byMin = new Map<string, { date: string; spot: number | null; rows: StrikeRow[] }>();
+  for (const l of lines.slice(1)) {
+    const c = splitCsv(l); if (c.length < h.length) continue;
+    const t = c[hi("timeIST")], m = byMin.get(t) || { date: c[hi("date")], spot: num(c[hi("spot")]), rows: [] };
+    m.rows.push({ strike: Number(c[hi("strike")]), ceOi: num(c[hi("ceOi")]), peOi: num(c[hi("peOi")]), ceLtp: num(c[hi("ceLtp")]), peLtp: num(c[hi("peLtp")]), ceVol: num(c[hi("ceVol")]), peVol: num(c[hi("peVol")]) });
+    byMin.set(t, m);
+  }
+  const out: MinuteSnap[] = [];
+  for (const [t, m] of [...byMin.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const md = meta.get(t); if (!md || !md.expiry) { stats.NO_META = (stats.NO_META || 0) + 1; continue; }
+    const captureT = Math.floor(Date.parse(`${m.date}T${t}:00Z`) / 1000) - IST;
+    const s: MinuteSnap = { symbol, expiry: md.expiry, providerT: captureT - md.age, captureT, minute: t, spot: md.spot ?? m.spot, pcr: md.pcr, maxPain: md.maxPain, strikes: m.rows.sort((a, b) => a.strike - b.strike), source: "minute-log" };
+    const prev = [...out].reverse().find((x) => x.expiry === s.expiry) || null;
+    const r = acceptSnapshot(prev, s);
+    if (!r.ok) { stats[r.reason] = (stats[r.reason] || 0) + 1; continue; }
+    out.push(s);
+  }
+  return { snaps: out, stats };
+}
+export function loadMinuteLog(date: string, symbol: string, root = LOG_ROOT): { snaps: MinuteSnap[]; stats: Record<string, number> } {
+  const idx = INDEX_OF[symbol]; if (!idx) return { snaps: [], stats: {} };
+  const fs1 = path.join(root, date, "summary.csv"), fs2 = path.join(root, date, `strikes-${idx}.csv`);
+  try {
+    const mtime = Math.max(fs.statSync(fs1).mtimeMs, fs.statSync(fs2).mtimeMs), k = `${root}|${date}|${symbol}`, c = _logCache.get(k);
+    if (c && c.mtime === mtime) return c;
+    const r = parseMinuteLog(symbol, fs.readFileSync(fs1, "utf8"), fs.readFileSync(fs2, "utf8"));
+    _logCache.set(k, { mtime, ...r }); return r;
+  } catch { return { snaps: [], stats: {} }; }
+}
+export function minuteLogDays(root = LOG_ROOT): string[] { try { return fs.readdirSync(root).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().reverse(); } catch { return []; } }

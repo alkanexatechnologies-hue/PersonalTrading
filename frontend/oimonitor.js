@@ -3,7 +3,7 @@
 // Every number comes from stored snapshots; a window whose two snapshots are not the stated
 // distance apart is flagged with its real interval. Replay walks the same stored minutes.
 const OIM = { win: 1, around: 10, min: null, max: null, heat: "CE", date: "", expiry: "", mode: "live", at: null, showChg: true, showOi: true, d: null, req: 0 };
-const OIM_SYMS = [["^NSEI", "NIFTY"], ["^NSEBANK", "BANK NIFTY"], ["^CNXFIN", "FIN NIFTY"]];
+const OIM_SYMS = [["^NSEI", "NIFTY"], ["^NSEBANK", "BANK NIFTY"], ["^CNXFIN", "FIN NIFTY"], ["^NSEMDCP50", "MIDCAP"], ["^BSESN", "SENSEX"]];
 
 function oimEsc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function oimK(v, sign) {
@@ -53,7 +53,7 @@ function oimSide(d) {
   const seg = (name, items, cur, attr) => `<div class="oimm-seg" role="group" aria-label="${name}">${items.map(([v, l]) => `<button type="button" ${attr}="${oimEsc(v)}" aria-pressed="${String(v) === String(cur)}">${oimEsc(l)}</button>`).join("")}</div>`;
   const nMin = (d.minutes || []).length;
   return `<h4>Instrument &amp; expiry</h4>${seg("Instrument", OIM_SYMS, sym, "data-om-sym")}
-    ${OIM_SYMS.some(([s]) => s === sym) ? "" : `<div class="oimm-note warn">1-min snapshots are collected for NIFTY, BANK NIFTY and FIN NIFTY only.</div>`}
+    <div class="oimm-note">Second-precise snapshots: NIFTY, BANK NIFTY, FIN NIFTY. MIDCAP / SENSEX use the app's minute OI log.</div>
     <label class="oimm-lb">Expiry<select data-om="expiry">${exps.length ? exps.map((e) => `<option ${e === d.expiry ? "selected" : ""}>${oimEsc(e)}</option>`).join("") : "<option>—</option>"}</select></label>
     <div class="oimm-note">Minute history exists only for the expiry the shared chain tracks (nearest).</div>
     <label class="oimm-lb">Day<select data-om="date">${days.length ? days.map((x) => `<option value="${x}" ${x === d.date ? "selected" : ""}>${x}${x === d.today ? " (today)" : ""}</option>`).join("") : `<option>${oimEsc(d.today || "today")}</option>`}</select></label>
@@ -99,7 +99,7 @@ function oimRender(d) {
       <div class="oimm-bx"><span>PCR (OI)</span><b>${d.pcr != null ? d.pcr.toFixed(2) : "—"}</b><em class="${oimC(pcrChg)}">${pcrChg != null ? (pcrChg > 0 ? "▲ +" : pcrChg < 0 ? "▼ " : "") + pcrChg.toFixed(2) : ""}</em></div>
       <div class="oimm-bx"><span>Max pain</span><b>${oimN(d.maxPain)}</b><em></em></div>
     </div>
-    <div class="oimm-clock"><span>Dhan fetch <b>${oimT(d.clocks.providerT)}</b></span><span>Captured <b>${oimT(d.clocks.captureT)}</b></span><span>${d.isToday && OIM.mode === "live" ? `age <b class="${d.stale ? "dn" : ""}">${d.clocks.ageSec}s</b>${d.stale ? " STALE" : ""}` : "replay"}</span><span>${d.samples} snapshots since ${oimEsc(d.firstMinute)}</span></div>
+    <div class="oimm-clock"><span>Dhan fetch <b>${oimT(d.clocks.providerT)}</b></span><span>Captured <b>${oimT(d.clocks.captureT)}</b></span><span>${d.isToday && OIM.mode === "live" ? `age <b class="${d.stale ? "dn" : ""}">${d.clocks.ageSec}s</b>${d.stale ? " STALE" : ""}` : "replay"}</span><span>${d.samples} snapshots since ${oimEsc(d.firstMinute)}</span><span>source <b>${d.source === "minute-log" ? "app minute OI log (to the minute)" : "1-min monitor"}</b></span>${d.marketOpen === false && d.isToday ? "<span><b>market closed</b> — last session minute shown</span>" : ""}</div>
     <div class="oimm-note">${oimEsc(d.clocks.note)}${Object.keys(d.stats || {}).length ? ` Skipped readings: ${Object.entries(d.stats).map(([k, v]) => `${k.toLowerCase().replace(/_/g, " ")} ${v}`).join(", ")}.` : ""}</div>`);
   const legTbl = (side) => {
     const rows = side === "CE" ? d.topCE : d.topPE, nmS = side === "CE" ? "call" : "put";
