@@ -6369,9 +6369,12 @@ function initTradeExec() {
     const btn = teEl("te-log-trade");
     try {
       if (btn) btn.disabled = true;
-      const r = await fetch("/api/trade-execute", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((x) => x.json());
+      const post = (b2) => fetch("/api/trade-execute", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b2) }).then((x) => x.json());
+      let r = await post(body);
+      // A safety check the trader may override — show the reason and ask; never log silently.
+      if (r && r.blocked && r.canForce && confirm(`System check:\n\n${r.reason}\n\nLog this trade anyway?`)) r = await post({ ...body, force: true, remarks: body.remarks + " · OVERRIDE: " + r.reason });
       if (r && r.ok) loadTradeExec();
-      else if (r && r.blocked) alert(r.reason || "Trade not logged (outside window / no valid levels).");
+      else if (r && r.blocked && !r.canForce) alert(r.reason || "Trade not logged (outside window / no valid levels).");
       else alert("Log failed: " + ((r && r.error) || "unknown"));
     } catch (e) { alert("Log error: " + e.message); }
     finally { if (btn) btn.disabled = false; }
@@ -7103,11 +7106,12 @@ function renderTELevels() {
 }
 
 function renderTETrades() {
+  if (!TE._auditAt || Date.now() - TE._auditAt > 60_000) { TE._auditAt = Date.now(); loadTEAudit(); }
   const body = teEl("te-trade-body"); if (!body) return;
   let rows = TE.trades || [];
   if (TE.filter && TE.filter !== "All") rows = rows.filter((r) => r.status === TE.filter);
   if (!rows.length) { body.innerHTML = `<tr><td colspan="15" class="te-l te-muted">No trades logged${TE.filter !== "All" ? " for " + TE.filter : ""} — trades appear here after execution.</td></tr>`; return; }
-  const stCls = (s) => s === "Target Hit" ? "te-b-target" : s === "SL Hit" ? "te-b-sl" : s === "Open" ? "te-b-open" : "te-b-notrade";
+  const stCls = (s) => s === "Target Hit" ? "te-b-target" : s === "SL Hit" ? "te-b-sl" : s === "EOD Exit" ? "te-b-eod" : s === "Open" ? "te-b-open" : "te-b-notrade";
   body.innerHTML = rows.map((r) => {
     const tp = r.totalPoint != null ? `<span class="${r.totalPoint >= 0 ? "te-up" : "te-down"}">${r.totalPoint >= 0 ? "+" : ""}${teNum(r.totalPoint, 2)}</span>` : "—";
     const sel = TE._selTradeId === r.id ? " te-trade-row-sel" : "";
@@ -7133,6 +7137,33 @@ function renderTETrades() {
       if (t) { TE._selTradeId = t.id; renderTELogicDetails(t); renderTETrades(); }
     });
   }
+}
+
+// ---- Execution Audit: every logged trade re-checked against the rules now in force (/api/trade-audit) ----
+async function loadTEAudit() {
+  const box = teEl("te-audit"); if (!box) return;
+  let d; try { d = await fetchJSON("/api/trade-audit", 20000); } catch { d = null; }
+  if (!d || !d.rows) { box.innerHTML = `<span class="te-muted">Audit unavailable.</span>`; return; }
+  const esc = (v) => String(v == null ? "—" : v).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const pts = (v) => v == null ? "—" : `<span class="${v > 0 ? "te-up" : v < 0 ? "te-dn" : ""}">${v > 0 ? "+" : ""}${v}</span>`;
+  const s = d.summary;
+  const chk = (c) => c ? `<span class="te-ac ${c.ok === true ? "ok" : c.ok === false ? "bad" : "na"}">${c.ok === true ? "✓" : c.ok === false ? "✗" : "?"} ${esc(c.text)}</span>` : "";
+  const V = { BLOCKED: "bad", ALLOWED: "ok", "NOT RECORDED": "na" };
+  box.innerHTML = `<div class="te-asum">
+      <div><span>Trades logged</span><b>${s.trades}</b><em>${s.auto} auto · ${s.manual} manual</em></div>
+      <div class="bad"><span>Would be BLOCKED now</span><b>${s.blocked}</b><em>their result ${pts(s.blockedPoints)} pts</em></div>
+      <div class="ok"><span>Would be ALLOWED</span><b>${s.allowed}</b><em>result ${pts(s.allowedPoints)} pts</em></div>
+      <div class="na"><span>Arbiter not recorded</span><b>${s.notRecorded}</b><em>result ${pts(s.notRecordedPoints)} pts</em></div>
+      <div><span>Mislabelled before</span><b>${s.relabelled}</b><em>EOD exits shown as Target/SL Hit</em></div>
+    </div>
+    <ul class="te-arules">${(d.rules || []).map((r) => `<li>${esc(r)}</li>`).join("")}</ul>
+    <div class="te-table-wrap"><table class="te-table te-atable"><thead><tr><th>Trade</th><th>Entry → result</th><th>Rule checks</th><th>Verdict</th></tr></thead><tbody>
+    ${d.rows.map((r) => { const c = (k) => r.checks.find((x) => x.key === k); const lab = c("label");
+      return `<tr class="${V[r.verdict] || ""}"><td><b>${esc(r.date)}</b> ${esc(r.time)}<div>${esc(r.index)} <b class="${r.type === "CE" ? "te-up" : "te-dn"}">${esc(r.strike)} ${esc(r.type)}</b></div><div class="te-muted">${esc(r.source)}</div></td>
+        <td>₹${esc(r.entry)} · SL ₹${esc(r.sl)} · ${esc(r.rr)}<div>${esc(r.status)} ${pts(r.points)} pts</div>${lab ? `<div class="te-ac bad">${esc(lab.text)}</div>` : ""}</td>
+        <td>${chk(c("arbiter"))}${chk(c("stop"))}${chk(c("target"))}</td>
+        <td><span class="te-av ${V[r.verdict] || ""}">${esc(r.verdict)}</span></td></tr>`; }).join("")}
+    </tbody></table></div>`;
 }
 
 // Manually mark an Open trade closed (Target Hit / SL Hit / No Trade). Uses the
@@ -16385,7 +16416,7 @@ const LG_TOKEN_KEY = "nsa_session";
 // each of the ~85 call sites individually.
 // ---- Data Control (central on/off per screen; settings live on the server) ----
 const DC = { screens: {}, loadedAt: 0 };
-const DC_ALWAYS = /^\/api\/(data-control|login|session|logout|connection|connect|feed|symbols|compliance|admin|auth|dhan|groww|telegram)\b/;
+const DC_ALWAYS = /^\/api\/(data-control|login|session|logout|connection|connect|feed|symbols|compliance|admin|auth|dhan|groww|telegram|trade-log|trade-audit|trade-cooldown)\b/;
 // Routes that belong to ONE screen/widget whichever tab is open.
 const DC_ROUTE_OWNER = {
   "best-trade": "w-besttrade", "data-status": "w-status", "top-opportunities": "w-watchlist", "watchlist": "w-watchlist",

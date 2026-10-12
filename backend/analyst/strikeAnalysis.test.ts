@@ -89,3 +89,27 @@ test("option setup: R:R below 1:2 is flagged, never widened to fake it", () => {
   assert.equal(s.meets1to2, false);
   assert.match(s.note, /< 1:2|WAIT/);
 });
+
+// ---- sanity of the plan against the market's own movement (audit fixes: SL ₹0.05, SL inside noise, R:R 1:83) ----
+const atm = () => chain([strike({ strike: 23400, peLtp: 90, peOi: 2e6, peVol: 6e4, peDelta: -0.50 })]);
+test("valid plan: stop outside one candle's premium noise, reachable target, R:R ≥ 2", () => {
+  const s = analyzeStrikes(atm(), "BEARISH", { spotSL: 23440, spotTarget: 23320, atr: 20 }).bestSetup!;
+  assert.equal(s.valid, true); assert.equal(s.premiumNoise, 10); assert.equal(s.riskPts, 20);
+});
+test("stop inside normal noise is invalid (was: stop 1.29 pts away, hit within 2 minutes)", () => {
+  const s = analyzeStrikes(atm(), "BEARISH", { spotSL: 23403, spotTarget: 23320, atr: 20 }).bestSetup!;
+  assert.equal(s.valid, false); assert.match(s.invalidReason!, /inside one candle's normal premium move/);
+});
+test("spot stop beyond the whole premium is invalid (was: SL ₹0.05)", () => {
+  const s = analyzeStrikes(atm(), "BEARISH", { spotSL: 23700, spotTarget: 22800, atr: 20 }).bestSetup!;
+  assert.equal(s.stopPremium, 0.05); assert.equal(s.valid, false); assert.match(s.invalidReason!, /beyond the whole premium/);
+});
+test("far target is counted only up to 4 × ATR (was: R:R 1:83 with a target that never fills)", () => {
+  const s = analyzeStrikes(atm(), "BEARISH", { spotSL: 23430, spotTarget: 22400, atr: 20 }).bestSetup!;
+  assert.equal(s.targetPremium, 90 + 0.5 * 80);            // 1000-pt target capped at 4 × 20 = 80 index points
+  assert.equal(s.rr, Math.round((40 / 15) * 100) / 100);
+});
+test("without ATR the old behaviour is unchanged (no cap, no noise check)", () => {
+  const s = analyzeStrikes(atm(), "BEARISH", { spotSL: 23440, spotTarget: 23320 }).bestSetup!;
+  assert.equal(s.premiumNoise, null); assert.equal(s.valid, true);
+});

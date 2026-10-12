@@ -9,7 +9,7 @@ import path from "path";
 // later. One row per execution; a stable sequence number per IST day.
 
 export type TradeType = "CE" | "PE";
-export type TradeStatus = "Open" | "Target Hit" | "SL Hit" | "No Trade";
+export type TradeStatus = "Open" | "Target Hit" | "SL Hit" | "EOD Exit" | "No Trade";
 
 export interface TradeRow {
   id: string;
@@ -120,11 +120,20 @@ export function updateTrade(inp: UpdateTradeInput): TradeRow | null {
   return r;
 }
 
+/** Trades exactly as stored (no read-time label correction) — for the audit, which reports the corrections. */
+export function listTradesRaw(): TradeRow[] { return readAll().sort((a, b) => b.execTs - a.execTs); }
+
 /** All trades (optionally filtered to one IST day), newest first. */
 export function listTrades(date?: string): TradeRow[] {
-  const rows = readAll();
+  const rows = readAll().map(normalizeEod);
   const filtered = date ? rows.filter((r) => r.date === date) : rows;
   return filtered.sort((a, b) => b.execTs - a.execTs);
+}
+
+/** Rows closed by the old EOD square-off were stored as "Target Hit" / "SL Hit" although neither level was touched;
+ *  show them as what they were ("EOD Exit"). Read-time only — the file is not rewritten. */
+export function normalizeEod(r: TradeRow): TradeRow {
+  return (r.status === "Target Hit" || r.status === "SL Hit") && /EOD square-off/.test(r.remarks || "") ? { ...r, status: "EOD Exit" } : r;
 }
 
 export interface DaySummary { date: string; trades: number; win: number; loss: number; pl: number; }
@@ -132,12 +141,14 @@ export interface DaySummary { date: string; trades: number; win: number; loss: n
 /** Per-day win/loss/P&L summary, newest day first (default last 7 days present). */
 export function weeklySummary(days = 7): DaySummary[] {
   const byDay = new Map<string, DaySummary>();
-  for (const r of readAll()) {
+  for (const r0 of readAll()) {
+    const r = normalizeEod(r0);
     let s = byDay.get(r.date);
     if (!s) { s = { date: r.date, trades: 0, win: 0, loss: 0, pl: 0 }; byDay.set(r.date, s); }
     s.trades++;
-    if (r.status === "Target Hit") s.win++;
-    else if (r.status === "SL Hit") s.loss++;
+    // win / loss by what actually happened: target / SL hits, and EOD exits by their realised points
+    if (r.status === "Target Hit" || (r.status === "EOD Exit" && (r.totalPoint ?? 0) > 0)) s.win++;
+    else if (r.status === "SL Hit" || (r.status === "EOD Exit" && (r.totalPoint ?? 0) <= 0)) s.loss++;
     if (r.totalPoint != null) s.pl += r.totalPoint;
   }
   return [...byDay.values()]

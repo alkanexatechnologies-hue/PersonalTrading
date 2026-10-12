@@ -51,6 +51,12 @@ export interface OptionSetup {
   rewardPts: number | null;       // premium reward
   rr: number | null;              // reward:risk
   meets1to2: boolean;
+  // Sanity of the plan against the market's own movement (index ATR on the screen's timeframe × delta):
+  // false when the stop sits inside one candle's normal premium movement, when the spot stop is beyond the
+  // whole premium (old floor of ₹0.05 = no real stop), or when R:R only reaches 1:2 with an out-of-reach target.
+  valid: boolean;
+  invalidReason: string | null;
+  premiumNoise: number | null;    // |delta| × index ATR — one candle's typical premium move
   responsiveness: number | null;  // |delta|
   responding: boolean | null;     // did premium actually move with the underlying?
   note: string;
@@ -120,12 +126,12 @@ function buildRow(sym: string, s: OiStrike, side: Side, spot: number): StrikeRow
 // Build the option-premium plan for one strike from its delta + the spot levels.
 // Premium move ≈ |delta| × underlying move. Enforces a minimum 1:2 without ever
 // nudging SL/target to fabricate the ratio.
-function computeOptionSetup(row: StrikeRow, spot: number, spotSL: number | null, spotTarget: number | null): OptionSetup {
+function computeOptionSetup(row: StrikeRow, spot: number, spotSL: number | null, spotTarget: number | null, atr: number | null = null): OptionSetup {
   const resp = row.responsiveness;
   const base: OptionSetup = {
     strike: row.strike, side: row.side, entryPremium: row.ltp,
     stopPremium: null, targetPremium: null, riskPts: null, rewardPts: null, rr: null,
-    meets1to2: false, responsiveness: resp,
+    meets1to2: false, valid: false, invalidReason: null, premiumNoise: null, responsiveness: resp,
     responding: row.ltpChgPct != null ? Math.abs(row.ltpChgPct) >= 0.5 : null,
     note: "",
   };
@@ -134,21 +140,31 @@ function computeOptionSetup(row: StrikeRow, spot: number, spotSL: number | null,
     return base;
   }
   const spotRisk = Math.abs(spot - spotSL);
-  const spotReward = Math.abs(spotTarget - spot);
-  const stop = Math.max(0.05, Math.round((row.ltp - resp * spotRisk) * 100) / 100);
+  // A target is only counted up to 4 candles' typical range (index ATR × 4): farther chart levels are not
+  // reached within an intraday option trade and produced plans like R:R 1:83 whose target never fills.
+  const reach = atr != null && atr > 0 ? 4 * atr : null;
+  const spotReward = reach != null ? Math.min(Math.abs(spotTarget - spot), reach) : Math.abs(spotTarget - spot);
+  const rawStop = Math.round((row.ltp - resp * spotRisk) * 100) / 100;
+  const stop = Math.max(0.05, rawStop);
   const target = Math.round((row.ltp + resp * spotReward) * 100) / 100;
   const risk = Math.round((row.ltp - stop) * 100) / 100;
   const reward = Math.round((target - row.ltp) * 100) / 100;
   const rr = risk > 0 ? Math.round((reward / risk) * 100) / 100 : null;
-  base.stopPremium = stop; base.targetPremium = target; base.riskPts = risk; base.rewardPts = reward;
+  const noise = atr != null && atr > 0 ? Math.round(resp * atr * 100) / 100 : null;
+  base.stopPremium = stop; base.targetPremium = target; base.riskPts = risk; base.rewardPts = reward; base.premiumNoise = noise;
   base.rr = rr; base.meets1to2 = rr != null && rr >= 2;
-  base.note = base.meets1to2
+  base.invalidReason = rawStop <= 0.05 ? `Spot stop ${Math.round(spotRisk)} pts away is beyond the whole premium (₹${row.ltp}) — no real option stop.`
+    : noise != null && risk < noise ? `Stop ₹${risk} is inside one candle's normal premium move (≈₹${noise}) — it would be hit by noise.`
+    : !base.meets1to2 ? `R:R 1:${rr ?? "—"} < 1:2 with a reachable target (≤ 4 × ATR) — WAIT rather than widen artificially.`
+    : null;
+  base.valid = base.invalidReason == null;
+  base.note = base.valid
     ? `≈₹${row.ltp} entry, SL ₹${stop}, target ₹${target} (R:R 1:${rr}) from delta ${resp.toFixed(2)}.`
-    : `R:R 1:${rr ?? "—"} < 1:2 on the existing stop/target — WAIT rather than widen artificially.`;
+    : base.invalidReason as string;
   return base;
 }
 
-export function analyzeStrikes(oi: OiAnalysis | null, direction: "BULLISH" | "BEARISH" | "NEUTRAL", opts: { stale?: boolean; finalAction?: string; masterVerdict?: string; name?: string; spotSL?: number | null; spotTarget?: number | null } = {}): StrikeAnalysis {
+export function analyzeStrikes(oi: OiAnalysis | null, direction: "BULLISH" | "BEARISH" | "NEUTRAL", opts: { stale?: boolean; finalAction?: string; masterVerdict?: string; name?: string; spotSL?: number | null; spotTarget?: number | null; atr?: number | null } = {}): StrikeAnalysis {
   const index = oi?.symbol || "";
   const indexName = opts.name || index;
   const spot = oi?.underlying ?? null;
@@ -232,8 +248,8 @@ export function analyzeStrikes(oi: OiAnalysis | null, direction: "BULLISH" | "BE
   }
 
   // Option-premium setups (entry/SL/target/R:R) for the best & second strike.
-  const bestSetup = primary ? computeOptionSetup(rows.find((r) => r.strike === primary.strike)!, spot, opts.spotSL ?? null, opts.spotTarget ?? null) : null;
-  const secondSetup = alternative ? computeOptionSetup(rows.find((r) => r.strike === alternative.strike)!, spot, opts.spotSL ?? null, opts.spotTarget ?? null) : null;
+  const bestSetup = primary ? computeOptionSetup(rows.find((r) => r.strike === primary.strike)!, spot, opts.spotSL ?? null, opts.spotTarget ?? null, opts.atr ?? null) : null;
+  const secondSetup = alternative ? computeOptionSetup(rows.find((r) => r.strike === alternative.strike)!, spot, opts.spotSL ?? null, opts.spotTarget ?? null, opts.atr ?? null) : null;
 
   const preferred = primary ? `${primary.strike} ${primary.side}` : null;
   const summaryWhy = primary

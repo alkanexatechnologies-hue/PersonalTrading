@@ -39,20 +39,27 @@ test("candles before entry are ignored", () => {
   assert.equal(r, null); // the pre-entry spike must not count
 });
 
-test("EOD square-off in profit → Target Hit with remark", () => {
+test("EOD square-off in profit → EOD Exit (never reported as Target Hit) with remark", () => {
   const r = resolveFromCandles(t, [c(1000, 112, 96, 108), c(1300, 120, 98, 118)], true);
-  assert.equal(r?.status, "Target Hit");
+  assert.equal(r?.status, "EOD Exit");
   assert.equal(r?.exitPrice, 118);
   assert.match(r?.remark || "", /square-off/i);
 });
 
-test("EOD square-off in loss → SL Hit", () => {
+test("EOD square-off in loss → EOD Exit (never reported as SL Hit)", () => {
   const r = resolveFromCandles(t, [c(1000, 108, 96, 102), c(1300, 104, 90, 92)], true);
-  assert.equal(r?.status, "SL Hit");
+  assert.equal(r?.status, "EOD Exit");
   assert.equal(r?.exitPrice, 92);
 });
 
 test("unmonitorable trade never resolves (SL/target = 0)", () => {
   const bad: MonitorTrade = { execTs: 1000, entry: 112.4, sl: 0, target: 0 };
   assert.equal(resolveFromCandles(bad, [c(1300, 200, 1, 150)], true), null);
+});
+
+import { normalizeEod } from "./tradeLogStore";
+test("legacy rows closed by the EOD square-off read back as EOD Exit", () => {
+  const row: any = { status: "Target Hit", remarks: "Auto signal · EOD square-off @ 196.75 (in profit; target/SL not touched)" };
+  assert.equal(normalizeEod(row).status, "EOD Exit");
+  assert.equal(normalizeEod({ status: "Target Hit", remarks: "Target hit" } as any).status, "Target Hit");
 });

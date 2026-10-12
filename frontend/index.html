@@ -7,7 +7,7 @@
          under the home indicator. Android ignores it harmlessly. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>BC Data Status</title>
-    <link rel="stylesheet" href="styles.css?v=20261013-ad1" />
+    <link rel="stylesheet" href="styles.css?v=20261013-ta4" />
     <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   </head>
   <body class="oi-focus">
@@ -2246,6 +2246,7 @@
                       <button class="te-fbtn active" data-f="All">All</button>
                       <button class="te-fbtn" data-f="Target Hit">Target Hit</button>
                       <button class="te-fbtn" data-f="SL Hit">SL Hit</button>
+                      <button class="te-fbtn" data-f="EOD Exit">EOD Exit</button>
                       <button class="te-fbtn" data-f="Open">Open</button>
                       <button class="te-fbtn" data-f="No Trade">No Trade</button>
                     </span>
@@ -2254,6 +2255,12 @@
                   <div class="te-table-wrap"><table class="te-table" id="te-trade-table"><thead><tr>
                     <th>SeqNo</th><th>Date</th><th>Time</th><th>Index</th><th>Type</th><th>Strike</th><th>Entry</th><th>SL</th><th>Target</th><th>Total Pt</th><th>1:2</th><th>Status</th><th>Exit</th><th>Exit Time</th><th>Remarks</th>
                   </tr></thead><tbody id="te-trade-body"></tbody></table></div>
+                </div>
+
+                <div class="te-card te-audit-card">
+                  <div class="te-card-hd"><span class="te-card-title">🛡 Execution Audit — every trade re-checked</span>
+                    <span class="te-muted">arbiter agreement · real stop · reachable target · honest labels</span></div>
+                  <div id="te-audit"><span class="te-muted">Loading audit…</span></div>
                 </div>
 
                 <div class="te-card">
@@ -2570,7 +2577,7 @@
         <div id="dc-body" class="dc-body">Loading…</div>
       </div>
     </div>
-    <script src="app.js?v=20261013-ot2"></script>
+    <script src="app.js?v=20261013-ta4"></script>
     <script src="mcsummary.js?v=20261012-dh1"></script>
     <script src="oimonitor.js?v=20261013-ad1"></script>
     <script src="liquidity.js?v=20261007-lqa7"></script>

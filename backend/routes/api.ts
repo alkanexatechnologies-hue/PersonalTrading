@@ -248,7 +248,8 @@ import { getOptionTopPickAuditLog } from "../optionTopPick/auditLog";
 import { buildFakeMoveResult, FakeMoveLevel, FakeMoveTFInput, FakeMoveResult } from "../analyst/fakeMove";
 import { buildConfirmationFlow } from "../analyst/confirmationFlow";
 import { getCooldownState, computeCooldown, recordExecution } from "../trade/cooldownStore";
-import { appendTrade, updateTrade, listTrades, tradesToCsv, weeklySummary, TradeType, TradeStatus } from "../trade/tradeLogStore";
+import { auditTrade, summarizeAudit, INDEX_OF_NAME } from "../trade/executionAudit";
+import { appendTrade, updateTrade, listTrades, listTradesRaw, tradesToCsv, weeklySummary, TradeType, TradeStatus } from "../trade/tradeLogStore";
 import { resolveFromCandles, isMonitorable } from "../trade/tradeMonitor";
 import { scanOptionTopPick, evaluateStockBothTracks } from "../optionTopPick/scanner";
 import { OptionTopPickDeps } from "../optionTopPick/types";
@@ -311,7 +312,9 @@ router.use((req: Request, res: Response, next) => {
 // (X-NSA-Screen). A screen switched OFF in Data Control gets 503 {disabled:true}
 // (the browser normally doesn't even send it). Login/session/settings routes are
 // never blocked so Data Control itself can always be reached.
-const DC_ALWAYS_ALLOWED = /^\/(data-control|login|session|logout|connection|connect|feed|symbols|compliance|admin|auth|dhan|groww|telegram)\b/;
+// The trade log, its audit and the cooldown state only read local files (no market-data calls), so pausing a
+// screen's data never hides the record of trades already taken.
+const DC_ALWAYS_ALLOWED = /^\/(data-control|login|session|logout|connection|connect|feed|symbols|compliance|admin|auth|dhan|groww|telegram|trade-log|trade-audit|trade-cooldown)\b/;
 router.use((req: Request, res: Response, next: NextFunction) => {
   const screen = String(req.get("x-nsa-screen") || "").slice(0, 40);
   if (DC_ALWAYS_ALLOWED.test(req.path)) return next();
@@ -4944,7 +4947,7 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
     // only the direction it is given is made consistent with the displayed view.
     const strikeDirection: "BULLISH" | "BEARISH" | "NEUTRAL" =
       marketView.direction === "BULLISH" || marketView.direction === "BEARISH" ? marketView.direction : "NEUTRAL";
-    const strikeAnalysis = analyzeStrikes(skipOi ? null : oiChain, strikeDirection, { stale: dataStale, finalAction, masterVerdict: arbVerdict, name: def.name, spotSL, spotTarget: spotT1 ?? spotT2 });
+    const strikeAnalysis = analyzeStrikes(skipOi ? null : oiChain, strikeDirection, { stale: dataStale, finalAction, masterVerdict: arbVerdict, name: def.name, spotSL, spotTarget: spotT1 ?? spotT2, atr: currentAtr });
 
     // ADDITIVE (read-only): dual-timeframe OI-MOVEMENT judge — 5M for trade, 15M
     // for direction. Records the ATM±5 CE/PE OI sums this request already has and
@@ -5210,8 +5213,21 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
     // "Order Block invalidated" NO-TRADE case are preserved from the old logic).
     let effectiveAction = finalAction;
     let effectiveWaitReason = waitReason as string | null;
+    // One gate for both the screen and the auto-log: the checklist's TRADE stands only when the option plan is sane
+    // (see analyzeStrikes valid) AND the arbiter itself is BUY on the same side on a recent closed candle.
+    const tradeGate = (() => {
+      const bs0 = strikeAnalysis?.bestSetup;
+      const side0: "CE" | "PE" = strikeAnalysis?.primary?.side === "PE" ? "PE" : strikeAnalysis?.primary?.side === "CE" ? "CE" : (marketView.direction === "BEARISH" ? "PE" : "CE");
+      if (!bs0) return { ok: false, reason: "No option plan for the best strike" };
+      if (!bs0.valid) return { ok: false, reason: bs0.invalidReason || "Option plan not valid" };
+      const arb0 = latestDecision(indexDefOf(def).index), want0 = side0 === "CE" ? "BUY_CE" : "BUY_PE";
+      if (!arb0 || (arb0 as any).finalAction !== want0 || nowSec - Number((arb0 as any).candleTime || 0) > 15 * 60)
+        return { ok: false, reason: `Checklist passed, but the arbiter is ${(arb0 as any)?.finalAction || "not decided"} — not ${want0}` };
+      return { ok: true, reason: "" };
+    })();
     if (!isHistorical && finalAction !== "NO TRADE") {
-      if (confirmationFlow.action === "TRADE") { effectiveAction = "TAKE"; effectiveWaitReason = null; }
+      if (confirmationFlow.action === "TRADE" && !tradeGate.ok) { effectiveAction = "WAIT"; effectiveWaitReason = `WAIT — ${tradeGate.reason}`; }
+      else if (confirmationFlow.action === "TRADE") { effectiveAction = "TAKE"; effectiveWaitReason = null; }
       else if (cooldown.active) { effectiveAction = "WAIT"; effectiveWaitReason = confirmationFlow.reason; } // cooldown wins over stale
       else if (confirmationFlow.action === "DATA UNAVAILABLE") { effectiveAction = "DATA STALE"; effectiveWaitReason = confirmationFlow.reason; }
       else { effectiveAction = displayStale ? "DATA STALE" : "WAIT"; effectiveWaitReason = confirmationFlow.reason; }
@@ -5240,6 +5256,15 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
         const sigEntry = bs?.entryPremium ?? null, sigSl = bs?.stopPremium ?? null, sigTarget = bs?.targetPremium ?? null;
         // A trade with no real entry/SL/target can never be resolved — skip it.
         if (!(sigEntry && sigSl && sigTarget)) throw new Error("no resolvable levels");
+        // The plan must be sane against the market's own movement (stop outside one candle's noise, a real stop,
+        // a reachable target with R:R ≥ 1:2) — otherwise it is not logged.
+        if (!bs?.valid) throw new Error(`invalid plan: ${bs?.invalidReason || "unknown"}`);
+        // Single decision source: the arbiter must itself be BUY on the same side for this index on a recent closed
+        // candle. The Trade Execution checklist alone fired on every direction flip (7 Oct: 7 PE trades logged while
+        // the arbiter's only signal that day was a CE).
+        const arb = latestDecision(indexDefOf(def).index);
+        const want = side === "CE" ? "BUY_CE" : "BUY_PE";
+        if (!arb || (arb as any).finalAction !== want || nowSec - Number((arb as any).candleTime || 0) > 15 * 60) throw new Error(`arbiter is not ${want} (${(arb as any)?.finalAction || "no decision"})`);
         appendTrade({
           execTs: nowSec, index: def.name, symbol: def.symbol, type: side,
           strike: sigStrike, expiry: oiChain?.expiry ?? (oiData as any)?.expiry ?? null,
@@ -5541,7 +5566,7 @@ router.get("/market-command", requirePermission("oiAnalysis"), async (req: Reque
 // and enforced server-side inside /market-command — there is no client path that
 // bypasses it. This endpoint does NOT compute SL/target/risk; it stores what the
 // caller passes (already produced by the existing engines).
-router.post("/trade-execute", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
+router.post("/trade-execute", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
   try {
     const b = req.body || {};
     const symbol = String(b.symbol || "");
@@ -5563,6 +5588,23 @@ router.post("/trade-execute", requirePermission("oiAnalysis"), (req: Request, re
     if (!b.force && !(entry && sl && target && target > entry && sl < entry)) {
       return res.json({ ok: false, blocked: true, reason: `Trade needs a real entry, SL (below entry) and target (above entry) so it can be tracked to Target/SL — not logged.` });
     }
+    // A stop at the ₹0.05 floor is no stop at all (the plan's spot stop was beyond the whole premium) — never logged.
+    if (sl != null && sl <= 0.05) return res.json({ ok: false, blocked: true, reason: "SL ₹0.05 is not a real stop (the chart stop is beyond the whole premium) — not logged." });
+    if (!b.force) {
+      // Checks the trader can override with an explicit confirmation (force:true), never silently:
+      const cd = getCooldownState(def.symbol);
+      if (cd && (cd as any).active) return res.json({ ok: false, blocked: true, canForce: true, reason: `Post-trade cooldown active (${(cd as any).reason || "15 min after the last trade"}) — this would be a duplicate / revenge entry.` });
+      const why = String((b.snapshot && b.snapshot.reason) || "");
+      if (/^(WAIT|CONFLICT|DATA STALE|DATA UNAVAILABLE|NO TRADE)/i.test(why)) return res.json({ ok: false, blocked: true, canForce: true, reason: `The screen says "${why}" — the system is not giving this trade.` });
+      if (entry && sl && num(b.strike) != null && b.expiry) {
+        try {
+          const cs = (await fetchTradePremiumCandles(def, type, num(b.strike) as number, String(b.expiry), 5)).slice(-24);
+          const rng = cs.map((c: any) => c.high - c.low).filter((x: number) => x > 0).sort((x: number, y: number) => x - y);
+          const noise = rng.length >= 6 ? Math.round(rng[Math.floor(rng.length / 2)] * 100) / 100 : null;
+          if (noise != null && entry - sl < noise) return res.json({ ok: false, blocked: true, canForce: true, reason: `SL ₹${Math.round((entry - sl) * 100) / 100} below entry is inside this option's normal 5-minute movement (≈₹${noise}) — it would be hit by noise.` });
+        } catch { /* candles unavailable: other checks still apply */ }
+      }
+    }
     const trade = appendTrade({
       execTs, index: def.name, symbol: def.symbol, type,
       strike: num(b.strike), expiry: b.expiry != null ? String(b.expiry) : (b.snapshot && b.snapshot.expiry) || null,
@@ -5577,6 +5619,28 @@ router.post("/trade-execute", requirePermission("oiAnalysis"), (req: Request, re
   } catch (e: any) {
     res.status(502).json({ error: e?.message || "trade-execute failed" });
   }
+});
+
+// Execution audit for the Trade Execution screen: every logged trade re-checked against the rules now in force
+// (arbiter agreement, real stop, reachable target, honest labels). Read-only.
+router.get("/trade-audit", requirePermission("oiAnalysis"), (_req: Request, res: Response) => {
+  try {
+    const trades = listTradesRaw();
+    const cache = new Map<string, any[] | null>();
+    const ledgerDay = (day: string, index: string) => {
+      const k = `${day}|${index}`;
+      if (!cache.has(k)) { const rows = ledgerFor(index, day); cache.set(k, rows.length ? rows : (ledgerFor("NIFTY", day).length ? [] : null)); }
+      return cache.get(k)!;
+    };
+    const rows = trades.map((t) => auditTrade(t, ledgerDay(t.date, INDEX_OF_NAME[t.index] || t.index)));
+    res.json({ rows, summary: summarizeAudit(rows), rules: [
+      "Arbiter must be BUY on the same side (closed candle, ≤ 15 min old)",
+      "Stop must be a real stop (above ₹0.05, below entry) and outside one candle's normal premium move",
+      "Target counted only up to 4 × ATR (reachable); R:R must still be ≥ 1:2",
+      "No new entry during the 15-min cooldown; manual logs while the screen says WAIT need an explicit override",
+      "EOD square-offs are shown as EOD Exit, not Target Hit / SL Hit",
+    ] });
+  } catch (e: any) { res.json({ rows: [], error: e?.message || "audit failed" }); }
 });
 
 // Current cooldown state for a symbol (server-authoritative; recovered from disk).

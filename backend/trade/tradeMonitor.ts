@@ -6,7 +6,7 @@
 // PE): it wins when the premium rises, so target is above entry and stop below,
 // and the same math applies to both sides.
 
-export type MonitorStatus = "Target Hit" | "SL Hit";
+export type MonitorStatus = "Target Hit" | "SL Hit" | "EOD Exit";
 
 export interface MonitorTrade {
   execTs: number;            // entry time (epoch sec)
@@ -52,10 +52,11 @@ export function resolveFromCandles(t: MonitorTrade, candles: Candle[], windowEnd
     if (hitSl) return { status: "SL Hit", exitPrice: sl, exitTs: c.time, remark: "SL hit" };
   }
   if (windowEnded && bars.length) {
+    // Neither level was touched: an honest "EOD Exit" (never reported as Target Hit / SL Hit).
     const last = bars[bars.length - 1];
     const win = last.close >= entry;
     return {
-      status: win ? "Target Hit" : "SL Hit",
+      status: "EOD Exit",
       exitPrice: last.close, exitTs: last.time,
       remark: `EOD square-off @ ${last.close} (${win ? "in profit" : "in loss"}; target/SL not touched)`,
     };
