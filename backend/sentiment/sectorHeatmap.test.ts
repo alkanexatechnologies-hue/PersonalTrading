@@ -32,3 +32,14 @@ test("most stocks still at previous close → PREOPEN_NOT_AVAILABLE, not a flat 
   assert.match(h.note || "", /4 of 5/);
   assert.equal(buildHeatmap({ X: ["A"] }, { A: null }, "d", 1).status, "FAILED");
 });
+
+test("refill updates only stocks still at previous close and recomputes sectors", async () => {
+  const { applyRefill } = await import("./sectorHeatmap");
+  const h = buildHeatmap({ Energy: ["REL", "ONGC"], Oil: ["REL"] }, { REL: { price: 100, previousClose: 100 }, ONGC: { price: 101, previousClose: 100 } }, "d", 1);
+  const r = applyRefill(h, new Map([["REL", 101], ["ONGC", 105]]), 2);
+  const energy = r.sectors.find((s) => s.name === "Energy")!, oil = r.sectors.find((s) => s.name === "Oil")!;
+  assert.equal(r.refilled, 1);                                   // REL updated once even though in 2 sectors
+  assert.equal(energy.stocks.find((k) => k.s === "ONGC")!.price, 101);   // already-moved stock untouched
+  assert.equal(oil.avg, 1); assert.equal(energy.avg, 1);
+  assert.equal(r.atPrevClose, 0); assert.equal(r.stocksUp, 2);
+});

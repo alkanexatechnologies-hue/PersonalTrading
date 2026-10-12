@@ -198,7 +198,7 @@ import {
 import { writeBaseline as writeStrategyBaseline, checkStrategyIntegrity } from "../qa/strategyIntegrity";
 import { getMarketNews } from "../news/news";
 import { getNewsIntel } from "../news/intel";
-import { takeSnapshot as takeHeatSnapshot, saveSnapshot as saveHeatSnapshot, readSnapshot as readHeatSnapshot, latestSnapshot as latestHeatSnapshot } from "../sentiment/sectorHeatmap";
+import { refillSnapshot as refillHeatSnapshot, takeSnapshot as takeHeatSnapshot, saveSnapshot as saveHeatSnapshot, readSnapshot as readHeatSnapshot, latestSnapshot as latestHeatSnapshot } from "../sentiment/sectorHeatmap";
 import { buildPremarketOverview } from "../sentiment/overview";
 import { todaySnapshots } from "../sentiment/snapshotStore";
 import { getMarketDataHealth, fetchMarketData, marketDataProviderName, MdKey } from "../sentiment/marketDataProvider";
@@ -9792,7 +9792,19 @@ export function startHourlyScheduler() {
     if (heatBusy || wd === 0 || wd === 6 || secOfDay < 9 * 3600 + 13 * 60 || secOfDay > 9 * 3600 + 14 * 60 + 45 || !jobOn("sectorHeatmap")) return;
     const date = istDateStr();
     const have = readHeatSnapshot(date);
-    if (have && have.status === "OK") return;
+    if (have && have.status === "OK") {
+      // one refill pass from 09:14:30 for stocks whose pre-open price arrived after 09:13
+      if (have.refilledAt || secOfDay < 9 * 3600 + 14 * 60 + 30) return;
+      heatBusy = true;
+      try {
+        const prov: any = getProvider();
+        if (typeof prov.getQuotes !== "function") return;
+        const r = await refillHeatSnapshot(have, (syms) => prov.getQuotes(syms));
+        saveHeatSnapshot(r);
+        console.log(`[sector-heatmap] ${date} 09:14:30 refill: ${r.refilled} late pre-open prices, ${r.atPrevClose} still at prev close`);
+      } catch (e: any) { console.log("[sector-heatmap] refill failed:", e?.message || e); } finally { heatBusy = false; }
+      return;
+    }
     heatBusy = true;
     try {
       const prov: any = getProvider();

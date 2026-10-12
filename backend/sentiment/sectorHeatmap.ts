@@ -35,7 +35,7 @@ export const SECTORS: { name: string; file: string }[] = [
 export interface HeatStock { s: string; price: number; prev: number; pct: number }
 export interface HeatSector { name: string; avg: number; adv: number; dec: number; n: number; stocks: HeatStock[] }
 export interface HeatSnapshot {
-  date: string; takenAt: number; status: "OK" | "PREOPEN_NOT_AVAILABLE" | "FAILED";
+  date: string; takenAt: number; refilledAt?: number; refilled?: number; status: "OK" | "PREOPEN_NOT_AVAILABLE" | "FAILED";
   sectors: HeatSector[]; stocksUp: number; stocksDown: number; quoted: number; listed: number; atPrevClose: number; dropped: string[];
   note?: string;
 }
@@ -115,6 +115,38 @@ export function latestSnapshot(date: string, okOnly = false): HeatSnapshot | nul
     for (const f of files) { const s = readSnapshot(f.slice(0, 10)); if (s && (!okOnly || s.status === "OK")) return s; }
     return null;
   } catch { return null; }
+}
+
+/** Second pass (09:14:30, pre-open prices still fixed): re-quote stocks still at the previous
+ *  close — Dhan delivered ~6% of pre-open prices after 09:13 on 12 Oct (e.g. RELIANCE showed 0%
+ *  but opened +0.85%) — and recompute sector averages / counts. Pure apart from getQuotes. */
+export async function refillSnapshot(snap: HeatSnapshot, getQuotes: (syms: string[]) => Promise<Record<string, any>>): Promise<HeatSnapshot> {
+  const flat = new Set<string>();
+  for (const s of snap.sectors) for (const k of s.stocks) if (k.price === k.prev) flat.add(k.s);
+  const out: HeatSnapshot = { ...snap, refilledAt: Math.floor(Date.now() / 1000), refilled: 0 };
+  if (!flat.size) return out;
+  const raw = await getQuotes([...flat].map((s) => s + ".NS"));
+  const upd = new Map<string, number>();
+  for (const s of flat) { const q = raw[s + ".NS"]; const p = q ? Number(q.price) : NaN; if (p > 0) upd.set(s, p); }
+  return applyRefill(snap, upd, out.refilledAt!);
+}
+export function applyRefill(snap: HeatSnapshot, upd: Map<string, number>, at: number): HeatSnapshot {
+  let refilled = 0; const seen = new Set<string>();
+  const sectors = snap.sectors.map((sec) => {
+    const stocks = sec.stocks.map((k) => {
+      const p = upd.get(k.s);
+      if (p == null || p === k.price || k.price !== k.prev) return k;
+      const pct = Math.round(((p - k.prev) / k.prev) * 10000) / 100;
+      if (Math.abs(pct) > 20) return k;
+      if (!seen.has(k.s)) { seen.add(k.s); refilled++; }
+      return { ...k, price: p, pct };
+    }).sort((a, b) => b.pct - a.pct);
+    const avg = stocks.length ? Math.round((stocks.reduce((a, x) => a + x.pct, 0) / stocks.length) * 100) / 100 : 0;
+    return { ...sec, stocks, avg, adv: stocks.filter((x) => x.pct > 0).length, dec: stocks.filter((x) => x.pct < 0).length };
+  }).sort((a, b) => b.avg - a.avg);
+  const uniq = new Map<string, HeatStock>(); for (const s of sectors) for (const k of s.stocks) uniq.set(k.s, k);
+  const vals = [...uniq.values()];
+  return { ...snap, sectors, refilledAt: at, refilled, stocksUp: vals.filter((x) => x.pct > 0).length, stocksDown: vals.filter((x) => x.pct < 0).length, atPrevClose: vals.filter((x) => x.price === x.prev).length };
 }
 
 /** Take today's snapshot with the given batched-quote function. */
