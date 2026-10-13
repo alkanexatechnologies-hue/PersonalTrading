@@ -26,3 +26,19 @@ test("no index price: parity replaces a wrong chain price", () => {
   const r = checkedUnderlying(23122.1, chain, null);
   assert.equal(r.source, "put-call parity"); assert.ok(Math.abs((r.underlying as number) - 22564.4) < 1);
 });
+
+import { forwardToSpot } from "./parity";
+test("parity uses only the strikes nearest the forward — stale far strikes cannot drag it away", () => {
+  // true forward ≈ 13,800: near strikes priced consistently; several far strikes carry stale premiums
+  const near = [13700, 13750, 13800, 13850, 13900].map((k) => ({ strike: k, ceLtp: 120 + (13800 - k) / 2, peLtp: 120 - (13800 - k) / 2 }));   // CE − PE = F − K
+  const stale = [14300, 14350, 14400, 14450, 14500, 14550, 14600].map((k) => ({ strike: k, ceLtp: 300, peLtp: 20 }));   // nonsense far quotes
+  const p = parityUnderlying([...near, ...stale])!;
+  assert.ok(Math.abs(p - 13800) < 5, `got ${p}`);
+});
+test("forward converted to spot with carry; no index price → carry-adjusted parity", () => {
+  assert.equal(Math.round(forwardToSpot(55721.75, 14)), Math.round(55721.75 / (1 + 0.065 * 14 / 365)));
+  assert.equal(forwardToSpot(100, null), 100);
+  const strikes = [55300, 55400, 55500, 55600, 55700].map((k) => ({ strike: k, ceLtp: 400 + (55720 - k) / 2, peLtp: 400 - (55720 - k) / 2 }));   // forward 55,720
+  const r = checkedUnderlying(56900, strikes, null, 14);
+  assert.equal(r.source, "put-call parity"); assert.ok(r.underlying! < 55720 && r.underlying! > 55500);
+});

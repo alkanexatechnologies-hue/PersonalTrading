@@ -522,8 +522,13 @@ function oiSnapshotFresh(oi: any): boolean {
   return asOf > 0 && Date.now() - asOf * 1000 < 20 * 3600_000;
 }
 // The index's own price, used to check the option chain's underlying (Dhan's chain last_price can be wrong).
+// Cache first: a recent index quote (≤ 60 s), then a live quote (5 s cap — the quote API allows 1 call/s and queues under
+// load), then the index's last cached 5-min candle (≤ 10 min). Only when none exists does the chain fall back to parity.
 async function indexSpotFor(def: SymbolDef): Promise<number | null> {
-  try { const q = await withTimeout(getProvider().getQuote(def.symbol), 5_000, `spot ${def.symbol}`); return q && (q as any).price > 0 ? (q as any).price : null; } catch { return null; }
+  const cq = peekFresh<any>(`quote:${def.symbol}`, 60_000); if (cq && cq.price > 0) return cq.price;
+  try { const q = await withTimeout(getProvider().getQuote(def.symbol), 5_000, `spot ${def.symbol}`); if (q && (q as any).price > 0) return (q as any).price; } catch { /* next source */ }
+  const c5 = peekFresh<any[]>(`c:${def.symbol}:5m`, 600_000); if (c5 && c5.length && c5[c5.length - 1].close > 0) return c5[c5.length - 1].close;
+  return null;
 }
 async function liveOptionOi(def: SymbolDef): Promise<OiAnalysis> {
   const feed = syncSessionProvider();
@@ -4336,7 +4341,12 @@ router.get("/market-analysis", requirePermission("oiAnalysis"), async (req: Requ
     const quote = peekFresh<any>(`quote:${symbol}`, 20_000);
 
     const lastClose = c5.length ? c5[c5.length - 1].close : (c15.length ? c15[c15.length - 1].close : null);
-    const spot = (oi?.underlying && oi.underlying > 0 ? oi.underlying : null) ?? quote?.price ?? lastClose ?? null;
+    // Spot = the INDEX's own price. The option chain's "underlying" can disagree with the index (after the close
+    // BANKNIFTY's chain said 55,721.75 while the index closed at 55,481.05 — NSE official), so it is used only during
+    // market hours and only when it agrees with the index's last candle within 0.3 %.
+    const chainU = oi?.underlying && oi.underlying > 0 ? oi.underlying : null;
+    const chainOk = chainU != null && isMarketOpenIST() && (lastClose == null || Math.abs(chainU - lastClose) / lastClose <= 0.003);
+    const spot = (quote?.price > 0 ? quote.price : null) ?? (chainOk ? chainU : null) ?? lastClose ?? chainU ?? null;
 
     // Feed the OI-movement/shock engine (deduped by asOf; safe every request).
     let oiMovement: OiMoveResult | null = null;

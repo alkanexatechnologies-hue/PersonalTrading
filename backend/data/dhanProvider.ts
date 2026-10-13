@@ -498,7 +498,8 @@ export async function dhanOiAnalysis(def: SymbolDef, indexSpot?: number | null):
     if (!chain.available) return fail(chain.message || "Dhan chain unavailable");
 
     // The chain's own last_price can be wrong (seen after hours); check it against put-call parity.
-    const uc = checkedUnderlying(chain.spot, chain.strikes, indexSpot);
+    const dte = chain.expiry ? Math.max(0, (Date.parse(String(chain.expiry) + "T10:00:00Z") - Date.now()) / 86400_000) : null;   // ~15:30 IST on expiry day
+    const uc = checkedUnderlying(chain.spot, chain.strikes, indexSpot, dte);
     const underlying = uc.underlying;
     const expiry = chain.expiry;
     const all: OiStrike[] = chain.strikes.map((s: any) => ({
