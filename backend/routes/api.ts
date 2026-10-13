@@ -116,8 +116,8 @@ import { recordConnectionTest, recordConnectionSuccess, getConnectionStatus } fr
 import { lookupDhanSecurity, lookupDhanOption } from "../data/dhanInstruments";
 import { fnoMovers, indexPivots, runIndicatorCheck, readIndicatorCheck } from "../data/dhanInsights";
 import { reconcileDay, readReconcile, latestReconcile, NSE_FO_SYMBOL } from "../oi/oiReconcile";
-import { snapFromChain, recordSnapshot as recordMinuteSnapshot, loadDay as loadMinuteDay, listDays as listMinuteDays, buildView as buildMinuteView, captureStats as minuteCaptureStats, loadMinuteLog, minuteLogDays, inSession as minuteInSession, istMinute as istMinuteOf, SESSION_FROM as MM_FROM, SESSION_TO as MM_TO } from "../oi/minuteMonitor";
-const MINUTE_MONITOR_SYMBOLS = ["^NSEI", "^NSEBANK", "^CNXFIN"];
+import { snapFromChain, recordSnapshot as recordMinuteSnapshot, loadDay as loadMinuteDay, listDays as listMinuteDays, buildView as buildMinuteView, captureStats as minuteCaptureStats, capturedThisMinute, noteCaptureFailure, loadMinuteLog, minuteLogDays, inSession as minuteInSession, istMinute as istMinuteOf, SESSION_FROM as MM_FROM, SESSION_TO as MM_TO } from "../oi/minuteMonitor";
+const MINUTE_MONITOR_SYMBOLS = ["^NSEI", "^NSEBANK", "^CNXFIN", "^NSEMDCP50", "^BSESN"];
 import { dhanCompanyInfo } from "../data/dhanDataApis";
 import { fetchDhanCandles, DhanBacktestInterval } from "../data/dhanHistorical";
 import { BacktestMode, DEFAULT_BACKTEST_MODE, FullMasterUnavailableError } from "../backtest/backtestMode";
@@ -645,6 +645,7 @@ const getOiCached = async (def: SymbolDef): Promise<OiAnalysis> => {
       if (oiHasPremiums(oi)) {
         _cache.set(key, { ts: Date.now(), v: oi });
         _lastGoodOi.set(key, { ts: Date.now(), v: oi });
+        captureMinuteFromChain(def.symbol, oi);   // 1-min OI monitor reuses every fresh chain (no extra Dhan call)
         return oi;
       }
       const lg = _lastGoodOi.get(key); // degraded (no premiums) -> use recent good chain
@@ -664,6 +665,14 @@ const getOiCached = async (def: SymbolDef): Promise<OiAnalysis> => {
   return p;
 };
 
+// 1-minute OI monitor: store a snapshot from any FRESH live chain fetched by any screen (deduped per minute).
+function captureMinuteFromChain(symbol: string, oi: any) {
+  try {
+    if (!MINUTE_MONITOR_SYMBOLS.includes(symbol) || !isMarketOpenIST()) return;
+    const now = Math.floor(Date.now() / 1000); if (!minuteInSession(istMinuteOf(now))) return;
+    const snp = snapFromChain(symbol, oi, now); if (snp) recordMinuteSnapshot(snp);
+  } catch { /* never affects the request that fetched the chain */ }
+}
 // The 1-minute OI monitor needs a chain no older than ~50 s. It refreshes the SAME shared cache entry
 // (one Dhan call per index per minute) so every other screen reuses it — no separate polling.
 async function getOiFresh(def: SymbolDef, maxAgeMs = 50_000): Promise<OiAnalysis> {
@@ -9946,16 +9955,28 @@ export function startHourlyScheduler() {
   // serving an actual request and are deliberately left at the default HIGH.
   setInterval(() => { if (isTradingTimeIST() && jobOn("oiChangeSnapshot")) refreshOiChangeSnapshot(); }, 3 * 60 * 1000);
   // 1-minute OI monitor: capture one snapshot per index per minute (aligned to :05 s) in market hours.
-  const minuteTick = async () => {
-    if (!isMarketOpenIST() || !minuteInSession(istMinuteOf(Math.floor(Date.now() / 1000)))) return;   // 09:15–15:12 only
-    for (const sym of MINUTE_MONITOR_SYMBOLS) {
-      const def = findSymbolDef(sym); if (!def) continue;
-      try { const chain = await withDhanPriority("low", () => getOiFresh(def)); const snp = snapFromChain(def.symbol, chain, Math.floor(Date.now() / 1000)); if (snp) recordMinuteSnapshot(snp); }
-      catch { /* a missed minute stays missing — never back-filled */ }
-    }
+  // Per index, independent timers (:05 / :25 / :45 s): fetch only if no snapshot was captured this minute yet (a screen's
+  // fresh chain is recorded by captureMinuteFromChain). Time-critical and only 3 calls a minute → high priority, 20 s cap.
+  // Every failure is counted (shown on the monitor) instead of disappearing silently.
+  const busy = new Set<string>();
+  const minuteTick = async (sym: string) => {
+    const now = Math.floor(Date.now() / 1000);
+    if (!isMarketOpenIST() || !minuteInSession(istMinuteOf(now)) || capturedThisMinute(sym, now)) return;
+    if (busy.has(sym)) { noteCaptureFailure(sym, "PREVIOUS_FETCH_STILL_RUNNING"); return; }
+    const def = findSymbolDef(sym); if (!def) return;
+    busy.add(sym);
+    try {
+      const chain = await Promise.race([withDhanPriority("high", () => getOiFresh(def, 15_000)), new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timeout")), 20_000))]);
+      captureMinuteFromChain(sym, chain);
+      if (!capturedThisMinute(sym, Math.floor(Date.now() / 1000))) noteCaptureFailure(sym, "NO_NEW_CHAIN_THIS_MINUTE");
+    } catch (e: any) { noteCaptureFailure(sym, /timeout/i.test(e?.message || "") ? "FETCH_TIMEOUT" : "FETCH_ERROR"); }
+    finally { busy.delete(sym); }
   };
-  const scheduleMinute = () => { const ms = 60_000 - (Date.now() % 60_000) + 5_000; setTimeout(() => { minuteTick().finally(scheduleMinute); }, ms); };
-  scheduleMinute();
+  MINUTE_MONITOR_SYMBOLS.forEach((sym, k) => {
+    const offset = 5_000 + k * 12_000;   // 5 indices spread across the minute (:05 :17 :29 :41 :53)
+    const schedule = () => { const ms = 60_000 - (Date.now() % 60_000) + offset; setTimeout(() => { minuteTick(sym).finally(schedule); }, ms > 60_000 ? ms - 60_000 : ms); };
+    schedule();
+  });
   // OI accuracy check vs NSE official bhavcopy: trading days 18:15–23:30 IST, once per day (retries every 10 min until published).
   setInterval(() => {
     const ist = new Date(Date.now() + 19800000), d = ist.toISOString().slice(0, 10), hm = ist.toISOString().slice(11, 16), wd = ist.getUTCDay();

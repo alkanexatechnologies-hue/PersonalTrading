@@ -81,7 +81,15 @@ export function recordSnapshot(s: MinuteSnap, root = ROOT): AcceptResult {
   try { fs.mkdirSync(path.dirname(snapFile(date, s.symbol, s.expiry, root)), { recursive: true }); fs.appendFileSync(snapFile(date, s.symbol, s.expiry, root), JSON.stringify(s) + "\n"); } catch { /* best effort */ }
   return r;
 }
-export function captureStats(symbol: string, expiry: string) { return _stats.get(`${symbol}|${expiry}`) || {}; }
+export function captureStats(symbol: string, expiry: string) { return { ..._stats.get(`${symbol}|${expiry}`), ..._stats.get(`${symbol}|*`) }; }
+/** Count a failed capture attempt (fetch error / timeout / overrun) so missing minutes are explained on screen. */
+export function noteCaptureFailure(symbol: string, reason: string) { const k = `${symbol}|*`, st = _stats.get(k) || {}; st[reason] = (st[reason] || 0) + 1; _stats.set(k, st); }
+/** Has a snapshot already been stored for this symbol in the current IST minute (any expiry)? */
+export function capturedThisMinute(symbol: string, nowSec: number): boolean {
+  const date = istDate(nowSec), minute = istMinute(nowSec);
+  for (const [k, arr] of _mem) if (k.startsWith(`${date}|${symbol}|`) && arr.length && arr[arr.length - 1].minute === minute) return true;
+  return false;
+}
 export function listDays(symbol: string, root = ROOT): { date: string; expiries: string[] }[] {
   try {
     return fs.readdirSync(root).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().reverse().map((d) => ({

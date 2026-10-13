@@ -17930,16 +17930,20 @@ function renderMASummary(d) {
 
 function renderMANearestCR(d) {
   const host = maEl("ma-ncr"); if (!host) return;
-  const blk = (c, label, color) => c
-    ? `<div class="ma-nz-h" style="color:${color}">${label} <b>${c.strike}</b></div>` +
+  const HC = { HELD: "#00D6A3", BALANCED: "#f2b03a", CONTESTED: "#FF5A5F" };
+  const held = (c, side) => c.held ? ` <span style="color:${HC[c.held]};font-size:10px;font-weight:800">${c.held}${c.ownVsOpposite != null ? ` · ${side} ${c.ownVsOpposite}× ${side === "PUT" ? "call" : "put"} OI` : ""}</span>` : "";
+  const blk = (c, c2, label, color, side, mj) => c
+    ? `<div class="ma-nz-h" style="color:${color}">${label} <b>${c.strike}</b>${held(c, side)}</div>` +
       `<div class="ma-kv"><span>Dist · OI</span><b>${maN(c.distancePts, 0)}pt · ${maOi(c.oi)}</b></div>` +
-      `<div class="ma-kv"><span>Str · Gamma</span><b>${maEsc(c.strength)} · <span class="ma-gs ${maGsCls(c.gammaState)}">${maEsc(c.gammaState)}</span></b></div>`
+      `<div class="ma-kv"><span>Str · Gamma</span><b>${maEsc(c.strength)} · <span class="ma-gs ${maGsCls(c.gammaState)}">${maEsc(c.gammaState)}</span></b></div>` +
+      (c2 ? `<div class="ma-kv"><span>Next ${side === "PUT" ? "support" : "resistance"}</span><b>${c2.strike} · ${maOi(c2.oi)}${c2.held && c2.held !== "HELD" ? ` <span style="color:${HC[c2.held]}">${c2.held}</span>` : ""}</b></div>` : "") +
+      (mj && mj.strike !== c.strike && (!c2 || mj.strike !== c2.strike) ? `<div class="ma-kv"><span>Biggest wall</span><b>${mj.strike} · ${maOi(mj.oi)} · ${maN(mj.distancePts, 0)}pt</b></div>` : "")
     : `<div class="ma-empty">${label}: —</div>`;
   host.innerHTML =
-    `<h4>Nearest Levels <span>CE resistance · PE support</span></h4>` +
-    blk(d.nearestCallResistance, "CALL RESISTANCE", "#FF5A5F") +
+    `<h4>OI Walls <span>nearest strike with ≥ half of the side's biggest OI</span></h4>` +
+    blk(d.nearestCallResistance, d.nextCallResistance, "CALL RESISTANCE", "#FF5A5F", "CALL", d.majorCallResistance) +
     `<div class="ma-ncr-sep"></div>` +
-    blk(d.nearestPutSupport, "PUT SUPPORT", "#00D6A3");
+    blk(d.nearestPutSupport, d.nextPutSupport, "PUT SUPPORT", "#00D6A3", "PUT", d.majorPutSupport);
 }
 
 function renderMAVix(d) {

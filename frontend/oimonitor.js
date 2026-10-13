@@ -55,7 +55,7 @@ function oimSide(d) {
   const seg = (name, items, cur, attr) => `<div class="oimm-seg" role="group" aria-label="${name}">${items.map(([v, l]) => `<button type="button" ${attr}="${oimEsc(v)}" aria-pressed="${String(v) === String(cur)}">${oimEsc(l)}</button>`).join("")}</div>`;
   const nMin = (d.minutes || []).length;
   return `<h4>Instrument &amp; expiry</h4>${seg("Instrument", OIM_SYMS, sym, "data-om-sym")}
-    <div class="oimm-note">Second-precise snapshots: NIFTY, BANK NIFTY, FIN NIFTY. MIDCAP / SENSEX use the app's minute OI log.</div>
+    <div class="oimm-note">1-minute snapshots for all five indices (from 13 Oct night build); earlier days use the app's minute OI log.</div>
     <label class="oimm-lb">Expiry<select data-om="expiry">${exps.length ? exps.map((e) => `<option ${e === d.expiry ? "selected" : ""}>${oimEsc(e)}</option>`).join("") : "<option>—</option>"}</select></label>
     <div class="oimm-note">Minute history exists only for the expiry the shared chain tracks (nearest).</div>
     <label class="oimm-lb">Day<select data-om="date">${days.length ? days.map((x) => `<option value="${x}" ${x === d.date ? "selected" : ""}>${x}${x === d.today ? " (today)" : ""}</option>`).join("") : `<option>${oimEsc(d.today || "today")}</option>`}</select></label>

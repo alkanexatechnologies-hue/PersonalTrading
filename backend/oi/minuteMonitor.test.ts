@@ -203,3 +203,10 @@ test("price context is computed from real 1-min and 5-min spot moves", () => {
   assert.equal(c.noise1, 10); assert.equal(c.move5, 10); assert.equal(c.recentSpots.length, 11);
   assert.equal(priceContext([s[0]]).noise1, null);
 });
+
+import { capturedThisMinute, noteCaptureFailure, captureStats } from "./minuteMonitor";
+test("collector helpers: captured-this-minute check and failure counts shown with the stats", () => {
+  noteCaptureFailure("^TESTX", "FETCH_TIMEOUT"); noteCaptureFailure("^TESTX", "FETCH_TIMEOUT");
+  assert.equal(captureStats("^TESTX", "2026-10-27").FETCH_TIMEOUT, 2);
+  assert.equal(capturedThisMinute("^TESTX", T0), false);
+});

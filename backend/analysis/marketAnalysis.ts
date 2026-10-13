@@ -117,6 +117,7 @@ export type Bucket = "VERY_HIGH" | "HIGH" | "MEDIUM" | "LOW";
 
 export interface SRCard {
   strike: number; distancePts: number; oi: number | null; oiChgPct: number | null; strength: string; gammaState: string;
+  oppositeOi?: number | null; ownVsOpposite?: number | null; held?: "HELD" | "BALANCED" | "CONTESTED";
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -316,6 +317,7 @@ export function buildMarketAnalysis(input: MarketAnalysisInput) {
   let nearestCallResistance: SRCard | null = null;
   let nextPutSupport: SRCard | null = null;
   let nextCallResistance: SRCard | null = null;
+  let majorPutSupport: SRCard | null = null, majorCallResistance: SRCard | null = null;
   let oiFlowSummary = { state: "UNAVAILABLE", note: "Option chain unavailable.", shock: false };
   let movementOpportunity: { ce: any; pe: any; note: string } = { ce: null, pe: null, note: "Option chain unavailable." };
 
@@ -334,6 +336,7 @@ export function buildMarketAnalysis(input: MarketAnalysisInput) {
     nearestCallResistance = built.nearestCallResistance;
     nextPutSupport = built.nextPutSupport;
     nextCallResistance = built.nextCallResistance;
+    majorPutSupport = built.majorPutSupport; majorCallResistance = built.majorCallResistance;
     oiFlowSummary = built.oiFlowSummary;
     movementOpportunity = built.movementOpportunity;
   }
@@ -393,6 +396,8 @@ export function buildMarketAnalysis(input: MarketAnalysisInput) {
     nearestCallResistance,
     nextPutSupport,
     nextCallResistance,
+    majorPutSupport,
+    majorCallResistance,
     callOptions,
     putOptions,
     gammaBlast,
@@ -661,6 +666,22 @@ function strengthOf(oi: number, max: number): { label: string; pct: number } {
   return { label, pct };
 }
 
+/** OI walls, nearest first: a strike counts as a wall when its OI is at least half of that side's largest OI in the
+ *  window (relative to the day's own walls — a tiny strike next to spot is not a wall). Puts at/below spot = supports,
+ *  calls at/above spot = resistances. `major` = the single largest wall on that side. */
+export function rankOiWalls(win: OiStrike[], spot: number) {
+  const side = (below: boolean) => {
+    const oiOf = (s: OiStrike) => (below ? s.peOi : s.ceOi) || 0;
+    const cands = win.filter((s) => (below ? s.strike <= spot : s.strike >= spot) && oiOf(s) > 0);
+    const max = Math.max(0, ...cands.map(oiOf));
+    const major = cands.find((s) => oiOf(s) === max) || null;
+    const walls = cands.filter((s) => oiOf(s) >= 0.5 * max).sort((x, y) => Math.abs(x.strike - spot) - Math.abs(y.strike - spot));
+    return { walls, major };
+  };
+  const p = side(true), c = side(false);
+  return { peBelow: p.walls, ceAbove: c.walls, putMajor: p.major, callMajor: c.major };
+}
+
 function buildOptionTables(a: {
   oi: OiAnalysis; spot: number; baseline: BaselineLike | null;
   movement: ReturnType<typeof buildMovementEnvelope>; atr15: number | null;
@@ -844,12 +865,15 @@ function buildOptionTables(a: {
     putBucket: bucketOf(s.peOi || 0, heatMaxPe),
   }));
 
-  // Nearest PE support (PE OI below spot) + CE resistance (CE OI above spot).
-  const peBelow = win.filter((s) => s.strike <= spot).sort((x, y) => y.strike - x.strike);
-  const ceAbove = win.filter((s) => s.strike >= spot).sort((x, y) => x.strike - y.strike);
+  // OI support / resistance = where the OI actually sits, not simply the next strike: put support = the strike AT /
+  // BELOW spot with the largest PUT OI (then the 2nd largest); call resistance = the strike AT / ABOVE spot with the
+  // largest CALL OI (then the 2nd). The old version took the nearest strike below/above spot whatever its OI
+  // (BANKNIFTY 13 Oct: showed 55700 with 81k put OI while the put wall was 55500 with 8.08 lakh).
+  const { peBelow, ceAbove, putMajor, callMajor } = rankOiWalls(win, spot);
   const toCard = (s: OiStrike | undefined, side: "CE" | "PE"): SRCard | null => {
     if (!s) return null;
     const row = (side === "CE" ? callOptions : putOptions).find((r) => r.strike === s.strike);
+    const own = side === "CE" ? (s.ceOi || 0) : (s.peOi || 0), other = side === "CE" ? (s.peOi || 0) : (s.ceOi || 0);
     return {
       strike: s.strike,
       distancePts: r1n(Math.abs(s.strike - spot)),
@@ -857,12 +881,16 @@ function buildOptionTables(a: {
       oiChgPct: row?.oiChgPct ?? null,
       strength: row?.strength ?? "—",
       gammaState: row?.gammaState ?? "NORMAL",
-    };
+      // same strike, other side: a "support" where call OI is larger (or a "resistance" where put OI is larger) is contested
+      oppositeOi: other, ownVsOpposite: other > 0 ? Math.round((own / other) * 100) / 100 : null,
+      held: other <= 0 || own >= 1.2 * other ? "HELD" : other >= 1.2 * own ? "CONTESTED" : "BALANCED",
+    } as SRCard;
   };
   const nearestPutSupport = toCard(peBelow[0], "PE");
   const nextPutSupport = toCard(peBelow[1], "PE");
   const nearestCallResistance = toCard(ceAbove[0], "CE");
   const nextCallResistance = toCard(ceAbove[1], "CE");
+  const majorPutSupport = toCard(putMajor || undefined, "PE"), majorCallResistance = toCard(callMajor || undefined, "CE");
 
   // Key strikes for gamma-blast + spike panels (ATM±2).
   const keyStrikes = win.filter((s) => Math.abs(s.strike - spot) <= atmBand * 2 + (sorted.length > 1 ? Math.abs(sorted[1].strike - sorted[0].strike) * 2 : 0));
@@ -886,7 +914,7 @@ function buildOptionTables(a: {
   // Aggregate OI flow + shock handling.
   const oiFlowSummary = buildOiFlowSummary(oiMovement, callOptions, putOptions);
 
-  return { callOptions, putOptions, heatmap, gammaBlast, spikeTriggers, nearestPutSupport, nextPutSupport, nearestCallResistance, nextCallResistance, oiFlowSummary, movementOpportunity };
+  return { callOptions, putOptions, heatmap, gammaBlast, spikeTriggers, nearestPutSupport, nextPutSupport, nearestCallResistance, nextCallResistance, majorPutSupport, majorCallResistance, oiFlowSummary, movementOpportunity };
 }
 
 function classifyStrikeFlow(oiChgPct: number | null, feedChg: number | null, oiVal: number | null, mv?: MarketAnalysisInput["oiMovement"]): string {
