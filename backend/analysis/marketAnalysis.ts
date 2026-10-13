@@ -22,7 +22,7 @@
 import { Candle, Interval, OiAnalysis, OiStrike } from "../types";
 import { SymbolDef, nearestStrike } from "../config";
 import { atr, ema, vwap, last } from "../indicators";
-import { resolveGamma, bsDelta, yearsToExpiry, repriceOption, BsInput } from "./greeks";
+import { resolveGamma, bsDelta, yearsToExpiry, repriceOption, premiumAtLevel, BsInput } from "./greeks";
 
 // ---------- VIX type (mirror of dhanProvider.IndiaVix, kept local to avoid a
 // value import from the network module) ----------
@@ -398,6 +398,8 @@ export function buildMarketAnalysis(input: MarketAnalysisInput) {
     nextCallResistance,
     majorPutSupport,
     majorCallResistance,
+    // index levels used by the option tables' S1…PDH columns (premium if the index reaches the level)
+    premiumLevels: idxLevels,
     callOptions,
     putOptions,
     gammaBlast,
@@ -741,11 +743,10 @@ function buildOptionTables(a: {
     // Project this option's PREMIUM (model-derived, Greek reprice) at each real
     // underlying level. Same level set + column order for CE and PE: the column
     // is keyed by the INDEX level and the value is the option's premium there.
-    const projAt = (level: number | null): number | null => {
-      if (level == null || ltp == null || delta == null) return null;
-      const v = repriceOption({ ltp, delta, gamma, theta, dSpot: level - spot });
-      return v != null ? r2(v) : null;
-    };
+    // Black-Scholes at this strike's own IV, anchored to the live premium, monotonic and ≥ intrinsic (premiumAtLevel).
+    // The old delta + ½·gamma·move² curve bent back up on big moves (13 Oct: CE 22800 worth more at S2 than at S1).
+    const projAt = (level: number | null): number | null =>
+      premiumAtLevel({ type: side, strike: s.strike, spot, ltp, delta, gamma, iv, tYears, level });
     // Premium projected at each underlying level.
     const pAtS1 = projAt(idxLevels.s1), pAtS2 = projAt(idxLevels.s2);
     const pAtSwl = projAt(idxLevels.swl), pAtPdl = projAt(idxLevels.pdl);
@@ -756,9 +757,10 @@ function buildOptionTables(a: {
     // SUPPORTS are the index down-levels (S1/S2/SWL/PDL), resistances the up-levels
     // (R1/R2/SWH/PDH). A PUT is inverted — its premium SUPPORT is on the index
     // UP-side (put loses) and its RESISTANCE on the index DOWN-side (put gains).
-    const lv = side === "CE"
-      ? { s1: pAtS1, s2: pAtS2, swl: pAtSwl, pdl: pAtPdl, r1: pAtR1, r2: pAtR2, swh: pAtSwh, pdh: pAtPdh }
-      : { s1: pAtR1, s2: pAtR2, swl: pAtSwh, pdl: pAtPdh, r1: pAtS1, r2: pAtS2, swh: pAtSwl, pdh: pAtPdl };
+    // Each column = this option's premium IF THE INDEX reaches that index level — the same for CE and PE (the old
+    // PE table swapped S and R columns, so a put's "S1" was its value at the index's R1). Level prices are sent
+    // in premiumLevels so the header shows them, including when a pivot is on the other side of spot.
+    const lv = { s1: pAtS1, s2: pAtS2, swl: pAtSwl, pdl: pAtPdl, r1: pAtR1, r2: pAtR2, swh: pAtSwh, pdh: pAtPdh };
 
     // S/R classification + strength from OI concentration.
     const strength = strengthOf(oiVal ?? 0, side === "CE" ? maxCe : maxPe);

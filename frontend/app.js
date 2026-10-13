@@ -18062,8 +18062,9 @@ function renderMATable(d, side) {
   const dirBadge = dir === "BULLISH" ? `<b class="up">▲ BULLISH</b>` : dir === "BEARISH" ? `<b class="down">▼ BEARISH</b>` : `<b style="color:var(--ma-amber)">• SIDEWAYS</b>`;
   host.innerHTML =
     `<h4>${title} <span>Dir: ${dirBadge} · ${maEsc(d.oiFlow ? d.oiFlow.state : "")}</span></h4>` +
+    `<div class="ma-lvl-note">S1…PDH = this option's premium <b>if ${maEsc(d.name || "the index")} reaches that level</b> (▼ below / ▲ above spot ${maN(d.spot, 2)}). Model: Black-Scholes at the strike's own IV, anchored to the live premium.</div>` +
     `<div class="ma-otbl-wrap"><table class="ma-otbl"><thead><tr>` +
-    `<th>Strike</th><th>LTP</th><th>S1</th><th>S2</th><th>SWL</th><th>PDL</th><th>R1</th><th>R2</th><th>SWH</th><th>PDH</th><th>5M</th><th>15M</th><th>Vol</th><th>OI</th><th>Gamma</th><th>Spike</th><th>Str</th><th>Dir</th>` +
+    `<th>Strike</th><th>LTP</th>${[["S1", "s1"], ["S2", "s2"], ["SWL", "swl"], ["PDL", "pdl"], ["R1", "r1"], ["R2", "r2"], ["SWH", "swh"], ["PDH", "pdh"]].map(([n, k]) => { const v = d.premiumLevels ? d.premiumLevels[k] : null; const side = v == null || d.spot == null ? "" : v < d.spot ? "▼" : "▲"; return `<th title="${n}: premium if ${maEsc(d.name || "the index")} reaches ${v != null ? maN(v, 2) : "—"} (${side === "▼" ? "below" : "above"} spot ${maN(d.spot, 2)})">${n}${v != null ? `<span class="ma-lvl">${side}${maN(v, 0)}</span>` : ""}</th>`; }).join("")}<th>5M</th><th>15M</th><th>Vol</th><th>OI</th><th>Gamma</th><th>Spike</th><th>Str</th><th>Dir</th>` +
     `</tr></thead><tbody>${body || `<tr><td colspan="18" class="ma-empty">Chain unavailable</td></tr>`}</tbody></table></div>`;
 }
 

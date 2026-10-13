@@ -44,6 +44,33 @@ function d1(i: BsInput): number {
   return (Math.log(i.spot / i.strike) + (r + 0.5 * i.iv * i.iv) * i.tYears) / (i.iv * Math.sqrt(i.tYears));
 }
 
+/** Black-Scholes price (MODEL). Null when inputs are not usable. */
+export function bsPrice(i: BsInput, type: "CE" | "PE"): number | null {
+  if (!usable(i)) return null;
+  const r = i.rate ?? DEFAULT_RATE, x1 = d1(i), x2 = x1 - i.iv * Math.sqrt(i.tYears), disc = Math.exp(-r * i.tYears);
+  const v = type === "CE" ? i.spot * normCdf(x1) - i.strike * disc * normCdf(x2) : i.strike * disc * normCdf(-x2) - i.spot * normCdf(-x1);
+  return Number.isFinite(v) ? Math.max(0, v) : null;
+}
+
+/** Premium of an option if the index moves to `level`: Black-Scholes at the strike's own IV, ANCHORED to the market
+ *  premium (market LTP + model change), never below intrinsic value and monotonic in the index (a call never gains
+ *  when the index falls, a put never gains when it rises). Falls back to delta-gamma — capped at its turning point —
+ *  when IV / time are unavailable. */
+export function premiumAtLevel(o: { type: "CE" | "PE"; strike: number; spot: number; ltp: number | null; delta: number | null; gamma: number | null; iv: number | null; tYears: number | null; level: number | null }): number | null {
+  if (o.level == null || o.ltp == null || !(o.spot > 0)) return null;
+  const intrinsic = o.type === "CE" ? Math.max(0, o.level - o.strike) : Math.max(0, o.strike - o.level);
+  const ivF = o.iv != null ? (o.iv > 1 ? o.iv / 100 : o.iv) : null;
+  if (ivF != null && ivF > 0 && o.tYears != null && o.tYears > 0) {
+    const a = bsPrice({ spot: o.spot, strike: o.strike, tYears: o.tYears, iv: ivF }, o.type), b = bsPrice({ spot: o.level, strike: o.strike, tYears: o.tYears, iv: ivF }, o.type);
+    if (a != null && b != null) return Math.round(Math.max(intrinsic, o.ltp + (b - a), 0) * 100) / 100;
+  }
+  if (o.delta == null) return null;
+  const g = o.gamma ?? 0;
+  let d = o.level - o.spot;
+  if (g > 0) { const turn = -o.delta / g; if ((o.type === "CE" && d < 0 && d < turn) || (o.type === "PE" && d > 0 && d > turn)) d = turn; }
+  return Math.round(Math.max(intrinsic, o.ltp + o.delta * d + 0.5 * g * d * d, 0) * 100) / 100;
+}
+
 /** Gamma (same for CE and PE). Null when inputs are not usable. */
 export function bsGamma(i: BsInput): number | null {
   if (!usable(i)) return null;

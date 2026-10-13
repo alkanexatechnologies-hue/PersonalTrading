@@ -7491,3 +7491,4 @@ body.lqa-fullwidth .content { padding-left: 0; padding-right: 0; }
 @media (max-width:1024px){ .te-asum{grid-template-columns:repeat(3,minmax(0,1fr))} }
 @media (max-width:600px){ .te-asum{grid-template-columns:repeat(2,minmax(0,1fr))} .te-ac{font-size:12px} }
 .te-atable td{text-align:left!important;white-space:normal} .te-atable th{text-align:left!important} .te-atable .te-ac{max-width:none}
+.ma-otbl th .ma-lvl{display:block;font-size:9px;font-weight:600;color:#8a97ad} .ma-lvl-note{font-size:11px;color:#8a97ad;margin:2px 0 6px}
