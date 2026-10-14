@@ -67,3 +67,20 @@ test("coach: no-trade zone, wick vs close, counter-trend, arbiter has the final 
   assert.match(coach(C({ spot: 144, closed15: [bar(0, 139), bar(1, 144)], arbiter: { finalAction: "BUY_CE", reason: "", fresh: true }, riskOk: false })).action, /WAIT FOR RETEST/);
   assert.match(coach(C({ spot: 116, closed15: [bar(0, 121), bar(1, 116)] })).action, /COUNTER-TREND/);               // PE break vs daily UP
 });
+test("level risk: room, OI wall, trend, rejections and history each add risk; far levels are FAR; strong supports are flagged for a bounce", async () => {
+  const { levelRisks } = await import("./traderView");
+  const tr = (d: string, h: string) => [{ tf: "Daily", verdict: d } as any, { tf: "1H", verdict: h } as any];
+  const good = Array.from({ length: 20 }, () => ({ dir: "UP", outcome: "FOLLOWED THROUGH" } as any)).concat(Array.from({ length: 20 }, () => ({ dir: "DOWN", outcome: "FOLLOWED THROUGH" } as any)));
+  const lv: Level[] = [{ price: 160, label: "R2", kind: "PIVOT" }, { price: 145, label: "PDH", kind: "PREV DAY" }, { price: 112, label: "S1", kind: "PIVOT" }, { price: 110, label: "Put wall", kind: "OI" }, { price: 90, label: "S2", kind: "PIVOT" }];
+  // uptrend, good history: breaking 145 (15 pts room to 160 at ATR 10) is LOW risk
+  let r = levelRisks({ levels: lv, spot: 130, atr: 10, closed: [], trends: tr("UP", "UP"), events: good });
+  assert.equal(r.find((x) => x.price === 145)!.risk, "LOW");
+  // breaking 112 down: counter-trend on both (+2) and a put wall 2 pts away (+1) → HIGH; but it is a strong support for a CE bounce
+  const s1 = r.find((x) => x.price === 112)!; assert.equal(s1.risk, "HIGH"); assert.match(s1.bounce!, /strong support/);
+  assert.equal(r.find((x) => x.price === 90)!.risk, "FAR");
+  // weak history (+1) and three rejections at 145 (+1) → MEDIUM
+  // three separate rejection episodes (a candle that does not reach the level between them)
+  const rej = [140, 120, 141, 120, 142].map((c, i) => ({ time: 1_790_000_000 + i * 900, open: c, high: c > 130 ? 145.5 : c + 1, low: c - 1, close: c, volume: 0 }));
+  r = levelRisks({ levels: lv, spot: 130, atr: 10, closed: rej, trends: tr("UP", "UP"), events: [] });
+  const p = r.find((x) => x.price === 145)!; assert.equal(p.rejections, 3); assert.equal(p.risk, "MEDIUM");
+});

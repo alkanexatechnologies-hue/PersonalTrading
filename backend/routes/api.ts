@@ -7813,7 +7813,10 @@ router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Reque
               projection: brokeAt == null ? future.map((t, j) => ({ time: t, value: Math.round(TV.lineAt(l, closed.length + j) * 100) / 100 })) : [] };
           });
           const tm = TV.tomorrowMap({ bull: pb.bull, bear: pb.bear, lines: lineLv.map((x) => ({ label: x.label, next: x.next })), todayHigh: today.high, todayLow: today.low, close: spot ?? 0, atr: atr15 });
-          return { trends, levels, events: events.slice(-40), eventStats: { up: TV.breakStats(events, "UP"), down: TV.breakStats(events, "DOWN"), horizonBars: horizon, rule: `FOLLOWED THROUGH = moved 1 ATR beyond the break candle's close (the first possible entry) within ${horizon} bars before closing back across the level` },
+          const risks = spot != null ? TV.levelRisks({ levels, spot, atr: atr15, dailyAtr: last(TV.atrS(daily)) ?? null, closed: closed15, trends, events }) : [];
+          const riskOf = (px: number) => risks.find((r) => Math.abs(r.price - px) < 0.01) || null;
+          for (const p of [pb.bull, pb.bear]) if (p) (p as any).triggerRisk = riskOf(p.trigger);
+          return { trends, levels: levels.map((v) => ({ ...v, risk: riskOf(v.price) })), events: events.slice(-40), eventStats: { up: TV.breakStats(events, "UP"), down: TV.breakStats(events, "DOWN"), horizonBars: horizon, rule: `FOLLOWED THROUGH = moved 1 ATR beyond the break candle's close (the first possible entry) within ${horizon} bars before closing back across the level` },
             plans: pb, coach: cz, lines: draw, future, tomorrow: tm, atr15: Math.round(atr15 * 100) / 100 };
         } catch (e: any) { return { error: e?.message || "trader view failed" }; }
       })(),

@@ -73,7 +73,7 @@ function ppcShell() {
       </div>
       <div class="ppc-tvwrap"><div id="ppc-ch-spot" class="ppc-ch-tv"></div><div id="ppc-legend" class="ppc-legend"></div></div>
     </div>
-    <div class="ppc-side"><div class="ppc-side-h">Level ladder <span class="ppc-sub">★ = confluence</span></div><div id="ppc-ladder"></div></div>
+    <div class="ppc-side"><div class="ppc-side-h">Level ladder <span class="ppc-sub">★ confluence · risk = for a buyer trading the break</span></div><div class="ppc-rk-key"><i class="ppc-rk ppc-rk-low">LOW RISK</i><i class="ppc-rk ppc-rk-med">MED RISK</i><i class="ppc-rk ppc-rk-high">HIGH RISK</i><i class="ppc-rk ppc-rk-far">FAR</i> <span class="ppc-sub">hover a level for why</span></div><div id="ppc-ladder"></div></div>
   </div>
   <div class="ppc-plans" id="ppc-plans"></div>
   <div class="ppc-row2"><div class="ppc-card" id="ppc-tomorrow"></div><div class="ppc-card" id="ppc-history"></div></div>
@@ -269,6 +269,7 @@ function ppcRenderRank() {
 
 // ================================================================ experienced-trader view (all drawn on the chart)
 const TVC = { bg: "#131722", grid: "#1e222d", text: "#d1d4dc", border: "#2a2e39", up: "#26a69a", down: "#ef5350", seller: "#f23645", buyer: "#089981", ce: "#2962ff", pe: "#ff9800", zone: "#f7c948" };
+const PPC_RISK = { LOW: { col: "#26a69a", short: "LOW RISK", cls: "low" }, MEDIUM: { col: "#f7c948", short: "MED RISK", cls: "med" }, HIGH: { col: "#ef5350", short: "HIGH RISK", cls: "high" }, FAR: { col: "#5d606b", short: "FAR", cls: "far" } };
 const ppcR = (v) => (v == null || !isFinite(v) ? "—" : Math.round(v).toLocaleString("en-IN"));
 
 function ppcRenderCoach() {
@@ -344,7 +345,8 @@ function ppcRenderTV(layerToggle) {
     for (const g of groups) {
       const lbl = g.items.map((v) => short(v.label)).join("/"), star = g.items.length > 1 || g.items.some((v) => v.confluence);
       if (planPx.some((x) => Math.abs(x - g.price) <= tol)) { PPC._planNames = PPC._planNames || {}; PPC._planNames[g.price.toFixed(2)] = lbl; continue; }
-      s.createPriceLine({ price: g.price, color: kindCol[g.items[0].kind] || "#787b86", lineWidth: star ? 2 : 1, lineStyle: 2, axisLabelVisible: true, title: (star ? "★ " : "") + lbl });
+      const rk = g.items.map((v) => v.risk).find(Boolean), rc = rk ? PPC_RISK[rk.risk] : null;
+      s.createPriceLine({ price: g.price, color: rc ? rc.col : kindCol[g.items[0].kind] || "#787b86", lineWidth: star ? 2 : 1, lineStyle: 2, axisLabelVisible: true, title: (star ? "★ " : "") + lbl + (rc && rk.risk !== "FAR" ? ` · ${rc.short}` : "") });
     }
   }
   // the plan: triggers, stops, targets, no-trade zone
@@ -352,7 +354,7 @@ function ppcRenderTV(layerToggle) {
     for (const [p, col, nm] of [[T.plans.bull, TVC.ce, "CE"], [T.plans.bear, TVC.pe, "PE"]]) {
       if (!p) continue;
       const nameAt = (px) => { const tol = 0.1 * (T.atr15 || 1), k = Object.keys(PPC._planNames || {}).find((x) => Math.abs(Number(x) - px) <= tol); return k ? ` · ${PPC._planNames[k]}` : ""; };
-      s.createPriceLine({ price: p.trigger, color: col, lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: `${nm} TRIGGER${nameAt(p.trigger)}` });
+      s.createPriceLine({ price: p.trigger, color: col, lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: `${nm} TRIGGER${nameAt(p.trigger)}${p.triggerRisk && PPC_RISK[p.triggerRisk.risk] && p.triggerRisk.risk !== "FAR" ? " · " + PPC_RISK[p.triggerRisk.risk].short : ""}` });
       s.createPriceLine({ price: p.stop, color: "#f23645", lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: `${nm} SL${nameAt(p.stop)}` });
       s.createPriceLine({ price: p.t1, color: "#089981", lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: `${nm} T1${nameAt(p.t1)}` });
       if (p.t2 != null && inView(p.t2)) s.createPriceLine({ price: p.t2, color: "#089981", lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: `${nm} T2${nameAt(p.t2)}` });
@@ -397,7 +399,9 @@ function ppcRenderLadder() {
   for (const v of T.levels) {
     if (!placed && spot != null && v.price < spot) { rows.push(`<div class="ppc-lad-spot">▶ ${ppcNs(spot)} SPOT</div>`); placed = true; }
     const tag = bull && Math.abs(v.price - bull.trigger) < 0.01 ? '<i class="ppc-lt ce">CE trigger</i>' : bear && Math.abs(v.price - bear.trigger) < 0.01 ? '<i class="ppc-lt pe">PE trigger</i>' : "";
-    rows.push(`<div class="ppc-lad ppc-lk-${v.kind.replace(/\s/g, "")}" title="${ppcEsc(v.with ? "Confluence with: " + v.with.join(", ") : "")}"><span>${ppcNs(v.price)}</span><span>${v.confluence ? "★ " : ""}${ppcEsc(v.label)} ${tag}</span><span class="ppc-sub">${spot != null ? (v.price > spot ? "+" : "") + Math.round(v.price - spot) : ""}</span></div>`);
+    const rk = v.risk, rc = rk ? PPC_RISK[rk.risk] : null;
+    rows.push(`<div class="ppc-lad ppc-lk-${v.kind.replace(/\s/g, "")}" title="${ppcEsc((v.with ? "Confluence with: " + v.with.join(", ") + "\n" : "") + (rk ? `Break ${rk.side === "ABOVE" ? "above" : "below"} = ${rk.risk} RISK (score ${rk.score}):\n• ` + rk.reasons.join("\n• ") : ""))}"><span>${ppcNs(v.price)}</span><span>${v.confluence ? "★ " : ""}${ppcEsc(v.label)} ${tag}${rc ? ` <i class="ppc-rk ppc-rk-${rc.cls}">${rc.short}</i>` : ""}</span><span class="ppc-sub">${spot != null ? (v.price > spot ? "+" : "") + Math.round(v.price - spot) : ""}</span>
+      ${rk && rk.risk !== "FAR" ? `<div class="ppc-lad-why">${ppcEsc(rk.reasons.filter((x) => !/room to|with the/.test(x) || rk.risk === "LOW").slice(0, 2).join(" · "))}</div>` : ""}${rk?.bounce ? `<div class="ppc-lad-bounce">↺ ${ppcEsc(rk.bounce)}</div>` : ""}</div>`);
   }
   if (!placed && spot != null) rows.push(`<div class="ppc-lad-spot">▶ ${ppcNs(spot)} SPOT</div>`);
   el.innerHTML = rows.join("");
@@ -411,6 +415,7 @@ function ppcPlanCard(p, side) {
   return `<div class="ppc-plan ${cls}"><h4>${nm}</h4>
     <div class="ppc-pl-row"><span>Trigger</span><b>15-min CLOSE ${side === "CE" ? "above" : "below"} ${ppcNs(p.trigger)}</b></div>
     <div class="ppc-sub ppc-pl-lbl">${ppcEsc(p.triggerLabel)}</div>
+    ${p.triggerRisk ? `<div class="ppc-pl-risk ppc-rkb-${PPC_RISK[p.triggerRisk.risk].cls}"><b>${PPC_RISK[p.triggerRisk.risk].short} trigger</b> — ${ppcEsc(p.triggerRisk.reasons.join(" · "))}</div>` : ""}
     <div class="ppc-pl-row"><span>Confirm</span><b>retest holds + ${side} premium makes a new high</b></div>
     <div class="ppc-pl-row"><span>Buy</span><b>${p.strike ?? "—"} ${side} · now ₹${ppcNs(p.premNow)} · at trigger ${prem(p.premAtTrigger)}${p.delta != null ? ` · Δ ${ppcNs(p.delta)}` : ""}</b></div>
     <div class="ppc-pl-grid">
@@ -430,6 +435,7 @@ function ppcRenderPlans() {
   el.innerHTML = ppcPlanCard(T.plans?.bull, "CE")
     + `<div class="ppc-plan ppc-pl-nt"><h4>NO-TRADE ZONE</h4>${nt ? `<div class="ppc-nt-big">${ppcNs(nt.from)} – ${ppcNs(nt.to)}</div><div>${Math.round(nt.to - nt.from)} pts wide (${ppcNs((nt.to - nt.from) / (T.atr15 || 1), 1)} × ATR)</div>
       <div class="ppc-sub">Inside this band both premiums lose to theta while price chops. An experienced buyer waits for a 15-min close outside it.</div>` : '<div class="ppc-na">NOT AVAILABLE</div>'}
+      ${ppcLowRiskIdeas(T)}
       <div class="ppc-sub" style="margin-top:6px">${ppcEsc(T.eventStats?.rule || "")}</div></div>`
     + ppcPlanCard(T.plans?.bear, "PE");
 }
@@ -444,4 +450,18 @@ function ppcRenderHistory() {
     <table class="ppc-hist"><thead><tr><th>Time</th><th>Break</th><th>Level</th><th>Result</th><th>Max for</th><th>Max against</th></tr></thead><tbody>
     ${ev.map((e) => `<tr><td>${dt(e.time)}</td><td class="${e.dir === "UP" ? "ppc-up" : "ppc-dn"}">${e.dir === "UP" ? "▲ breakout" : "▼ breakdown"}<span class="ppc-sub"> · ${e.source === "TRENDLINE" ? "trendline" : "swing"}</span></td><td>${ppcR(e.level)}</td><td class="${e.outcome === "FOLLOWED THROUGH" ? "ppc-up" : e.outcome === "FAILED" ? "ppc-dn" : "ppc-wait"}">${ppcEsc(e.outcome.toLowerCase())}${e.bars != null ? ` (${e.bars} bars)` : ""}</td><td class="ppc-up">+${ppcR(e.mfe)}</td><td class="ppc-dn">−${ppcR(e.mae)}</td></tr>`).join("") || '<tr><td colspan="6" class="ppc-na">no breaks in the loaded history</td></tr>'}</tbody></table>
     <div class="ppc-sub">All breaks: ▲ ${T.eventStats.up.n} (${T.eventStats.up.pct ?? "—"}% followed through) · ▼ ${T.eventStats.down.n} (${T.eventStats.down.pct ?? "—"}%). Index points; premium P&L not simulated.</div>`;
+}
+
+/** Lowest-risk ideas: the nearest strong level on each side where a bounce / rejection trade has the trend behind it, and any LOW-risk break. */
+function ppcLowRiskIdeas(T) {
+  const spot = PPC.d.spot?.price; if (spot == null) return "";
+  const lv = (T.levels || []).filter((v) => v.risk && v.risk.risk !== "FAR");
+  const near = (arr) => arr.sort((a, b) => Math.abs(a.price - spot) - Math.abs(b.price - spot))[0];
+  const sup = near(lv.filter((v) => v.price < spot && v.risk.bounce)), res = near(lv.filter((v) => v.price > spot && v.risk.bounce));
+  const lowBreak = lv.filter((v) => v.risk.risk === "LOW");
+  const items = [];
+  if (sup) items.push(`<li class="ppc-up">CE on a bounce from <b>${ppcNs(sup.price)}</b> (${ppcEsc(sup.label)}) — stop just below</li>`);
+  if (res) items.push(`<li class="ppc-dn">PE on a rejection from <b>${ppcNs(res.price)}</b> (${ppcEsc(res.label)}) — stop just above</li>`);
+  for (const v of lowBreak.slice(0, 2)) items.push(`<li>${v.price > spot ? "CE" : "PE"} on a 15-min close ${v.price > spot ? "above" : "below"} <b>${ppcNs(v.price)}</b> — LOW-RISK break</li>`);
+  return `<div class="ppc-lowrisk"><b>Lowest-risk ideas now</b>${items.length ? `<ul>${items.join("")}</ul>` : '<div class="ppc-sub">none — every nearby level is risky; standing aside is a position</div>'}<div class="ppc-sub">Still needs the 15-min candle, premium confirmation and the arbiter.</div></div>`;
 }

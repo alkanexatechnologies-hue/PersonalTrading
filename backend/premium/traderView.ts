@@ -228,3 +228,50 @@ export function tomorrowMap(o: { bull: Plan | null; bear: Plan | null; lines: { 
   if (o.bull && o.bear) s.push(`Open between ${o.bear.trigger} and ${o.bull.trigger}: no trade until one side breaks on a 15-min close.`);
   return { levels: [{ label: "Today high → tomorrow's PDH", value: o.todayHigh }, { label: "Today low → tomorrow's PDL", value: o.todayLow }, ...o.lines.map((l) => ({ label: `${l.label} at the next open`, value: l.next }))], scenarios: s };
 }
+
+// ---------------------------------------------------------------- risk of each level (for an option BUYER trading its break)
+export interface LevelRisk { price: number; side: "ABOVE" | "BELOW"; risk: "LOW" | "MEDIUM" | "HIGH" | "FAR"; score: number; reasons: string[]; bounce: string | null; rejections: number; roomPts: number | null }
+/**
+ * Each factor that makes a break trade harder adds 1 (counter-trend on both higher timeframes adds 2):
+ *  room to the next level < 0.5·ATR · an OI wall in the zone · against the daily / 1H trend · rejected ≥ 3 times before
+ *  · past breaks in that direction followed through < 50 % (or fewer than 15 of them).
+ * Rejections: the last 5 sessions only, one per episode (consecutive candles pushed back from the level count once).
+ * 0–1 = LOW, 2 = MEDIUM, ≥ 3 = HIGH. Levels more than one daily ATR away are FAR (not in play for this session).
+ */
+export function levelRisks(o: { levels: Level[]; spot: number; atr: number; dailyAtr?: number | null; closed: Candle[]; trends: TfTrend[]; events: BreakEvent[] }): LevelRisk[] {
+  const a = o.atr || 1, d = o.trends.find((t) => t.tf === "Daily")?.verdict, h = o.trends.find((t) => t.tf === "1H")?.verdict;
+  const up = breakStats(o.events, "UP"), dn = breakStats(o.events, "DOWN");
+  const sorted = [...o.levels].sort((x, y) => x.price - y.price);
+  return o.levels.map((v) => {
+    const above = v.price > o.spot, dir = above ? 1 : -1, reasons: string[] = [];
+    let score = 0;
+    // room: the next distinct level beyond this one
+    const beyond = sorted.filter((x) => dir * (x.price - v.price) > 0.1 * a);
+    const next = above ? beyond[0] : beyond[beyond.length - 1], room = next ? Math.abs(next.price - v.price) : null;
+    if (room != null && room < 0.5 * a) { score++; reasons.push(`only ${Math.round(room)} pts to ${next!.label} — no room`); }
+    else reasons.push(room == null ? "open space beyond (no level)" : `${Math.round(room)} pts of room to ${next!.label}`);
+    // writers defend OI walls
+    const oi = o.levels.find((x) => x.kind === "OI" && Math.abs(x.price - v.price) <= 0.2 * a);
+    if (oi) { score++; reasons.push(`${oi.label} — writers defend it`); }
+    // higher-timeframe trend for a break in this direction
+    const want = above ? "UP" : "DOWN", against = [d, h].filter((t) => t && t !== "RANGE" && t !== "NO DATA" && t !== want).length;
+    if (against) { score += against; reasons.push(`break is against the ${against === 2 ? "daily and 1H" : d !== want && d !== "RANGE" ? "daily" : "1H"} trend`); }
+    else if (d === want || h === want) reasons.push(`break is with the ${d === want ? "daily" : "1H"} trend`);
+    // how often price was pushed back from this level (15-min closes)
+    let rej = 0, inEp = false; const tol = 0.15 * a, recentDays = [...new Set(o.closed.map((c) => dayOf(c.time)))].slice(-5);
+    for (const c of o.closed.filter((x) => recentDays.includes(dayOf(x.time)))) {
+      const hit = above ? c.high >= v.price - tol && c.close < v.price - tol : c.low <= v.price + tol && c.close > v.price + tol;
+      if (hit && !inEp) rej++; inEp = hit;
+    }
+    if (rej >= 3) { score++; reasons.push(`rejected ${rej} times in the last 5 sessions — first breaks often fail`); }
+    // what past breaks in this direction did
+    const st = above ? up : dn;
+    if (st.weak) { score++; reasons.push(st.n < 15 ? `only ${st.n} past ${above ? "breakouts" : "breakdowns"} to learn from` : `past ${above ? "breakouts" : "breakdowns"} followed through ${st.pct}%`); }
+    const far = Math.abs(v.price - o.spot) > (o.dailyAtr && o.dailyAtr > 0 ? o.dailyAtr : 2.5 * a);
+    const risk: LevelRisk["risk"] = far ? "FAR" : score <= 1 ? "LOW" : score === 2 ? "MEDIUM" : "HIGH";
+    // the same level can be a GOOD place to buy the bounce: strong (confluence or ≥ 2 rejections) and with the trend of the bounce
+    const strong = !!v.confluence || rej >= 2 || !!oi, bounceDir = above ? "DOWN" : "UP";
+    const bounce = !far && strong && (d === bounceDir || h === bounceDir) ? (above ? `strong resistance — lower-risk PE on a rejection (stop just above ${Math.round(v.price)})` : `strong support — lower-risk CE on a bounce (stop just below ${Math.round(v.price)})`) : null;
+    return { price: v.price, side: above ? "ABOVE" : "BELOW", risk, score, reasons, bounce, rejections: rej, roomPts: room != null ? Math.round(room) : null };
+  });
+}
