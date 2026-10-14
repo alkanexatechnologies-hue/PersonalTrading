@@ -144,7 +144,7 @@ export function ladder(o: { daily: Candle[]; sessionDay: string; today: { high: 
 
 // ---------------------------------------------------------------- playbook
 export interface Plan {
-  side: "CE" | "PE"; trigger: number; triggerLabel: string; zoneFrom: number; stop: number; t1: number; t1Label: string; t2: number | null; t2Label: string | null; rr: number;
+  side: "CE" | "PE"; trigger: number; entry: number; buffer: number; premAtEntry: number | null; triggerLabel: string; zoneFrom: number; stop: number; t1: number; t1Label: string; t2: number | null; t2Label: string | null; rr: number;
   strike: number | null; expiry: string | null; premNow: number | null; premAtTrigger: number | null; premAtStop: number | null; premAtT1: number | null; premAtT2: number | null;
   delta: number | null; history: ReturnType<typeof breakStats>; flags: string[];
 }
@@ -161,11 +161,14 @@ export function plans(o: { levels: Level[]; spot: number; atr: number; chain: Oi
     let z = 0; while (z + 1 < seq.length && Math.abs(seq[z + 1].price - seq[z].price) <= 0.75 * a) z++;
     const zone = seq.slice(0, z + 1), trig = zone[zone.length - 1];
     const zoneLabel = zone.length > 1 ? `zone ${Math.round(zone[0].price)}–${Math.round(trig.price)}: ${zone.map((x) => x.label).join(" + ")}` : trig.label + (trig.confluence ? ` ★ (+ ${trig.with!.join(", ")})` : "");
-    const tgts = seq.slice(z + 1).filter((x) => dir * (x.price - trig.price) >= 0.5 * a);
-    const t1 = tgts[0] ? { p: tgts[0].price, l: tgts[0].label } : { p: r2(trig.price + dir * a), l: "1 ATR (no level beyond)" };
+    // the plan STARTS on a 15-min close beyond the level + the engine's break buffer (0.1·ATR) — one exact whole number
+    const buffer = Math.max(1, Math.round(0.1 * a)), entry = dir > 0 ? Math.ceil(trig.price + buffer) : Math.floor(trig.price - buffer);
+    const tgts = seq.slice(z + 1).filter((x) => dir * (x.price - entry) >= 0.5 * a);
+    const t1 = tgts[0] ? { p: tgts[0].price, l: tgts[0].label } : { p: Math.round(entry + dir * a), l: "1 ATR (no level beyond)" };
     const t2 = tgts.find((x) => dir * (x.price - t1.p) >= 0.5 * a) || null;
-    const stop = r2(trig.price - dir * 0.5 * a), rr = r2(Math.abs(t1.p - trig.price) / Math.abs(trig.price - stop));
-    const k = strikes.length ? strikes.reduce((b, s) => (Math.abs(s - trig.price) < Math.abs(b - trig.price) ? s : b), strikes[0]) : null;
+    // stop: a close back ½·ATR inside = the break failed; R:R from the real entry, not from the level
+    const stop = Math.round(entry - dir * 0.5 * a), rr = r2(Math.abs(t1.p - entry) / Math.abs(entry - stop));
+    const k = strikes.length ? strikes.reduce((b, s) => (Math.abs(s - entry) < Math.abs(b - entry) ? s : b), strikes[0]) : null;
     const row: any = k != null ? o.chain.find((s) => s.strike === k) : null, p = side === "CE" ? "ce" : "pe";
     const leg = row ? { ltp: row[`${p}Ltp`] ?? null, delta: row[`${p}Delta`] ?? null, gamma: row[`${p}Gamma`] ?? null, iv: row[`${p}Iv`] ?? null } : null;
     const t = yearsToExpiry(o.expiry, o.nowMs);
@@ -174,11 +177,11 @@ export function plans(o: { levels: Level[]; spot: number; atr: number; chain: Oi
     if (rr < 1.5) flags.push(`R:R 1:${rr} is below 1:1.5 — skip unless the level is very strong`);
     if (history.weak) flags.push(history.n < 15 ? `only ${history.n} past ${side === "CE" ? "breakouts" : "breakdowns"} to learn from` : `past ${side === "CE" ? "breakouts" : "breakdowns"} followed through only ${history.pct}% of the time`);
     if (zone.some((x) => x.kind === "OI")) flags.push("an OI wall is in the trigger zone — writers defend it; expect a fight there");
-    return { side, trigger: trig.price, triggerLabel: zoneLabel, zoneFrom: zone[0].price, stop, t1: t1.p, t1Label: t1.l, t2: t2?.price ?? null, t2Label: t2?.label ?? null, rr,
+    return { side, trigger: trig.price, entry, buffer, premAtEntry: at(entry), triggerLabel: zoneLabel, zoneFrom: zone[0].price, stop, t1: t1.p, t1Label: t1.l, t2: t2?.price ?? null, t2Label: t2?.label ?? null, rr,
       strike: k, expiry: o.expiry, premNow: leg?.ltp ?? null, premAtTrigger: at(trig.price), premAtStop: at(stop), premAtT1: at(t1.p), premAtT2: at(t2?.price ?? null), delta: leg?.delta ?? null, history, flags };
   };
   const bull = build("CE"), bear = build("PE");
-  return { bull, bear, noTrade: bull && bear ? { from: bear.trigger, to: bull.trigger } : null };
+  return { bull, bear, noTrade: bull && bear ? { from: bear.entry, to: bull.entry } : null };
 }
 
 // ---------------------------------------------------------------- what I'd do now + checklist
@@ -193,12 +196,12 @@ export function coach(m: CoachIn) {
   const side = m.bull && m.spot > m.bull.trigger ? "CE" : m.bear && m.spot < m.bear.trigger ? "PE" : null;
   const plan = side === "CE" ? m.bull : side === "PE" ? m.bear : null;
   const dir = side === "CE" ? 1 : -1;
-  const closedBeyond = !!(plan && last15 && dir * (last15.close - plan.trigger) > 0.1 * m.atr);
+  const closedBeyond = !!(plan && last15 && dir * (last15.close - plan.entry) >= 0);   // the plan's exact start
   const retestHeld = !!(plan && closedBeyond && prev15 && (side === "CE" ? last15.low <= plan.trigger + 0.2 * m.atr && last15.close > plan.trigger : last15.high >= plan.trigger - 0.2 * m.atr && last15.close < plan.trigger));
   const aligned = side ? (side === "CE" ? htf === "UP" || h1 === "UP" : htf === "DOWN" || h1 === "DOWN") : null;
   const checklist = [
     { item: "Higher timeframe (daily / 1H) agrees", ok: aligned, detail: `Daily ${htf} · 1H ${h1}` },
-    { item: "15-min candle CLOSED beyond the trigger", ok: side ? closedBeyond : null, detail: plan ? `${plan.trigger}` : "price inside the no-trade zone" },
+    { item: "15-min candle CLOSED beyond the start", ok: side ? closedBeyond : null, detail: plan ? `${plan.entry}` : "price inside the no-trade zone" },
     { item: "Retest held", ok: side ? retestHeld : null, detail: "optional, but the safest entry" },
     { item: "Option premium confirming (new high)", ok: side ? m.premium[side]?.response === "RISING" : null, detail: side ? `${side} premium ${m.premium[side]?.response?.toLowerCase() || "unknown"}` : "—" },
     { item: "Reward : risk ≥ 1 : 1.5", ok: plan ? plan.rr >= 1.5 : null, detail: plan ? `1 : ${plan.rr}` : "—" },
@@ -209,11 +212,11 @@ export function coach(m: CoachIn) {
   const passed = checklist.filter((c) => c.ok === true).length, total = checklist.filter((c) => c.ok !== null).length;
   let action: string, why: string, tone: "bull" | "bear" | "wait" | "stop";
   if (/STALE|DISCONNECTED|UNAVAILABLE/.test(m.dataStatus)) { action = "NO TRADE — DATA NOT LIVE"; why = `Feed is ${m.dataStatus}. Never trade on old prices.`; tone = "stop"; }
-  else if (m.session !== "OPEN") { action = "MARKET CLOSED — PREPARE THE PLAN"; why = `Next session: CE above ${m.bull?.trigger ?? "—"}, PE below ${m.bear?.trigger ?? "—"}; nothing in between.`; tone = "wait"; }
+  else if (m.session !== "OPEN") { action = "MARKET CLOSED — PREPARE THE PLAN"; why = `Next session: Bull plan starts on a 15-min close above ${m.bull?.entry ?? "—"}, Bear plan below ${m.bear?.entry ?? "—"}; nothing in between.`; tone = "wait"; }
   else if (m.istMin < 570) { action = "WAIT — OPENING RANGE"; why = "First 15 minutes set the range. Let the 09:30 candle close before acting."; tone = "wait"; }
   else if (m.istMin > 885) { action = "NO NEW TRADES — LATE SESSION"; why = "After 14:45 theta and the 15:12 exit leave too little room for a buyer."; tone = "stop"; }
-  else if (!side) { action = "WAIT — NO-TRADE ZONE"; why = `Price ${Math.round(m.spot)} is between ${m.bear?.trigger ?? "—"} and ${m.bull?.trigger ?? "—"}. Buying here pays theta for a coin flip. Ready for CE above ${m.bull?.trigger ?? "—"} or PE below ${m.bear?.trigger ?? "—"} on a 15-min close.`; tone = "wait"; }
-  else if (!closedBeyond) { action = `WATCH — ${side === "CE" ? "BREAKOUT" : "BREAKDOWN"} ATTEMPT`; why = `Price is beyond ${plan!.trigger} but no 15-min candle has closed there yet. Wicks trap buyers.`; tone = "wait"; }
+  else if (!side) { action = "WAIT — NO-TRADE ZONE"; why = `Price ${Math.round(m.spot)} is between ${m.bear?.entry ?? "—"} and ${m.bull?.entry ?? "—"}. Buying here pays theta for a coin flip. Bull plan starts on a 15-min close above ${m.bull?.entry ?? "—"}; Bear plan below ${m.bear?.entry ?? "—"}.`; tone = "wait"; }
+  else if (!closedBeyond) { action = `WATCH — ${side === "CE" ? "BREAKOUT" : "BREAKDOWN"} ATTEMPT`; why = `Price is past ${plan!.trigger} but no 15-min candle has closed beyond ${plan!.entry} yet. Wicks trap buyers.`; tone = "wait"; }
   else if (m.arbiter?.fresh && m.arbiter.finalAction === (side === "CE" ? "BUY_CE" : "BUY_PE") && m.riskOk) { action = `READY — BUY ${side} (arbiter confirmed)`; why = `${passed}/${total} checks pass. Stop ${plan!.stop}, T1 ${plan!.t1}. Size so the stop costs ≤ your fixed risk.`; tone = side === "CE" ? "bull" : "bear"; }
   else if (aligned === false) { action = `CAUTION — COUNTER-TREND ${side === "CE" ? "BREAKOUT" : "BREAKDOWN"}`; why = `Break confirmed but the higher timeframe disagrees. Experienced buyers skip or wait for the retest.`; tone = "wait"; }
   else { action = `WAIT FOR RETEST — ${side === "CE" ? "BREAKOUT" : "BREAKDOWN"} CONFIRMED`; why = `${passed}/${total} checks pass. Arbiter: ${m.arbiter?.finalAction || "not BUY"} — it has the final word.`; tone = "wait"; }
@@ -223,9 +226,9 @@ export function coach(m: CoachIn) {
 // ---------------------------------------------------------------- tomorrow's map
 export function tomorrowMap(o: { bull: Plan | null; bear: Plan | null; lines: { label: string; next: number | null }[]; todayHigh: number | null; todayLow: number | null; close: number; atr: number }) {
   const s: string[] = [];
-  if (o.bull) s.push(`Gap-up above ${o.bull.trigger}: do not chase the open — wait for the first 15-min candle to close and hold above it (target ${o.bull.t1}).`);
-  if (o.bear) s.push(`Gap-down below ${o.bear.trigger}: wait for the first 15-min candle to close below it before PE (target ${o.bear.t1}).`);
-  if (o.bull && o.bear) s.push(`Open between ${o.bear.trigger} and ${o.bull.trigger}: no trade until one side breaks on a 15-min close.`);
+  if (o.bull) s.push(`Gap-up above ${o.bull.entry}: do not chase the open — wait for the first 15-min candle to close and hold above it (target ${o.bull.t1}).`);
+  if (o.bear) s.push(`Gap-down below ${o.bear.entry}: wait for the first 15-min candle to close below it before PE (target ${o.bear.t1}).`);
+  if (o.bull && o.bear) s.push(`Open between ${o.bear.entry} and ${o.bull.entry}: no trade until one side breaks on a 15-min close.`);
   return { levels: [{ label: "Today high → tomorrow's PDH", value: o.todayHigh }, { label: "Today low → tomorrow's PDL", value: o.todayLow }, ...o.lines.map((l) => ({ label: `${l.label} at the next open`, value: l.next }))], scenarios: s };
 }
 

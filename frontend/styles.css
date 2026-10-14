@@ -7682,3 +7682,13 @@ body.ppc-fullwidth .watchlist, body.ppc-fullwidth #watchlist { display: none !im
 @media (max-width: 700px) { .ppc-lad-why, .ppc-lad-bounce { padding-left: 0; } }
 .ppc-lowrisk { margin-top: 8px; padding: 6px 8px; border-radius: 6px; background: rgba(38,166,154,.07); border: 1px solid rgba(38,166,154,.35); font-size: 12px; }
 .ppc-lowrisk ul { margin: 4px 0; padding-left: 18px; }
+.ppc-pl-head { display: flex; align-items: center; gap: 8px; } .ppc-pl-head h4 { margin: 0; }
+.ppc-pl-start { font-size: 15px; margin: 6px 0 2px; } .ppc-pl-start b { font-size: 22px; }
+.ppc-pl-ce .ppc-pl-start b, .ppc-ce-t { color: #82a8ff; } .ppc-pl-pe .ppc-pl-start b, .ppc-pe-t { color: #ffb74d; }
+.ppc-pl-buy { font-size: 13px; margin-bottom: 4px; }
+.ppc-pl-tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.ppc-pl-tbl th { color: #787b86; font-size: 10.5px; font-weight: 700; text-align: left; padding: 2px 4px; }
+.ppc-pl-tbl td { padding: 4px; border-top: 1px solid #2a2e39; } .ppc-pl-tbl td:first-child { color: #9598a1; }
+.ppc-pl-rr { margin: 6px 0 2px; font-size: 12.5px; }
+.ppc-pl-why { margin-top: 4px; font-size: 11.5px; color: #b2b5be; } .ppc-pl-why summary { cursor: pointer; color: #787b86; }
+.ppc-pl-why > div { margin-top: 3px; }

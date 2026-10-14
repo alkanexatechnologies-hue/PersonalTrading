@@ -42,9 +42,11 @@ test("ladder: previous day / pivots / previous week, sorted, with confluence", (
 test("plans: trigger = nearest level beyond the noise, targets ≥ ½ ATR apart, stop ½ ATR back, flags weak history", () => {
   const lv: Level[] = [{ price: 160, label: "R2", kind: "PIVOT" }, { price: 150, label: "PDH", kind: "PREV DAY" }, { price: 141, label: "R1", kind: "PIVOT" }, { price: 130.5, label: "noise", kind: "TODAY" }, { price: 120, label: "PDL", kind: "PREV DAY" }, { price: 110, label: "S1", kind: "PIVOT" }];
   const p = plans({ levels: lv, spot: 130, atr: 10, chain: [], expiry: null, events: [] });
-  assert.equal(p.bull!.trigger, 141); assert.equal(p.bull!.t1, 150); assert.equal(p.bull!.stop, 136); assert.equal(p.bull!.rr, 1.8);
+  // level 141 + buffer 1 (0.1·ATR) → the plan starts at 142; stop ½ ATR back = 137; R:R from the entry = (150−142)/(142−137)
+  assert.equal(p.bull!.trigger, 141); assert.equal(p.bull!.entry, 142); assert.equal(p.bull!.t1, 150); assert.equal(p.bull!.stop, 137); assert.equal(p.bull!.rr, 1.6);
+  assert.equal(p.bear!.entry, 119); assert.equal(p.bear!.stop, 124);
   assert.equal(p.bear!.trigger, 120); assert.equal(p.bear!.t1, 110);
-  assert.deepEqual(p.noTrade, { from: 120, to: 141 });
+  assert.deepEqual(p.noTrade, { from: 119, to: 142 });   // between the two plan starts
   assert.ok(p.bull!.flags.some((f) => /past breakouts/.test(f)));
   // OI wall + prev-day high + trendline within 0.75 ATR = one zone; the trigger is its far edge
   const z: Level[] = [{ price: 160, label: "R2", kind: "PIVOT" }, { price: 145.2, label: "trendline", kind: "TRENDLINE" }, { price: 145, label: "PDH", kind: "PREV DAY" }, { price: 140, label: "OI call wall", kind: "OI" }, { price: 120, label: "PDL", kind: "PREV DAY" }];
@@ -53,7 +55,7 @@ test("plans: trigger = nearest level beyond the noise, targets ≥ ½ ATR apart,
   assert.ok(q.flags.some((f) => /OI wall is in the trigger zone/.test(f)));
 });
 const C = (o: Partial<CoachIn> = {}): CoachIn => ({ session: "OPEN", istMin: 630, dataStatus: "LIVE", spot: 130, atr: 10, closed15: [bar(0, 129), bar(1, 130)],
-  bull: { side: "CE", trigger: 141, stop: 136, t1: 150, rr: 1.8 } as any, bear: { side: "PE", trigger: 120, stop: 125, t1: 110, rr: 2 } as any,
+  bull: { side: "CE", trigger: 141, entry: 142, stop: 137, t1: 150, rr: 1.6 } as any, bear: { side: "PE", trigger: 120, entry: 119, stop: 124, t1: 110, rr: 2 } as any,
   trends: [{ tf: "Daily", verdict: "UP" } as any, { tf: "1H", verdict: "RANGE" } as any], arbiter: { finalAction: "WAIT", reason: "", fresh: true }, riskOk: true, riskWhy: "ok",
   premium: { CE: { response: "RISING" }, PE: { response: "FLAT" } }, liquidity: { CE: "GOOD", PE: "GOOD" }, ...o });
 test("coach: no-trade zone, wick vs close, counter-trend, arbiter has the final word, time rules", () => {
