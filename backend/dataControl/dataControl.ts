@@ -16,6 +16,7 @@ export const DC_SCREENS: DcItem[] = [
   { key: "optionterminal", label: "📈 Option Terminal", group: "Trading" },
   { key: "tradeexec", label: "🧾 Trade Execution", group: "Trading" },
   { key: "mcsummary", label: "🧭 MC Summary", group: "Trading" },
+  { key: "premiumcenter", label: "🎯 Premium Prediction", group: "Trading", note: "CE/PE premium candles + option chain every 15s while open" },
   { key: "liquidityanalysis", label: "💧 Liquidity Analysis", group: "Trading", note: "Research screen — 20-day history fetched once a day" },
   { key: "marketanalysis", label: "📊 Market Analysis", group: "Trading" },
   { key: "oianalysis", label: "🔬 OI Analysis", group: "Trading" },

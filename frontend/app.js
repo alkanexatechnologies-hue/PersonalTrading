@@ -1952,6 +1952,10 @@ function switchTab(name) {
   // Market Command Summary — one-screen summary (full-width), opened from Market Command.
   document.body.classList.toggle("mcs-fullwidth", name === "mcsummary");
   if (name === "mcsummary" && typeof initMcSummary === "function") initMcSummary();
+  // Option Premium Prediction Center — opened from Market Command (full-width), follows Market Command's index.
+  document.body.classList.toggle("ppc-fullwidth", name === "premiumcenter");
+  if (name === "premiumcenter" && typeof initPremiumCenter === "function") initPremiumCenter();
+  else if (typeof ppcStop === "function") ppcStop();
   // Liquidity Analysis — research screen (full-width), follows Market Command's index.
   document.body.classList.toggle("lqa-fullwidth", name === "liquidityanalysis");
   if (name === "liquidityanalysis" && typeof initLiquidityAnalysis === "function") initLiquidityAnalysis();
@@ -5787,6 +5791,7 @@ function initMarketCommand() {
   el("mc-open-tradeexec")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("tradeexec"); });
   el("mc-open-mcsummary")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("mcsummary"); });
   el("mc-open-liquidity")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("liquidityanalysis"); });
+  el("mc-open-premiumcenter")?.addEventListener("click", () => { if (typeof switchTab === "function") switchTab("premiumcenter"); });
 
   // Wire fullscreen
   const fsBtn = el("mc-fullscreen");
@@ -16478,7 +16483,7 @@ const DC_ROUTE_OWNER = {
   "market-sentiment-brief": "marketcommand", "oi-command": "oicommand", "top-picks": "toppicks", "option-top-pick": "toppicks",
   "liquidity-status": "liquiditystatus", "oi-analysis": "oianalysis", "oi-chain": "oianalysis", "premarket": "premarket",
   "today-movers": "todaymovers", "bull-rank": "bullrank", "big-move": "bigmove", "testlab": "testlab", "move-timing": "movetiming",
-  "backtest-dhan": "dhanbacktest", "liquidity-analysis": "liquidityanalysis", "setup-signals": "mcsummary", "setup-test-log": "mcsummary", "strategy-replay": "stratreplay", "qa": "strategylab", "ai-paper": "aip",
+  "backtest-dhan": "dhanbacktest", "liquidity-analysis": "liquidityanalysis", "setup-signals": "mcsummary", "premium-center": "premiumcenter", "setup-test-log": "mcsummary", "strategy-replay": "stratreplay", "qa": "strategylab", "ai-paper": "aip",
 };
 function dcActiveTab() {
   const t = document.querySelector("#tabs .tab.active");

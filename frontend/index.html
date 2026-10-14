@@ -7,7 +7,7 @@
          under the home indicator. Android ignores it harmlessly. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>BC Data Status</title>
-    <link rel="stylesheet" href="styles.css?v=20261014-pv1" />
+    <link rel="stylesheet" href="styles.css?v=20261015-pc1" />
     <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   </head>
   <body class="oi-focus">
@@ -493,6 +493,7 @@
           <button class="tab tab-primary" data-tab="marketcommand" data-group="marketcommand">⚡ Market Command</button>
           <button class="tab tab-primary" data-tab="marketanalysis" data-group="marketcommand">📊 Market Analysis</button>
           <button class="tab tab-primary" data-tab="optionterminal" data-group="marketcommand">📈 Option Terminal</button>
+          <button class="tab tab-primary" data-tab="premiumcenter" data-group="marketcommand">🎯 Premium Prediction</button>
           <button class="tab tab-primary" data-tab="oianalysis" data-group="marketcommand">🔬 OI Analysis</button>
           <button class="tab tab-primary" data-tab="tradeexec" data-group="marketcommand">🧾 Trade Execution</button>
           <button class="tab tab-primary" data-tab="mcsummary" data-group="marketcommand">🧭 MC Summary</button>
@@ -1570,6 +1571,7 @@
               </div>
               <button class="mc2-replay" id="mc-open-marketanalysis" title="Open the composite Market Analysis screen for this index" style="margin-left:4px">📊 Market Analysis</button>
               <button class="mc2-replay" id="mc-open-optionterminal" title="Open the CE/PE Option Terminal for this index">📈 Option Terminal</button>
+              <button class="mc2-replay mc2-ppc-btn" id="mc-open-premiumcenter" title="Option Premium Prediction Center — CE vs PE, breakout / breakdown states, strike ranking (advisory)">🎯 Premium Prediction</button>
               <button class="mc2-replay" id="mc-open-oianalysis" title="Open the OI Analysis screen for this index">🔬 OI Analysis</button>
               <button class="mc2-replay" id="mc-open-tradeexec" title="Open the Trade & Levels / Trade Execution screen">🧾 Trade Execution</button>
               <button class="mc2-replay mc2-summary-btn" id="mc-open-mcsummary" title="Open the Market Command Summary for this index">📋 MARKET COMMAND SUMMARY</button>
@@ -1829,6 +1831,7 @@
              Command. CE + PE premium charts are the primary focus. All data is the
              live Dhan snapshot; nothing is fabricated. -->
         <div class="tab-panel" id="panel-mcsummary"><div class="mcs-wrap" id="mcs-root"></div></div>
+        <div class="tab-panel" id="panel-premiumcenter"><div class="ppc-wrap" id="ppc-root"></div></div>
         <div class="tab-panel" id="panel-liquidityanalysis"><div class="lqa-wrap" id="lqa-root"></div></div>
         <div class="tab-panel" id="panel-optionterminal">
           <div class="ot-wrap">
@@ -2577,8 +2580,9 @@
         <div id="dc-body" class="dc-body">Loading…</div>
       </div>
     </div>
-    <script src="app.js?v=20261014-pv1"></script>
+    <script src="app.js?v=20261015-pc1"></script>
     <script src="mcsummary.js?v=20261012-dh1"></script>
+    <script src="premiumcenter.js?v=20261015-pc1"></script>
     <script src="oimonitor.js?v=20261014-ma2"></script>
     <script src="liquidity.js?v=20261007-lqa7"></script>
   </body>

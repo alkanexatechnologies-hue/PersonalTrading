@@ -64,7 +64,9 @@ import { runTest as runTestLab, availableHistory as testLabAvailableHistory } fr
 import { writeReviewPackage as writeTestLabPackage } from "../testlab/exporter";
 import { defaultConfig as testLabDefaultConfig } from "../testlab/config";
 import { buildBreakout, BREAKOUT_VERSION } from "../signals/breakoutService";
-import { getDecision, latestDecision, ledgerFor, DecisionDeps, IndexDef } from "../decision/service";
+import { getDecision, latestDecision, ledgerFor, DecisionDeps, IndexDef, openArbiterTrade } from "../decision/service";
+import { runSession as runBreakoutSession, BREAKOUT_CONFIG } from "../signals/breakoutEngine";
+import * as PC from "../premium/premiumCenter";
 import { Decision } from "../decision/types";
 import { runHtf as runTestLabHtf } from "../testlab/htfRunner";
 import { abcComparison as htfAbc, timingDiagnostic as htfTiming, perCandleAudit as htfPerCandle } from "../testlab/htfAudit";
@@ -7621,6 +7623,159 @@ router.get("/backtest/option/strikes", async (req: Request, res: Response) => {
 
 // Live premium CANDLES for one option strike (clicked in the chain) → its chart.
 // /api/option-candles?symbol=^NSEI&type=PE&strike=23900&expiry=2026-09-08&interval=15
+// ===================== Option Premium Prediction Center (read-only; advisory) =====================
+// /api/premium-center?symbol=^NSEI&interval=5m|15m&expiryOffset=0&moneyness=ATM|ITM|OTM&ceStrike=&peStrike=
+// Composes EXISTING sources only: Dhan spot candles (shared cache), Dhan option chain (LTP, OI, volume, IV, greeks,
+// bid/ask), real Dhan option-premium OHLC candles (same as Option Terminal), the breakout engine's levels, the arbiter's
+// decision and the existing risk state (cooldown, open trade, time window). Probabilities are NOT shown until validated.
+const PC_VERSION = "premium-center/v1";
+async function pcOptionCandles(underlying: string, side: "CE" | "PE", strike: number, expiry: string, intervalMin: number) {
+  return cached(`pc-opt:${underlying}:${side}:${strike}:${expiry}:${intervalMin}`, 20_000, async () => {
+    const o = await lookupDhanOption(underlying, side, strike, expiry);
+    if (!o) return { ok: false, reason: `${underlying} ${expiry} ${strike} ${side} not in the instrument master`, candles: [] as any[] };
+    const now = Math.floor(Date.now() / 1000);
+    const cs = await dhanOptionCandles(o.securityId, now - 3 * 86400, now, intervalMin, o.exchangeSegment);
+    return { ok: cs.length > 0, reason: cs.length ? null : "Dhan returned no premium candles", candles: cs, securityId: o.securityId };
+  });
+}
+router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
+  if (!def || def.type !== "index" || !def.fno || !def.nseSymbol) return res.status(400).json({ error: "F&O index symbol required" });
+  const interval = req.query.interval === "15m" ? "15m" : "5m", intervalSec = interval === "15m" ? 900 : 300;
+  const off = Math.max(0, Math.min(3, Number(req.query.expiryOffset) || 0));
+  const money = ["ITM", "OTM"].includes(String(req.query.moneyness)) ? String(req.query.moneyness) : "ATM";
+  const nowSec = Math.floor(Date.now() / 1000), istMin = Math.floor(((nowSec + 19800) % 86400) / 60), wd = new Date((nowSec + 19800) * 1000).getUTCDay();
+  const session = wd === 0 || wd === 6 ? "CLOSED" : istMin >= 540 && istMin < 555 ? "PRE-OPEN" : istMin >= 555 && istMin <= 930 ? "OPEN" : "CLOSED";
+  try {
+    const [candlesAll, c15, chain, quote] = await Promise.all([
+      getCandlesCached(def.symbol, interval as Interval).catch(() => [] as any[]),
+      interval === "5m" ? getCandlesCached(def.symbol, "15m" as Interval).catch(() => [] as any[]) : Promise.resolve(null),
+      cached(`pc-chain:${def.symbol}:${off}`, 30_000, () => dhanChainForExpiry(def, off)).catch((e: any) => ({ available: false, message: e?.message })),
+      cached(`quote:${def.symbol}`, TTL_QUOTE, () => getProvider().getQuote(def.symbol)).catch(() => null),
+    ]);
+    const candles: any[] = (candlesAll as any[]) || [];
+    const n0 = candles.length, formingNow = n0 && candles[n0 - 1].time + intervalSec > nowSec;
+    const closed = formingNow ? candles.slice(0, -1) : candles, forming = formingNow ? candles[n0 - 1] : null;
+    const lastTs = n0 ? candles[n0 - 1].time : null, ageSec = lastTs != null ? nowSec - lastTs : null;
+    const dhanOn = !!(syncSessionProvider().dhanOn);
+    const dataStatus = !dhanOn ? "DISCONNECTED" : !n0 ? "UNAVAILABLE" : session !== "OPEN" ? "CLOSED" : ageSec! <= intervalSec * 1.5 ? "LIVE" : ageSec! <= intervalSec * 3 ? "DELAYED" : "STALE";
+    // indicators on the full series (closed + forming) for the chart; decisions use closed bars only
+    const closes = candles.map((c: any) => c.close), e9 = ema(closes, 9), e21 = ema(closes, 21), vw = vwap(candles as any), bb = bollinger(closes, 20, 2);
+    const atrS = atr(closed as any, BREAKOUT_CONFIG.atrPeriod), atrNow = last(atrS) ?? null;
+    // the breakout engine's levels: levels[i] = resistance/support known BEFORE closed bar i
+    const sessionRes = runBreakoutSession(closed as any, { intervalSec, nowSec: undefined, dataIssue: null });
+    const rowByTime = new Map(sessionRes.rows.map((r: any) => [r.time, r]));
+    const levels: PC.LevelsAt[] = [];
+    for (let i = 0; i <= closed.length; i++) { const r: any = i > 0 ? rowByTime.get(closed[i - 1].time) : null; levels.push({ resistance: r?.resistance?.price ?? null, support: r?.support?.price ?? null }); }
+    const buf = atrNow != null ? BREAKOUT_CONFIG.breakBufferAtr * atrNow : 0;
+    const brk = PC.breakStates(closed as any, forming, levels, atrNow, buf);
+    const tl = PC.trendlines(closed.slice(-150) as any);
+    const swings = PC.confirmedSwings(closed.slice(-150) as any, 2).slice(-12);
+    const ms = closed.length >= 20 ? detectMarketStructure(closed.slice(-150) as any, 3) : null;
+    // CHoCH = a confirmed break AGAINST the previous confirmed break's direction; BOS = with it
+    const bosAll = (ms?.bosEvents || []).filter((b: any) => b.stage === "Confirmed");
+    const bos = bosAll.map((b: any, i: number) => ({ time: b.breakTime, level: Math.round(b.level * 100) / 100, direction: b.direction, kind: i > 0 && bosAll[i - 1].direction !== b.direction ? "CHoCH" : "BOS" })).slice(-6);
+    const latestRow: any = sessionRes.latest;
+    // ---- option chain + selected contracts ----
+    const ch: any = chain;
+    const strikes: any[] = ch?.available ? ch.strikes : [];
+    const spot = (quote as any)?.price > 0 ? (quote as any).price : closed.length ? closed[closed.length - 1].close : null;
+    const ks = strikes.map((s) => s.strike), step = ks.length > 1 ? Math.min(...ks.slice(1).map((k: number, i: number) => k - ks[i]).filter((d: number) => d > 0)) : (def as any).strikeStep || 50;
+    const atm = spot != null && ks.length ? ks.reduce((b: number, k: number) => (Math.abs(k - spot) < Math.abs(b - spot) ? k : b), ks[0]) : null;
+    const pick = (side: "CE" | "PE") => { const q = Number(req.query[side === "CE" ? "ceStrike" : "peStrike"]); if (q > 0 && ks.includes(q)) return q; if (atm == null) return null; const d = money === "ATM" ? 0 : (money === "ITM") === (side === "CE") ? -step : step; return ks.includes(atm + d) ? atm + d : atm; };
+    const ceK = pick("CE"), peK = pick("PE"), expiry = ch?.expiry || null;
+    const medSpread = atm != null ? PC.chainMedianSpreadPct(strikes, atm, step) : null;
+    const horizons = [5, 15, 30];
+    const moveFor = (h: number) => PC.typicalMove(closed as any, Math.max(1, Math.round((h * 60) / intervalSec)));
+    // 5-min horizon on 15-min bars: scale the 1-bar move by sqrt(time)
+    const moveH = (h: number) => (h * 60 >= intervalSec ? moveFor(h) : (() => { const m = PC.typicalMove(closed as any, 1); return m != null ? Math.round(m * Math.sqrt((h * 60) / intervalSec) * 100) / 100 : null; })());
+    const legOf = (s: any, side: "CE" | "PE") => { const p = side === "CE" ? "ce" : "pe"; return { ltp: s?.[`${p}Ltp`] ?? null, prevClose: s?.[`${p}PrevClose`] ?? null, oi: s?.[`${p}Oi`] ?? null, oiChg: s?.[`${p}Chg`] ?? null, volume: s?.[`${p}Vol`] ?? null, iv: s?.[`${p}Iv`] ?? null, delta: s?.[`${p}Delta`] ?? null, gamma: s?.[`${p}Gamma`] ?? null, theta: s?.[`${p}Theta`] ?? null, vega: s?.[`${p}Vega`] ?? null, bid: s?.[`${p}Bid`] ?? null, ask: s?.[`${p}Ask`] ?? null }; };
+    const optSide = async (side: "CE" | "PE", k: number | null) => {
+      if (k == null || !expiry) return { side, available: false, reason: ch?.message || "option chain not available" };
+      const s = strikes.find((x) => x.strike === k), L = legOf(s, side);
+      let oc: any = { ok: false, reason: "not loaded", candles: [] };
+      try { oc = await withTimeout(pcOptionCandles(def.nseSymbol!, side, k, expiry, intervalSec / 60), 15_000, `pc ${side}`); } catch (e: any) { oc = { ok: false, reason: e?.message || "premium candles failed", candles: [] }; }
+      const pcs: any[] = oc.candles || [], pForming = pcs.length && pcs[pcs.length - 1].time + intervalSec > nowSec, pClosed = pForming ? pcs.slice(0, -1) : pcs;
+      const beh = PC.premiumBehaviour(pClosed as any);
+      const dir = PC.optionDirection(side, brk.bull.state, brk.bear.state, beh);
+      const liq = PC.liquidity(L.bid, L.ask, L.ltp, medSpread, L.volume);
+      const chg = L.ltp != null && L.prevClose ? Math.round((L.ltp - L.prevClose) * 100) / 100 : null;
+      return { side, available: true, strike: k, expiry, moneyness: atm == null ? null : k === atm ? "ATM" : (side === "CE") === (k < atm) ? "ITM" : "OTM",
+        ...L, change: chg, changePct: chg != null && L.prevClose ? Math.round((chg / L.prevClose) * 10000) / 100 : null,
+        liquidity: liq, behaviour: beh, direction: dir.dir, bullishEvidence: dir.bullish, bearishEvidence: dir.bearish,
+        expectedMove: Object.fromEntries(horizons.map((h) => [h, PC.modelPremiumMove(L, moveH(h), h)])),
+        probability: { up: null, down: null, status: PC.VALIDATION.status },
+        candles: pcs.slice(-120), candlesSource: oc.ok ? "Dhan premium OHLC" : null, candlesReason: oc.ok ? null : oc.reason };
+    };
+    const [ce, pe] = await Promise.all([optSide("CE", ceK), optSide("PE", peK)]);
+    // ---- strike ranking (ATM ± 3) — model move per rupee net of spread; never ranked by cheapness alone ----
+    const ranking: any[] = [];
+    if (atm != null && expiry) for (const s of strikes.filter((x) => Math.abs(x.strike - atm) <= 3 * step)) for (const side of ["CE", "PE"] as const) {
+      const L = legOf(s, side); if (!(L.ltp > 0)) continue;
+      const liq = PC.liquidity(L.bid, L.ask, L.ltp, medSpread, L.volume), mv = PC.modelPremiumMove(L, moveH(15), 15);
+      const aligned = side === "CE" ? ["CONFIRMED_BREAKOUT", "RETEST_HOLD", "FAILED_BREAKDOWN"].includes(brk.bull.state) || brk.bear.state === "FAILED_BREAKDOWN" : ["CONFIRMED_BREAKDOWN", "RETEST_FAILURE"].includes(brk.bear.state) || brk.bull.state === "FAILED_BREAKOUT";
+      const netPct = mv && liq.spread != null ? Math.round(((mv.absPts - liq.spread) / L.ltp) * 10000) / 100 : null;
+      const setup = aligned ? "ALIGNED with index structure" : "no confirmed structure for this side";
+      ranking.push({ side, strike: s.strike, expiry, ltp: L.ltp, change: L.prevClose ? Math.round((L.ltp - L.prevClose) * 100) / 100 : null, changePct: L.prevClose ? Math.round(((L.ltp / L.prevClose) - 1) * 10000) / 100 : null,
+        volume: L.volume, oi: L.oi, oiChg: L.oiChg, spread: liq.spread, spreadPct: liq.spreadPct, delta: L.delta, iv: L.iv,
+        expectedMove15: mv?.absPts ?? null, expectedMove15Pct: mv?.absPct ?? null, netOfSpreadPct: netPct, liquidity: liq.status, setup, aligned,
+        validation: PC.VALIDATION.status,
+        reason: liq.status === "POOR" ? "poor quote — avoid" : !mv ? "no delta in the feed — move not modelled" : `${aligned ? "aligned; " : ""}model ±${mv.absPts} pts in 15 min, ${netPct}% of premium after the spread` });
+    }
+    ranking.sort((a, b) => (b.aligned ? 1 : 0) - (a.aligned ? 1 : 0) || (a.liquidity === "POOR" ? 1 : 0) - (b.liquidity === "POOR" ? 1 : 0) || (b.netOfSpreadPct ?? -1e9) - (a.netOfSpreadPct ?? -1e9));
+    // ---- master decision: arbiter + existing risk state have final authority ----
+    const idx = indexDefOf(def).index, arb: any = latestDecision(idx);
+    let openTrade: { index: string } | null = null;
+    for (const d of ARBITER_INDEXES()) { const o = openArbiterTrade(indexDefOf(d).index); if (o) { openTrade = { index: indexDefOf(d).index }; break; } }
+    const cool: any = getCooldownState(def.symbol, nowSec);
+    const master = PC.masterDecision({ dataStatus, enoughData: closed.length >= 30, chainOk: !!ch?.available, bull: brk.bull, bear: brk.bear,
+      arbiter: arb ? { finalAction: arb.finalAction, candleTime: arb.candleTime, reason: arb.reason, plan: arb.plan, option: arb.option } : null,
+      nowSec, inTradeWindow: session === "OPEN" && istMin >= 560 && istMin <= 912, cooldown: cool ? { active: !!cool.active, reason: cool.active ? `cooldown until ${new Date(((cool.endTs || 0) + 19800) * 1000).toISOString().slice(11, 16)}` : undefined } : null,
+      openTrade, liq: { CE: (ce as any).liquidity || null, PE: (pe as any).liquidity || null } });
+    if (session !== "OPEN") Object.assign(master, { state: "RISK GATE BLOCKED", reason: `Market ${session === "PRE-OPEN" ? "in pre-open" : "closed"} — showing the last session for reference only`, confirmationRequired: "market open (09:15) and a fresh closed candle" });
+    const ap = arb?.plan || latestRow?.plan || null;
+    const supporting: string[] = [], contra: string[] = [];
+    if (brk.bull.state !== "NONE") (brk.bull.state === "FAILED_BREAKOUT" ? contra : supporting).push(`Bullish: ${brk.bull.state.replace(/_/g, " ").toLowerCase()} — ${brk.bull.detail}`);
+    if (brk.bear.state !== "NONE") (brk.bear.state === "FAILED_BREAKDOWN" ? contra : supporting).push(`Bearish: ${brk.bear.state.replace(/_/g, " ").toLowerCase()} — ${brk.bear.detail}`);
+    if (tl.seller) (tl.seller.status === "BROKEN" ? supporting : contra).push(`Seller trendline ${tl.seller.status.toLowerCase()} (now ${tl.seller.valueNow})`);
+    if (tl.buyer) (tl.buyer.status === "BROKEN" ? contra : supporting).push(`Buyer trendline ${tl.buyer.status.toLowerCase()} (now ${tl.buyer.valueNow})`);
+    const ctx15 = c15 && (c15 as any[]).length > 25 ? (() => { const cl = (c15 as any[]).map((c) => c.close), e = ema(cl, 21); const v = last(e); return v == null ? null : cl[cl.length - 1] > v ? "15-min close above EMA21 (up context)" : "15-min close below EMA21 (down context)"; })() : null;
+    res.json({
+      version: PC_VERSION, available: true, symbol: def.symbol, name: def.name, interval, session, dataStatus,
+      exchangeTs: lastTs, ageSec, quoteTs: (quote as any)?.marketTime || null, generatedAt: nowSec, provider: dhanOn ? "Dhan (connected)" : "Dhan (not connected)",
+      spot: await (async () => {
+        const q: any = quote, dayOf = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(0, 10);
+        const sessionDay = n0 ? dayOf(candles[n0 - 1].time) : null;   // the session the price belongs to (not the calendar day)
+        const first = sessionDay ? candles.find((c: any) => dayOf(c.time) === sessionDay) : null;
+        let prevClose = q?.previousClose ?? null;
+        // After the close Dhan's quote reports the session close as the previous close (change 0): use daily candles then.
+        if (session !== "OPEN" && sessionDay) {
+          try {
+            const d: any[] = await getDailyCached(def.symbol, 10), i = d.length - 1;
+            if (i >= 1) prevClose = dayOf(d[i].time) === sessionDay ? d[i - 1].close : d[i].close;
+          } catch { /* keep the quote's value */ }
+        }
+        const chg = spot != null && prevClose ? Math.round((spot - prevClose) * 100) / 100 : null;
+        return { price: spot, change: chg, changePct: chg != null && prevClose ? Math.round((chg / prevClose) * 10000) / 100 : null, open: first?.open ?? null, high: q?.dayHigh ?? null, low: q?.dayLow ?? null, prevClose, sessionDay };
+      })(),
+      expiries: ch?.expiries || [], expiry, expiryOffset: off, atm, step, moneyness: money,
+      chart: { candles: candles.slice(-160), ema9: e9.slice(-160), ema21: e21.slice(-160), vwap: vw.slice(-160), bbUpper: bb.upper.slice(-160), bbLower: bb.lower.slice(-160), formingTime: forming?.time ?? null },
+      structure: { swings, bos, trendlines: tl, resistance: levels[levels.length - 1]?.resistance ?? null, support: levels[levels.length - 1]?.support ?? null, atr: atrNow, breakBuffer: Math.round(buf * 100) / 100, context15: ctx15 },
+      breakout: brk.bull, breakdown: brk.bear, ce, pe,
+      comparison: {
+        ceDirection: (ce as any).direction ?? null, peDirection: (pe as any).direction ?? null,
+        ceMove15: (ce as any).expectedMove?.[15] ?? null, peMove15: (pe as any).expectedMove?.[15] ?? null,
+        stronger: (ce as any).direction === "UP" && (pe as any).direction !== "UP" ? "CE" : (pe as any).direction === "UP" && (ce as any).direction !== "UP" ? "PE" : null,
+        alignedWithIndex: (ce as any).direction === "UP" ? brk.bull.state : (pe as any).direction === "UP" ? brk.bear.state : null,
+        probability: PC.VALIDATION,
+      },
+      ranking, master: { ...master, entryTrigger: ap?.trigger ?? master.confirmationRequired, stop: ap?.stopLoss ?? null, target: ap?.target1 ?? null, rr: ap?.rr ?? null, planSource: arb?.plan ? "arbiter" : latestRow?.plan ? "breakout engine (if triggered)" : null, supporting, contradictory: contra },
+      validation: PC.VALIDATION,
+      note: "Advisory only. Probabilities are not shown until validated out of sample. The arbiter and existing risk gates decide trades.",
+    });
+  } catch (e: any) { res.json({ available: false, version: PC_VERSION, error: e?.message || "premium center failed" }); }
+});
+
 router.get("/option-candles", async (req: Request, res: Response) => {
   const provider = getProvider();
   if (provider.name !== "dhan") return res.json({ available: false, message: "Option chart के लिए Dhan चाहिए।" });
