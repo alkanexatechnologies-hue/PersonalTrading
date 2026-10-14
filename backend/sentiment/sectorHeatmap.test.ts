@@ -43,3 +43,13 @@ test("refill updates only stocks still at previous close and recomputes sectors"
   assert.equal(oil.avg, 1); assert.equal(energy.avg, 1);
   assert.equal(r.atPrevClose, 0); assert.equal(r.stocksUp, 2);
 });
+
+import { niftyConstituentHeat } from "./sectorHeatmap";
+test("NIFTY constituents: weight order, % move from the snapshot, index points", () => {
+  const snap: any = { sectors: [{ name: "Bank", stocks: [{ s: "HDFCBANK", price: 1010, prev: 1000, pct: 1 }, { s: "ICICIBANK", price: 990, prev: 1000, pct: -1 }] }, { name: "Energy", stocks: [{ s: "RELIANCE", price: 1005, prev: 1000, pct: 0.5 }, { s: "HDFCBANK", price: 1010, prev: 1000, pct: 1 }] }] };
+  const r = niftyConstituentHeat(snap, { RELIANCE: 0.0764, HDFCBANK: 0.1078, ICICIBANK: 0.0919, TCS: 0.03 }, 22000)!;
+  assert.deepEqual(r.rows.map((x) => x.s), ["HDFCBANK", "ICICIBANK", "RELIANCE", "TCS"]);
+  assert.equal(r.rows[0].points, Math.round(0.1078 * 0.01 * 22000 * 10) / 10);   // +23.7
+  assert.equal(r.rows[3].pct, null); assert.equal(r.priced, 3); assert.equal(r.up, 2); assert.equal(r.down, 1);
+  assert.equal(niftyConstituentHeat(null, {}, 1), null);
+});

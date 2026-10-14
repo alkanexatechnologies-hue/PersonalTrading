@@ -7492,3 +7492,13 @@ body.lqa-fullwidth .content { padding-left: 0; padding-right: 0; }
 @media (max-width:600px){ .te-asum{grid-template-columns:repeat(2,minmax(0,1fr))} .te-ac{font-size:12px} }
 .te-atable td{text-align:left!important;white-space:normal} .te-atable th{text-align:left!important} .te-atable .te-ac{max-width:none}
 .ma-otbl th .ma-lvl{display:block;font-size:9px;font-weight:600;color:#8a97ad} .ma-lvl-note{font-size:11px;color:#8a97ad;margin:2px 0 6px}
+/* 09:13 heat map — NIFTY 50 constituents, tile size by weight */
+.pmx-nsum{font-size:11px;color:#cfd8e6;margin:2px 0 4px}
+.pmx-nh{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));grid-auto-rows:34px;grid-auto-flow:dense;gap:3px}
+.pmx-nt{border-radius:5px;padding:3px 5px;color:#fff;display:flex;flex-direction:column;justify-content:center;min-width:0;overflow:hidden;cursor:default}
+.pmx-nt b{font-size:10px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .pmx-nt i{font-style:normal;font-size:11px;font-weight:800}
+.pmx-nt em{font-style:normal;font-size:9px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pmx-nt.w4{grid-column:span 4;grid-row:span 2} .pmx-nt.w4 b{font-size:13px} .pmx-nt.w4 i{font-size:15px}
+.pmx-nt.w3{grid-column:span 3;grid-row:span 2} .pmx-nt.w3 b{font-size:12px} .pmx-nt.w3 i{font-size:13px}
+.pmx-nt.w2{grid-column:span 2;grid-row:span 2} .pmx-nt.w1{grid-column:span 2} .pmx-nt.w1 em{display:none} .pmx-nt.w1 b{font-size:9.5px} .pmx-nt.w1 i{font-size:10px}
+@media (max-width:760px){ .pmx-nh{grid-template-columns:repeat(6,minmax(0,1fr));grid-auto-rows:36px} .pmx-nt.w4{grid-column:span 3} .pmx-nt.w3{grid-column:span 3} .pmx-nt.w2,.pmx-nt.w1{grid-column:span 2} }

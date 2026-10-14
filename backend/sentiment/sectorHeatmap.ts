@@ -159,3 +159,29 @@ export async function takeSnapshot(getQuotes: (syms: string[]) => Promise<Record
   for (const s of all) { const q = raw[s + ".NS"]; quotes[s] = q ? { price: Number(q.price), previousClose: Number(q.previousClose) } : null; }
   return buildHeatmap(members, quotes, date, Math.floor(Date.now() / 1000));
 }
+
+// ---- NIFTY 50 constituents view: the 09:13 move of each NIFTY stock with its weight and index points ----
+// Weights = the validated estimated contribution model (NNLS on 5-min returns; sums to ≈ 100 %), not NSE's official
+// weights. Index points = weight × the stock's % move × the NIFTY reference level (previous close).
+export interface NiftyHeatRow { s: string; weightPct: number; pct: number | null; points: number | null; price: number | null; prev: number | null }
+export function niftyConstituentHeat(snap: HeatSnapshot | null, coefs: Record<string, number> | null, indexRef: number | null) {
+  if (!snap || !coefs) return null;
+  const bySym = new Map<string, HeatStock>();
+  for (const sec of snap.sectors || []) for (const k of sec.stocks) if (!bySym.has(k.s)) bySym.set(k.s, k);
+  const r2 = (v: number) => Math.round(v * 100) / 100;
+  const rows: NiftyHeatRow[] = Object.entries(coefs).filter(([, c]) => c > 0).map(([s, c]) => {
+    const k = bySym.get(s);
+    return { s, weightPct: r2(c * 100), pct: k ? k.pct : null, price: k ? k.price : null, prev: k ? k.prev : null,
+      points: k && indexRef ? Math.round(c * (k.pct / 100) * indexRef * 10) / 10 : null };
+  }).sort((a, b) => b.weightPct - a.weightPct);
+  const priced = rows.filter((r) => r.pct != null);
+  const sumW = (rs: NiftyHeatRow[]) => r2(rs.reduce((a, r) => a + r.weightPct, 0));
+  const top10 = rows.slice(0, 10);
+  return {
+    rows, priced: priced.length, of: rows.length, indexRef,
+    up: priced.filter((r) => (r.pct as number) > 0).length, down: priced.filter((r) => (r.pct as number) < 0).length,
+    totalPoints: indexRef ? Math.round(priced.reduce((a, r) => a + (r.points ?? 0), 0) * 10) / 10 : null,
+    top10Weight: sumW(top10), top10Points: indexRef ? Math.round(top10.reduce((a, r) => a + (r.points ?? 0), 0) * 10) / 10 : null,
+    note: "Weights: estimated contribution model (not NSE's official weights). Points ≈ weight × 09:13 move × NIFTY previous close.",
+  };
+}

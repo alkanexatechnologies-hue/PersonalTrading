@@ -212,7 +212,7 @@ import { findSimilar, readLibrary, saveLibrary, buildLibrary, buildHistory, topB
 import { premiumAnalysis, strikeComparison } from "../sentiment/optionPremium";
 import { newsRows, newsTabs, newMajor } from "../sentiment/newsImpact";
 import { mcxCrudeLive, giftOvernightLive } from "../sentiment/dhanMarketExtras";
-import { refillSnapshot as refillHeatSnapshot, takeSnapshot as takeHeatSnapshot, saveSnapshot as saveHeatSnapshot, readSnapshot as readHeatSnapshot, latestSnapshot as latestHeatSnapshot } from "../sentiment/sectorHeatmap";
+import { refillSnapshot as refillHeatSnapshot, takeSnapshot as takeHeatSnapshot, saveSnapshot as saveHeatSnapshot, readSnapshot as readHeatSnapshot, latestSnapshot as latestHeatSnapshot, niftyConstituentHeat } from "../sentiment/sectorHeatmap";
 import { buildPremarketOverview } from "../sentiment/overview";
 import { todaySnapshots } from "../sentiment/snapshotStore";
 import { getMarketDataHealth, fetchMarketData, marketDataProviderName, MdKey } from "../sentiment/marketDataProvider";
@@ -8309,14 +8309,23 @@ router.get("/news/intel", async (req: Request, res: Response) => {
 
 // 09:13 sector heatmap (Market Sentiment → India Market Sector Analysis). Today's snapshot once
 // taken, otherwise the most recent earlier one (the UI labels its date). Display only.
-router.get("/sector-heatmap", (_req: Request, res: Response) => {
+router.get("/sector-heatmap", async (_req: Request, res: Response) => {
   const today = istDateStr();
   // Today's 09:13 picture when it is usable; otherwise (holiday, feed or data plan down) the last
   // good one, with today's outcome passed along so the screen can say why.
   const t = readHeatSnapshot(today);
   const snap = t && t.status === "OK" ? t : latestHeatSnapshot(today, true);
   const todayIssue = t && t.status !== "OK" ? (t.status === "FAILED" ? "Today's 09:13 heatmap could not be taken (quotes unavailable)." : "No pre-open prices at 09:13 today (market holiday or feed not delivering).") : null;
-  res.json({ today, snapshot: snap, isToday: !!snap && snap.date === today, todayIssue });
+  // NIFTY 50 constituents view: each stock's 09:13 move with its (estimated) weight and NIFTY points. The reference
+  // level is NIFTY's close on the trading day BEFORE the snapshot (daily candles — not the quote, whose "previous
+  // close" turns into today's close after hours).
+  let nifty: any = null;
+  try {
+    let ref: number | null = null;
+    if (snap) { const d: any[] = await getDailyCached("^NSEI", 15); const prev = d.filter((c) => new Date((c.time + 19800) * 1000).toISOString().slice(0, 10) < snap.date).pop(); ref = prev ? prev.close : null; }
+    nifty = niftyConstituentHeat(snap, readContribModel()?.coefs || null, ref);
+  } catch { nifty = null; }
+  res.json({ today, snapshot: snap, isToday: !!snap && snap.date === today, todayIssue, nifty });
 });
 
 // ===================== 09:10 Market & Global Sentiment desk (READ-ONLY) =====================

@@ -8832,9 +8832,9 @@ function pmHeatCol(v) {
 function pmHeatPct(v) { return (v > 0 ? "+" : "") + v.toFixed(2) + "%"; }
 function renderPMHeat(d) {
   const box = pmEl("pmx-5"); if (!box) return;
-  const s = d.snapshot, view = PM.heatView || "sectors";
+  const s = d.snapshot, view = PM.heatView || "stocks";   // default: NIFTY 50 constituents (weight-sized)
   const when = s ? new Date(s.takenAt * 1000).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }) : "";
-  const seg = `<span class="pmx-seg" role="group"><button type="button" data-heat-view="sectors" aria-pressed="${view === "sectors"}">Sectors</button><button type="button" data-heat-view="stocks" aria-pressed="${view === "stocks"}">Constituents</button></span>`;
+  const seg = `<span class="pmx-seg" role="group"><button type="button" data-heat-view="stocks" aria-pressed="${view === "stocks"}">Constituents</button><button type="button" data-heat-view="sectors" aria-pressed="${view !== "stocks"}">Sectors</button></span>`;
   const head = pmxH(9, "09:13 sector heat map " + seg, s ? `pre-open · ${pmEsc(when)}${d.isToday ? "" : " · last snapshot"}` : "");
   if (!s) { box.innerHTML = head + `<div class="pm-na">The first heat map is taken at 09:13 on the next trading morning.</div>`; pmxRenderStrength(); return; }
   const older = d.isToday ? "" : `<div class="pmx-note warn">${d.todayIssue ? pmEsc(d.todayIssue) + " Showing the last good snapshot." : "Today's snapshot is taken at 09:13."}</div>`;
@@ -8842,14 +8842,24 @@ function renderPMHeat(d) {
   const secs = s.sectors || [];
   if (!PM.heatSel || !secs.some((x) => x.name === PM.heatSel)) PM.heatSel = secs[0] && secs[0].name;
   let body;
-  if (view === "sectors") body = `<div class="pmx-hm">${secs.map((x) => `<button type="button" class="pmx-ht" data-heat="${pmAttr(x.name)}" style="background:${pmHeatCol(x.avg)}" title="${pmAttr(`${x.name}: ${x.adv} up · ${x.dec} down of ${x.n}`)}"><span>${pmEsc(x.name.toUpperCase())}</span><b>${pmHeatPct(x.avg)}</b></button>`).join("")}</div>`;
+  const n = d.nifty;
+  if (view === "stocks") {
+    if (!n || !n.rows || !n.rows.length) body = `<div class="pm-na">NIFTY weights unavailable — showing sectors.</div>`;
+    else {
+      const span = (w) => (w >= 7 ? "w4" : w >= 4 ? "w3" : w >= 2 ? "w2" : "w1");
+      const pts = (v) => (v == null ? "" : `${v > 0 ? "+" : ""}${v.toFixed(1)} pts`);
+      body = `<div class="pmx-nsum"><b>NIFTY 50</b> · ${n.up} up / ${n.down} down of ${n.priced}${n.totalPoints != null ? ` · all stocks ≈ <b class="${pmCls(n.totalPoints)}">${pts(n.totalPoints)}</b>` : ""} · top 10 = ${n.top10Weight}% of NIFTY${n.top10Points != null ? ` ≈ <b class="${pmCls(n.top10Points)}">${pts(n.top10Points)}</b>` : ""}</div>
+        <div class="pmx-nh">${n.rows.map((r) => `<span class="pmx-nt ${span(r.weightPct)}" style="background:${r.pct == null ? "#1b2540" : pmHeatCol(r.pct)}" title="${pmAttr(`${r.s}: weight ≈ ${r.weightPct}% · ${r.pct == null ? "no 09:13 price" : `${pmNum(r.prev, 2)} → ${pmNum(r.price, 2)} (${pmHeatPct(r.pct)})`}${r.points != null ? ` · ${pts(r.points)} on NIFTY` : ""}`)}"><b>${pmEsc(r.s)}</b><i>${r.pct == null ? "—" : pmHeatPct(r.pct)}</i><em>${r.weightPct}%${r.points != null ? ` · ${pts(r.points)}` : ""}</em></span>`).join("")}</div>
+        <div class="pmx-note">${pmEsc(n.note)}</div>`;
+    }
+  } else if (view === "sectors") body = `<div class="pmx-hm">${secs.map((x) => `<button type="button" class="pmx-ht" data-heat="${pmAttr(x.name)}" style="background:${pmHeatCol(x.avg)}" title="${pmAttr(`${x.name}: ${x.adv} up · ${x.dec} down of ${x.n}`)}"><span>${pmEsc(x.name.toUpperCase())}</span><b>${pmHeatPct(x.avg)}</b></button>`).join("")}</div>`;
   else { const x = secs.find((y) => y.name === PM.heatSel); body = `<div class="pmx-hsel">${secs.map((y) => `<button type="button" data-heat="${pmAttr(y.name)}" aria-pressed="${y.name === PM.heatSel}">${pmEsc(y.name)}</button>`).join("")}</div><div class="pm-heat-stocks">${x.stocks.map((k) => `<span class="pm-heat-sk" style="background:${pmHeatCol(k.pct)}" title="${pmAttr(k.s)} ${pmNum(k.prev, 2)} → ${pmNum(k.price, 2)}"><span>${pmEsc(k.s)}</span><span>${pmHeatPct(k.pct)}</span></span>`).join("")}</div>`; }
   box.innerHTML = head + older + body + `<div class="pmx-note">Stocks up / down ${s.stocksUp} / ${s.stocksDown} · ${s.quoted} of ${s.listed} priced${s.refilled ? ` · ${s.refilled} late prices filled at 09:14:30` : ""} · pre-open prices only</div>`;
   if (!box._heatBound) {
     box._heatBound = true;
     box.addEventListener("click", (e) => {
       const v = e.target.closest("[data-heat-view]"); if (v) { PM.heatView = v.getAttribute("data-heat-view"); renderPMHeat(PM.heat); return; }
-      const b = e.target.closest("[data-heat]"); if (b) { PM.heatSel = b.getAttribute("data-heat"); PM.heatView = "stocks"; renderPMHeat(PM.heat); }
+      const b = e.target.closest("[data-heat]"); if (b) { PM.heatSel = b.getAttribute("data-heat"); PM.heatView = "sector"; renderPMHeat(PM.heat); }
     });
   }
   pmxRenderStrength();
