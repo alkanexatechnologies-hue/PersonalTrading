@@ -99,7 +99,8 @@ import { saveOiSnapshot, priorDaySnapshot, latestSnapshot } from "../oi/snapshot
 import { recordOiBaseline, computeOiChange, oiBaselineStrike } from "../oi/oiChange";
 import { recordOiSample, computeOiMovement, OiMoveResult } from "../oi/oiMovement";
 import { getBaseline } from "../oi/baselineStore";
-import { buildMarketAnalysis } from "../analysis/marketAnalysis";
+import { buildMarketAnalysis, rankOiWalls } from "../analysis/marketAnalysis";
+import { newState as newRangeState, onTick as rangeTick, breakMessage as rangeBreakMessage, summaryMessage as rangeSummaryMessage, RangeState, Levels as RangeLevels } from "../alerts/dayRangeAlerts";
 // OI Analysis module (additive, read-only, feature-flagged via CONFIG.oiAnalysis)
 import { buildOiMovement } from "../oi/analysisModule/movement";
 import { buildOiSummary } from "../oi/analysisModule/summary";
@@ -222,7 +223,7 @@ import { evaluateSession, dailyAtrFrom5m, summarizeReplay, analyzeMoves, SETUP_C
 import { writeOiMinute, listOiMinuteDays, oiMinuteFilePath } from "../oi/oiMinuteLog";
 import { jwtExp, renewDecision, pickRenewedToken } from "../data/dhanTokenRenew";
 import { dhanFetch as dhanGuardedFetch } from "../data/dhanClient";
-import { notify } from "../integrations/notificationService";
+import { notify, notifyDetached } from "../integrations/notificationService";
 import { runLabStrategy, pdhPdlLevels, swingLevels, oiLevels, liquidityMap, LAB_CONFIG, LAB_OVERRIDES, type LabTrade } from "../signals/strategyLab";
 import { regimeAt } from "../decision/regime";
 import { buildOptionPlan } from "../signals/breakoutOption";
@@ -8330,6 +8331,57 @@ router.get("/sector-heatmap", async (_req: Request, res: Response) => {
 });
 
 // PCR for every index (whole chain + near-money ATM ±5) and India VIX, each with its reference band (context only).
+// ===================== Day high / low break alerts (Telegram, context only) =====================
+const _rangeState = new Map<string, RangeState>();
+let _rangeDay = "", _rangeSummariesSent = new Set<string>();
+const RANGE_SUMMARY_SLOTS = ["09:30", "11:00", "13:00", "14:45"];
+async function rangeLevels(def: SymbolDef, price: number): Promise<RangeLevels> {
+  // Cached chain only (the 1-min OI collector keeps it fresh) — no extra option-chain calls.
+  const oi: any = peekFresh<any>(`oi:${def.symbol}`, 5 * 60_000) || (_lastGoodOi.get(`oi:${def.symbol}`)?.v ?? null);
+  if (!oi?.available || !Array.isArray(oi.topStrikes)) return { support: null, resistance: null };
+  const w = rankOiWalls(oi.topStrikes, price);
+  const pcr = oi.totalCeOi > 0 ? Math.round((oi.totalPeOi / oi.totalCeOi) * 100) / 100 : null;
+  return { support: w.peBelow[0]?.strike ?? null, supportOi: w.peBelow[0]?.peOi ?? null, nextSupport: w.peBelow[1]?.strike ?? null,
+    resistance: w.ceAbove[0]?.strike ?? null, resistanceOi: w.ceAbove[0]?.ceOi ?? null, nextResistance: w.ceAbove[1]?.strike ?? null,
+    pcr, pcrLabel: bandOf(pcr, PCR_BANDS)?.label ?? null };
+}
+async function rangeRows() {
+  const rows: { name: string; price: number | null; high: number | null; low: number | null; changePct: number | null; lv: RangeLevels; def: SymbolDef }[] = [];
+  for (const sym of MINUTE_MONITOR_SYMBOLS) {
+    const def = findSymbolDef(sym); if (!def) continue;
+    let q: any = null;
+    try { q = await withTimeout(cached(`quote:${sym}`, TTL_QUOTE, () => getProvider().getQuote(sym)), 6_000, `range quote ${sym}`); } catch { q = peekFresh<any>(`quote:${sym}`, 120_000); }
+    const price = q?.price > 0 ? q.price : null;
+    rows.push({ name: def.name, price, high: q?.dayHigh ?? null, low: q?.dayLow ?? null, changePct: q?.changePercent ?? null, lv: price ? await rangeLevels(def, price) : { support: null, resistance: null }, def });
+  }
+  return rows;
+}
+async function sendRangeSummary(label: string) {
+  const rows = await rangeRows();
+  return notify("INDEX_ALERT", rangeSummaryMessage(rows, label));
+}
+async function dayRangeTick() {
+  const nowS = Math.floor(Date.now() / 1000), ist = new Date(Date.now() + 19800000), day = ist.toISOString().slice(0, 10), hm = ist.toISOString().slice(11, 16);
+  if (day !== _rangeDay) { _rangeDay = day; _rangeState.clear(); _rangeSummariesSent = new Set(); }
+  const rows = await rangeRows();
+  for (const r of rows) {
+    if (r.price == null) continue;
+    const st = _rangeState.get(r.def.symbol) || newRangeState(); _rangeState.set(r.def.symbol, st);
+    const ev = rangeTick(st, nowS, r.price, r.high, r.low);
+    if (ev) notifyDetached("INDEX_ALERT", rangeBreakMessage(r.name, ev, r.lv));
+  }
+  const slot = RANGE_SUMMARY_SLOTS.find((s) => hm >= s && hm < addMinutesHm(s, 3));
+  if (slot && !_rangeSummariesSent.has(slot)) { _rangeSummariesSent.add(slot); notifyDetached("INDEX_ALERT", rangeSummaryMessage(rows, `${slot} IST`)); }
+}
+function addMinutesHm(hm: string, m: number) { const t = +hm.slice(0, 2) * 60 + +hm.slice(3) + m; return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; }
+router.post("/alerts/day-range/summary", requirePermission("oiAnalysis"), async (_req: Request, res: Response) => {
+  try { const ist = new Date(Date.now() + 19800000).toISOString().slice(11, 16); const r = await sendRangeSummary(`${ist} IST (on request)`); res.json({ ok: r.ok, error: r.error || null }); }
+  catch (e: any) { res.json({ ok: false, error: e?.message || "summary failed" }); }
+});
+router.get("/alerts/day-range", requirePermission("oiAnalysis"), (_req: Request, res: Response) => {
+  res.json({ day: _rangeDay, summariesSent: [..._rangeSummariesSent], indices: [..._rangeState.entries()].map(([s, st]) => ({ symbol: s, high: st.high, highAt: st.highAt, low: st.low, lowAt: st.lowAt, lastAlert: st.lastAlert })) });
+});
+
 router.get("/premarket/pcr-vix", async (_req: Request, res: Response) => {
   try {
     const today = istDateStr();
@@ -10036,6 +10088,8 @@ export function startHourlyScheduler() {
     const schedule = () => { const ms = 60_000 - (Date.now() % 60_000) + offset; setTimeout(() => { minuteTick(sym).finally(schedule); }, ms > 60_000 ? ms - 60_000 : ms); };
     schedule();
   });
+  // Day high / low break alerts + index level summaries → Telegram (context only, uses cached chains; 5 quote calls/min).
+  setInterval(() => { if (isTradingTimeIST() && jobOn("dayRangeAlerts")) dayRangeTick().catch(() => {}); }, 60_000);
   // OI accuracy check vs NSE official bhavcopy: trading days 18:15–23:30 IST, once per day (retries every 10 min until published).
   setInterval(() => {
     const ist = new Date(Date.now() + 19800000), d = ist.toISOString().slice(0, 10), hm = ist.toISOString().slice(11, 16), wd = ist.getUTCDay();

@@ -26,7 +26,8 @@ export type NotificationKind =
   | "MARKET_OPEN"       // market-online briefing
   | "CREDENTIAL_ROTATION"
   | "TEST"
-  | "SYSTEM";
+  | "SYSTEM"
+  | "INDEX_ALERT";      // day high / low break + index level summaries
 
 export interface NotifyResult {
   ok: boolean;

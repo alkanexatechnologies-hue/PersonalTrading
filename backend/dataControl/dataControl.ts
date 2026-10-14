@@ -55,6 +55,7 @@ export const DC_JOBS: DcItem[] = [
   { key: "sectorHeatmap", label: "09:13 sector heatmap (one quote call for ~220 sector stocks)", group: "Background", note: "Shown in Market Sentiment → India Market Sector Analysis" },
   { key: "oiMinuteLog", label: "1-minute OI log for analysis (every 60s, 09:15–15:30)", group: "Background", note: "CSV per day; pulled to the desktop by scripts/pull-oi-logs.mjs" },
   { key: "oiChangeSnapshot", label: "OI change snapshot (every 3 min)", group: "Background" },
+  { key: "dayRangeAlerts", label: "Telegram: day high/low break alerts + level summaries (every 60s, cached data)", group: "Background", note: "Summaries 09:30 · 11:00 · 13:00 · 14:45; breaks after 09:30" },
   { key: "arbiterObserver", label: "Decision ledger observer (every 30s, no extra Dhan calls)", group: "Background" },
 ];
 
