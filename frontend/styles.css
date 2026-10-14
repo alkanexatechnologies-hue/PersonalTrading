@@ -7502,3 +7502,20 @@ body.lqa-fullwidth .content { padding-left: 0; padding-right: 0; }
 .pmx-nt.w3{grid-column:span 3;grid-row:span 2} .pmx-nt.w3 b{font-size:12px} .pmx-nt.w3 i{font-size:13px}
 .pmx-nt.w2{grid-column:span 2;grid-row:span 2} .pmx-nt.w1{grid-column:span 2} .pmx-nt.w1 em{display:none} .pmx-nt.w1 b{font-size:9.5px} .pmx-nt.w1 i{font-size:10px}
 @media (max-width:760px){ .pmx-nh{grid-template-columns:repeat(6,minmax(0,1fr));grid-auto-rows:36px} .pmx-nt.w4{grid-column:span 3} .pmx-nt.w3{grid-column:span 3} .pmx-nt.w2,.pmx-nt.w1{grid-column:span 2} }
+/* PCR & India VIX strip (top of Market Sentiment) */
+.pmx-pcr{background:#0d1424;border:1px solid #24345a;border-radius:10px;padding:6px 8px;margin-bottom:5px;display:grid;gap:4px}
+.pmx-hd2{display:flex;gap:8px;align-items:baseline} .pmx-hd2 h3{margin:0;font-size:12.5px;font-weight:800;text-transform:uppercase;color:#e6ecf5} .pmx-hd2 .mut{font-size:11px;color:#8395b3}
+.pmx-pcg{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:5px}
+.pmx-pc{background:#111a2e;border:1px solid #1b2540;border-radius:8px;padding:5px 7px;display:grid;gap:2px;min-width:0}
+.pmx-pc .k{font-size:10px;font-weight:800;color:#cfd8e6;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .pmx-pc .k em{font-style:normal;font-weight:500;color:#8395b3;text-transform:none}
+.pmx-pc .v{display:flex;align-items:center;gap:6px;flex-wrap:wrap} .pmx-pc .v b{font-size:20px;font-weight:900;font-variant-numeric:tabular-nums}
+.pmx-pc .pill{font-size:9.5px;font-weight:900;border:1px solid currentColor;border-radius:5px;padding:0 5px;white-space:nowrap}
+.pmx-pc .s{font-size:10.5px;color:#8395b3;line-height:1.3} .pmx-pc .s b{color:#e6ecf5}
+.pmx-pc.up{border-color:#1d6b4b} .pmx-pc.up .v b,.pmx-pc.up .pill{color:#16c784} .pmx-pc.dn{border-color:#7a2633} .pmx-pc.dn .v b,.pmx-pc.dn .pill{color:#ea3943}
+.pmx-pc.neu .v b,.pmx-pc.neu .pill{color:#cfd8e6} .pmx-pc.cau{border-color:#6b5520} .pmx-pc.cau .v b,.pmx-pc.cau .pill{color:#f2b03a}
+.pmx-pcr .up{color:#16c784} .pmx-pcr .dn{color:#ea3943} .pmx-pcr .neu{color:#cfd8e6} .pmx-pcr .cau{color:#f2b03a}
+.pmx-scale{position:relative;height:7px;border-radius:4px;background:#1b2540;margin:2px 0;overflow:visible}
+.pmx-scale i{position:absolute;top:0;height:100%;opacity:.75} .pmx-scale i.up{background:#16c784} .pmx-scale i.dn{background:#ea3943} .pmx-scale i.neu{background:#5f6f8e} .pmx-scale i.cau{background:#f2b03a}
+.pmx-scale b{position:absolute;top:-3px;width:3px;height:13px;margin-left:-1.5px;background:#fff;border-radius:2px;box-shadow:0 0 0 1px #0d1424}
+@media (max-width:1280px){ .pmx-pcg{grid-template-columns:repeat(3,minmax(0,1fr))} }
+@media (max-width:760px){ .pmx-pcg{grid-template-columns:repeat(2,minmax(0,1fr))} .pmx-pc .s{font-size:11.5px} }

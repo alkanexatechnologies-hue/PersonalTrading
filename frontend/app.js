@@ -8302,6 +8302,7 @@ function initPremarket() {
     </div>
     <div class="pm-strip" id="pm-strip"></div>
     <div class="pmx-key" id="pmx-key" aria-label="Key points"></div>
+    <section class="pmx-pcr" id="pmx-pcr" aria-label="PCR and India VIX"><div class="pm-na">Loading PCR and VIX…</div></section>
     <div class="pmx-grid">
       <div class="pmx-col c1">
         <section class="pmx-pn a-in" id="pmx-in"><div class="pm-na">Loading market inputs…</div></section>
@@ -8390,8 +8391,8 @@ async function loadPremarket(force) {
     if (d && !d.error) { PM.data = d; renderPremarket(d); }
     if (h) { PM.health = h; renderPMExtStatus(h); }
     renderPMTimeline();
-    if (force) await Promise.all([loadPMIntel(true), loadPMHeat(true), loadPMCommand(true)]);
-    else { loadPMIntel(); loadPMHeat(); loadPMCommand(); }
+    if (force) await Promise.all([loadPMIntel(true), loadPMHeat(true), loadPMCommand(true), loadPMPcr(true)]);
+    else { loadPMIntel(); loadPMHeat(); loadPMCommand(); loadPMPcr(); }
   } catch (e) { /* keep last render */ }
 }
 
@@ -8813,6 +8814,45 @@ function pmxRenderTimeline(slots) {
 
 // ---- 09:13 sector heatmap (inside panel 3). The server takes one snapshot each trading morning at
 // 09:13 (pre-open price vs previous close); before that the latest earlier snapshot is shown with its date.
+// ---- PCR (every index) + India VIX with reference bands, at the top of Market Sentiment (/api/premarket/pcr-vix) ----
+async function loadPMPcr(force) {
+  if (!force && Date.now() - (PM.pcrAt || 0) < 60000) return;
+  PM.pcrAt = Date.now();
+  try { const d = await fetch("/api/premarket/pcr-vix", { screen: "premarket" }).then((r) => r.json()); if (d && d.indices) { PM.pcr = d; renderPMPcr(d); } } catch { /* keep last */ }
+}
+function renderPMPcr(d) {
+  const box = pmEl("pmx-pcr"); if (!box) return;
+  const T = { bull: "up", bear: "dn", neutral: "neu", caution: "cau" };
+  // a band scale: one segment per band, the marker at the value (scale clipped to a readable range)
+  const scale = (bands, v, lo, hi) => {
+    const pos = (x) => Math.max(0, Math.min(100, ((x - lo) / (hi - lo)) * 100));
+    const segs = bands.map((b) => { const a = pos(b.min), z = pos(b.max == null ? hi : b.max); return z > a ? `<i class="${T[b.tone]}" style="left:${a}%;width:${z - a}%" title="${pmAttr(`${b.label}: ${b.min}${b.max == null ? "+" : "–" + b.max} · ${b.meaning}`)}"></i>` : ""; }).join("");
+    return `<div class="pmx-scale">${segs}${v != null ? `<b style="left:${pos(v)}%"></b>` : ""}</div>`;
+  };
+  const card = (x) => {
+    if (!x.available) return `<div class="pmx-pc"><span class="k">${pmEsc(x.name)}</span><div class="pm-na">${pmEsc(x.reason || "unavailable")}</div></div>`;
+    const b = x.band || {}, ch = x.change;
+    return `<div class="pmx-pc ${T[b.tone] || ""}"><span class="k">${pmEsc(x.name)} <em>PCR · exp ${pmEsc(x.expiry || "")}</em></span>
+      <div class="v"><b>${x.pcr != null ? x.pcr.toFixed(2) : "—"}</b><span class="pill">${pmEsc(b.label || "—")}</span></div>
+      ${scale(d.pcrBands, x.pcr, 0.3, 2)}
+      <div class="s">${pmEsc(b.meaning || "")}</div>
+      <div class="s">Near ATM ±5: <b>${x.nearPcr != null ? x.nearPcr.toFixed(2) : "—"}</b> ${x.nearBand ? `<span class="${T[x.nearBand.tone]}">${pmEsc(x.nearBand.label)}</span>` : ""}${ch != null ? ` · since open ${ch > 0 ? "▲ +" : ch < 0 ? "▼ " : ""}${ch.toFixed(2)}` : ""}</div></div>`;
+  };
+  const v = d.vix;
+  const vixCard = v ? `<div class="pmx-pc ${T[(v.band || {}).tone] || ""}"><span class="k">INDIA VIX <em>fear gauge</em></span>
+      <div class="v"><b>${pmNum(v.value, 2)}</b><span class="pill">${pmEsc((v.band || {}).label || "—")}</span></div>
+      ${scale(d.vixBands, v.value, 8, 32)}
+      <div class="s">${pmEsc((v.band || {}).meaning || "")}</div>
+      <div class="s"><span class="${T[v.trend.tone]}">${pmEsc(v.trend.label)}</span>${v.dayLow != null ? ` · day ${pmNum(v.dayLow, 2)}–${pmNum(v.dayHigh, 2)}` : ""}</div></div>` : `<div class="pmx-pc"><span class="k">INDIA VIX</span><div class="pm-na">VIX unavailable</div></div>`;
+  const leg = (bands) => bands.map((b) => `<span class="${T[b.tone]}">${b.max == null ? `&gt; ${b.min}` : b.min === 0 ? `&lt; ${b.max}` : `${b.min}–${b.max}`} ${pmEsc(b.label)}</span>`).join(" · ");
+  const sess = (d.indices || []).find((x) => x.session);
+  box.innerHTML = `<div class="pmx-hd2"><h3>PCR &amp; India VIX</h3><span class="mut">${d.marketOpen ? "live" : `market closed${sess ? " — last session " + pmEsc(sess.session) : ""}`}</span></div>
+    <div class="pmx-pcg">${(d.indices || []).map(card).join("")}${vixCard}</div>
+    <div class="pmx-note"><b>PCR levels:</b> ${leg(d.pcrBands)}</div>
+    <div class="pmx-note"><b>VIX levels:</b> ${leg(d.vixBands)}</div>
+    <div class="pmx-note">${pmEsc(d.note || "")} High PCR = more put writing (support below); low PCR = more call writing (resistance above); the extremes are crowded and can reverse.</div>`;
+}
+
 async function loadPMHeat(force) {
   if (!force && Date.now() - PM.heatAt < 60000) return;
   PM.heatAt = Date.now();

@@ -211,7 +211,7 @@ import { evaluateInputs, saveSnapshot as saveInputSnapshot, recordRevision as re
 import { findSimilar, readLibrary, saveLibrary, buildLibrary, buildHistory, topByCoef, IT_NAMES, BANK_NAMES, type Features } from "../sentiment/similarScenarios";
 import { premiumAnalysis, strikeComparison } from "../sentiment/optionPremium";
 import { newsRows, newsTabs, newMajor } from "../sentiment/newsImpact";
-import { mcxCrudeLive, giftOvernightLive } from "../sentiment/dhanMarketExtras";
+import { mcxCrudeLive, giftOvernightLive, vixDaily } from "../sentiment/dhanMarketExtras";
 import { refillSnapshot as refillHeatSnapshot, takeSnapshot as takeHeatSnapshot, saveSnapshot as saveHeatSnapshot, readSnapshot as readHeatSnapshot, latestSnapshot as latestHeatSnapshot, niftyConstituentHeat } from "../sentiment/sectorHeatmap";
 import { buildPremarketOverview } from "../sentiment/overview";
 import { todaySnapshots } from "../sentiment/snapshotStore";
@@ -249,6 +249,7 @@ import { buildFakeMoveResult, FakeMoveLevel, FakeMoveTFInput, FakeMoveResult } f
 import { buildConfirmationFlow } from "../analyst/confirmationFlow";
 import { getCooldownState, computeCooldown, recordExecution } from "../trade/cooldownStore";
 import { auditTrade, summarizeAudit, INDEX_OF_NAME } from "../trade/executionAudit";
+import { bandOf, PCR_BANDS, VIX_BANDS, nearPcr, vixTrend } from "../sentiment/pcrVix";
 import { appendTrade, updateTrade, listTrades, listTradesRaw, tradesToCsv, weeklySummary, TradeType, TradeStatus } from "../trade/tradeLogStore";
 import { resolveFromCandles, isMonitorable } from "../trade/tradeMonitor";
 import { scanOptionTopPick, evaluateStockBothTracks } from "../optionTopPick/scanner";
@@ -8326,6 +8327,45 @@ router.get("/sector-heatmap", async (_req: Request, res: Response) => {
     nifty = niftyConstituentHeat(snap, readContribModel()?.coefs || null, ref);
   } catch { nifty = null; }
   res.json({ today, snapshot: snap, isToday: !!snap && snap.date === today, todayIssue, nifty });
+});
+
+// PCR for every index (whole chain + near-money ATM ±5) and India VIX, each with its reference band (context only).
+router.get("/premarket/pcr-vix", async (_req: Request, res: Response) => {
+  try {
+    const today = istDateStr();
+    const idx = await Promise.all(["^NSEI", "^NSEBANK", "^CNXFIN", "^NSEMDCP50", "^BSESN"].map(async (sym) => {
+      const def = findSymbolDef(sym); if (!def) return null;
+      try {
+        const oi: any = await getOiCached(def);
+        if (!oi?.available) return { symbol: sym, name: def.name, available: false, reason: oi?.message || "chain unavailable" };
+        const pcr = oi.totalCeOi > 0 ? Math.round((oi.totalPeOi / oi.totalCeOi) * 100) / 100 : null;
+        const near = nearPcr(oi.topStrikes || [], oi.underlying ?? null, 5);
+        // change since today's first 1-min snapshot (if the monitor has one for this expiry today)
+        let open: number | null = null;
+        try { const day = loadMinuteDay(today, sym, String(oi.expiry)); if (day.length && day[0].pcr != null) open = day[0].pcr; } catch { /* none */ }
+        const b = bandOf(pcr, PCR_BANDS), bn = bandOf(near, PCR_BANDS);
+        return { symbol: sym, name: def.name, available: true, expiry: oi.expiry, pcr, band: b, nearPcr: near, nearBand: bn, putOi: oi.totalPeOi, callOi: oi.totalCeOi,
+          pcrAtOpen: open, change: open != null && pcr != null ? Math.round((pcr - open) * 100) / 100 : null,
+          session: oi.sessionDate || null, live: isMarketOpenIST() && !oi.sessionDate, asOf: oi.asOf ?? null };
+      } catch (e: any) { return { symbol: sym, name: def.name, available: false, reason: e?.message || "chain unavailable" }; }
+    }));
+    let vix: any = null;
+    try {
+      const v: any = await cached("india-vix", 60_000, () => getIndiaVix());
+      // After the close Dhan's quote reports today's close as the "previous close" (change 0). Use daily candles:
+      // the last close vs the close of the day before.
+      if (v?.available && !isMarketOpenIST()) {
+        try {
+          const dv: any[] = await cached("vix-daily", 30 * 60_000, () => vixDaily(new Date(Date.now() - 12 * 86400_000).toISOString().slice(0, 10), new Date(Date.now() + 86400_000).toISOString().slice(0, 10)));
+          if (dv.length >= 2) { const last = dv[dv.length - 1], prev = dv[dv.length - 2]; v.change = Math.round((last.close - prev.close) * 100) / 100; v.changePct = Math.round(((last.close / prev.close) - 1) * 10000) / 100; v.dayHigh = last.high; v.dayLow = last.low; }
+        } catch { /* keep the quote's values */ }
+      }
+      if (v?.available) vix = { value: v.value, change: v.change, changePct: v.changePct, dayHigh: v.dayHigh, dayLow: v.dayLow, band: bandOf(v.value, VIX_BANDS), trend: vixTrend(v.changePct), ts: v.ts };
+    } catch { vix = null; }
+    res.json({ indices: idx.filter(Boolean), vix, pcrBands: PCR_BANDS.map(({ min, max, label, tone, meaning }) => ({ min, max: Number.isFinite(max) ? max : null, label, tone, meaning })),
+      vixBands: VIX_BANDS.map(({ min, max, label, tone, meaning }) => ({ min, max: Number.isFinite(max) ? max : null, label, tone, meaning })), marketOpen: isMarketOpenIST(),
+      note: "PCR = put OI ÷ call OI (nearest expiry). Bands are the usual reference levels — context only, not a trade signal." });
+  } catch (e: any) { res.json({ indices: [], error: e?.message || "pcr-vix failed" }); }
 });
 
 // ===================== 09:10 Market & Global Sentiment desk (READ-ONLY) =====================
