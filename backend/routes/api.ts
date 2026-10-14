@@ -7685,6 +7685,7 @@ router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Reque
     const pick = (side: "CE" | "PE") => { const q = Number(req.query[side === "CE" ? "ceStrike" : "peStrike"]); if (q > 0 && ks.includes(q)) return q; if (atm == null) return null; const d = money === "ATM" ? 0 : (money === "ITM") === (side === "CE") ? -step : step; return ks.includes(atm + d) ? atm + d : atm; };
     const ceK = pick("CE"), peK = pick("PE"), expiry = ch?.expiry || null;
     const medSpread = atm != null ? PC.chainMedianSpreadPct(strikes, atm, step) : null;
+    const VAL = PC.validationFor(def.symbol, interval);   // tested result for this index / timeframe — never a made-up number
     const horizons = [5, 15, 30];
     const moveFor = (h: number) => PC.typicalMove(closed as any, Math.max(1, Math.round((h * 60) / intervalSec)));
     // 5-min horizon on 15-min bars: scale the 1-bar move by sqrt(time)
@@ -7704,7 +7705,7 @@ router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Reque
         ...L, change: chg, changePct: chg != null && L.prevClose ? Math.round((chg / L.prevClose) * 10000) / 100 : null,
         liquidity: liq, behaviour: beh, direction: dir.dir, bullishEvidence: dir.bullish, bearishEvidence: dir.bearish,
         expectedMove: Object.fromEntries(horizons.map((h) => [h, PC.modelPremiumMove(L, moveH(h), h)])),
-        probability: { up: null, down: null, status: PC.VALIDATION.status },
+        probability: { up: null, down: null, status: VAL.status },
         candles: pcs.slice(-120), candlesSource: oc.ok ? "Dhan premium OHLC" : null, candlesReason: oc.ok ? null : oc.reason };
     };
     const [ce, pe] = await Promise.all([optSide("CE", ceK), optSide("PE", peK)]);
@@ -7719,7 +7720,7 @@ router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Reque
       ranking.push({ side, strike: s.strike, expiry, ltp: L.ltp, change: L.prevClose ? Math.round((L.ltp - L.prevClose) * 100) / 100 : null, changePct: L.prevClose ? Math.round(((L.ltp / L.prevClose) - 1) * 10000) / 100 : null,
         volume: L.volume, oi: L.oi, oiChg: L.oiChg, spread: liq.spread, spreadPct: liq.spreadPct, delta: L.delta, iv: L.iv,
         expectedMove15: mv?.absPts ?? null, expectedMove15Pct: mv?.absPct ?? null, netOfSpreadPct: netPct, liquidity: liq.status, setup, aligned,
-        validation: PC.VALIDATION.status,
+        validation: VAL.status,
         reason: liq.status === "POOR" ? "poor quote — avoid" : !mv ? "no delta in the feed — move not modelled" : `${aligned ? "aligned; " : ""}model ±${mv.absPts} pts in 15 min, ${netPct}% of premium after the spread` });
     }
     ranking.sort((a, b) => (b.aligned ? 1 : 0) - (a.aligned ? 1 : 0) || (a.liquidity === "POOR" ? 1 : 0) - (b.liquidity === "POOR" ? 1 : 0) || (b.netOfSpreadPct ?? -1e9) - (a.netOfSpreadPct ?? -1e9));
@@ -7767,10 +7768,10 @@ router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Reque
         ceMove15: (ce as any).expectedMove?.[15] ?? null, peMove15: (pe as any).expectedMove?.[15] ?? null,
         stronger: (ce as any).direction === "UP" && (pe as any).direction !== "UP" ? "CE" : (pe as any).direction === "UP" && (ce as any).direction !== "UP" ? "PE" : null,
         alignedWithIndex: (ce as any).direction === "UP" ? brk.bull.state : (pe as any).direction === "UP" ? brk.bear.state : null,
-        probability: PC.VALIDATION,
+        probability: VAL,
       },
       ranking, master: { ...master, entryTrigger: ap?.trigger ?? master.confirmationRequired, stop: ap?.stopLoss ?? null, target: ap?.target1 ?? null, rr: ap?.rr ?? null, planSource: arb?.plan ? "arbiter" : latestRow?.plan ? "breakout engine (if triggered)" : null, supporting, contradictory: contra },
-      validation: PC.VALIDATION,
+      validation: VAL,
       note: "Advisory only. Probabilities are not shown until validated out of sample. The arbiter and existing risk gates decide trades.",
     });
   } catch (e: any) { res.json({ available: false, version: PC_VERSION, error: e?.message || "premium center failed" }); }

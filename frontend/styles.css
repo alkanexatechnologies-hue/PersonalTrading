@@ -7596,3 +7596,4 @@ body.ppc-fullwidth .watchlist, body.ppc-fullwidth #watchlist { display: none !im
   /* phone: keep the columns that decide the choice */
   .ppc-rank th:nth-child(6), .ppc-rank td:nth-child(6), .ppc-rank th:nth-child(7), .ppc-rank td:nth-child(7), .ppc-rank th:nth-child(9), .ppc-rank td:nth-child(9), .ppc-rank th:nth-child(10), .ppc-rank td:nth-child(10), .ppc-rank th:nth-child(13), .ppc-rank td:nth-child(13), .ppc-rank th:nth-child(16), .ppc-rank td:nth-child(16) { display: none; }
 }
+.ppc-study { margin-top: 6px; padding: 6px 8px; border-left: 3px solid #f59e0b; background: rgba(245,158,11,.07); font-size: 11.5px; border-radius: 4px; }

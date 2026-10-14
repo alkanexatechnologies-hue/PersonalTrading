@@ -23,7 +23,7 @@ const PPC_TIPS = {
   BOS: "Break of Structure: a candle CLOSES beyond the last confirmed swing in the same direction as the trend.",
   CHoCH: "Change of Character: the first confirmed break AGAINST the previous break's direction — a possible trend change.",
   MOVE: "Model, not a forecast: delta × typical index move for the horizon (median of today's own moves) + ½·gamma·move² − theta for the horizon. Uses the feed's greeks only.",
-  PROB: "No CE/PE premium probability has passed out-of-sample validation yet, so no percentage is shown.",
+  PROB: "No CE/PE premium probability has passed out-of-sample validation, so no percentage is shown.",
   STATE: "PRE = within ½ ATR of the level · ATTEMPT = forming candle beyond it (not closed) · CONFIRMED = a candle CLOSED beyond level + buffer · RETEST = came back and held · FAILED = closed back inside.",
 };
 
@@ -156,7 +156,7 @@ function ppcCard(o, side) {
     <div class="ppc-ltp"><span class="ppc-ltpv">${ppcN(o.ltp)}</span> <span class="${ppcCls(o.change)}">${ppcSg(o.change)} (${ppcSg(o.changePct, 2, "%")})</span></div>
     <div class="ppc-kv">
       <div><span>Direction (evidence)</span><b class="${dirC}">${ppcEsc(o.direction)}</b></div>
-      <div><span>P(rise)</span><b class="ppc-na" title="${ppcEsc(PPC_TIPS.PROB)}">NOT VALIDATED</b></div>
+      <div><span>P(rise)</span><b class="ppc-na" title="${ppcEsc(d.validation?.detail || PPC_TIPS.PROB)}">${ppcEsc(d.validation?.status || "NOT VALIDATED")}</b></div>
       <div title="${ppcEsc(PPC_TIPS.MOVE)}"><span>Expected move · ${h} min (model)</span><b>${mv ? `±${ppcNs(mv.absPts)} (${ppcNs(mv.absPct)}%)` : '<span class="ppc-na">NOT AVAILABLE</span>'}</b></div>
       <div title="${ppcEsc(PPC_TIPS.MOVE)}"><span>If index ±${mv ? ppcNs(mv.indexMove, 0) : "—"} pts</span><b>${mv ? `<span class="ppc-up">${ppcSg(mv.ifIndexUp)}</span> / <span class="ppc-dn">${ppcSg(mv.ifIndexDown)}</span>` : "—"}</b></div>
       <div><span>Index ${side === "CE" ? "breakout" : "breakdown"}</span><b>${ppcStateChip(st)}</b></div>
@@ -177,7 +177,7 @@ function ppcRenderCards() {
   const mce = ce.expectedMove?.[h], mpe = pe.expectedMove?.[h];
   ppcEl("ppc-card-cmp").innerHTML = `<h4>CE vs PE <span class="ppc-sub">same time · ${h}-min horizon</span></h4>
     <table class="ppc-cmp"><tr><th></th><th class="ppc-up">CE ${ce.strike ?? ""}</th><th class="ppc-dn">PE ${pe.strike ?? ""}</th></tr>
-      <tr><td>P(rise)</td><td class="ppc-na" colspan="2" title="${ppcEsc(PPC_TIPS.PROB)}">PROBABILITY NOT VALIDATED</td></tr>
+      <tr><td>P(rise)</td><td class="ppc-na" colspan="2" title="${ppcEsc(d.validation?.detail || PPC_TIPS.PROB)}">${ppcEsc(d.validation?.status || "PROBABILITY NOT VALIDATED")}</td></tr>
       <tr><td>Direction (evidence)</td><td>${ppcEsc(ce.direction || "—")}</td><td>${ppcEsc(pe.direction || "—")}</td></tr>
       <tr><td>Abs. move (model)</td><td>${mce ? "±" + ppcNs(mce.absPts) : "—"}</td><td>${mpe ? "±" + ppcNs(mpe.absPts) : "—"}</td></tr>
       <tr><td>% of premium</td><td>${mce ? ppcNs(mce.absPct) + "%" : "—"}</td><td>${mpe ? ppcNs(mpe.absPct) + "%" : "—"}</td></tr>
@@ -186,7 +186,8 @@ function ppcRenderCards() {
       <tr><td>Liquidity</td><td>${ppcEsc(ce.liquidity?.status || "—")}</td><td>${ppcEsc(pe.liquidity?.status || "—")}</td></tr></table>
     <div class="ppc-cmpv">Stronger setup now: <b class="${c.stronger === "CE" ? "ppc-up" : c.stronger === "PE" ? "ppc-dn" : "ppc-wait"}">${c.stronger ? c.stronger + " — structure and its own premium agree" : "NEITHER — no side has structure + premium confirmation"}</b></div>
     <div class="ppc-sub">Index ${ppcStateChip(d.breakout)} ${ppcStateChip(d.breakdown)} · ${ppcEsc(d.structure?.context15 || "")}</div>
-    <div class="ppc-sub">Data ${ppcBadge(d.dataStatus)} · model confidence: <b>not validated</b></div>`;
+    <div class="ppc-sub">Data ${ppcBadge(d.dataStatus)} · model confidence: <b>not validated</b></div>
+    <div class="ppc-study">${d.validation?.study ? `<b>Tested ${ppcEsc(d.validation.study.date)} · ${d.validation.study.days} days · ${ppcEsc(d.validation.study.verdict)}:</b> ` : ""}${ppcEsc(d.validation?.detail || "")}</div>`;
 }
 
 // ---------------------------------------------------------------- charts (lightweight-charts, already loaded)
@@ -255,7 +256,12 @@ function ppcRenderCharts() {
     c3.timeScale().fitContent();
   }
 }
-window.addEventListener("resize", () => { if (!document.body.classList.contains("ppc-fullwidth")) return; for (const [id, ch] of Object.entries(PPC.charts)) { const h = ppcEl(id); if (h && ch) ch.applyOptions({ width: h.clientWidth }); } });
+let _ppcRz = null;
+window.addEventListener("resize", () => {
+  if (!document.body.classList.contains("ppc-fullwidth")) return;
+  clearTimeout(_ppcRz);
+  _ppcRz = setTimeout(() => { for (const [id, ch] of Object.entries(PPC.charts)) { const h = ppcEl(id); if (h && ch) { ch.applyOptions({ width: h.clientWidth }); ch.timeScale().fitContent(); } } }, 120);
+});
 
 // ---------------------------------------------------------------- strike ranking
 function ppcRenderRank() {
@@ -265,5 +271,5 @@ function ppcRenderRank() {
   if (k !== "rank") rows.sort((a, b) => ((a[k] ?? -1e9) - (b[k] ?? -1e9)) * dir); else if (dir === 1) rows.sort((a, b) => a.rank - b.rank); else rows.sort((a, b) => b.rank - a.rank);
   const th = (key, label, tip = "") => `<th><button class="ppc-sort ${k === key ? "on" : ""}" data-sort="${key}" title="${ppcEsc(tip)}">${label}${k === key ? (dir === 1 ? " ▲" : " ▼") : ""}</button></th>`;
   ppcEl("ppc-rank").innerHTML = rows.length ? `<table class="ppc-rank"><thead><tr>${th("rank", "#")}<th>Type</th><th>Strike</th>${th("ltp", "LTP")}${th("changePct", "Chg %")}${th("volume", "Vol")}${th("oi", "OI")}${th("spreadPct", "Spread %")}<th>Δ</th><th>IV</th>${th("expectedMove15", "Move 15m", PPC_TIPS.MOVE)}${th("netOfSpreadPct", "Net %", "modelled move minus the spread, as % of premium")}<th>P(rise)</th><th>Liquidity</th><th>Setup</th><th>Reason</th></tr></thead><tbody>${rows.map((r) => `
-    <tr class="${r.side === "CE" ? "ppc-rce" : "ppc-rpe"} ${r.strike === d.atm ? "ppc-ratm" : ""}"><td>${r.rank}</td><td class="${r.side === "CE" ? "ppc-up" : "ppc-dn"}">${r.side}</td><td>${r.strike}${r.strike === d.atm ? " ATM" : ""}</td><td>${ppcNs(r.ltp)}</td><td class="${ppcCls(r.changePct)}">${ppcSg(r.changePct, 1, "%")}</td><td>${ppcL(r.volume)}</td><td>${ppcL(r.oi)}</td><td>${ppcNs(r.spreadPct)}</td><td>${ppcNs(r.delta)}</td><td>${ppcNs(r.iv, 1)}</td><td>${r.expectedMove15 != null ? "±" + ppcNs(r.expectedMove15) : "—"}</td><td>${ppcNs(r.netOfSpreadPct)}</td><td class="ppc-na">NOT VALIDATED</td><td class="${r.liquidity === "GOOD" ? "ppc-up" : r.liquidity === "WIDE" ? "ppc-wait" : "ppc-dn"}">${ppcEsc(r.liquidity)}</td><td>${r.aligned ? '<span class="ppc-up">aligned</span>' : '<span class="ppc-sub">—</span>'}</td><td class="ppc-reason">${ppcEsc(r.reason)}</td></tr>`).join("")}</tbody></table>` : `<div class="ppc-na">NOT AVAILABLE — option chain not loaded</div>`;
+    <tr class="${r.side === "CE" ? "ppc-rce" : "ppc-rpe"} ${r.strike === d.atm ? "ppc-ratm" : ""}"><td>${r.rank}</td><td class="${r.side === "CE" ? "ppc-up" : "ppc-dn"}">${r.side}</td><td>${r.strike}${r.strike === d.atm ? " ATM" : ""}</td><td>${ppcNs(r.ltp)}</td><td class="${ppcCls(r.changePct)}">${ppcSg(r.changePct, 1, "%")}</td><td>${ppcL(r.volume)}</td><td>${ppcL(r.oi)}</td><td>${ppcNs(r.spreadPct)}</td><td>${ppcNs(r.delta)}</td><td>${ppcNs(r.iv, 1)}</td><td>${r.expectedMove15 != null ? "±" + ppcNs(r.expectedMove15) : "—"}</td><td>${ppcNs(r.netOfSpreadPct)}</td><td class="ppc-na" title="${ppcEsc(d.validation?.detail || "")}">${ppcEsc(r.validation || "NOT VALIDATED")}</td><td class="${r.liquidity === "GOOD" ? "ppc-up" : r.liquidity === "WIDE" ? "ppc-wait" : "ppc-dn"}">${ppcEsc(r.liquidity)}</td><td>${r.aligned ? '<span class="ppc-up">aligned</span>' : '<span class="ppc-sub">—</span>'}</td><td class="ppc-reason">${ppcEsc(r.reason)}</td></tr>`).join("")}</tbody></table>` : `<div class="ppc-na">NOT AVAILABLE — option chain not loaded</div>`;
 }

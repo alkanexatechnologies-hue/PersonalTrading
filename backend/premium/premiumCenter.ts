@@ -185,5 +185,17 @@ export function masterDecision(m: MasterInput) {
   return out("NO EDGE", b === "FAILED_BREAKOUT" || s === "FAILED_BREAKDOWN" ? `Failed ${b === "FAILED_BREAKOUT" ? "breakout" : "breakdown"} — no fresh setup` : "Price is between levels; no breakout or breakdown setup", `price near ${m.bull.level ?? "resistance"} or ${m.bear.level ?? "support"}`);
 }
 
-/** Probabilities: none validated yet (step 3). Kept as one place so the screen can never show an unvalidated number. */
-export const VALIDATION = { status: "PROBABILITY NOT VALIDATED", detail: "No CE/PE premium probability has passed out-of-sample validation yet (step 3 pending: NIFTY 2-year 1-minute premium history).", lastValidated: null as string | null, sample: null as number | null };
+/** Probabilities: one place, so the screen can never show an unvalidated number.
+ *  Step-3 study (backend/research/premiumState, pre-registered in 4ceb087): NIFTY 5-min, ATM CE/PE, 5/15/30-min horizons,
+ *  494 days (DEV 2024-10-14→2025-10-31, VALIDATION →2026-05-31). No state moved the rise rate ≥ 5 points from the
+ *  baseline, so nothing qualifies for display and the HOLDOUT was left unopened. */
+export const VALIDATION = { status: "PROBABILITY NOT VALIDATED", detail: "No CE/PE premium probability has passed out-of-sample validation.", lastValidated: null as string | null, sample: null as number | null };
+export const STATE_STUDY = {
+  id: "premium-state/v1", date: "2026-10-15", days: 494, decisionPoints: 22_134,
+  verdict: "NO EDGE",
+  summary: "Tested on 2 years of NIFTY 5-min data: after a breakout or breakdown the ATM CE / PE premium rose 41–49 % of the time over 5–30 min, versus 43–48 % at any time. No state shifts that by 5 points or more, so the state is context, not a probability.",
+};
+export function validationFor(symbol: string, interval: string) {
+  if (symbol === "^NSEI" && interval === "5m") return { ...VALIDATION, status: "NO EDGE (TESTED)", detail: STATE_STUDY.summary, study: STATE_STUDY };
+  return { ...VALIDATION, detail: `${VALIDATION.detail} Only NIFTY 5-min has been tested (no edge); this index / timeframe has no option history tested yet.`, study: null };
+}

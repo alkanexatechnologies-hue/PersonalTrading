@@ -84,3 +84,10 @@ test("master panel: arbiter and risk gates have final authority", () => {
   assert.equal(masterDecision(M({ bear: { state: "PRE_BREAKDOWN", level: 99, barTime: 1, intrabar: false, detail: "" } })).state, "WAIT FOR BREAKDOWN");
   assert.equal(VALIDATION.status, "PROBABILITY NOT VALIDATED");
 });
+test("probability status: NIFTY 5-min shows the tested NO EDGE result; every other index/timeframe stays NOT VALIDATED; never a number", async () => {
+  const { validationFor } = await import("./premiumCenter");
+  assert.equal(validationFor("^NSEI", "5m").status, "NO EDGE (TESTED)");
+  assert.equal(validationFor("^NSEI", "15m").status, "PROBABILITY NOT VALIDATED");
+  assert.equal(validationFor("^NSEBANK", "5m").status, "PROBABILITY NOT VALIDATED");
+  for (const v of [validationFor("^NSEI", "5m"), validationFor("^BSESN", "15m")]) assert.equal((v as any).up ?? null, null);
+});
