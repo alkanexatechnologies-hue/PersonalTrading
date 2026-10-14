@@ -67,6 +67,7 @@ import { buildBreakout, BREAKOUT_VERSION } from "../signals/breakoutService";
 import { getDecision, latestDecision, ledgerFor, DecisionDeps, IndexDef, openArbiterTrade } from "../decision/service";
 import { runSession as runBreakoutSession, BREAKOUT_CONFIG } from "../signals/breakoutEngine";
 import * as PC from "../premium/premiumCenter";
+import * as TV from "../premium/traderView";
 import { Decision } from "../decision/types";
 import { runHtf as runTestLabHtf } from "../testlab/htfRunner";
 import { abcComparison as htfAbc, timingDiagnostic as htfTiming, perCandleAudit as htfPerCandle } from "../testlab/htfAudit";
@@ -7647,9 +7648,11 @@ router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Reque
   const nowSec = Math.floor(Date.now() / 1000), istMin = Math.floor(((nowSec + 19800) % 86400) / 60), wd = new Date((nowSec + 19800) * 1000).getUTCDay();
   const session = wd === 0 || wd === 6 ? "CLOSED" : istMin >= 540 && istMin < 555 ? "PRE-OPEN" : istMin >= 555 && istMin <= 930 ? "OPEN" : "CLOSED";
   try {
-    const [candlesAll, c15, chain, quote] = await Promise.all([
+    const [candlesAll, c15, dailyAll, h1All, chain, quote] = await Promise.all([
       getCandlesCached(def.symbol, interval as Interval).catch(() => [] as any[]),
       interval === "5m" ? getCandlesCached(def.symbol, "15m" as Interval).catch(() => [] as any[]) : Promise.resolve(null),
+      getDailyCached(def.symbol, 120).catch(() => [] as any[]),
+      getCandlesCached(def.symbol, "60m" as Interval).catch(() => [] as any[]),
       cached(`pc-chain:${def.symbol}:${off}`, 30_000, () => dhanChainForExpiry(def, off)).catch((e: any) => ({ available: false, message: e?.message })),
       cached(`quote:${def.symbol}`, TTL_QUOTE, () => getProvider().getQuote(def.symbol)).catch(() => null),
     ]);
@@ -7771,6 +7774,49 @@ router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Reque
         probability: VAL,
       },
       ranking, master: { ...master, entryTrigger: ap?.trigger ?? master.confirmationRequired, stop: ap?.stopLoss ?? null, target: ap?.target1 ?? null, rr: ap?.rr ?? null, planSource: arb?.plan ? "arbiter" : latestRow?.plan ? "breakout engine (if triggered)" : null, supporting, contradictory: contra },
+      trader: (() => {
+        try {
+          // ---- experienced-trader view (pure module): trend by timeframe, past breaks, ladder, plans, coach, tomorrow ----
+          const drop = (cs: any[], sec: number) => (cs.length && cs[cs.length - 1].time + sec > nowSec ? cs.slice(0, -1) : cs);
+          const c15All: any[] = interval === "15m" ? candles : ((c15 as any[]) || []), closed15 = drop(c15All, 900), daily: any[] = (dailyAll as any[]) || [], h1: any[] = drop((h1All as any[]) || [], 3600);
+          const closed5 = interval === "5m" ? closed : null;
+          const trends = [TV.tfTrend("Daily", daily, 2), TV.tfTrend("1H", h1, 2), TV.tfTrend("15m", closed15, 3), ...(closed5 ? [TV.tfTrend("5m", closed5, 3)] : [])];
+          const atr15 = last(TV.atrS(closed15)) ?? atrNow ?? 0;
+          const lines15 = TV.activeLines(closed15, 3), linesD = TV.activeLines(daily, 2);
+          const lineLv = [
+            lines15.seller && !lines15.seller.broken ? { label: "15m seller trendline", value: lines15.seller.value, next: lines15.seller.next } : null,
+            lines15.buyer && !lines15.buyer.broken ? { label: "15m buyer trendline", value: lines15.buyer.value, next: lines15.buyer.next } : null,
+            linesD.seller && !linesD.seller.broken ? { label: "Daily seller trendline", value: linesD.seller.value, next: linesD.seller.next } : null,
+            linesD.buyer && !linesD.buyer.broken ? { label: "Daily buyer trendline", value: linesD.buyer.value, next: linesD.buyer.next } : null,
+          ].filter(Boolean) as { label: string; value: number; next: number }[];
+          const sessionDay = closed.length ? new Date((closed[closed.length - 1].time + 19800) * 1000).toISOString().slice(0, 10) : "";
+          const todayBars = closed.filter((c: any) => new Date((c.time + 19800) * 1000).toISOString().slice(0, 10) === sessionDay);
+          const today = { high: (quote as any)?.dayHigh ?? (todayBars.length ? Math.max(...todayBars.map((c: any) => c.high)) : null), low: (quote as any)?.dayLow ?? (todayBars.length ? Math.min(...todayBars.map((c: any) => c.low)) : null) };
+          const levels = spot != null ? TV.ladder({ daily, sessionDay, today, lines: lineLv, chain: strikes, spot, atr: atr15 }) : [];
+          // break history on the chart's own timeframe (what the trader sees), outcome horizon ≈ 4 hours
+          const k = 3, horizon = interval === "15m" ? 16 : 48, events = TV.breakEvents(closed as any, k, horizon);
+          const pb = spot != null ? TV.plans({ levels, spot, atr: atr15, chain: strikes, expiry, events }) : { bull: null, bear: null, noTrade: null };
+          const arbFresh = !!(arb && arb.candleTime && nowSec - arb.candleTime <= 15 * 60);
+          const cz = TV.coach({ session, istMin, dataStatus, spot: spot ?? 0, atr: atr15, closed15, bull: pb.bull, bear: pb.bear, trends,
+            arbiter: arb ? { finalAction: arb.finalAction, reason: arb.reason, fresh: arbFresh } : null,
+            riskOk: master.riskGate.ok && session === "OPEN", riskWhy: master.riskGate.gates.filter((g: any) => !g.ok).map((g: any) => g.detail).join("; ") || "all pass",
+            premium: { CE: (ce as any).behaviour || null, PE: (pe as any).behaviour || null }, liquidity: { CE: (ce as any).liquidity?.status ?? null, PE: (pe as any).liquidity?.status ?? null } });
+          // lines to draw on the chart: recent ones on the chart's timeframe, each to its break (or now) + a projection over the next session
+          const iv = intervalSec, all = TV.allLines(closed as any, k), firstShown = Math.max(0, closed.length - 160);
+          const future: number[] = []; { let t = closed.length ? closed[closed.length - 1].time : nowSec; while (future.length < (iv === 900 ? 26 : 76)) { t += iv; const m = Math.floor(((t + 19800) % 86400) / 60), wd = new Date((t + 19800) * 1000).getUTCDay(); if (wd === 0 || wd === 6 || m < 555 || m > 925) continue; future.push(t); } }
+          const draw = (["SELLER", "BUYER"] as const).flatMap((kind) => all.filter((l) => l.kind === kind && l.p2.index >= firstShown).slice(-3)).map((l) => {
+            let brokeAt: number | null = null;
+            for (let i = l.from + 1; i < closed.length; i++) if (l.kind === "SELLER" ? closed[i].close > TV.lineAt(l, i) : closed[i].close < TV.lineAt(l, i)) { brokeAt = i; break; }
+            const end = brokeAt ?? closed.length - 1;
+            return { kind: l.kind, p1: { time: l.p1.time, price: l.p1.price }, p2: { time: l.p2.time, price: l.p2.price }, end: { time: closed[end].time, price: Math.round(TV.lineAt(l, end) * 100) / 100 },
+              broken: brokeAt != null, brokeAt: brokeAt != null ? closed[brokeAt].time : null,
+              projection: brokeAt == null ? future.map((t, j) => ({ time: t, value: Math.round(TV.lineAt(l, closed.length + j) * 100) / 100 })) : [] };
+          });
+          const tm = TV.tomorrowMap({ bull: pb.bull, bear: pb.bear, lines: lineLv.map((x) => ({ label: x.label, next: x.next })), todayHigh: today.high, todayLow: today.low, close: spot ?? 0, atr: atr15 });
+          return { trends, levels, events: events.slice(-40), eventStats: { up: TV.breakStats(events, "UP"), down: TV.breakStats(events, "DOWN"), horizonBars: horizon, rule: `FOLLOWED THROUGH = moved 1 ATR beyond the break candle's close (the first possible entry) within ${horizon} bars before closing back across the level` },
+            plans: pb, coach: cz, lines: draw, future, tomorrow: tm, atr15: Math.round(atr15 * 100) / 100 };
+        } catch (e: any) { return { error: e?.message || "trader view failed" }; }
+      })(),
       validation: VAL,
       note: "Advisory only. Probabilities are not shown until validated out of sample. The arbiter and existing risk gates decide trades.",
     });
