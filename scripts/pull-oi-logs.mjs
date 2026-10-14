@@ -5,7 +5,7 @@
 //   node scripts/pull-oi-logs.mjs --wake    only wake the server (free Render sleeps when idle)
 //
 // Settings come from ~/.nsa-pull.env (never committed):
-//   NSA_URL=https://<your-app>.onrender.com
+//   NSA_URL=https://btradingsetup.onrender.com
 //   NSA_USER=admin            NSA_PASS=<password>        NSA_MODE=admin   (or user)
 //   OUT_DIR=~/Desktop/NSA-OI-Logs                         (optional)
 //   LOCAL_DATA=<repo>/data/oi-minute                     (optional: also merge the local server's log)

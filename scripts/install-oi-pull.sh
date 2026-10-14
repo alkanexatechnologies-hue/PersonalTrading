@@ -23,7 +23,7 @@ mkdir -p "$AGENTS" "$HOME/Library/Logs"
 if [ ! -f "$HOME/.nsa-pull.env" ]; then
   cat > "$HOME/.nsa-pull.env" <<EOF
 # Settings for scripts/pull-oi-logs.mjs — fill in, keep private (never commit).
-NSA_URL=https://YOUR-APP.onrender.com
+NSA_URL=https://btradingsetup.onrender.com
 NSA_USER=admin
 NSA_PASS=
 NSA_MODE=admin

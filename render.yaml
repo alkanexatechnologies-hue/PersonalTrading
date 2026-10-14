@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: nsa-intraday-assistant
+    name: btradingsetup
     runtime: node
     # PERSISTENCE: a Persistent Disk (below) is REQUIRED for admin-created user
     # accounts to survive restart/redeploy, and Render only allows disks on a
