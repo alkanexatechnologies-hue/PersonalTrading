@@ -139,3 +139,14 @@ test("significant lines: at most one respected (unbroken) + one recently broken 
   }
   assert.ok(out.every((l) => typeof l.touches === "number"));
 });
+test("significant lines: a smooth staircase of lower highs (no 3-bar pivot) still gets a minor seller line", async () => {
+  // rally to a top, then lower highs whose pivots are only 2 bars wide, with closes staying below the falling line
+  const hs = [100, 104, 108, 112, 116, 120, 117, 118.5, 116, 117, 118, 117.5, 115, 113, 112, 111, 110.5, 110, 109.5, 109];
+  const c = hs.map((h, i) => ({ time: 1_700_000_000 + i * 300, open: h - 2, high: h, low: h - 4, close: h - 2, volume: 0 }));
+  const { significantLines } = await import("./traderView");
+  const L = significantLines(c as any, 3, 3, 0);
+  const s = L.find((l: any) => l.kind === "SELLER" && l.brokeAt == null) as any;
+  assert.ok(s, "seller line present");
+  assert.equal(s.minor, true);
+  assert.ok(s.p2.price < s.p1.price);
+});

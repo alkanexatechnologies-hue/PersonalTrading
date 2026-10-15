@@ -345,9 +345,9 @@ export function anchoredPlans(o: { levels: Level[]; spot: number; prevClose: num
  * breakout that just happened). Everything else is noise and is not drawn. Closed bars only.
  */
 export function significantLines(c: Candle[], k: number, atr: number, firstShown: number) {
-  const all = allLines(c, k), n = c.length, out: (Line & { touches: number; brokeAt: number | null })[] = [];
-  for (const kind of ["SELLER", "BUYER"] as const) {
-    const scored = all.filter((l) => l.kind === kind && l.p2.index >= firstShown - 40).map((l) => {
+  const n = c.length, out: (Line & { touches: number; brokeAt: number | null; minor?: boolean })[] = [];
+  const pick = (kind: "SELLER" | "BUYER", kk: number) => {
+    const scored = allLines(c, kk).filter((l) => l.kind === kind && l.p2.index >= firstShown - 40).map((l) => {
       let touches = 0, brokeAt: number | null = null;
       for (let i = l.from + 1; i < n; i++) {
         const v = lineAt(l, i);
@@ -358,7 +358,14 @@ export function significantLines(c: Candle[], k: number, atr: number, firstShown
     });
     const active = scored.filter((l) => l.brokeAt == null).sort((a, b) => b.touches - a.touches || (b.p2.index - b.p1.index) - (a.p2.index - a.p1.index))[0];
     const broken = scored.filter((l) => l.brokeAt != null && l.brokeAt >= n - 30).sort((a, b) => b.brokeAt! - a.brokeAt!)[0];
-    if (active) out.push(active); if (broken) out.push(broken);
+    return [active, broken].filter(Boolean) as typeof scored;
+  };
+  for (const kind of ["SELLER", "BUYER"] as const) {
+    let got = pick(kind, k);
+    // A smooth staircase (lower highs / higher lows without a clear k-bar pivot) leaves a side empty: retry with a
+    // smaller pivot so both sides are always drawn when the structure exists; marked "minor".
+    if (!got.some((l) => l.brokeAt == null) && k > 2) got = [...got, ...pick(kind, 2).filter((l) => l.brokeAt == null).slice(0, 1).map((l) => ({ ...l, minor: true }))];
+    out.push(...got);
   }
   return out;
 }

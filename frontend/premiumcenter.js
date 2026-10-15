@@ -354,7 +354,7 @@ function ppcRenderTV(layerToggle) {
     const a = ch.addLineSeries({ color: tl.broken ? col + "88" : col, lineWidth: tl.broken ? 1 : 2, lineStyle: tl.broken ? 2 : 0, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
     a.setData([{ time: ppcT(tl.p1.time), value: tl.p1.price }, { time: ppcT(tl.end.time), value: tl.end.price }]);
     if (!tl.broken && tl.projection?.length) {
-      const pr = ch.addLineSeries({ color: col, lineWidth: 1, lineStyle: 1, priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false, title: `${tl.kind === "SELLER" ? "Seller" : "Buyer"} TL${tl.touches ? ` · ${tl.touches + 2} touches` : ""}` });
+      const pr = ch.addLineSeries({ color: col, lineWidth: 1, lineStyle: 1, priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false, title: `${tl.kind === "SELLER" ? "Seller" : "Buyer"} TL${tl.minor ? " (minor)" : ""}${tl.touches ? ` · ${tl.touches + 2} touches` : ""}` });
       pr.setData([{ time: ppcT(tl.end.time), value: tl.end.price }, ...tl.projection.map((p) => ({ time: ppcT(p.time), value: p.value }))]);
     }
   }

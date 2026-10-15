@@ -7846,7 +7846,7 @@ async function premiumCenterPayload(query: Record<string, any>): Promise<any> {
           const draw = TV.significantLines(closed as any, k, atrNow ?? atr15, firstShown).map((l) => {
             const brokeAt = l.brokeAt;
             const end = brokeAt ?? closed.length - 1;
-            return { kind: l.kind, touches: l.touches, p1: { time: l.p1.time, price: l.p1.price }, p2: { time: l.p2.time, price: l.p2.price }, end: { time: closed[end].time, price: Math.round(TV.lineAt(l, end) * 100) / 100 },
+            return { kind: l.kind, touches: l.touches, minor: !!(l as any).minor, p1: { time: l.p1.time, price: l.p1.price }, p2: { time: l.p2.time, price: l.p2.price }, end: { time: closed[end].time, price: Math.round(TV.lineAt(l, end) * 100) / 100 },
               broken: brokeAt != null, brokeAt: brokeAt != null ? closed[brokeAt].time : null,
               projection: brokeAt == null ? future.map((t, j) => ({ time: t, value: Math.round(TV.lineAt(l, closed.length + j) * 100) / 100 })) : [] };
           });
