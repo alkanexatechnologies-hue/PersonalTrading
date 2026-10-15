@@ -7789,9 +7789,16 @@ router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Reque
             linesD.seller && !linesD.seller.broken ? { label: "Daily seller trendline", value: linesD.seller.value, next: linesD.seller.next } : null,
             linesD.buyer && !linesD.buyer.broken ? { label: "Daily buyer trendline", value: linesD.buyer.value, next: linesD.buyer.next } : null,
           ].filter(Boolean) as { label: string; value: number; next: number }[];
-          const sessionDay = closed.length ? new Date((closed[closed.length - 1].time + 19800) * 1000).toISOString().slice(0, 10) : "";
-          const todayBars = closed.filter((c: any) => new Date((c.time + 19800) * 1000).toISOString().slice(0, 10) === sessionDay);
-          const today = { high: (quote as any)?.dayHigh ?? (todayBars.length ? Math.max(...todayBars.map((c: any) => c.high)) : null), low: (quote as any)?.dayLow ?? (todayBars.length ? Math.min(...todayBars.map((c: any) => c.low)) : null) };
+          // The plan is for the session that is TRADING or ABOUT TO TRADE: during market hours that is today; before the open
+          // (and after the close) it is the next session, so "previous day" = the last completed session and there is no
+          // "today" range yet (pre-open, Dhan's quote reports the previous close as the day high/low — never use that).
+          const dayOfT = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(0, 10);
+          const lastDay = closed.length ? dayOfT(closed[closed.length - 1].time) : "", calToday = dayOfT(nowSec);
+          const nextWeekday = (d: string) => { let t = Date.parse(d + "T00:00:00Z") + 86400_000; while ([0, 6].includes(new Date(t).getUTCDay())) t += 86400_000; return new Date(t).toISOString().slice(0, 10); };
+          const sessionOver = lastDay < calToday || istMin > 930;
+          const sessionDay = session === "OPEN" ? calToday : !sessionOver ? (lastDay || calToday) : (lastDay < calToday && ![0, 6].includes(wd) && istMin < 555 ? calToday : nextWeekday(lastDay || calToday));
+          const todayBars = closed.filter((c: any) => dayOfT(c.time) === sessionDay);
+          const today = todayBars.length ? { high: session === "OPEN" ? (quote as any)?.dayHigh ?? Math.max(...todayBars.map((c: any) => c.high)) : Math.max(...todayBars.map((c: any) => c.high)), low: session === "OPEN" ? (quote as any)?.dayLow ?? Math.min(...todayBars.map((c: any) => c.low)) : Math.min(...todayBars.map((c: any) => c.low)) } : { high: null, low: null };
           const levels = spot != null ? TV.ladder({ daily, sessionDay, today, lines: lineLv, chain: strikes, spot, atr: atr15 }) : [];
           // break history on the chart's own timeframe (what the trader sees), outcome horizon ≈ 4 hours
           const k = 3, horizon = interval === "15m" ? 16 : 48, events = TV.breakEvents(closed as any, k, horizon);
@@ -7817,7 +7824,7 @@ router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Reque
           const riskOf = (px: number) => risks.find((r) => Math.abs(r.price - px) < 0.01) || null;
           for (const p of [pb.bull, pb.bear]) if (p) (p as any).triggerRisk = riskOf(p.trigger);
           return { trends, levels: levels.map((v) => ({ ...v, risk: riskOf(v.price) })), events: events.slice(-40), eventStats: { up: TV.breakStats(events, "UP"), down: TV.breakStats(events, "DOWN"), horizonBars: horizon, rule: `FOLLOWED THROUGH = moved 1 ATR beyond the break candle's close (the first possible entry) within ${horizon} bars before closing back across the level` },
-            plans: pb, coach: cz, lines: draw, future, tomorrow: tm, atr15: Math.round(atr15 * 100) / 100 };
+            plans: pb, coach: cz, lines: draw, future, tomorrow: tm, atr15: Math.round(atr15 * 100) / 100, planFor: sessionDay };
         } catch (e: any) { return { error: e?.message || "trader view failed" }; }
       })(),
       validation: VAL,
