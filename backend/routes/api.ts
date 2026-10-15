@@ -69,6 +69,8 @@ import { runSession as runBreakoutSession, BREAKOUT_CONFIG } from "../signals/br
 import * as PC from "../premium/premiumCenter";
 import * as TV from "../premium/traderView";
 import { zeroHero as zeroHeroLive } from "../premium/zeroHero";
+import { readCandle } from "../premium/candleRead";
+import * as CP from "../premium/copilot";
 import { Decision } from "../decision/types";
 import { runHtf as runTestLabHtf } from "../testlab/htfRunner";
 import { abcComparison as htfAbc, timingDiagnostic as htfTiming, perCandleAudit as htfPerCandle } from "../testlab/htfAudit";
@@ -7641,16 +7643,18 @@ async function pcOptionCandles(underlying: string, side: "CE" | "PE", strike: nu
     return { ok: cs.length > 0, reason: cs.length ? null : "Dhan returned no premium candles", candles: cs, securityId: o.securityId };
   });
 }
-router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+/** The Premium Prediction payload — used by the route and by the daily co-pilot job (no request object needed). */
+async function premiumCenterPayload(query: Record<string, any>): Promise<any> {
+  const req = { query };
   const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
-  if (!def || def.type !== "index" || !def.fno || !def.nseSymbol) return res.status(400).json({ error: "F&O index symbol required" });
+  if (!def || def.type !== "index" || !def.fno || !def.nseSymbol) return { available: false, status: 400, error: "F&O index symbol required" };
   const interval = req.query.interval === "15m" ? "15m" : "5m", intervalSec = interval === "15m" ? 900 : 300;
   const off = Math.max(0, Math.min(3, Number(req.query.expiryOffset) || 0));
   const money = ["ITM", "OTM"].includes(String(req.query.moneyness)) ? String(req.query.moneyness) : "ATM";
   const nowSec = Math.floor(Date.now() / 1000), istMin = Math.floor(((nowSec + 19800) % 86400) / 60), wd = new Date((nowSec + 19800) * 1000).getUTCDay();
   const session = wd === 0 || wd === 6 ? "CLOSED" : istMin >= 540 && istMin < 555 ? "PRE-OPEN" : istMin >= 555 && istMin <= 930 ? "OPEN" : "CLOSED";
   try {
-    const [candlesAll, c15, dailyAll, h1All, chain, quote] = await Promise.all([
+    const [candlesAll, c15, dailyAll, h1All, chain, quote, c5x] = await Promise.all([
       getCandlesCached(def.symbol, interval as Interval).catch(() => [] as any[]),
       interval === "5m" ? getCandlesCached(def.symbol, "15m" as Interval).catch(() => [] as any[]) : Promise.resolve(null),
       getDailyCached(def.symbol, 120).catch(() => [] as any[]),
@@ -7663,6 +7667,7 @@ router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Reque
         return lg && Date.now() - lg.at < 5 * 60_000 ? { ...lg.v, staleChain: true, staleAgeSec: Math.round((Date.now() - lg.at) / 1000) } : c;
       }),
       cached(`quote:${def.symbol}`, TTL_QUOTE, () => getProvider().getQuote(def.symbol)).catch(() => null),
+      interval === "5m" ? Promise.resolve(null) : getCandlesCached(def.symbol, "5m" as Interval).catch(() => [] as any[]),
     ]);
     const candles: any[] = (candlesAll as any[]) || [];
     const n0 = candles.length, formingNow = n0 && candles[n0 - 1].time + intervalSec > nowSec;
@@ -7752,7 +7757,7 @@ router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Reque
     if (tl.seller) (tl.seller.status === "BROKEN" ? supporting : contra).push(`Seller trendline ${tl.seller.status.toLowerCase()} (now ${tl.seller.valueNow})`);
     if (tl.buyer) (tl.buyer.status === "BROKEN" ? contra : supporting).push(`Buyer trendline ${tl.buyer.status.toLowerCase()} (now ${tl.buyer.valueNow})`);
     const ctx15 = c15 && (c15 as any[]).length > 25 ? (() => { const cl = (c15 as any[]).map((c) => c.close), e = ema(cl, 21); const v = last(e); return v == null ? null : cl[cl.length - 1] > v ? "15-min close above EMA21 (up context)" : "15-min close below EMA21 (down context)"; })() : null;
-    res.json({
+    return ({
       version: PC_VERSION, available: true, symbol: def.symbol, name: def.name, interval, session, dataStatus,
       exchangeTs: lastTs, ageSec, quoteTs: (quote as any)?.marketTime || null, generatedAt: nowSec, provider: dhanOn ? "Dhan (connected)" : "Dhan (not connected)",
       spot: await (async () => {
@@ -7840,6 +7845,13 @@ router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Reque
           const riskOf = (px: number) => risks.find((r) => Math.abs(r.price - px) < 0.01) || null;
           for (const p of [pb.bull, pb.bear]) if (p) (p as any).triggerRisk = riskOf(p.trigger);
           return { trends, levels: levels.map((v) => ({ ...v, risk: riskOf(v.price) })), events: events.slice(-40), eventStats: { up: TV.breakStats(events, "UP"), down: TV.breakStats(events, "DOWN"), horizonBars: horizon, rule: `FOLLOWED THROUGH = moved 1 ATR beyond the break candle's close (the first possible entry) within ${horizon} bars before closing back across the level` },
+            candles: (() => {
+              // plain-language read of the last CLOSED 15-min and 5-min candles, against the ladder levels
+              const lv = levels.filter((v: any) => v.kind !== "TODAY").map((v: any) => ({ price: v.price, label: v.label }));   // today's H/L is set BY these candles — never compare a candle with itself
+              const c5c = interval === "5m" ? closed : drop(((c5x as any[]) || []), 300);
+              const today5 = c5c.filter((c: any) => dayOfT(c.time) === dayOfT(nowSec)), today15 = closed15.filter((c: any) => dayOfT(c.time) === dayOfT(nowSec));
+              return { m15: today15.length ? readCandle(today15.slice(-2), "15-min", lv, atr15) : null, m5: today5.length ? readCandle(today5.slice(-2), "5-min", lv, atr15 / Math.sqrt(3)) : null };
+            })(),
             plans: pb, coach: cz, lines: draw, future, tomorrow: tm, atr15: Math.round(atr15 * 100) / 100, planFor: sessionDay,
             radar: (() => {
               // the forming 15-min candle (live only) — shown and counted down, never used as a confirmation
@@ -7856,15 +7868,22 @@ router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Reque
       validation: VAL,
       note: "Advisory only. Probabilities are not shown until validated out of sample. The arbiter and existing risk gates decide trades.",
     });
-  } catch (e: any) { res.json({ available: false, version: PC_VERSION, error: e?.message || "premium center failed" }); }
+  } catch (e: any) { return { available: false, version: PC_VERSION, error: e?.message || "premium center failed" }; }
+}
+router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  const out = await premiumCenterPayload(req.query as any);
+  if (out?.status === 400) return res.status(400).json({ error: out.error });
+  res.json(out);
 });
 
 // ===================== Zero-Hero (expiry-day cheap OTM) — live read; advisory only =====================
 // /api/zero-hero-live?symbol=^NSEI|^BSESN|...&budget=3000 · uses the same cached chain (with last-good fallback), 5-min
 // candles and the 1-minute OI log; adds no new Dhan load beyond the shared caches.
-router.get("/zero-hero-live", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+/** Zero-Hero payload — used by the route and the daily co-pilot job. */
+async function zeroHeroPayload(query: Record<string, any>): Promise<any> {
+  const req = { query };
   const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
-  if (!def || def.type !== "index" || !def.fno || !def.nseSymbol) return res.status(400).json({ error: "F&O index symbol required" });
+  if (!def || def.type !== "index" || !def.fno || !def.nseSymbol) return { available: false, status: 400, error: "F&O index symbol required" };
   const budget = Math.max(0, Number(req.query.budget) || 0) || null;
   const nowSec = Math.floor(Date.now() / 1000), istMin = Math.floor(((nowSec + 19800) % 86400) / 60), today = new Date((nowSec + 19800) * 1000).toISOString().slice(0, 10);
   try {
@@ -7876,7 +7895,7 @@ router.get("/zero-hero-live", requirePermission("oiAnalysis"), async (req: Reque
       getCandlesCached(def.symbol, "5m" as Interval).catch(() => [] as any[]),
       cached(`quote:${def.symbol}`, TTL_QUOTE, () => getProvider().getQuote(def.symbol)).catch(() => null),
     ]);
-    const ch: any = chain; if (!ch?.available) return res.json({ available: false, error: ch?.message || "option chain unavailable" });
+    const ch: any = chain; if (!ch?.available) return { available: false, error: ch?.message || "option chain unavailable" };
     const strikes: any[] = ch.strikes, ks = strikes.map((x) => x.strike), step = ks.length > 1 ? Math.min(...ks.slice(1).map((k: number, i: number) => k - ks[i]).filter((d: number) => d > 0)) : 50;
     const spot = (quote as any)?.price > 0 ? (quote as any).price : ch.spot;
     const dayOf = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(0, 10);
@@ -7905,9 +7924,14 @@ router.get("/zero-hero-live", requirePermission("oiAnalysis"), async (req: Reque
       }
     } catch { history = null; }
     const z = zeroHeroLive({ symbol: def.symbol, expiry: String(ch.expiry), today, istMin, spot, step, lot, chain: strikes, closed5Today: closed5, oiNow, oi15Ago: oi15, budget, history });
-    res.json({ available: true, symbol: def.symbol, name: def.name, expiry: ch.expiry, lot, budget, chainStale: !!ch.staleChain, generatedAt: nowSec, ...z,
+    return ({ available: true, symbol: def.symbol, name: def.name, expiry: ch.expiry, lot, budget, chainStale: !!ch.staleChain, generatedAt: nowSec, ...z,
       note: "Advisory only. Zero-hero options usually expire worthless; the 2-year record is shown so you see the real odds." });
-  } catch (e: any) { res.json({ available: false, error: e?.message || "zero-hero failed" }); }
+  } catch (e: any) { return { available: false, error: e?.message || "zero-hero failed" }; }
+}
+router.get("/zero-hero-live", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  const out = await zeroHeroPayload(req.query as any);
+  if (out?.status === 400) return res.status(400).json({ error: out.error });
+  res.json(out);
 });
 
 router.get("/option-candles", async (req: Request, res: Response) => {
@@ -8663,6 +8687,96 @@ async function dayRangeTick() {
   if (slot && !_rangeSummariesSent.has(slot)) { _rangeSummariesSent.add(slot); notifyDetached("INDEX_ALERT", rangeSummaryMessage(rows, `${slot} IST`)); }
 }
 function addMinutesHm(hm: string, m: number) { const t = +hm.slice(0, 2) * 60 + +hm.slice(3) + m; return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; }
+// ===================== Daily trading co-pilot (Telegram) — advisory only =====================
+// 09:05 plan · NIFTY 15-minute updates · opportunity alerts with risk grade + 2-year odds (risk is a label, never a filter)
+// · ONE tracked trade per index (NIFTY, SENSEX) with follow-ups on Target 1 / Target 2 / stop / 15:12 · 15:35 review.
+const CP_FILE = path.join(process.cwd(), "data", "copilot-state.json");
+let _cp: any = (() => { try { return JSON.parse(fs.readFileSync(CP_FILE, "utf8")); } catch { return {}; } })();
+const cpSave = () => { try { fs.writeFileSync(CP_FILE, JSON.stringify(_cp)); } catch { /* best-effort */ } };
+const cpSend = (text: string) => { notifyDetached("INDEX_ALERT", CP.stripTags(text)); try { fs.appendFileSync(path.join(process.cwd(), "data", "copilot-log.txt"), `\n[${new Date(Date.now() + 19800000).toISOString().slice(0, 19)}]\n${CP.stripTags(text)}\n`); } catch { /* best-effort */ } };
+function cpOdds(sym: string): string | undefined {
+  try {
+    if (sym === "^NSEI") { const r = JSON.parse(fs.readFileSync(path.join(process.cwd(), "data", "research-early-breakout", "results_dev_val.json"), "utf8")); const a = r.periods.DEV.T15_ALL, b = r.periods.VALIDATION.T15_ALL; return `2-yr NIFTY 15-min breakout record after costs: ${a.winPct}–${b.winPct}% wins, ${a.avgNet} / ${b.avgNet} pts per trade (no proven edge — size small).`; }
+    const ix = ({ "^NSEBANK": "BANKNIFTY", "^BSESN": "SENSEX", "^CNXFIN": "FINNIFTY", "^NSEMDCP50": "MIDCPNIFTY" } as Record<string, string>)[sym]; if (!ix) return undefined;
+    const r = JSON.parse(fs.readFileSync(path.join(process.cwd(), "data", "research-multi", "results", `${ix}.json`), "utf8")), t = r.early.T15;
+    return `2-yr ${ix} 15-min breakout record after costs: ${t.DEV.winPct}–${t.VALIDATION.winPct}% wins, ${t.DEV.avgNet} / ${t.VALIDATION.avgNet} pts per trade (no proven edge — size small).`;
+  } catch { return undefined; }
+}
+let _cpBusy = false, _cpTick = 0;
+async function copilotTick() {
+  if (_cpBusy) return; _cpBusy = true;
+  try {
+    const nowSec = Math.floor(Date.now() / 1000), ist = new Date((nowSec + 19800) * 1000), day = ist.toISOString().slice(0, 10), istMin = ist.getUTCHours() * 60 + ist.getUTCMinutes(), sec = ist.getUTCSeconds(), wd = ist.getUTCDay();
+    if (wd === 0 || wd === 6) return;
+    if (_cp.day !== day) { _cp = { day, trades: {}, closed: [], sent: {}, seen: {} }; cpSave(); }
+    const pay = (sym: string) => premiumCenterPayload({ symbol: sym, interval: "15m" });
+    // 09:05 plan
+    if (istMin >= 545 && istMin <= 552 && !_cp.sent.plan) {
+      const list = (await Promise.all(["^NSEI", "^NSEBANK", "^BSESN"].map((x) => pay(x).catch(() => null)))).filter((x: any) => x?.available);
+      if (list.length) { _cp.sent.plan = true; cpSave(); cpSend(CP.morningPlan(list, Object.fromEntries(list.map((d: any) => [d.symbol, cpOdds(d.symbol) || ""])))); }
+    }
+    if (istMin >= 555 && istMin <= 916) {
+      _cpTick++;
+      const syms = _cpTick % 2 ? ["^NSEI"] : ["^NSEI", "^BSESN", "^NSEBANK"];
+      for (const sym of syms) {
+        const d: any = await pay(sym).catch(() => null); if (!d?.available || !d.trader || d.trader.error || d.dataStatus !== "LIVE") continue;
+        const T = d.trader, tracked = sym === "^NSEI" || sym === "^BSESN";
+        // follow the open trade
+        const tr: CP.CoTrade | null = _cp.trades[sym] || null;
+        if (tr && tr.state !== "CLOSED") {
+          const prem = (d.ranking || []).find((x: any) => x.side === tr.side && x.strike === tr.strike)?.ltp ?? null;
+          const c15 = (d.chart?.candles || []).filter((c: any) => c.time + 900 <= nowSec), last15 = c15.length ? { time: c15[c15.length - 1].time + 900, close: c15[c15.length - 1].close } : null;
+          const msgs = CP.stepTrade(tr, { spot: d.spot.price, prem, last15, nowSec, istMin });
+          for (const m of msgs) cpSend(m);
+          if ((tr.state as string) === "CLOSED") { _cp.closed.push(tr); _cp.trades[sym] = null; _cp.sent[`cool|${sym}`] = nowSec; }
+          cpSave();
+        }
+        // new opportunities (every setup, with its risk grade — never hidden), confirmed on two consecutive polls
+        for (const side of ["bull", "bear"] as const) {
+          const o = T.radar?.[side], p = T.plans?.[side]; if (!o || !p || p.strike == null) continue;
+          const key = `${sym}|${side}`, sig = `${o.state}|${p.entry}`, confirmed = _cp.seen[key] === sig; _cp.seen[key] = sig;
+          if (!confirmed || istMin < 570 || istMin > 870) continue;
+          if (o.state === "TRIGGERED" && !_cp.sent[`trig|${key}|${p.entry}`]) {
+            _cp.sent[`trig|${key}|${p.entry}`] = nowSec;
+            const free = tracked && !(_cp.trades[sym] && _cp.trades[sym].state !== "CLOSED") && nowSec - (_cp.sent[`cool|${sym}`] || 0) > 15 * 60;
+            if (free) { const t = CP.openTrade(d, side, nowSec); if (t) { _cp.trades[sym] = t; cpSend("📌 TRADE GIVEN — I will follow it and message you at Target 1, Target 2, stop or 15:12.\n" + CP.opportunity(d, side, "TRIGGERED", cpOdds(sym))); } }
+            else cpSend(CP.opportunity(d, side, "TRIGGERED", cpOdds(sym)) + (tracked ? "\n  (A trade on this index is already open — shown for information.)" : ""));
+          } else if (o.state === "ARMED" && nowSec - (_cp.sent[`armed|${key}`] || 0) > 20 * 60) { _cp.sent[`armed|${key}`] = nowSec; cpSend(CP.opportunity(d, side, "ARMED", cpOdds(sym))); }
+        }
+        cpSave();
+        // NIFTY 15-minute update, right after each 15-min candle closes (09:30 … 15:15)
+        if (sym === "^NSEI" && istMin >= 570 && istMin % 15 === 0 && sec >= 20 && !_cp.sent[`u|${istMin}`]) {
+          _cp.sent[`u|${istMin}`] = true; cpSave();
+          const zh = await zeroHeroPayload({ symbol: "^NSEI" }).catch(() => null);
+          let text = CP.fifteenMinUpdate(d, _cp.trades["^NSEI"] || null, zh?.available ? zh : null, cpOdds("^NSEI"));
+          const zs = await zeroHeroPayload({ symbol: "^BSESN" }).catch(() => null);
+          if (zs?.available && zs.isExpiry && istMin >= 810 && istMin <= 900) text += `\n  🎲 SENSEX zero-hero (${zs.window}): ${zs.sides.map((x: any) => `${x.side} ${x.strike} ₹${x.premium != null ? Math.round(x.premium) : "—"} · ${x.trigger.state}${x.moveToDouble != null ? ` · 2× needs ${Math.round(x.moveToDouble)} pts` : ""}`).join(" | ")}${zs.history?.text ? `\n     2-yr: ${zs.history.text}` : ""}`;
+          cpSend(text);
+        }
+      }
+    }
+    // 15:35 review
+    if (istMin >= 935 && istMin <= 945 && !_cp.sent.review) {
+      const list = (await Promise.all(["^NSEI", "^NSEBANK", "^BSESN"].map((x) => pay(x).catch(() => null)))).filter((x: any) => x?.available);
+      if (list.length) {
+        _cp.sent.review = true; cpSave();
+        const tr = (_cp.closed || []).map((t: any) => `  ${t.name} ${t.strike} ${t.side}: ${t.exitWhy}${t.entryPrem != null && t.exitPrem != null ? ` · ₹${Math.round(t.entryPrem)} → ₹${Math.round(t.exitPrem)}` : ""}${t.t1Prem != null ? ` (half at T1 ₹${Math.round(t.t1Prem)})` : ""}`);
+        cpSend(CP.dayReview(list) + (tr.length ? `\nTrades given today:\n${tr.join("\n")}` : "\nNo trade was given today."));
+      }
+    }
+  } catch { /* the co-pilot never affects the app */ } finally { _cpBusy = false; }
+}
+router.get("/copilot/state", requirePermission("oiAnalysis"), (_req: Request, res: Response) => { res.json(_cp); });
+router.post("/copilot/update-now", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  try {
+    const sym = String(req.query.symbol || "^NSEI"), d: any = await premiumCenterPayload({ symbol: sym, interval: "15m" });
+    if (!d?.available) return res.json({ ok: false, error: d?.error || "unavailable" });
+    const zh = await zeroHeroPayload({ symbol: sym }).catch(() => null);
+    const text = CP.fifteenMinUpdate(d, (_cp.trades || {})[sym] || null, zh?.available ? zh : null, cpOdds(sym));
+    cpSend(text); res.json({ ok: true, text: CP.stripTags(text) });
+  } catch (e: any) { res.json({ ok: false, error: e?.message || "failed" }); }
+});
+
 router.post("/alerts/day-range/summary", requirePermission("oiAnalysis"), async (_req: Request, res: Response) => {
   try { const ist = new Date(Date.now() + 19800000).toISOString().slice(11, 16); const r = await sendRangeSummary(`${ist} IST (on request)`); res.json({ ok: r.ok, error: r.error || null }); }
   catch (e: any) { res.json({ ok: false, error: e?.message || "summary failed" }); }
@@ -10379,6 +10493,8 @@ export function startHourlyScheduler() {
   });
   // Day high / low break alerts + index level summaries → Telegram (context only, uses cached chains; 5 quote calls/min).
   setInterval(() => { if (isTradingTimeIST() && jobOn("dayRangeAlerts")) dayRangeTick().catch(() => {}); }, 60_000);
+  // Daily trading co-pilot (09:05 plan, NIFTY 15-min updates, tracked trades with follow-ups, 15:35 review)
+  setInterval(() => { if (jobOn("coPilot")) copilotTick().catch(() => {}); }, 30_000);
   // OI accuracy check vs NSE official bhavcopy: trading days 18:15–23:30 IST, once per day (retries every 10 min until published).
   setInterval(() => {
     const ist = new Date(Date.now() + 19800000), d = ist.toISOString().slice(0, 10), hm = ist.toISOString().slice(11, 16), wd = ist.getUTCDay();
