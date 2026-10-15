@@ -68,7 +68,7 @@ import { getDecision, latestDecision, ledgerFor, DecisionDeps, IndexDef, openArb
 import { runSession as runBreakoutSession, BREAKOUT_CONFIG } from "../signals/breakoutEngine";
 import * as PC from "../premium/premiumCenter";
 import * as TV from "../premium/traderView";
-import { zeroHero as zeroHeroLive } from "../premium/zeroHero";
+import { zeroHero as zeroHeroLive, newZhTrade, stepZhTrade, ZhTrade } from "../premium/zeroHero";
 import { readCandle } from "../premium/candleRead";
 import * as CP from "../premium/copilot";
 import { Decision } from "../decision/types";
@@ -7924,7 +7924,11 @@ async function zeroHeroPayload(query: Record<string, any>): Promise<any> {
       }
     } catch { history = null; }
     const z = zeroHeroLive({ symbol: def.symbol, expiry: String(ch.expiry), today, istMin, spot, step, lot, chain: strikes, closed5Today: closed5, oiNow, oi15Ago: oi15, budget, history });
-    return ({ available: true, symbol: def.symbol, name: def.name, expiry: ch.expiry, lot, budget, chainStale: !!ch.staleChain, generatedAt: nowSec, ...z,
+    const zhTrades = (_zhLedger.day === today ? _zhLedger.trades : []).filter((t: ZhTrade) => t.symbol === def.symbol).map((t: ZhTrade) => {
+      const row = strikes.find((x: any) => x.strike === t.strike), live = row ? (t.side === "CE" ? row.ceLtp : row.peLtp) ?? null : null;
+      return { ...t, livePrem: t.state === "CLOSED" ? null : live, livePnlPct: t.state === "CLOSED" || live == null ? null : Math.round(((live / t.entryPrem) - 1) * 1000) / 10 };
+    });
+    return ({ available: true, symbol: def.symbol, name: def.name, expiry: ch.expiry, lot, budget, chainStale: !!ch.staleChain, generatedAt: nowSec, zhTrades, ...z,
       note: "Advisory only. Zero-hero options usually expire worthless; the 2-year record is shown so you see the real odds." });
   } catch (e: any) { return { available: false, error: e?.message || "zero-hero failed" }; }
 }
@@ -8687,6 +8691,54 @@ async function dayRangeTick() {
   if (slot && !_rangeSummariesSent.has(slot)) { _rangeSummariesSent.add(slot); notifyDetached("INDEX_ALERT", rangeSummaryMessage(rows, `${slot} IST`)); }
 }
 function addMinutesHm(hm: string, m: number) { const t = +hm.slice(0, 2) * 60 + +hm.slice(3) + m; return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; }
+// ===================== Zero-hero ledger: FROZEN trades, one at a time per index (expiry afternoons) =====================
+// A trade is fixed at its trigger (number, time, strike, entry premium at the trigger candle close, T1 2×, T2 3×, stops) and
+// never re-planned. No new zero-hero trade on that index until the open one ends (stop / target / 15:20).
+const ZH_FILE = path.join(process.cwd(), "data", "zero-hero-trades.json");
+let _zhLedger: { day: string; trades: ZhTrade[] } = (() => { try { return JSON.parse(fs.readFileSync(ZH_FILE, "utf8")); } catch { return { day: "", trades: [] }; } })();
+const zhSave = () => { try { fs.writeFileSync(ZH_FILE, JSON.stringify(_zhLedger, null, 1)); } catch { /* best-effort */ } };
+const zhR = (v: number | null | undefined) => (v == null ? "—" : `₹${Math.round(v * 10) / 10}`);
+function zhCard(t: ZhTrade) {
+  return `🎲 ZERO-HERO TRADE #${t.n} — ${t.name} ${t.strike} ${t.side} (expiry ${t.expiry})\n  Time ${new Date((t.openedAt + 19800) * 1000).toISOString().slice(11, 16)} · entry ${zhR(t.entryPrem)} (index ${Math.round(t.entryIndex)})\n  T1 ${zhR(t.t1Prem)} (2× — book half) · T2 ${zhR(t.t2Prem)} (3× — exit rest)\n  SL: ${t.slIndexRule} OR premium ${zhR(t.slPrem)} (−50%) · time exit 15:20\n  These levels are FIXED — no new zero-hero on ${t.name} until this trade ends.`;
+}
+let _zhBusy = false;
+async function zeroHeroLedgerTick() {
+  if (_zhBusy) return; _zhBusy = true;
+  try {
+    const nowSec = Math.floor(Date.now() / 1000), ist = new Date((nowSec + 19800) * 1000), day = ist.toISOString().slice(0, 10), istMin = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+    if ([0, 6].includes(ist.getUTCDay()) || istMin < 810 || istMin > 925) return;
+    if (_zhLedger.day !== day) { _zhLedger = { day, trades: [] }; zhSave(); }
+    for (const sym of ["^NSEI", "^BSESN"]) {
+      const zp: any = await zeroHeroPayload({ symbol: sym }).catch(() => null); if (!zp?.available || !zp.isExpiry) continue;
+      const def = findSymbolDef(sym)!, mine = _zhLedger.trades.filter((t) => t.symbol === sym), open = mine.find((t) => t.state !== "CLOSED");
+      const c5: any[] = ((await getCandlesCached(sym, "5m" as Interval).catch(() => [])) as any[]).filter((c) => new Date((c.time + 19800) * 1000).toISOString().slice(0, 10) === day && c.time + 300 <= nowSec);
+      if (open) {
+        const ch: any = _pcLastChain.get(`${sym}:0`)?.v, row = ch?.strikes?.find((x: any) => x.strike === open.strike), prem = row ? (open.side === "CE" ? row.ceLtp : row.peLtp) ?? null : null;
+        const lb = c5[c5.length - 1], fired = stepZhTrade(open, { prem, spot: zp.spot, last5: lb ? { time: lb.time + 300, close: lb.close } : null, nowSec, istMin });
+        for (const f of fired) cpSend(`${f === "T1" ? "✅" : /TARGET 2/.test(f) ? "🏁" : /STOP|failed/.test(f) ? "🛑" : "⏰"} ZERO-HERO #${open.n} ${open.name} ${open.strike} ${open.side}: ${open.events[open.events.length - 1].what}\n  Premium ${zhR(prem)} (entry ${zhR(open.entryPrem)}${prem != null ? `, ${Math.round(((prem / open.entryPrem) - 1) * 100)}%` : ""}) · index ${Math.round(zp.spot)}${f === "T1" ? `\n  → Book HALF now. Rest: T2 ${zhR(open.t2Prem)}; stop now at entry ${zhR(open.entryPrem)}.` : open.state === "CLOSED" ? `\n  → Trade #${open.n} closed. A new zero-hero on ${open.name} is allowed only on a fresh trigger.` : ""}`);
+        if (fired.length) zhSave();
+        continue;
+      }
+      if (istMin > 885) continue;   // no new zero-hero after 14:45
+      const lastClosed = Math.max(0, ...mine.map((t) => t.closedAt || 0));
+      for (const x of zp.sides) {
+        const tg = x.trigger; if (tg.state !== "TRIGGERED" || !tg.at || tg.at <= lastClosed || mine.some((t) => t.side === x.side)) continue;
+        // freeze the trade at the TRIGGER candle: index close, 2-step OTM strike of that moment, premium at that candle's close
+        const bar = c5.find((c) => c.time + 300 === tg.at), entryIndex = bar ? bar.close : zp.spot;
+        const ks = (_pcLastChain.get(`${sym}:0`)?.v?.strikes || []).map((r: any) => r.strike), step = ks.length > 1 ? Math.min(...ks.slice(1).map((k: number, i: number) => k - ks[i]).filter((v: number) => v > 0)) : 50;
+        const strike = Math.round(entryIndex / step) * step + (x.side === "CE" ? 2 : -2) * step;
+        let entryPrem: number | null = null;
+        try { const oc: any = await withTimeout(pcOptionCandles(def.nseSymbol!, x.side, strike, String(zp.expiry), 5), 15_000, "zh entry"); const ob = (oc.candles || []).find((c: any) => c.time + 300 === tg.at); entryPrem = ob?.close ?? null; } catch { entryPrem = null; }
+        if (entryPrem == null) { const row = (_pcLastChain.get(`${sym}:0`)?.v?.strikes || []).find((r: any) => r.strike === strike); entryPrem = row ? (x.side === "CE" ? row.ceLtp : row.peLtp) ?? null : null; }
+        if (!(entryPrem! > 0)) continue;
+        const t = newZhTrade({ n: mine.length + 1, day, symbol: sym, name: def.name, side: x.side, strike, expiry: String(zp.expiry), lot: zp.lot ?? null, at: tg.at, entryPrem: entryPrem!, entryIndex, triggerLevel: tg.level });
+        _zhLedger.trades.push(t); zhSave(); cpSend(zhCard(t) + (zp.history?.text ? `\n  📊 2-yr: ${zp.history.text}` : "")); break;   // one at a time
+      }
+    }
+  } catch { /* never affects the app */ } finally { _zhBusy = false; }
+}
+router.get("/zero-hero/trades", requirePermission("oiAnalysis"), (_req: Request, res: Response) => { res.json(_zhLedger); });
+
 // ===================== Daily trading co-pilot (Telegram) — advisory only =====================
 // 09:05 plan · NIFTY 15-minute updates · opportunity alerts with risk grade + 2-year odds (risk is a label, never a filter)
 // · ONE tracked trade per index (NIFTY, SENSEX) with follow-ups on Target 1 / Target 2 / stop / 15:12 · 15:35 review.
@@ -10495,6 +10547,8 @@ export function startHourlyScheduler() {
   setInterval(() => { if (isTradingTimeIST() && jobOn("dayRangeAlerts")) dayRangeTick().catch(() => {}); }, 60_000);
   // Daily trading co-pilot (09:05 plan, NIFTY 15-min updates, tracked trades with follow-ups, 15:35 review)
   setInterval(() => { if (jobOn("coPilot")) copilotTick().catch(() => {}); }, 30_000);
+  // Zero-hero ledger (expiry afternoons; frozen trades, one at a time per index)
+  setInterval(() => { if (jobOn("coPilot")) zeroHeroLedgerTick().catch(() => {}); }, 30_000);
   // OI accuracy check vs NSE official bhavcopy: trading days 18:15–23:30 IST, once per day (retries every 10 min until published).
   setInterval(() => {
     const ist = new Date(Date.now() + 19800000), d = ist.toISOString().slice(0, 10), hm = ist.toISOString().slice(11, 16), wd = ist.getUTCDay();

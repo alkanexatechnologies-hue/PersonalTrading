@@ -30,3 +30,17 @@ test("window, trigger on a 5-min CLOSE beyond the day range, and verdicts", () =
   assert.equal(z.sides[0].trigger.state, "TRIGGERED"); assert.equal(z.sides[0].strike, 23000);
   assert.ok(z.sides[0].moveToDouble! > 0); assert.ok(z.sides[0].lots! >= 0); assert.match(z.history!.text, /2 years/);
 });
+test("frozen zero-hero trade: levels fixed; T1 2× → breakeven; T2 3×; stops; time", async () => {
+  const { newZhTrade, stepZhTrade } = await import("./zeroHero");
+  const mk = () => newZhTrade({ n: 1, day: "2026-10-15", symbol: "^BSESN", name: "SENSEX", side: "CE", strike: 74500, expiry: "2026-10-15", lot: 20, at: 1000, entryPrem: 40, entryIndex: 74240, triggerLevel: 74218 });
+  let t = mk(); const frozen = JSON.stringify([t.entryPrem, t.t1Prem, t.t2Prem, t.slPrem, t.triggerLevel]);
+  assert.deepEqual(stepZhTrade(t, { prem: 55, spot: 74300, last5: { time: 1300, close: 74290 }, nowSec: 1300, istMin: 830 }), []);
+  assert.deepEqual(stepZhTrade(t, { prem: 81, spot: 74420, last5: null, nowSec: 1400, istMin: 835 }), ["T1"]); assert.equal(t.state, "T1");
+  assert.deepEqual(stepZhTrade(t, { prem: 121, spot: 74480, last5: null, nowSec: 1500, istMin: 840 }), ["TARGET 2 (3×)"]); assert.equal(t.state, "CLOSED");
+  assert.equal(JSON.stringify([t.entryPrem, t.t1Prem, t.t2Prem, t.slPrem, t.triggerLevel]), frozen);   // never changed
+  t = mk(); assert.deepEqual(stepZhTrade(t, { prem: 19, spot: 74230, last5: null, nowSec: 1200, istMin: 832 }), ["STOP LOSS (premium −50%)"]);
+  t = mk(); assert.deepEqual(stepZhTrade(t, { prem: 30, spot: 74200, last5: { time: 1300, close: 74210 }, nowSec: 1310, istMin: 832 }), ["STOP LOSS (breakout failed)"]);
+  t = mk(); stepZhTrade(t, { prem: 82, spot: 74420, last5: null, nowSec: 1400, istMin: 835 });
+  assert.deepEqual(stepZhTrade(t, { prem: 39, spot: 74300, last5: null, nowSec: 1500, istMin: 840 }), ["BREAKEVEN STOP (after T1)"]);
+  t = mk(); assert.deepEqual(stepZhTrade(t, { prem: 45, spot: 74260, last5: null, nowSec: 2000, istMin: 920 }), ["TIME EXIT 15:20"]);
+});

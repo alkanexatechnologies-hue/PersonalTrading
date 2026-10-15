@@ -87,3 +87,32 @@ export function zeroHero(o: ZhInput) {
   return { isExpiry, window: windowState, spot: r2(o.spot), atm: atm?.strike ?? null, straddle, minutesToClose: Math.max(0, 930 - o.istMin), sides, history: o.history ?? ZH_HISTORY[o.symbol] ?? null,
     rules: ["Expiry day only, 13:30–14:45", "Trigger = a 5-min CLOSE beyond the day's high/low (never a wick, never in advance)", "Strike 2 steps OTM; skip if the spread is wide", "Fixed budget you accept losing 100 %; never average down", "Book half at 2–3×; everything out by 15:20"] };
 }
+
+// ---------------------------------------------------------------- frozen zero-hero trades (one at a time per index)
+export interface ZhEvent { t: number; what: string; prem: number | null; index: number | null }
+export interface ZhTrade {
+  id: string; n: number; day: string; symbol: string; name: string; side: "CE" | "PE"; strike: number; expiry: string; lot: number | null;
+  openedAt: number; entryPrem: number; entryIndex: number; triggerLevel: number;
+  t1Prem: number; t2Prem: number; slPrem: number; slIndexRule: string;
+  state: "OPEN" | "T1" | "CLOSED"; events: ZhEvent[]; exitPrem?: number | null; exitWhy?: string; closedAt?: number;
+}
+/** Freeze a new trade from a trigger. Every number here is fixed for the life of the trade. */
+export function newZhTrade(o: { n: number; day: string; symbol: string; name: string; side: "CE" | "PE"; strike: number; expiry: string; lot: number | null; at: number; entryPrem: number; entryIndex: number; triggerLevel: number }): ZhTrade {
+  const p = o.entryPrem;
+  return { id: `${o.day}|${o.symbol}|${o.n}`, n: o.n, day: o.day, symbol: o.symbol, name: o.name, side: o.side, strike: o.strike, expiry: o.expiry, lot: o.lot,
+    openedAt: o.at, entryPrem: r2(p), entryIndex: r2(o.entryIndex), triggerLevel: r2(o.triggerLevel), t1Prem: r2(2 * p), t2Prem: r2(3 * p), slPrem: r2(0.5 * p),
+    slIndexRule: `5-min close ${o.side === "CE" ? "below" : "above"} ${r2(o.triggerLevel)} (breakout failed)`, state: "OPEN", events: [{ t: o.at, what: "ENTRY", prem: r2(p), index: r2(o.entryIndex) }] };
+}
+/** Advance a frozen trade. The levels never change; only the state moves forward. Returns event names that fired. */
+export function stepZhTrade(tr: ZhTrade, x: { prem: number | null; spot: number | null; last5: { time: number; close: number } | null; nowSec: number; istMin: number }): string[] {
+  if (tr.state === "CLOSED") return [];
+  const fired: string[] = [], dir = tr.side === "CE" ? 1 : -1;
+  const close = (why: string) => { tr.state = "CLOSED"; tr.exitWhy = why; tr.exitPrem = x.prem; tr.closedAt = x.nowSec; tr.events.push({ t: x.nowSec, what: why, prem: x.prem, index: x.spot }); fired.push(why); };
+  if (x.prem != null && tr.state === "OPEN" && x.prem >= tr.t1Prem) { tr.state = "T1"; tr.events.push({ t: x.nowSec, what: "TARGET 1 (2×) — half booked, premium stop moved to entry", prem: x.prem, index: x.spot }); fired.push("T1"); }
+  if (x.prem != null && x.prem >= tr.t2Prem) { close("TARGET 2 (3×)"); return fired; }
+  const premStop = tr.state === "T1" ? tr.entryPrem : tr.slPrem;
+  if (x.prem != null && x.prem <= premStop) { close(tr.state === "T1" ? "BREAKEVEN STOP (after T1)" : "STOP LOSS (premium −50%)"); return fired; }
+  if (x.last5 && x.last5.time > tr.openedAt && dir * (x.last5.close - tr.triggerLevel) < 0) { close(tr.state === "T1" ? "EXIT — breakout failed (after T1)" : "STOP LOSS (breakout failed)"); return fired; }
+  if (x.istMin >= 920) close("TIME EXIT 15:20");
+  return fired;
+}

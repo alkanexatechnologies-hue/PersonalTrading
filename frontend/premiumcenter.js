@@ -617,8 +617,17 @@ function ppcRenderZHToday() {
     return `<div class="ppc-zht-s ${c}"><b class="${x.side === "CE" ? "ppc-up" : "ppc-dn"}">${x.side} ${x.strike ?? "—"}</b> ₹${ppcNs(x.premium)} <span class="ppc-chip ppc-c-${t === "TRIGGERED" ? "bull" : "wait"}">${ppcEsc(t)}</span>
       <span class="ppc-sub">2× at ${ppcNs(x.doubleAt, 0)} (${x.moveToDouble != null ? Math.round(x.moveToDouble) : "—"} pts) · touch ${x.pTouchDouble != null ? Math.round(x.pTouchDouble) + "%" : "—"} · writers ${x.writersCovering == null ? "—" : x.writersCovering ? "covering" : "adding"}${x.costPerLot ? ` · ₹${Math.round(x.costPerLot)}/lot` : ""}</span></div>`;
   };
-  el.innerHTML = exp.map((d) => `<div class="ppc-zht-row ${d.sides.some((x) => x.trigger.state === "TRIGGERED") ? "trig" : ""}">
+  const hm2 = (t) => new Date((t + 19800) * 1000).toISOString().slice(11, 16), rp = (v) => (v == null ? "—" : "₹" + (Math.round(v * 10) / 10));
+  const tradeCard = (t) => {
+    const st = t.state === "CLOSED" ? `CLOSED — ${ppcEsc(t.exitWhy || "")} @ ${rp(t.exitPrem)} (${t.exitPrem != null ? Math.round(((t.exitPrem / t.entryPrem) - 1) * 100) + "%" : "—"})` : t.state === "T1" ? "T1 HIT — half booked, stop at entry" : "OPEN";
+    return `<div class="ppc-zht-trade ${t.state === "CLOSED" ? "closed" : "open"}">
+      <div class="ppc-zht-th"><b>TRADE #${t.n}</b> · ${hm2(t.openedAt)} · <b class="${t.side === "CE" ? "ppc-up" : "ppc-dn"}">${t.strike} ${t.side}</b> · <span class="ppc-chip ppc-c-${t.state === "CLOSED" ? "muted" : "bull"}">${st}</span>${t.state !== "CLOSED" && t.livePrem != null ? ` · now <b>${rp(t.livePrem)}</b> <span class="${t.livePnlPct >= 0 ? "ppc-up" : "ppc-dn"}">(${t.livePnlPct >= 0 ? "+" : ""}${t.livePnlPct}%)</span>` : ""}</div>
+      <div class="ppc-zht-tg"><span>Entry <b>${rp(t.entryPrem)}</b><em>index ${Math.round(t.entryIndex)}</em></span><span>T1 (2×) <b class="ppc-up">${rp(t.t1Prem)}</b><em>book half</em></span><span>T2 (3×) <b class="ppc-up">${rp(t.t2Prem)}</b><em>exit rest</em></span><span>Stop <b class="ppc-dn">${rp(t.state === "T1" ? t.entryPrem : t.slPrem)}</b><em>${ppcEsc(t.slIndexRule)}</em></span><span>Time exit <b>15:20</b></span></div>
+      ${t.events.length > 1 ? `<div class="ppc-sub">${t.events.slice(1).map((e) => `${hm2(e.t)} ${ppcEsc(e.what)} @ ${rp(e.prem)}`).join(" · ")}</div>` : ""}</div>`;
+  };
+  el.innerHTML = exp.map((d) => { const trades = d.zhTrades || [], open = trades.find((t) => t.state !== "CLOSED"); return `<div class="ppc-zht-row ${open || d.sides.some((x) => x.trigger.state === "TRIGGERED") ? "trig" : ""}">
       <div class="ppc-zht-h">🎲 <b>${ppcEsc(d.name.replace(" 50", ""))} EXPIRY TODAY</b> · ${ppcEsc(d.window)} · ${d.minutesToClose} min left · market prices ±${ppcNs(d.straddle, 0)} pts</div>
-      <div class="ppc-zht-sides">${d.sides.map((x) => side(d, x)).join("")}</div>
-      ${d.history ? `<div class="ppc-zht-hist">2-yr: ${ppcEsc(d.history.text)}</div>` : ""}</div>`).join("");
+      ${trades.map(tradeCard).join("")}
+      ${open ? `<div class="ppc-zht-lock">🔒 Trade #${open.n} is open — its levels are fixed and no new zero-hero is given on ${ppcEsc(d.name.replace(" 50", ""))} until it hits its stop, target or 15:20.</div>` : `<div class="ppc-zht-sides">${d.sides.map((x) => side(d, x)).join("")}</div>`}
+      ${d.history ? `<div class="ppc-zht-hist">2-yr: ${ppcEsc(d.history.text)}</div>` : ""}</div>`; }).join("");
 }

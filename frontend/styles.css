@@ -7753,3 +7753,10 @@ body.ppc-fullwidth .watchlist, body.ppc-fullwidth #watchlist { display: none !im
 .ppc-zht-s .ppc-sub { display: block; margin-top: 2px; }
 .ppc-zht-hist { font-size: 11px; color: #ef9a9a; margin-top: 4px; }
 @media (max-width: 700px) { .ppc-zht-sides { grid-template-columns: 1fr; } .ppc-k-list[open] { grid-template-columns: 1fr; } }
+.ppc-zht-trade { border-radius: 6px; padding: 6px 8px; margin-bottom: 4px; background: #131722; border-left: 4px solid #ab47bc; }
+.ppc-zht-trade.closed { border-left-color: #5d606b; opacity: .85; }
+.ppc-zht-th { font-size: 13px; margin-bottom: 4px; }
+.ppc-zht-tg { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px 10px; font-size: 12px; }
+.ppc-zht-tg span { display: flex; flex-direction: column; color: #787b86; font-size: 10.5px; } .ppc-zht-tg b { font-size: 14px; color: #d1d4dc; } .ppc-zht-tg b.ppc-up { color: #26a69a; } .ppc-zht-tg b.ppc-dn { color: #ef5350; } .ppc-zht-tg em { font-style: normal; font-size: 10px; color: #9598a1; }
+.ppc-zht-lock { font-size: 12px; color: #ce93d8; padding: 2px 4px; }
+@media (max-width: 700px) { .ppc-zht-tg { grid-template-columns: 1fr 1fr; } }
