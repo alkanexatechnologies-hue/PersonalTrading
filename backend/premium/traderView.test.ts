@@ -128,3 +128,14 @@ test("plan levels are ranked against the anchor, so a live-price move never resh
   const r2 = anchoredPlans({ levels: levelsAt(145), spot: 145, prevClose: 130, todays15: [k(0, 132)], atr: 10, chain: [], expiry: null, events: [], levelsAt });
   assert.equal(r1.bull!.entry, r2.bull!.entry);   // live price 130 vs 145 — same plan
 });
+test("significant lines: at most one respected (unbroken) + one recently broken per side", async () => {
+  const { significantLines } = await import("./traderView");
+  const p = [100, 104, 110, 104, 100, 98, 101, 106, 101, 98, 96, 99, 103, 100, 97, 98, 99, 101, 100, 99];
+  const c = p.map((v, i) => ({ time: 1_790_000_000 + i * 900, open: v, high: v + 0.5, low: v - 0.5, close: v, volume: 0 }));
+  const out = significantLines(c as any, 2, 2, 0);
+  for (const kind of ["SELLER", "BUYER"]) {
+    const mine = out.filter((l) => l.kind === kind);
+    assert.ok(mine.length <= 2); assert.ok(mine.filter((l) => l.brokeAt == null).length <= 1);
+  }
+  assert.ok(out.every((l) => typeof l.touches === "number"));
+});

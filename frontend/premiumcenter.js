@@ -69,12 +69,15 @@ function ppcShell() {
     <div class="ppc-status" id="ppc-status">loading…</div>
   </div>
   <div id="ppc-quote" class="ppc-quote"></div>
-  <div id="ppc-zh-today" class="ppc-zht"></div>
-  <div id="ppc-radar" class="ppc-radar"></div>
-  <div id="ppc-eye" class="ppc-eye"></div>
-  <div id="ppc-btsd" class="ppc-btsd"></div>
+  <div class="ppc-sec">① Decision now</div>
   <div id="ppc-coach" class="ppc-coach"></div>
-  <div id="ppc-trend" class="ppc-trendstrip"></div>
+  <div id="ppc-radar" class="ppc-radar"></div>
+  <div class="ppc-sec">② Trade plan <span id="ppc-planfor" class="ppc-sub"></span></div>
+  <div class="ppc-plans" id="ppc-plans"></div>
+  <div class="ppc-sec">③ My trades &amp; zero-hero</div>
+  <div id="ppc-btsd" class="ppc-btsd"></div>
+  <div id="ppc-zh-today" class="ppc-zht"></div>
+  <div class="ppc-sec">④ Chart &amp; levels</div>
   <div class="ppc-main">
     <div class="ppc-tv">
       <div class="ppc-tvbar">
@@ -88,7 +91,8 @@ function ppcShell() {
     </div>
     <div class="ppc-side"><div class="ppc-side-h">Level ladder <span class="ppc-sub">★ confluence · risk = for a buyer trading the break</span></div><div class="ppc-rk-key"><i class="ppc-rk ppc-rk-low">LOW RISK</i><i class="ppc-rk ppc-rk-med">MED RISK</i><i class="ppc-rk ppc-rk-high">HIGH RISK</i><i class="ppc-rk ppc-rk-far">FAR</i> <span class="ppc-sub">hover a level for why</span></div><div id="ppc-ladder"></div></div>
   </div>
-  <div class="ppc-plans" id="ppc-plans"></div>
+  <div class="ppc-sec">⑤ Context</div>
+  <div class="ppc-ctx"><div id="ppc-eye" class="ppc-eye"></div><div id="ppc-trend" class="ppc-trendstrip"></div></div>
   <details class="ppc-more" id="ppc-more"><summary>More details — next-session map · past breaks · arbiter &amp; risk gates · CE/PE cards · premium charts · strike ranking · zero-hero detail</summary>
   <div class="ppc-row2"><div class="ppc-card" id="ppc-tomorrow"></div><div class="ppc-card" id="ppc-history"></div></div>
   <details class="ppc-card ppc-arb"><summary><b>Arbiter &amp; risk gates</b> <span class="ppc-sub">final authority — the screen never overrides it</span> <span id="ppc-arb-sum"></span></summary><div id="ppc-master" class="ppc-master"></div></details>
@@ -350,7 +354,7 @@ function ppcRenderTV(layerToggle) {
     const a = ch.addLineSeries({ color: tl.broken ? col + "88" : col, lineWidth: tl.broken ? 1 : 2, lineStyle: tl.broken ? 2 : 0, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
     a.setData([{ time: ppcT(tl.p1.time), value: tl.p1.price }, { time: ppcT(tl.end.time), value: tl.end.price }]);
     if (!tl.broken && tl.projection?.length) {
-      const pr = ch.addLineSeries({ color: col, lineWidth: 1, lineStyle: 1, priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false, title: `${tl.kind === "SELLER" ? "Seller" : "Buyer"} TL next` });
+      const pr = ch.addLineSeries({ color: col, lineWidth: 1, lineStyle: 1, priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false, title: `${tl.kind === "SELLER" ? "Seller" : "Buyer"} TL${tl.touches ? ` · ${tl.touches + 2} touches` : ""}` });
       pr.setData([{ time: ppcT(tl.end.time), value: tl.end.price }, ...tl.projection.map((p) => ({ time: ppcT(p.time), value: p.value }))]);
     }
   }
@@ -458,6 +462,7 @@ function ppcPlanCard(p, side) {
 }
 function ppcRenderPlans() {
   const T = PPC.d.trader, el = ppcEl("ppc-plans"); if (!el) return;
+  const pf = ppcEl("ppc-planfor"); if (pf && T?.planFor) { const today = new Date(Date.now() + 19800000).toISOString().slice(0, 10); pf.innerHTML = T.planFor === today ? "for today" : `<b class="ppc-wait">for the next session · ${ppcEsc(T.planFor)}</b>`; }
   if (!T || T.error) { el.innerHTML = ""; return; }
   const nt = T.plans?.noTrade;
   el.innerHTML = ppcPlanCard(T.plans?.bull, "CE")

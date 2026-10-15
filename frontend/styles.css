@@ -7772,3 +7772,13 @@ body.ppc-fullwidth .watchlist, body.ppc-fullwidth #watchlist { display: none !im
 .ppc-bt-f label { display: flex; flex-direction: column; font-size: 10.5px; color: #787b86; } .ppc-bt-f input { background: #1a2130; color: #e6ebf2; border: 1px solid #2a2e39; border-radius: 6px; padding: 6px; font-size: 15px; min-height: 36px; }
 .ppc-bt-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 @media (max-width: 700px) { .ppc-bt-form .ppc-bt-f { grid-template-columns: 1fr 1fr; } }
+/* ---- Premium Prediction: priority order, compact scroll layout ---- */
+.ppc-sec { font-size: 11px; font-weight: 800; letter-spacing: .8px; color: #82a8ff; text-transform: uppercase; margin: 8px 2px 3px; }
+.ppc-sec .ppc-sub { text-transform: none; letter-spacing: 0; font-weight: 600; }
+.ppc-coach { margin-bottom: 4px; } .ppc-radar { margin-bottom: 4px; } .ppc-plans { margin-bottom: 4px; }
+.ppc-rd-tiles { gap: 6px; } .ppc-rt-bar { height: 4px; } .ppc-rt-next { font-size: 12px; }
+.ppc-btsd { margin-bottom: 4px; } .ppc-zht { margin-bottom: 4px; }
+.ppc-ctx { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 6px; align-items: start; margin-bottom: 6px; }
+.ppc-ctx .ppc-eye { margin-bottom: 0; } .ppc-ctx .ppc-trendstrip { margin-bottom: 0; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .ppc-ctx { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .ppc-sec { margin-top: 6px; } .ppc-ctx .ppc-trendstrip { grid-template-columns: 1fr 1fr; } }

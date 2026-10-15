@@ -337,3 +337,28 @@ export function anchoredPlans(o: { levels: Level[]; spot: number; prevClose: num
   }
   return { ...pb, anchor: { ref: r2(ref), since, why, rolls } };
 }
+
+// ---------------------------------------------------------------- the trendlines an experienced trader keeps on the chart
+/**
+ * Of all lines through confirmed swings, keep per side: the most RESPECTED line still unbroken (most touches — candles that
+ * came within 0.15·ATR of it without closing through — then the longest span) and the most recent line that broke (the
+ * breakout that just happened). Everything else is noise and is not drawn. Closed bars only.
+ */
+export function significantLines(c: Candle[], k: number, atr: number, firstShown: number) {
+  const all = allLines(c, k), n = c.length, out: (Line & { touches: number; brokeAt: number | null })[] = [];
+  for (const kind of ["SELLER", "BUYER"] as const) {
+    const scored = all.filter((l) => l.kind === kind && l.p2.index >= firstShown - 40).map((l) => {
+      let touches = 0, brokeAt: number | null = null;
+      for (let i = l.from + 1; i < n; i++) {
+        const v = lineAt(l, i);
+        if (kind === "SELLER" ? c[i].close > v : c[i].close < v) { brokeAt = i; break; }
+        if (Math.abs((kind === "SELLER" ? c[i].high : c[i].low) - v) <= 0.15 * atr) touches++;
+      }
+      return { ...l, touches, brokeAt };
+    });
+    const active = scored.filter((l) => l.brokeAt == null).sort((a, b) => b.touches - a.touches || (b.p2.index - b.p1.index) - (a.p2.index - a.p1.index))[0];
+    const broken = scored.filter((l) => l.brokeAt != null && l.brokeAt >= n - 30).sort((a, b) => b.brokeAt! - a.brokeAt!)[0];
+    if (active) out.push(active); if (broken) out.push(broken);
+  }
+  return out;
+}

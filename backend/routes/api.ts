@@ -7798,7 +7798,7 @@ async function premiumCenterPayload(query: Record<string, any>): Promise<any> {
         try {
           // ---- experienced-trader view (pure module): trend by timeframe, past breaks, ladder, plans, coach, tomorrow ----
           const drop = (cs: any[], sec: number) => (cs.length && cs[cs.length - 1].time + sec > nowSec ? cs.slice(0, -1) : cs);
-          const c15All: any[] = interval === "15m" ? candles : ((c15 as any[]) || []), closed15 = drop(c15All, 900), daily: any[] = (dailyAll as any[]) || [], h1: any[] = drop((h1All as any[]) || [], 3600);
+          const c15All: any[] = interval === "15m" ? candles : ((c15 as any[]) || []), closed15 = drop(c15All, 900), daily: any[] = [...((dailyAll as any[]) || [])], h1: any[] = drop((h1All as any[]) || [], 3600);
           const closed5 = interval === "5m" ? closed : null;
           const trends = [TV.tfTrend("Daily", daily, 2), TV.tfTrend("1H", h1, 2), TV.tfTrend("15m", closed15, 3), ...(closed5 ? [TV.tfTrend("5m", closed5, 3)] : [])];
           const atr15 = last(TV.atrS(closed15)) ?? atrNow ?? 0;
@@ -7817,7 +7817,15 @@ async function premiumCenterPayload(query: Record<string, any>): Promise<any> {
           const nextWeekday = (d: string) => { let t = Date.parse(d + "T00:00:00Z") + 86400_000; while ([0, 6].includes(new Date(t).getUTCDay())) t += 86400_000; return new Date(t).toISOString().slice(0, 10); };
           const sessionOver = lastDay < calToday || istMin > 930;
           const sessionDay = session === "OPEN" ? calToday : !sessionOver ? (lastDay || calToday) : (lastDay < calToday && ![0, 6].includes(wd) && istMin < 555 ? calToday : nextWeekday(lastDay || calToday));
+          // After the close, Dhan's daily candles may not hold the finished session yet: build it from the intraday bars, so
+          // tomorrow's "previous day" (PDH/PDL/PDC, pivots, anchor) is TODAY, not the day before.
+          if (lastDay && lastDay < sessionDay && !daily.some((x: any) => dayOfT(x.time) === lastDay)) {
+            const lb = closed.filter((c: any) => dayOfT(c.time) === lastDay);
+            if (lb.length) daily.push({ time: lb[0].time, open: lb[0].open, high: Math.max(...lb.map((c: any) => c.high)), low: Math.min(...lb.map((c: any) => c.low)), close: lb[lb.length - 1].close, volume: 0 });
+          }
           const todayBars = closed.filter((c: any) => dayOfT(c.time) === sessionDay);
+          const finished = lastDay && lastDay < sessionDay ? closed.filter((c: any) => dayOfT(c.time) === lastDay) : [];   // the session that just ended
+          const justEnded = finished.length ? { high: Math.max(...finished.map((c: any) => c.high)), low: Math.min(...finished.map((c: any) => c.low)) } : null;
           const today = todayBars.length ? { high: session === "OPEN" ? (quote as any)?.dayHigh ?? Math.max(...todayBars.map((c: any) => c.high)) : Math.max(...todayBars.map((c: any) => c.high)), low: session === "OPEN" ? (quote as any)?.dayLow ?? Math.min(...todayBars.map((c: any) => c.low)) : Math.min(...todayBars.map((c: any) => c.low)) } : { high: null, low: null };
           const levels = spot != null ? TV.ladder({ daily, sessionDay, today, lines: lineLv, chain: strikes, spot, atr: atr15 }) : [];
           // break history on the chart's own timeframe (what the trader sees), outcome horizon ≈ 4 hours
@@ -7834,15 +7842,15 @@ async function premiumCenterPayload(query: Record<string, any>): Promise<any> {
           // lines to draw on the chart: recent ones on the chart's timeframe, each to its break (or now) + a projection over the next session
           const iv = intervalSec, all = TV.allLines(closed as any, k), firstShown = Math.max(0, closed.length - 160);
           const future: number[] = []; { let t = closed.length ? closed[closed.length - 1].time : nowSec; while (future.length < (iv === 900 ? 26 : 76)) { t += iv; const m = Math.floor(((t + 19800) % 86400) / 60), wd = new Date((t + 19800) * 1000).getUTCDay(); if (wd === 0 || wd === 6 || m < 555 || m > 925) continue; future.push(t); } }
-          const draw = (["SELLER", "BUYER"] as const).flatMap((kind) => all.filter((l) => l.kind === kind && l.p2.index >= firstShown).slice(-3)).map((l) => {
-            let brokeAt: number | null = null;
-            for (let i = l.from + 1; i < closed.length; i++) if (l.kind === "SELLER" ? closed[i].close > TV.lineAt(l, i) : closed[i].close < TV.lineAt(l, i)) { brokeAt = i; break; }
+          void all;
+          const draw = TV.significantLines(closed as any, k, atrNow ?? atr15, firstShown).map((l) => {
+            const brokeAt = l.brokeAt;
             const end = brokeAt ?? closed.length - 1;
-            return { kind: l.kind, p1: { time: l.p1.time, price: l.p1.price }, p2: { time: l.p2.time, price: l.p2.price }, end: { time: closed[end].time, price: Math.round(TV.lineAt(l, end) * 100) / 100 },
+            return { kind: l.kind, touches: l.touches, p1: { time: l.p1.time, price: l.p1.price }, p2: { time: l.p2.time, price: l.p2.price }, end: { time: closed[end].time, price: Math.round(TV.lineAt(l, end) * 100) / 100 },
               broken: brokeAt != null, brokeAt: brokeAt != null ? closed[brokeAt].time : null,
               projection: brokeAt == null ? future.map((t, j) => ({ time: t, value: Math.round(TV.lineAt(l, closed.length + j) * 100) / 100 })) : [] };
           });
-          const tm = TV.tomorrowMap({ bull: pb.bull, bear: pb.bear, lines: lineLv.map((x) => ({ label: x.label, next: x.next })), todayHigh: today.high, todayLow: today.low, close: spot ?? 0, atr: atr15 });
+          const tm = TV.tomorrowMap({ bull: pb.bull, bear: pb.bear, lines: lineLv.map((x) => ({ label: x.label, next: x.next })), todayHigh: today.high ?? justEnded?.high ?? null, todayLow: today.low ?? justEnded?.low ?? null, close: spot ?? 0, atr: atr15 });
           const risks = spot != null ? TV.levelRisks({ levels, spot, atr: atr15, dailyAtr: last(TV.atrS(daily)) ?? null, closed: closed15, trends, events }) : [];
           const riskOf = (px: number) => risks.find((r) => Math.abs(r.price - px) < 0.01) || null;
           for (const p of [pb.bull, pb.bear]) if (p) (p as any).triggerRisk = riskOf(p.trigger);
