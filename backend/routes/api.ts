@@ -7630,6 +7630,7 @@ router.get("/backtest/option/strikes", async (req: Request, res: Response) => {
 // bid/ask), real Dhan option-premium OHLC candles (same as Option Terminal), the breakout engine's levels, the arbiter's
 // decision and the existing risk state (cooldown, open trade, time window). Probabilities are NOT shown until validated.
 const PC_VERSION = "premium-center/v1";
+const _pcLastChain = new Map<string, { at: number; v: any }>();
 async function pcOptionCandles(underlying: string, side: "CE" | "PE", strike: number, expiry: string, intervalMin: number) {
   return cached(`pc-opt:${underlying}:${side}:${strike}:${expiry}:${intervalMin}`, 20_000, async () => {
     const o = await lookupDhanOption(underlying, side, strike, expiry);
@@ -7653,7 +7654,13 @@ router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Reque
       interval === "5m" ? getCandlesCached(def.symbol, "15m" as Interval).catch(() => [] as any[]) : Promise.resolve(null),
       getDailyCached(def.symbol, 120).catch(() => [] as any[]),
       getCandlesCached(def.symbol, "60m" as Interval).catch(() => [] as any[]),
-      cached(`pc-chain:${def.symbol}:${off}`, 30_000, () => dhanChainForExpiry(def, off)).catch((e: any) => ({ available: false, message: e?.message })),
+      cached(`pc-chain:${def.symbol}:${off}`, 30_000, () => dhanChainForExpiry(def, off)).catch((e: any) => ({ available: false, message: e?.message })).then((c: any) => {
+        // a refresh that fails (usually a Dhan rate limit) keeps the last good chain for up to 5 minutes, marked stale
+        const k = `${def.symbol}:${off}`;
+        if (c?.available) { _pcLastChain.set(k, { at: Date.now(), v: c }); return c; }
+        const lg = _pcLastChain.get(k);
+        return lg && Date.now() - lg.at < 5 * 60_000 ? { ...lg.v, staleChain: true, staleAgeSec: Math.round((Date.now() - lg.at) / 1000) } : c;
+      }),
       cached(`quote:${def.symbol}`, TTL_QUOTE, () => getProvider().getQuote(def.symbol)).catch(() => null),
     ]);
     const candles: any[] = (candlesAll as any[]) || [];
@@ -7767,7 +7774,7 @@ router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Reque
         const chg = spot != null && prevClose ? Math.round((spot - prevClose) * 100) / 100 : null;
         return { price: spot, change: chg, changePct: chg != null && prevClose ? Math.round((chg / prevClose) * 10000) / 100 : null, open: first?.open ?? null, high: q?.dayHigh ?? null, low: q?.dayLow ?? null, prevClose, sessionDay, quoteDay, preOpen: session === "PRE-OPEN" };
       })(),
-      expiries: ch?.expiries || [], expiry, expiryOffset: off, atm, step, moneyness: money,
+      expiries: ch?.expiries || [], expiry, expiryOffset: off, atm, step, moneyness: money, chainStale: !!ch?.staleChain, chainAgeSec: ch?.staleAgeSec ?? null,
       chart: { candles: candles.slice(-160), ema9: e9.slice(-160), ema21: e21.slice(-160), vwap: vw.slice(-160), bbUpper: bb.upper.slice(-160), bbLower: bb.lower.slice(-160), formingTime: forming?.time ?? null },
       structure: { swings, bos, trendlines: tl, resistance: levels[levels.length - 1]?.resistance ?? null, support: levels[levels.length - 1]?.support ?? null, atr: atrNow, breakBuffer: Math.round(buf * 100) / 100, context15: ctx15 },
       breakout: brk.bull, breakdown: brk.bear, ce, pe,
@@ -7810,7 +7817,7 @@ router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Reque
           // FIXED session plan: anchored to the previous close, rolled only when a plan plays out on a closed 15-min candle
           const prevCloseForPlan = (() => { const pd = [...daily].reverse().find((x: any) => dayOfT(x.time) < sessionDay); return pd?.close ?? spot; })();
           const todays15 = closed15.filter((c: any) => dayOfT(c.time) === sessionDay);
-          const pb: any = spot != null ? TV.anchoredPlans({ levels, spot, prevClose: prevCloseForPlan, todays15, atr: atr15, chain: strikes, expiry, events }) : { bull: null, bear: null, noTrade: null, anchor: null };
+          const pb: any = spot != null ? TV.anchoredPlans({ levels, spot, prevClose: prevCloseForPlan, todays15, atr: atr15, chain: strikes, expiry, events, levelsAt: (ref: number) => TV.ladder({ daily, sessionDay, today, lines: lineLv, chain: strikes, spot: ref, atr: atr15 }) }) : { bull: null, bear: null, noTrade: null, anchor: null };
           const arbFresh = !!(arb && arb.candleTime && nowSec - arb.candleTime <= 15 * 60);
           const cz = TV.coach({ session, istMin, dataStatus, spot: spot ?? 0, atr: atr15, closed15, bull: pb.bull, bear: pb.bear, trends,
             arbiter: arb ? { finalAction: arb.finalAction, reason: arb.reason, fresh: arbFresh } : null,
@@ -7837,7 +7844,8 @@ router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Reque
               // the forming 15-min candle (live only) — shown and counted down, never used as a confirmation
               const f15 = session === "OPEN" && c15All.length && c15All[c15All.length - 1].time + 900 > nowSec ? c15All[c15All.length - 1] : null;
               const liveF = f15 && spot != null ? { ...f15, close: spot, high: Math.max(f15.high, spot), low: Math.min(f15.low, spot) } : f15;
-              const todays = closed15.filter((c: any) => dayOfT(c.time) === sessionDay);   // yesterday's candles never trigger today's plan
+              const since = pb.anchor?.since ?? null;   // after a roll, only candles AFTER it may trigger / fail the new plan
+              const todays = closed15.filter((c: any) => dayOfT(c.time) === sessionDay && (since == null || c.time > since));   // yesterday's candles never trigger today's plan
               const priceOnly = !liveF && spot != null ? { time: nowSec, open: spot, high: spot, low: spot, close: spot, volume: 0 } : null;
               const opp = (p: any) => { const o = TV.opportunity(p, todays, liveF ?? priceOnly, atr15); if (!liveF && o.state === "ARMED") Object.assign(o, { state: "APPROACHING", text: `${session === "PRE-OPEN" ? "pre-open price" : "price"} is beyond the start — nothing counts until a 15-min candle closes after 09:15`, next: "wait for the first 15-min close" }); if (!liveF) o.closesAt = null; return o; };
               return { bull: opp(pb.bull), bear: opp(pb.bear), forming15: liveF, closesAt: liveF ? liveF.time + 900 : null, serverTime: nowSec, preOpen: session === "PRE-OPEN" };

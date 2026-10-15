@@ -119,3 +119,12 @@ test("session plan stays fixed while price moves; rolls only after Target 1 or a
   r = anchoredPlans({ levels: lv, spot: 151, prevClose: 130, todays15: [k(0, 143), k(1, 151)], atr: 10, chain: [], expiry: null, events: [] });
   assert.equal(r.anchor.rolls.length, 1); assert.match(r.anchor.why, /Target 1/); assert.equal(r.bull!.trigger, 160);
 });
+test("plan levels are ranked against the anchor, so a live-price move never reshuffles the plan", async () => {
+  const { anchoredPlans } = await import("./traderView");
+  const k = (i: number, c: number) => ({ time: 1_790_000_000 + i * 900, open: c, high: c + 1, low: c - 1, close: c, volume: 0 });
+  // a wall whose side flips with the price it is ranked against: above the ref it is resistance, below it support
+  const levelsAt = (ref: number): Level[] => [{ price: 150, label: "R1", kind: "PIVOT" }, { price: 141, label: ref < 141 ? "call wall" : "put wall", kind: "OI" }, { price: 120, label: "PDL", kind: "PREV DAY" }];
+  const r1 = anchoredPlans({ levels: levelsAt(130), spot: 130, prevClose: 130, todays15: [k(0, 132)], atr: 10, chain: [], expiry: null, events: [], levelsAt });
+  const r2 = anchoredPlans({ levels: levelsAt(145), spot: 145, prevClose: 130, todays15: [k(0, 132)], atr: 10, chain: [], expiry: null, events: [], levelsAt });
+  assert.equal(r1.bull!.entry, r2.bull!.entry);   // live price 130 vs 145 — same plan
+});

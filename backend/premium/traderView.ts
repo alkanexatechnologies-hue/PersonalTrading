@@ -317,11 +317,12 @@ export function opportunity(p: Plan | null, closed15: Candle[], forming15: Candl
  * when a plan has PLAYED OUT on a closed 15-min candle — triggered and then reached Target 1, or triggered and closed back
  * inside the level (failed). Re-anchored to that candle's close. Closed candles only, so it never repaints.
  */
-export function anchoredPlans(o: { levels: Level[]; spot: number; prevClose: number; todays15: Candle[]; atr: number; chain: OiStrike[]; expiry: string | null; events: BreakEvent[]; nowMs?: number }) {
+export function anchoredPlans(o: { levels: Level[]; spot: number; prevClose: number; todays15: Candle[]; atr: number; chain: OiStrike[]; expiry: string | null; events: BreakEvent[]; nowMs?: number; levelsAt?: (ref: number) => Level[] }) {
   let ref = o.prevClose, since: number | null = null, why = "morning plan (anchored to the previous close)";
-  // today's own high/low keep changing as the day trades — shown on the chart, but they never re-shape the fixed plan
-  const planLevels = o.levels.filter((x) => x.kind !== "TODAY");
-  const mk = () => plans({ levels: planLevels, spot: o.spot, ref, atr: o.atr, chain: o.chain, expiry: o.expiry, events: o.events, nowMs: o.nowMs });
+  // today's own high/low keep changing as the day trades — shown on the chart, but they never re-shape the fixed plan.
+  // OI walls are ranked against the plan's ANCHOR (not the live price), so a wall never reshuffles the plan as price moves.
+  const planLevels = () => (o.levelsAt ? o.levelsAt(ref) : o.levels).filter((x) => x.kind !== "TODAY");
+  const mk = () => plans({ levels: planLevels(), spot: o.spot, ref, atr: o.atr, chain: o.chain, expiry: o.expiry, events: o.events, nowMs: o.nowMs });
   let pb = mk(), trig = { CE: false, PE: false };
   const rolls: { time: number; ref: number; why: string }[] = [];
   for (const c of o.todays15) {
