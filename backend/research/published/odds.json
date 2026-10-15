@@ -1,0 +1,466 @@
+{
+ "generated": "2026-10-15T13:39:24.503Z",
+ "early": {
+  "NIFTY": {
+   "DEV": {
+    "n": 164,
+    "winPct": 41.5,
+    "avgNet": -4.61,
+    "totalNet": -755.9,
+    "pf": 0.55,
+    "maxDD": -763.8,
+    "exits": {
+     "stop": 64,
+     "target": 62,
+     "60 min": 37,
+     "15:15": 1
+    },
+    "gapFillPct": 0
+   },
+   "VALIDATION": {
+    "n": 89,
+    "winPct": 42.7,
+    "avgNet": -2.6,
+    "totalNet": -231.2,
+    "pf": 0.74,
+    "maxDD": -275.2,
+    "exits": {
+     "target": 37,
+     "15:15": 1,
+     "60 min": 21,
+     "stop": 30
+    },
+    "gapFillPct": 0
+   }
+  },
+  "BANKNIFTY": {
+   "DEV": {
+    "n": 154,
+    "winPct": 50,
+    "avgNet": -2.33,
+    "totalNet": -358.4,
+    "pf": 0.9,
+    "maxDD": -584.6,
+    "exits": {
+     "60 min": 30,
+     "target": 66,
+     "stop": 57,
+     "15:15": 1
+    },
+    "gapFillPct": 0
+   },
+   "VALIDATION": {
+    "n": 89,
+    "winPct": 48.3,
+    "avgNet": 1.98,
+    "totalNet": 176.6,
+    "pf": 1.09,
+    "maxDD": -466.1,
+    "exits": {
+     "stop": 31,
+     "60 min": 16,
+     "target": 42
+    },
+    "gapFillPct": 0
+   }
+  },
+  "FINNIFTY": {
+   "DEV": {
+    "n": 131,
+    "winPct": 48.1,
+    "avgNet": -0.75,
+    "totalNet": -98.2,
+    "pf": 0.93,
+    "maxDD": -510.7,
+    "exits": {
+     "target": 59,
+     "stop": 43,
+     "60 min": 28,
+     "15:15": 1
+    },
+    "gapFillPct": 0.8
+   },
+   "VALIDATION": {
+    "n": 66,
+    "winPct": 42.4,
+    "avgNet": -0.85,
+    "totalNet": -56.2,
+    "pf": 0.91,
+    "maxDD": -175.9,
+    "exits": {
+     "target": 29,
+     "stop": 28,
+     "60 min": 9
+    },
+    "gapFillPct": 1.5
+   }
+  },
+  "MIDCPNIFTY": {
+   "DEV": {
+    "n": 161,
+    "winPct": 42.9,
+    "avgNet": -4.9,
+    "totalNet": -788.6,
+    "pf": 0.48,
+    "maxDD": -788.6,
+    "exits": {
+     "stop": 74,
+     "60 min": 27,
+     "target": 59,
+     "15:15": 1
+    },
+    "gapFillPct": 2.5
+   },
+   "VALIDATION": {
+    "n": 76,
+    "winPct": 36.8,
+    "avgNet": -7.75,
+    "totalNet": -588.7,
+    "pf": 0.32,
+    "maxDD": -588.7,
+    "exits": {
+     "stop": 37,
+     "60 min": 12,
+     "target": 27
+    },
+    "gapFillPct": 1.3
+   }
+  },
+  "SENSEX": {
+   "DEV": {
+    "n": 164,
+    "winPct": 46.3,
+    "avgNet": -6.65,
+    "totalNet": -1090.5,
+    "pf": 0.76,
+    "maxDD": -1365.1,
+    "exits": {
+     "stop": 63,
+     "60 min": 32,
+     "target": 66,
+     "15:15": 3
+    },
+    "gapFillPct": 0
+   },
+   "VALIDATION": {
+    "n": 87,
+    "winPct": 51.7,
+    "avgNet": -9.21,
+    "totalNet": -801.7,
+    "pf": 0.7,
+    "maxDD": -983,
+    "exits": {
+     "target": 33,
+     "60 min": 20,
+     "15:15": 1,
+     "stop": 33
+    },
+    "gapFillPct": 0
+   }
+  }
+ },
+ "zeroHero": {
+  "NIFTY": {
+   "index": "NIFTY",
+   "calendarAgreement": 96,
+   "expiryDays": 67,
+   "variants": {
+    "A_HOLD": {
+     "DEV": {
+      "n": 30,
+      "hit2xPct": 0,
+      "winPct": 3.3,
+      "avgNet": -10.04,
+      "totalNet": -301,
+      "best": 5.74,
+      "worst": -70.56,
+      "longestLosingStreak": 28,
+      "avgEntry": 11.08
+     },
+     "VALIDATION": {
+      "n": 24,
+      "hit2xPct": 8.3,
+      "winPct": 12.5,
+      "avgNet": -3.75,
+      "totalNet": -90,
+      "best": 64.37,
+      "worst": -29.24,
+      "longestLosingStreak": 9,
+      "avgEntry": 9.71
+     }
+    },
+    "A_SCALE": {
+     "DEV": {
+      "n": 30,
+      "hit2xPct": 0,
+      "winPct": 13.3,
+      "avgNet": -7.48,
+      "totalNet": -224,
+      "best": 21.37,
+      "worst": -70.56,
+      "longestLosingStreak": 17,
+      "avgEntry": 11.08
+     },
+     "VALIDATION": {
+      "n": 24,
+      "hit2xPct": 8.3,
+      "winPct": 16.7,
+      "avgNet": -4.74,
+      "totalNet": -114,
+      "best": 36.71,
+      "worst": -29.24,
+      "longestLosingStreak": 7,
+      "avgEntry": 9.71
+     }
+    },
+    "A_STOP50": {
+     "DEV": {
+      "n": 30,
+      "hit2xPct": 0,
+      "winPct": 3.3,
+      "avgNet": -6.93,
+      "totalNet": -208,
+      "best": 5.74,
+      "worst": -39.7,
+      "longestLosingStreak": 28,
+      "avgEntry": 11.08
+     },
+     "VALIDATION": {
+      "n": 24,
+      "hit2xPct": 4.2,
+      "winPct": 4.2,
+      "avgNet": -6.01,
+      "totalNet": -144,
+      "best": 17.74,
+      "worst": -29.24,
+      "longestLosingStreak": 21,
+      "avgEntry": 9.71
+     }
+    },
+    "B_HOLD": {
+     "DEV": {
+      "n": 13,
+      "hit2xPct": 0,
+      "winPct": 0,
+      "avgNet": -11.13,
+      "totalNet": -145,
+      "best": -2.08,
+      "worst": -31.29,
+      "longestLosingStreak": 13,
+      "avgEntry": 11.73
+     },
+     "VALIDATION": {
+      "n": 15,
+      "hit2xPct": 0,
+      "winPct": 0,
+      "avgNet": -5.88,
+      "totalNet": -88,
+      "best": -2.18,
+      "worst": -18.29,
+      "longestLosingStreak": 15,
+      "avgEntry": 8.54
+     }
+    },
+    "B_SCALE": {
+     "DEV": {
+      "n": 13,
+      "hit2xPct": 0,
+      "winPct": 15.4,
+      "avgNet": -5.89,
+      "totalNet": -77,
+      "best": 21.37,
+      "worst": -31.29,
+      "longestLosingStreak": 7,
+      "avgEntry": 11.73
+     },
+     "VALIDATION": {
+      "n": 15,
+      "hit2xPct": 0,
+      "winPct": 0,
+      "avgNet": -5.88,
+      "totalNet": -88,
+      "best": -2.18,
+      "worst": -18.29,
+      "longestLosingStreak": 15,
+      "avgEntry": 8.54
+     }
+    },
+    "B_STOP50": {
+     "DEV": {
+      "n": 13,
+      "hit2xPct": 0,
+      "winPct": 0,
+      "avgNet": -8.43,
+      "totalNet": -110,
+      "best": -1.88,
+      "worst": -18.51,
+      "longestLosingStreak": 13,
+      "avgEntry": 11.73
+     },
+     "VALIDATION": {
+      "n": 15,
+      "hit2xPct": 0,
+      "winPct": 0,
+      "avgNet": -5.23,
+      "totalNet": -79,
+      "best": -1.88,
+      "worst": -18.29,
+      "longestLosingStreak": 15,
+      "avgEntry": 8.54
+     }
+    }
+   }
+  },
+  "SENSEX": {
+   "index": "SENSEX",
+   "calendarAgreement": null,
+   "expiryDays": 42,
+   "variants": {
+    "A_HOLD": {
+     "DEV": {
+      "n": 27,
+      "hit2xPct": 11.1,
+      "winPct": 11.1,
+      "avgNet": -38.79,
+      "totalNet": -1047,
+      "best": 125.42,
+      "worst": -163.43,
+      "longestLosingStreak": 17,
+      "avgEntry": 55.3
+     },
+     "VALIDATION": {
+      "n": 13,
+      "hit2xPct": 0,
+      "winPct": 0,
+      "avgNet": -45.29,
+      "totalNet": -589,
+      "best": -9.51,
+      "worst": -114.91,
+      "longestLosingStreak": 13,
+      "avgEntry": 42.28
+     }
+    },
+    "A_SCALE": {
+     "DEV": {
+      "n": 27,
+      "hit2xPct": 14.8,
+      "winPct": 18.5,
+      "avgNet": -37.89,
+      "totalNet": -1023,
+      "best": 107.55,
+      "worst": -163.43,
+      "longestLosingStreak": 12,
+      "avgEntry": 55.3
+     },
+     "VALIDATION": {
+      "n": 13,
+      "hit2xPct": 0,
+      "winPct": 0,
+      "avgNet": -45.29,
+      "totalNet": -589,
+      "best": -9.51,
+      "worst": -114.91,
+      "longestLosingStreak": 13,
+      "avgEntry": 42.28
+     }
+    },
+    "A_STOP50": {
+     "DEV": {
+      "n": 27,
+      "hit2xPct": 3.7,
+      "winPct": 3.7,
+      "avgNet": -36.41,
+      "totalNet": -983,
+      "best": 12.05,
+      "worst": -163.43,
+      "longestLosingStreak": 22,
+      "avgEntry": 55.3
+     },
+     "VALIDATION": {
+      "n": 13,
+      "hit2xPct": 0,
+      "winPct": 0,
+      "avgNet": -26.68,
+      "totalNet": -347,
+      "best": -6.87,
+      "worst": -63.63,
+      "longestLosingStreak": 13,
+      "avgEntry": 42.28
+     }
+    },
+    "B_HOLD": {
+     "DEV": {
+      "n": 3,
+      "hit2xPct": 0,
+      "winPct": 0,
+      "avgNet": -83.41,
+      "totalNet": -250,
+      "best": -8.31,
+      "worst": -148.32,
+      "longestLosingStreak": 3,
+      "avgEntry": 106.73
+     },
+     "VALIDATION": {
+      "n": 2,
+      "hit2xPct": 0,
+      "winPct": 0,
+      "avgNet": -68.61,
+      "totalNet": -137,
+      "best": -11.06,
+      "worst": -126.16,
+      "longestLosingStreak": 2,
+      "avgEntry": 65.38
+     }
+    },
+    "B_SCALE": {
+     "DEV": {
+      "n": 3,
+      "hit2xPct": 0,
+      "winPct": 0,
+      "avgNet": -83.41,
+      "totalNet": -250,
+      "best": -8.31,
+      "worst": -148.32,
+      "longestLosingStreak": 3,
+      "avgEntry": 106.73
+     },
+     "VALIDATION": {
+      "n": 2,
+      "hit2xPct": 0,
+      "winPct": 50,
+      "avgNet": -62.66,
+      "totalNet": -125,
+      "best": 0.84,
+      "worst": -126.16,
+      "longestLosingStreak": 1,
+      "avgEntry": 65.38
+     }
+    },
+    "B_STOP50": {
+     "DEV": {
+      "n": 3,
+      "hit2xPct": 0,
+      "winPct": 0,
+      "avgNet": -61.12,
+      "totalNet": -183,
+      "best": -8.41,
+      "worst": -125.9,
+      "longestLosingStreak": 3,
+      "avgEntry": 106.73
+     },
+     "VALIDATION": {
+      "n": 2,
+      "hit2xPct": 0,
+      "winPct": 0,
+      "avgNet": -37.58,
+      "totalNet": -75,
+      "best": -8.32,
+      "worst": -66.85,
+      "longestLosingStreak": 2,
+      "avgEntry": 65.38
+     }
+    }
+   }
+  }
+ }
+}

@@ -7919,8 +7919,9 @@ async function zeroHeroPayload(query: Record<string, any>): Promise<any> {
     try {
       const ix = ({ "^NSEI": "NIFTY", "^BSESN": "SENSEX" } as Record<string, string>)[def.symbol];
       const f = ix ? path.join(process.cwd(), "data", "research-zero-hero", `${ix}.json`) : null;
-      if (f && fs.existsSync(f)) {
-        const r = JSON.parse(fs.readFileSync(f, "utf8")), rows = Object.values<any>(r.variants || {}).flatMap((v: any) => [v.DEV, v.VALIDATION]).filter((x: any) => x && x.n >= 10);   // tiny samples distort the range
+      const pubZh = ix ? _published?.zeroHero?.[ix] ?? null : null;
+      if ((f && fs.existsSync(f)) || pubZh) {
+        const r = f && fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")) : pubZh, rows = Object.values<any>(r.variants || {}).flatMap((v: any) => [v.DEV, v.VALIDATION]).filter((x: any) => x && x.n >= 10);   // tiny samples distort the range
         const n = rows.reduce((a: number, x: any) => a + x.n, 0) / Math.max(1, Object.keys(r.variants || {}).length), avgs = rows.map((x: any) => x.avgNet), hits = rows.map((x: any) => x.hit2xPct);
         history = { text: `${ix}, 2 years of expiry days (~${Math.round(n)} trades per rule): day-range breakout (tested 13:30–14:45) — reached 2× in ${Math.min(...hits)}–${Math.max(...hits)} % of trades; average ${Math.min(...avgs)} to ${Math.max(...avgs)} premium pts per trade after costs.`, hit2x: `${Math.min(...hits)}–${Math.max(...hits)} %`, avg: `${Math.min(...avgs)} to ${Math.max(...avgs)}` };
       }
@@ -8709,6 +8710,14 @@ async function eyeBuild() {
     const prep = (days: any[]) => { const out: any[] = []; let pc: number | null = null; for (const d of days) { const m = [...d.spot.entries()].sort((a: any, b: any) => a[0] - b[0]).filter(([t]: any) => { const k = Math.floor(((t + 19800) % 86400) / 60); return k >= 555 && k <= 929; }); if (pc && m.length) out.push({ day: d.day, minutes: m, prevClose: pc }); if (m.length) pc = m[m.length - 1][1]; } return out; };
     try { const r = EYE.buildRows(prep(assemble("2024-10-14", "2026-10-12").days)); if (r.length) _eye.set("^NSEI", r); } catch { /* no NIFTY history here */ }
     try { const r = EYE.buildRows(prep(assembleIndex("SENSEX", "2024-10-14", "2026-10-12"))); if (r.length) _eye.set("^BSESN", r); } catch { /* no SENSEX history here */ }
+    // no raw history on this server (e.g. Render): use the committed, secret-free bundle (backend/research/published)
+    for (const [sym, file] of [["^NSEI", "marketEye-NSEI.json"], ["^BSESN", "marketEye-BSESN.json"]] as const) {
+      if (_eye.has(sym)) continue;
+      try {
+        const c = JSON.parse(fs.readFileSync(path.join(process.cwd(), "backend", "research", "published", file), "utf8"));
+        _eye.set(sym, c.day.map((d: string, i: number) => ({ day: d, min: c.min[i], dayChg: c.dayChg[i], fromHigh: c.fromHigh[i], fromLow: c.fromLow[i], ret30: c.ret30[i], ret5: c.ret5[i], next30: c.next30[i], minNext: c.minNext[i], maxNext: c.maxNext[i] })));
+      } catch { /* bundle missing */ }
+    }
     console.log(`[market-eye] rows: NIFTY ${_eye.get("^NSEI")?.length ?? 0} · SENSEX ${_eye.get("^BSESN")?.length ?? 0}`);
   } catch (e: any) { console.log("[market-eye] unavailable:", e?.message); }
 }
@@ -8802,13 +8811,17 @@ async function cpDrain() {
 }
 // plain builder text → HTML alert (bold title / action lines, escaped); pre-built HTML messages pass `html: true`
 const cpSend = (text: string, htmlReady = false) => { _cpQueue.push({ text: htmlReady ? text : TG.htmlify(CP.stripTags(text)), html: true }); cpDrain().catch(() => {}); try { fs.appendFileSync(path.join(process.cwd(), "data", "copilot-log.txt"), `\n[${new Date(Date.now() + 19800000).toISOString().slice(0, 19)}]\n${String(text).replace(/<[^>]+>/g, "")}\n`); } catch { /* best-effort */ } };
+const _published = (() => { try { return JSON.parse(fs.readFileSync(path.join(process.cwd(), "backend", "research", "published", "odds.json"), "utf8")); } catch { return null; } })();
 function cpOdds(sym: string): string | undefined {
+  const ix = ({ "^NSEI": "NIFTY", "^NSEBANK": "BANKNIFTY", "^BSESN": "SENSEX", "^CNXFIN": "FINNIFTY", "^NSEMDCP50": "MIDCPNIFTY" } as Record<string, string>)[sym];
+  const pub = ix ? _published?.early?.[ix] : null;
+  const fromPub = pub ? `2-yr ${ix} 15-min breakout record after costs: ${pub.DEV.winPct}–${pub.VALIDATION.winPct}% wins, ${pub.DEV.avgNet} / ${pub.VALIDATION.avgNet} pts per trade (no proven edge — size small).` : undefined;
   try {
     if (sym === "^NSEI") { const r = JSON.parse(fs.readFileSync(path.join(process.cwd(), "data", "research-early-breakout", "results_dev_val.json"), "utf8")); const a = r.periods.DEV.T15_ALL, b = r.periods.VALIDATION.T15_ALL; return `2-yr NIFTY 15-min breakout record after costs: ${a.winPct}–${b.winPct}% wins, ${a.avgNet} / ${b.avgNet} pts per trade (no proven edge — size small).`; }
     const ix = ({ "^NSEBANK": "BANKNIFTY", "^BSESN": "SENSEX", "^CNXFIN": "FINNIFTY", "^NSEMDCP50": "MIDCPNIFTY" } as Record<string, string>)[sym]; if (!ix) return undefined;
     const r = JSON.parse(fs.readFileSync(path.join(process.cwd(), "data", "research-multi", "results", `${ix}.json`), "utf8")), t = r.early.T15;
     return `2-yr ${ix} 15-min breakout record after costs: ${t.DEV.winPct}–${t.VALIDATION.winPct}% wins, ${t.DEV.avgNet} / ${t.VALIDATION.avgNet} pts per trade (no proven edge — size small).`;
-  } catch { return undefined; }
+  } catch { return fromPub; }
 }
 let _cpBusy = false, _cpTick = 0;
 async function copilotTick() {
