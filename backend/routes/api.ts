@@ -8899,6 +8899,11 @@ async function copilotTick() {
         cpSend(CP.dayReview(list) + (tr.length ? `\nTrades given today:\n${tr.join("\n")}` : "\nNo trade was given today."));
       }
     }
+    // 15:40 next-day plan (NIFTY + SENSEX) — after the close the payload's plan is for the next session
+    if (istMin >= 940 && istMin <= 960 && !_cp.sent.nextDay) {
+      const items = (await Promise.all(["^NSEI", "^BSESN"].map((x) => pay(x).catch(() => null)))).filter((x: any) => x?.available && x.trader && !x.trader.error);
+      if (items.length) { _cp.sent.nextDay = true; cpSave(); cpSend(TG.nextDayPlanMsg(items.map((d: any) => ({ d, odds: cpOdds(d.symbol) }))), true); }
+    }
   } catch { /* the co-pilot never affects the app */ } finally { _cpBusy = false; }
 }
 // ===================== BTSD Trade: the user's OWN trades, followed like the co-pilot's (advisory journal) =====================
@@ -8955,6 +8960,15 @@ async function btsdTick(nowSec: number, istMin: number) {
 }
 
 router.get("/copilot/state", requirePermission("oiAnalysis"), (_req: Request, res: Response) => { res.json(_cp); });
+// The next-day plan on demand (same message as the 15:40 job); ?send=1 also posts it to Telegram
+router.get("/copilot/next-day-plan", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  try {
+    const items = (await Promise.all(["^NSEI", "^BSESN"].map((x) => premiumCenterPayload({ symbol: x, interval: "15m" }).catch(() => null)))).filter((x: any) => x?.available && x.trader && !x.trader.error);
+    const html = TG.nextDayPlanMsg(items.map((d: any) => ({ d, odds: cpOdds(d.symbol) })));
+    if (req.query.send) cpSend(html, true);
+    res.json({ ok: true, planFor: items[0]?.trader?.planFor ?? null, html });
+  } catch (e: any) { res.json({ ok: false, error: e?.message || "failed" }); }
+});
 router.post("/copilot/update-now", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
   try {
     const sym = String(req.query.symbol || "^NSEI"), d: any = await premiumCenterPayload({ symbol: sym, interval: "15m" });

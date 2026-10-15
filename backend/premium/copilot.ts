@@ -48,7 +48,7 @@ export function dayReview(list: any[]): string {
     return [`<b>${d.name}</b> O ${r0(s.open)} H ${r0(s.high)} L ${r0(s.low)} C ${r0(s.price)} (${s.changePct > 0 ? "+" : ""}${s.changePct}%)`,
       rolls.length ? `  Plans rolled ${rolls.length}×: ${rolls.map((x: any) => `${hm(x.time)} ${x.why}`).join(" | ")}` : "  No plan played out to Target 1 / failure today.",
       `  Tomorrow: ${(T.tomorrow?.scenarios || []).slice(0, 1).join(" ")}`];
-  }), "Plans for tomorrow arrive at 09:05."].join("\n");
+  }), "🗓 The next-day plan follows at 15:40 (re-checked at 09:05)."].join("\n");
 }
 
 // ---------------------------------------------------------------- one trade at a time, followed to its end

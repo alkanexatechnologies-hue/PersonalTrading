@@ -81,3 +81,29 @@ export function htmlify(plain: string): string {
   const lines = String(plain).split("\n");
   return lines.map((l, i) => (i === 0 ? `<b>${esc(l)}</b>` : /^\s*→/.test(l) ? `<b>${esc(l.trim())}</b>` : /^\s*📊/.test(l) ? `<i>${esc(l.trim())}</i>` : esc(l))).join("\n");
 }
+/** After the close: the plan for the NEXT session (NIFTY + SENSEX), from today's finished session. */
+export function nextDayPlanMsg(items: { d: any; odds?: string }[]): string {
+  const ok = items.filter((x) => x.d?.available && x.d.trader && !x.d.trader.error);
+  const forDay = ok[0]?.d.trader.planFor ?? "next session";
+  const L = [`🗓 <b>NEXT-DAY PLAN</b> · for <b>${esc(forDay)}</b>`, `<i>prepared ${hm(Math.floor(Date.now() / 1000))} from today's finished session</i>`];
+  for (const { d, odds } of ok) {
+    const T = d.trader, s = d.spot, b = T.plans?.bull, r = T.plans?.bear, px = s?.price;
+    const prem = (p: any) => (p?.premNow != null && p.premNow >= 1 ? `₹${n0(p.premNow)}` : "premium at the open");
+    L.push(LINE, `${d.symbol === "^BSESN" ? "🟣" : "🔵"} <b>${esc(short(d.name))}</b>  closed <b>${n0(px)}</b> ${arrow(s?.change)} ${s?.changePct > 0 ? "+" : ""}${esc(s?.changePct)}%`);
+    L.push(`  Today O ${n0(s?.open)} · H ${n0(s?.high)} · L ${n0(s?.low)}`);
+    const lv = (T.levels || []).filter((x: any) => Number.isFinite(x.price) && px != null);
+    const above = lv.filter((x: any) => x.price > px).sort((a: any, c: any) => a.price - c.price).slice(0, 3);
+    const below = lv.filter((x: any) => x.price < px).sort((a: any, c: any) => c.price - a.price).slice(0, 3);
+    if (above.length) L.push(`  ⬆ ${above.map((x: any) => `${n0(x.price)} <i>${esc(x.label)}</i>`).join(" · ")}`);
+    if (below.length) L.push(`  ⬇ ${below.map((x: any) => `${n0(x.price)} <i>${esc(x.label)}</i>`).join(" · ")}`);
+    if (b) L.push(`  🟢 <b>BULL</b> 15-min close above <b>${n0(b.entry)}</b> → ${b.strike} CE (${prem(b)})`, `      🛑 SL ${n0(b.stop)} · 🎯 T1 ${n0(b.t1)}${b.t2 ? ` · T2 ${n0(b.t2)}` : ""} · R:R 1:${esc(b.rr)} · risk <b>${esc(b.triggerRisk?.risk ?? "—")}</b>`);
+    if (r) L.push(`  🔴 <b>BEAR</b> 15-min close below <b>${n0(r.entry)}</b> → ${r.strike} PE (${prem(r)})`, `      🛑 SL ${n0(r.stop)} · 🎯 T1 ${n0(r.t1)}${r.t2 ? ` · T2 ${n0(r.t2)}` : ""} · R:R 1:${esc(r.rr)} · risk <b>${esc(r.triggerRisk?.risk ?? "—")}</b>`);
+    if (T.plans?.noTrade) L.push(`  ⏸ No-trade zone ${n0(T.plans.noTrade.from)} – ${n0(T.plans.noTrade.to)}`);
+    for (const sc of (T.tomorrow?.scenarios || []).slice(0, 3)) L.push(`  • ${esc(sc)}`);
+    if (d.expiry && d.expiry === forDay) L.push(`  🎲 <b>Expiry day</b> — zero-hero search 09:30–15:10`);
+    if (odds) L.push(`  <i>📊 ${esc(odds)}</i>`);
+  }
+  if (!ok.length) L.push("Plan unavailable — data not loaded.");
+  L.push(LINE, "<i>Re-checked at 09:05 with the live open · advisory only, the arbiter decides</i>");
+  return L.join("\n");
+}
