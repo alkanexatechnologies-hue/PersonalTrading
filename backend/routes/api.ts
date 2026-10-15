@@ -7921,7 +7921,7 @@ async function zeroHeroPayload(query: Record<string, any>): Promise<any> {
       if (f && fs.existsSync(f)) {
         const r = JSON.parse(fs.readFileSync(f, "utf8")), rows = Object.values<any>(r.variants || {}).flatMap((v: any) => [v.DEV, v.VALIDATION]).filter((x: any) => x && x.n >= 10);   // tiny samples distort the range
         const n = rows.reduce((a: number, x: any) => a + x.n, 0) / Math.max(1, Object.keys(r.variants || {}).length), avgs = rows.map((x: any) => x.avgNet), hits = rows.map((x: any) => x.hit2xPct);
-        history = { text: `${ix}, 2 years of expiry days (~${Math.round(n)} trades per rule): day-range breakout after 13:30 — reached 2× in ${Math.min(...hits)}–${Math.max(...hits)} % of trades; average ${Math.min(...avgs)} to ${Math.max(...avgs)} premium pts per trade after costs.`, hit2x: `${Math.min(...hits)}–${Math.max(...hits)} %`, avg: `${Math.min(...avgs)} to ${Math.max(...avgs)}` };
+        history = { text: `${ix}, 2 years of expiry days (~${Math.round(n)} trades per rule): day-range breakout (tested 13:30–14:45) — reached 2× in ${Math.min(...hits)}–${Math.max(...hits)} % of trades; average ${Math.min(...avgs)} to ${Math.max(...avgs)} premium pts per trade after costs.`, hit2x: `${Math.min(...hits)}–${Math.max(...hits)} %`, avg: `${Math.min(...avgs)} to ${Math.max(...avgs)}` };
       }
     } catch { history = null; }
     const z = zeroHeroLive({ symbol: def.symbol, expiry: String(ch.expiry), today, istMin, spot, step, lot, chain: strikes, closed5Today: closed5, oiNow, oi15Ago: oi15, budget, history });
@@ -7930,7 +7930,8 @@ async function zeroHeroPayload(query: Record<string, any>): Promise<any> {
       const ft = freshTrigger(closed5, sd.side, lastClosedZh), dirUp = sd.side === "CE";
       if (ft) sd.trigger = { state: "TRIGGERED", at: ft.at, level: ft.level, detail: `FRESH 5-min close ${ft.close} ${dirUp ? "above the day high" : "below the day low"} ${ft.level} after the last trade ended` };
       else { const hi = closed5.length ? Math.max(...closed5.map((b) => b.high)) : null, lo = closed5.length ? Math.min(...closed5.map((b) => b.low)) : null, lvl = dirUp ? hi : lo;
-        sd.trigger = { state: z.window.startsWith("ACTIVE") ? "WAIT" : "NOT IN WINDOW", at: null, level: lvl, detail: `needs a FRESH 5-min close ${dirUp ? "above the day high" : "below the day low"} ${lvl != null ? Math.round(lvl * 100) / 100 : "—"} (the earlier trigger was used by the closed trade)` }; }
+        sd.trigger = { state: z.window.startsWith("ACTIVE") ? "WAIT" : "NOT IN WINDOW", at: null, level: lvl, detail: `needs a FRESH 5-min close ${dirUp ? "above the day high" : "below the day low"} ${lvl != null ? Math.round(lvl * 100) / 100 : "—"} (the earlier trigger was used by the closed trade)` };
+        sd.verdict = `No fresh trigger — ${sd.trigger.detail}. Do not pre-empt the break.`; }
     }
     const zhTrades = (_zhLedger.day === today ? _zhLedger.trades : []).filter((t: ZhTrade) => t.symbol === def.symbol).map((t: ZhTrade) => {
       const row = strikes.find((x: any) => x.strike === t.strike), live = row ? (t.side === "CE" ? row.ceLtp : row.peLtp) ?? null : null;
@@ -8745,7 +8746,7 @@ async function zeroHeroLedgerTick() {
   if (_zhBusy) return; _zhBusy = true;
   try {
     const nowSec = Math.floor(Date.now() / 1000), ist = new Date((nowSec + 19800) * 1000), day = ist.toISOString().slice(0, 10), istMin = ist.getUTCHours() * 60 + ist.getUTCMinutes();
-    if ([0, 6].includes(ist.getUTCDay()) || istMin < 810 || istMin > 925) return;
+    if ([0, 6].includes(ist.getUTCDay()) || istMin < 570 || istMin > 925) return;
     if (_zhLedger.day !== day) { _zhLedger = { day, trades: [] }; zhSave(); }
     for (const sym of ["^NSEI", "^BSESN"]) {
       const zp: any = await zeroHeroPayload({ symbol: sym }).catch(() => null); if (!zp?.available || !zp.isExpiry) continue;
@@ -8758,7 +8759,7 @@ async function zeroHeroLedgerTick() {
         if (fired.length) zhSave();
         continue;
       }
-      if (istMin > 885) continue;   // no new zero-hero after 14:45
+      if (istMin > 910) continue;   // no new zero-hero after 15:10
       const lastClosed = Math.max(0, ...mine.map((t) => t.closedAt || 0));
       for (const x of zp.sides) {
         // a NEW 5-min close beyond the day range after the last trade ended (the first trigger of the day when none yet)
@@ -8857,7 +8858,7 @@ async function copilotTick() {
           const eye = await eyeFor(sym, { price: d.spot.price, changePct: d.spot.changePct, high: d.spot.high, low: d.spot.low }).catch(() => null);
           if (eye) text += `\n  ${eye.text}`;
           const zs = await zeroHeroPayload({ symbol: "^BSESN" }).catch(() => null);
-          if (sym === "^NSEI" && zs?.available && zs.isExpiry && istMin >= 810 && istMin <= 900) text += `\n  🎲 SENSEX zero-hero (${zs.window}): ${zs.sides.map((x: any) => `${x.side} ${x.strike} ₹${x.premium != null ? Math.round(x.premium) : "—"} · ${x.trigger.state}${x.moveToDouble != null ? ` · 2× needs ${Math.round(x.moveToDouble)} pts` : ""}`).join(" | ")}${zs.history?.text ? `\n     2-yr: ${zs.history.text}` : ""}`;
+          if (sym === "^NSEI" && zs?.available && zs.isExpiry && istMin >= 570 && istMin <= 915) text += `\n  🎲 SENSEX zero-hero (${zs.window}): ${zs.sides.map((x: any) => `${x.side} ${x.strike} ₹${x.premium != null ? Math.round(x.premium) : "—"} · ${x.trigger.state}${x.moveToDouble != null ? ` · 2× needs ${Math.round(x.moveToDouble)} pts` : ""}`).join(" | ")}${zs.history?.text ? `\n     2-yr: ${zs.history.text}` : ""}`;
           cpSend(text);
         }
       }

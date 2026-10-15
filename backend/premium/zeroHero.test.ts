@@ -19,8 +19,8 @@ test("double level and touch probability are consistent with Black-Scholes", () 
 test("window, trigger on a 5-min CLOSE beyond the day range, and verdicts", () => {
   const chain = mk(22900, 50), base = { symbol: "^NSEI", expiry: "2026-10-15", today: "2026-10-15", spot: 22900, step: 50, lot: 75, chain, oiNow: null, oi15Ago: null, budget: 3000 };
   const morning = [bar("09:15", 22950, 22850, 22900), bar("09:20", 22940, 22860, 22910)];
-  assert.match(zeroHero({ ...base, istMin: 700, closed5Today: morning }).window, /WAIT/);
-  assert.match(zeroHero({ ...base, istMin: 900, closed5Today: morning }).window, /CLOSED/);
+  assert.match(zeroHero({ ...base, istMin: 560, closed5Today: morning }).window, /WAIT/);
+  assert.match(zeroHero({ ...base, istMin: 915, closed5Today: morning }).window, /CLOSED/);
   assert.match(zeroHero({ ...base, expiry: "2026-10-19", istMin: 830, closed5Today: morning }).window, /NOT AN EXPIRY/);
   // wick above the high is not a trigger; a close above is
   const wick = [...morning, bar("13:35", 22990, 22900, 22930)];

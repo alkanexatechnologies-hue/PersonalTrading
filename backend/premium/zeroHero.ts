@@ -49,7 +49,7 @@ export function pTouch(spot: number, level: number, iv: number, t: number) { con
 
 export function zeroHero(o: ZhInput) {
   const isExpiry = !!o.expiry && o.expiry === o.today;
-  const windowState = !isExpiry ? "NOT AN EXPIRY DAY" : o.istMin < 810 ? "WAIT — opens 13:30" : o.istMin <= 885 ? "ACTIVE (13:30–14:45)" : "CLOSED — no new zero-hero after 14:45";
+  const windowState = !isExpiry ? "NOT AN EXPIRY DAY" : o.istMin < 570 ? "WAIT — opens 09:30" : o.istMin <= 910 ? "ACTIVE (09:30–15:10)" : "CLOSED — no new zero-hero after 15:10";
   const atm = o.chain.length ? o.chain.reduce((b, s) => (Math.abs(s.strike - o.spot) < Math.abs(b.strike - o.spot) ? s : b), o.chain[0]) : null;
   const straddle = atm && atm.ceLtp != null && atm.peLtp != null ? r2(atm.ceLtp + atm.peLtp) : null;
   const t = yearsToClose(o.istMin);
@@ -59,10 +59,10 @@ export function zeroHero(o: ZhInput) {
     const p = side === "CE" ? "ce" : "pe", premium = (row as any)?.[`${p}Ltp`] ?? null, bid = (row as any)?.[`${p}Bid`] ?? null, ask = (row as any)?.[`${p}Ask`] ?? null;
     const ivRaw = (row as any)?.[`${p}Iv`] ?? null, iv = ivRaw != null ? (ivRaw > 1 ? ivRaw / 100 : ivRaw) : null, delta = (row as any)?.[`${p}Delta`] ?? null;
     // trigger: first 5-min CLOSE beyond the day's range set before it, closing 13:30–14:45
-    let trig: ZhSide["trigger"] = { state: isExpiry && o.istMin >= 810 && o.istMin <= 885 ? "WAIT" : "NOT IN WINDOW", at: null, level: null, detail: "" };
+    let trig: ZhSide["trigger"] = { state: isExpiry && o.istMin >= 570 && o.istMin <= 910 ? "WAIT" : "NOT IN WINDOW", at: null, level: null, detail: "" };
     const bars = o.closed5Today;
     for (let j = 1; isExpiry && j < bars.length; j++) {   // the trigger is only judged on the expiry day itself
-      const c = bars[j].time + 300, m = Math.floor(((c + 19800) % 86400) / 60); if (m < 810 || m > 885) continue;
+      const c = bars[j].time + 300, m = Math.floor(((c + 19800) % 86400) / 60); if (m < 570 || m > 910) continue;
       const prior = bars.slice(0, j), hi = Math.max(...prior.map((b) => b.high)), lo = Math.min(...prior.map((b) => b.low));
       if (dir > 0 ? bars[j].close > hi : bars[j].close < lo) { trig = { state: "TRIGGERED", at: c, level: r2(dir > 0 ? hi : lo), detail: `5-min close ${r2(bars[j].close)} ${dir > 0 ? "above the day high" : "below the day low"} ${r2(dir > 0 ? hi : lo)}` }; break; }
     }
@@ -77,15 +77,15 @@ export function zeroHero(o: ZhInput) {
     const spreadPct = bid > 0 && ask >= bid ? r2(((ask - bid) / ((ask + bid) / 2)) * 100) : null;
     let verdict: string;
     if (!isExpiry) verdict = "Not an expiry day — zero-hero is an expiry-afternoon trade only.";
-    else if (o.istMin > 885) verdict = "After 14:45 the remaining time is too short — no new zero-hero.";
-    else if (o.istMin < 810) verdict = "Wait for 13:30; morning OTM premiums still carry time value that will melt.";
+    else if (o.istMin > 910) verdict = "After 15:10 the remaining time is too short — no new zero-hero.";
+    else if (o.istMin < 570) verdict = "Wait for 09:30 — the first 15 minutes set the range.";
     else if (trig.state !== "TRIGGERED") verdict = `No trigger yet — ${trig.detail}. Do not pre-empt the break.`;
     else if (spreadPct != null && spreadPct > 10) verdict = "Triggered, but the quote is too wide — a cheap option with a wide spread is a guaranteed loss to enter.";
     else verdict = `Triggered${covering ? " and writers are covering" : ""}. Index must reach ${doubleAt ?? "—"} (${moveToDouble ?? "—"} pts) for 2×; market prices a ±${straddle ?? "—"} pt move to the close; touch chance ≈ ${pT ?? "—"} %. Risk only a fixed amount you accept losing in full.`;
     return { side, strike, premium, bid, ask, spreadPct, iv: ivRaw, delta, trigger: trig, doubleAt, moveToDouble, pTouchDouble: pT, writersCovering: covering, oiChange15: oiChg, lots, costPerLot, verdict };
   });
   return { isExpiry, window: windowState, spot: r2(o.spot), atm: atm?.strike ?? null, straddle, minutesToClose: Math.max(0, 930 - o.istMin), sides, history: o.history ?? ZH_HISTORY[o.symbol] ?? null,
-    rules: ["Expiry day only, 13:30–14:45", "Trigger = a 5-min CLOSE beyond the day's high/low (never a wick, never in advance)", "Strike 2 steps OTM; skip if the spread is wide", "Fixed budget you accept losing 100 %; never average down", "Book half at 2–3×; everything out by 15:20"] };
+    rules: ["Expiry day, new trades 09:30–15:10 (the 2-year record covers 13:30–14:45 only)", "Trigger = a 5-min CLOSE beyond the day's high/low (never a wick, never in advance)", "Strike 2 steps OTM; skip if the spread is wide", "Fixed budget you accept losing 100 %; never average down", "Book half at 2–3×; everything out by 15:20"] };
 }
 
 // ---------------------------------------------------------------- frozen zero-hero trades (one at a time per index)
@@ -143,11 +143,11 @@ export function stepZhTrade(tr: ZhTrade, x: { prem: number | null; spot: number 
   return fired;
 }
 
-/** First 5-min CLOSE beyond the day's range (as it stood before that bar) after `after`, inside 13:30–14:45. */
+/** First 5-min CLOSE beyond the day's range (as it stood before that bar) after `after`, inside 09:30–15:10. */
 export function freshTrigger(bars: ZhCandle[], side: "CE" | "PE", after: number): { at: number; level: number; close: number } | null {
   const dir = side === "CE" ? 1 : -1;
   for (let j = 1; j < bars.length; j++) {
-    const c = bars[j].time + 300, m = Math.floor(((c + 19800) % 86400) / 60); if (c <= after || m < 810 || m > 885) continue;
+    const c = bars[j].time + 300, m = Math.floor(((c + 19800) % 86400) / 60); if (c <= after || m < 570 || m > 910) continue;
     const prior = bars.slice(0, j), hi = Math.max(...prior.map((b) => b.high)), lo = Math.min(...prior.map((b) => b.low));
     if (dir > 0 ? bars[j].close > hi : bars[j].close < lo) return { at: c, level: r2(dir > 0 ? hi : lo), close: bars[j].close };
   }
