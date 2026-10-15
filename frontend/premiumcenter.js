@@ -74,9 +74,9 @@ function ppcShell() {
   <div id="ppc-radar" class="ppc-radar"></div>
   <div class="ppc-sec">② Trade plan <span id="ppc-planfor" class="ppc-sub"></span></div>
   <div class="ppc-plans" id="ppc-plans"></div>
-  <div class="ppc-sec">③ My trades &amp; zero-hero</div>
-  <div id="ppc-btsd" class="ppc-btsd"></div>
-  <div id="ppc-zh-today" class="ppc-zht"></div>
+  <div class="ppc-sec" id="ppc-sec3" hidden>③ Expiry zero-hero</div>
+  <div id="ppc-btsd" class="ppc-btsd" hidden></div>
+  <div id="ppc-zh-today" class="ppc-zht" hidden></div>
   <div class="ppc-sec">④ Chart &amp; levels</div>
   <div class="ppc-main">
     <div class="ppc-tv">
@@ -609,8 +609,9 @@ async function ppcLoadZH(force) {
 // ================================================================ Zero-Hero TODAY: NIFTY + SENSEX (+ selected) — shows whichever expires today
 async function ppcLoadZHToday(force) {
   const el = ppcEl("ppc-zh-today"); if (!el) return;
+  if (PPC._zhtSym !== PPC.sym) { PPC._zhtSym = PPC.sym; force = true; ppcRenderZHToday(); }   // index switched: hide/show at once
   if (!force && PPC._zhtAt && Date.now() - PPC._zhtAt < 14000) return; PPC._zhtAt = Date.now();
-  const syms = [...new Set(["^NSEI", "^BSESN", PPC.sym])];
+  const syms = [PPC.sym];   // only the selected index — its expiry strip shows only on its own expiry day
   let budget = ""; try { budget = localStorage.getItem("ppc-zh-budget") || ""; } catch { /* private */ }
   // each index renders as soon as its own data arrives (a slow chain never blocks the others)
   PPC._zht = PPC._zht || {};
@@ -618,11 +619,10 @@ async function ppcLoadZHToday(force) {
 }
 function ppcRenderZHToday() {
   const el = ppcEl("ppc-zh-today"); if (!el) return;
-  const live = Object.values(PPC._zht || {}).filter((d) => d && d.available);
-  const exp = live.filter((d) => d.isExpiry);
-  if (!exp.length) {
-    el.innerHTML = `<div class="ppc-zht-none">🎲 Zero-hero: no expiry today · next ${live.map((d) => `${ppcEsc(d.name.replace(" 50", ""))} ${ppcEsc(String(d.expiry).slice(5))}`).join(" · ")}</div>`; return;
-  }
+  const cur = (PPC._zht || {})[PPC.sym];
+  const exp = cur && cur.available && cur.isExpiry ? [cur] : [];
+  el.hidden = !exp.length; ppcSec3();
+  if (!exp.length) { el.innerHTML = ""; return; }
   const side = (d, x) => {
     const t = x.trigger.state, c = t === "TRIGGERED" ? "on" : "";
     return `<div class="ppc-zht-s ${c}"><b class="${x.side === "CE" ? "ppc-up" : "ppc-dn"}">${x.side} ${x.strike ?? "—"}</b> ₹${ppcNs(x.premium)} <span class="ppc-chip ppc-c-${t === "TRIGGERED" ? "bull" : "wait"}">${ppcEsc(t)}</span>
@@ -662,6 +662,7 @@ async function ppcLoadEye() {
 
 
 // ================================================================ BTSD Trade — the user's own trades, followed with Telegram follow-ups
+setInterval(() => { try { if (PPC.d && !PPC._btsdSide && !!ppcEl("ppc-btsd")?.hidden === ppcBTSDWindow()) ppcBTSDPaint(); } catch { /* screen not open */ } }, 30000);
 async function ppcRenderBTSD(force) {
   const el = ppcEl("ppc-btsd"); if (!el || !PPC.d) return;
   if (PPC._btsdSide) return;   // keep the open form while the user types
@@ -671,8 +672,23 @@ async function ppcRenderBTSD(force) {
   try { const r = await fetch("/api/btsd/trades").then((x) => x.json()); PPC._btsd = r.trades || []; } catch { /* keep the last list */ }
   ppcBTSDPaint();
 }
+// The BTSD section is shown only 15:00–15:14 IST on weekdays (like the zero-hero strip on expiry days); hidden otherwise.
+function ppcBTSDWindow() {
+  const ist = new Date(Date.now() + 19800000), m = ist.getUTCHours() * 60 + ist.getUTCMinutes(), wd = ist.getUTCDay();
+  return wd !== 0 && wd !== 6 && m >= 900 && m <= 914;
+}
+/** Section ③ title follows what is visible: BTSD (15:00–15:14) and/or the selected index's expiry strip; hidden when neither. */
+function ppcSec3() {
+  const sec = ppcEl("ppc-sec3"); if (!sec) return;
+  const bt = !ppcEl("ppc-btsd")?.hidden, zh = !ppcEl("ppc-zh-today")?.hidden;
+  sec.hidden = !bt && !zh;
+  sec.textContent = bt && zh ? "③ My trades & expiry zero-hero" : bt ? "③ My trades" : "③ Expiry zero-hero";
+}
 function ppcBTSDPaint() {
   const el = ppcEl("ppc-btsd"); if (!el || PPC._btsdSide) return;
+  const on = ppcBTSDWindow(), sec = ppcEl("ppc-sec3");
+  el.hidden = !on; ppcSec3(); void sec;
+  if (!on) { el.innerHTML = ""; return; }
   const live = (t) => (PPC.d.ranking || []).find((x) => x.side === t.side && x.strike === t.strike)?.ltp ?? null;
   const rows = (PPC._btsd || []).filter((t) => t.index === PPC.sym).map((t) => {
     const now = t.state === "CLOSED" ? t.exitPrem : live(t), pnl = now != null && t.entryPrem ? Math.round(((now / t.entryPrem) - 1) * 100) : null;
