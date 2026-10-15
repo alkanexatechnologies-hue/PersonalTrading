@@ -7692,3 +7692,26 @@ body.ppc-fullwidth .watchlist, body.ppc-fullwidth #watchlist { display: none !im
 .ppc-pl-rr { margin: 6px 0 2px; font-size: 12.5px; }
 .ppc-pl-why { margin-top: 4px; font-size: 11.5px; color: #b2b5be; } .ppc-pl-why summary { cursor: pointer; color: #787b86; }
 .ppc-pl-why > div { margin-top: 3px; }
+/* ---- Opportunity radar ---- */
+.ppc-radar { background: #131722; border: 1px solid #2a2e39; border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; }
+.ppc-rd-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; } .ppc-rd-head > b { letter-spacing: 1px; font-size: 12px; color: #82a8ff; }
+.ppc-rd-clock { margin-left: auto; font-weight: 800; font-variant-numeric: tabular-nums; color: #d1d4dc; }
+.ppc-urgent { color: #f7c948 !important; animation: ppcPulse 1s infinite; }
+@keyframes ppcPulse { 50% { opacity: .55; } }
+.ppc-rd-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ppc-rt { border-radius: 8px; padding: 8px 10px; border: 1px solid #2a2e39; background: #171b26; min-width: 0; }
+.ppc-rt-top { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; } .ppc-rt-top b { font-size: 14px; }
+.ppc-rt-side { font-size: 11px; font-weight: 800; padding: 0 6px; border-radius: 3px; } .ppc-rt-ce .ppc-rt-side { background: #2962ff; color: #fff; } .ppc-rt-pe .ppc-rt-side { background: #ff9800; color: #111; }
+.ppc-rt-state { margin-left: auto; font-weight: 900; font-size: 13px; letter-spacing: .3px; }
+.ppc-rt-mid { display: flex; gap: 14px; flex-wrap: wrap; margin: 4px 0; font-size: 12.5px; color: #9598a1; } .ppc-rt-mid b { color: #d1d4dc; font-size: 16px; }
+.ppc-rt-bar { height: 6px; background: #2a2e39; border-radius: 3px; overflow: hidden; } .ppc-rt-bar i { display: block; height: 100%; background: #787b86; }
+.ppc-rt-txt { font-size: 12px; margin-top: 4px; } .ppc-rt-next { font-size: 12.5px; font-weight: 700; margin-top: 2px; }
+.ppc-rt-idle .ppc-rt-state { color: #787b86; }
+.ppc-rt-appr { border-color: #f7c948; } .ppc-rt-appr .ppc-rt-state, .ppc-rt-appr .ppc-rt-next { color: #f7c948; } .ppc-rt-appr .ppc-rt-bar i { background: #f7c948; }
+.ppc-rt-armed { border: 2px solid #f7c948; background: rgba(247,201,72,.08); } .ppc-rt-armed .ppc-rt-state { color: #f7c948; animation: ppcPulse 1.2s infinite; } .ppc-rt-armed .ppc-rt-bar i { background: #f7c948; }
+.ppc-rt-trig.ppc-rt-ce { border: 2px solid #26a69a; background: rgba(38,166,154,.12); } .ppc-rt-trig.ppc-rt-pe { border: 2px solid #ef5350; background: rgba(239,83,80,.12); }
+.ppc-rt-trig.ppc-rt-ce .ppc-rt-state, .ppc-rt-trig.ppc-rt-ce .ppc-rt-next { color: #26a69a; } .ppc-rt-trig.ppc-rt-pe .ppc-rt-state, .ppc-rt-trig.ppc-rt-pe .ppc-rt-next { color: #ef5350; }
+.ppc-rt-trig .ppc-rt-bar i { background: #26a69a; }
+.ppc-rt-fail { border-color: #5d606b; } .ppc-rt-fail .ppc-rt-state { color: #ef5350; } .ppc-rt-miss .ppc-rt-state { color: #9598a1; }
+.ppc-rt-cd { font-weight: 800; color: #f7c948; font-variant-numeric: tabular-nums; }
+@media (max-width: 700px) { .ppc-rd-tiles { grid-template-columns: 1fr; } .ppc-rd-clock { margin-left: 0; } }

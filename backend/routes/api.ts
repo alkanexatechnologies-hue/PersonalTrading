@@ -7750,17 +7750,22 @@ router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Reque
       spot: await (async () => {
         const q: any = quote, dayOf = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(0, 10);
         const sessionDay = n0 ? dayOf(candles[n0 - 1].time) : null;   // the session the price belongs to (not the calendar day)
-        const first = sessionDay ? candles.find((c: any) => dayOf(c.time) === sessionDay) : null;
+
         let prevClose = q?.previousClose ?? null;
         // After the close Dhan's quote reports the session close as the previous close (change 0): use daily candles then.
-        if (session !== "OPEN" && sessionDay) {
+        // The day the quote's price belongs to: from 09:00 on a weekday (pre-open, open, after the close) it is today; earlier
+        // it is the last session. The previous close is the last daily close BEFORE that day (never the quote's own field,
+        // which Dhan sets to the session close after hours).
+        const quoteDay = ![0, 6].includes(wd) && istMin >= 540 ? new Date((nowSec + 19800) * 1000).toISOString().slice(0, 10) : sessionDay;
+        const first = quoteDay ? candles.find((c: any) => dayOf(c.time) === quoteDay) : null;   // today's open only once today has a candle
+        if (session !== "OPEN" && quoteDay) {
           try {
-            const d: any[] = await getDailyCached(def.symbol, 10), i = d.length - 1;
-            if (i >= 1) prevClose = dayOf(d[i].time) === sessionDay ? d[i - 1].close : d[i].close;
+            const d: any[] = await getDailyCached(def.symbol, 10), prev = [...d].reverse().find((x) => dayOf(x.time) < quoteDay);
+            if (prev) prevClose = prev.close;
           } catch { /* keep the quote's value */ }
         }
         const chg = spot != null && prevClose ? Math.round((spot - prevClose) * 100) / 100 : null;
-        return { price: spot, change: chg, changePct: chg != null && prevClose ? Math.round((chg / prevClose) * 10000) / 100 : null, open: first?.open ?? null, high: q?.dayHigh ?? null, low: q?.dayLow ?? null, prevClose, sessionDay };
+        return { price: spot, change: chg, changePct: chg != null && prevClose ? Math.round((chg / prevClose) * 10000) / 100 : null, open: first?.open ?? null, high: q?.dayHigh ?? null, low: q?.dayLow ?? null, prevClose, sessionDay, quoteDay, preOpen: session === "PRE-OPEN" };
       })(),
       expiries: ch?.expiries || [], expiry, expiryOffset: off, atm, step, moneyness: money,
       chart: { candles: candles.slice(-160), ema9: e9.slice(-160), ema21: e21.slice(-160), vwap: vw.slice(-160), bbUpper: bb.upper.slice(-160), bbLower: bb.lower.slice(-160), formingTime: forming?.time ?? null },
@@ -7824,7 +7829,16 @@ router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Reque
           const riskOf = (px: number) => risks.find((r) => Math.abs(r.price - px) < 0.01) || null;
           for (const p of [pb.bull, pb.bear]) if (p) (p as any).triggerRisk = riskOf(p.trigger);
           return { trends, levels: levels.map((v) => ({ ...v, risk: riskOf(v.price) })), events: events.slice(-40), eventStats: { up: TV.breakStats(events, "UP"), down: TV.breakStats(events, "DOWN"), horizonBars: horizon, rule: `FOLLOWED THROUGH = moved 1 ATR beyond the break candle's close (the first possible entry) within ${horizon} bars before closing back across the level` },
-            plans: pb, coach: cz, lines: draw, future, tomorrow: tm, atr15: Math.round(atr15 * 100) / 100, planFor: sessionDay };
+            plans: pb, coach: cz, lines: draw, future, tomorrow: tm, atr15: Math.round(atr15 * 100) / 100, planFor: sessionDay,
+            radar: (() => {
+              // the forming 15-min candle (live only) — shown and counted down, never used as a confirmation
+              const f15 = session === "OPEN" && c15All.length && c15All[c15All.length - 1].time + 900 > nowSec ? c15All[c15All.length - 1] : null;
+              const liveF = f15 && spot != null ? { ...f15, close: spot, high: Math.max(f15.high, spot), low: Math.min(f15.low, spot) } : f15;
+              const todays = closed15.filter((c: any) => dayOfT(c.time) === sessionDay);   // yesterday's candles never trigger today's plan
+              const priceOnly = !liveF && spot != null ? { time: nowSec, open: spot, high: spot, low: spot, close: spot, volume: 0 } : null;
+              const opp = (p: any) => { const o = TV.opportunity(p, todays, liveF ?? priceOnly, atr15); if (!liveF && o.state === "ARMED") Object.assign(o, { state: "APPROACHING", text: `${session === "PRE-OPEN" ? "pre-open price" : "price"} is beyond the start — nothing counts until a 15-min candle closes after 09:15`, next: "wait for the first 15-min close" }); if (!liveF) o.closesAt = null; return o; };
+              return { bull: opp(pb.bull), bear: opp(pb.bear), forming15: liveF, closesAt: liveF ? liveF.time + 900 : null, serverTime: nowSec, preOpen: session === "PRE-OPEN" };
+            })() };
         } catch (e: any) { return { error: e?.message || "trader view failed" }; }
       })(),
       validation: VAL,

@@ -86,3 +86,17 @@ test("level risk: room, OI wall, trend, rejections and history each add risk; fa
   r = levelRisks({ levels: lv, spot: 130, atr: 10, closed: rej, trends: tr("UP", "UP"), events: [] });
   const p = r.find((x) => x.price === 145)!; assert.equal(p.rejections, 3); assert.equal(p.risk, "MEDIUM");
 });
+test("opportunity radar: approaching → armed (forming only) → triggered (closed) → failed / missed", async () => {
+  const { opportunity } = await import("./traderView");
+  const p: any = { side: "CE", trigger: 100, entry: 102, stop: 97, t1: 120 };
+  const k = (i: number, c: number) => ({ time: 1_790_000_000 + i * 900, open: c, high: c + 1, low: c - 1, close: c, volume: 0 });
+  const base = [k(0, 90), k(1, 92), k(2, 95)];
+  assert.equal(opportunity(p, base, k(3, 99), 10).state, "APPROACHING");                 // 3 pts away, 0.3 ATR = 3
+  assert.equal(opportunity(p, base, k(3, 96), 10).state, "IDLE");
+  assert.equal(opportunity(p, base, k(3, 103), 10).state, "ARMED");                      // forming above, not closed
+  assert.equal(opportunity(p, [...base, k(3, 103)], k(4, 104), 10).state, "TRIGGERED");  // closed above the start
+  assert.equal(opportunity(p, [...base, k(3, 103), k(4, 99)], k(5, 99), 10).state, "FAILED");
+  assert.equal(opportunity(p, [...base, k(3, 103)], k(4, 121), 10).state, "MISSED");
+  const q: any = { side: "PE", trigger: 100, entry: 98, stop: 103, t1: 80 };
+  assert.equal(opportunity(q, [k(0, 105), k(1, 97)], k(2, 96), 10).state, "TRIGGERED");
+});

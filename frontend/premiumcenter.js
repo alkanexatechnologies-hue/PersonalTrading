@@ -41,8 +41,16 @@ function initPremiumCenter() {
   }
   ppcLoad(); ppcStart();
 }
-function ppcStart() { ppcStop(); PPC.timer = setInterval(() => { if (document.hidden || !document.body.classList.contains("ppc-fullwidth")) return; ppcLoad(); }, 15000); }
-function ppcStop() { if (PPC.timer) clearInterval(PPC.timer); PPC.timer = null; }
+function ppcStart() {
+  ppcStop();
+  const tick = () => {
+    const hot = ["APPROACHING", "ARMED", "TRIGGERED"].some((x) => [PPC.d?.trader?.radar?.bull?.state, PPC.d?.trader?.radar?.bear?.state].includes(x));
+    PPC.timer = setTimeout(() => { if (!document.hidden && document.body.classList.contains("ppc-fullwidth")) ppcLoad(); tick(); }, hot ? 5000 : 15000);
+  };
+  tick();
+  if (!PPC.clock) PPC.clock = setInterval(ppcClock, 1000);
+}
+function ppcStop() { if (PPC.timer) clearTimeout(PPC.timer); PPC.timer = null; if (PPC.clock) clearInterval(PPC.clock); PPC.clock = null; }
 
 function ppcShell() {
   return `
@@ -60,6 +68,7 @@ function ppcShell() {
     <div class="ppc-status" id="ppc-status">loading…</div>
   </div>
   <div id="ppc-quote" class="ppc-quote"></div>
+  <div id="ppc-radar" class="ppc-radar"></div>
   <div id="ppc-coach" class="ppc-coach"></div>
   <div id="ppc-trend" class="ppc-trendstrip"></div>
   <div class="ppc-main">
@@ -93,6 +102,7 @@ function ppcOnClick(e) {
   if (b.dataset.act === "back") { ppcStop(); if (typeof switchTab === "function") switchTab("marketcommand"); return; }
   if (b.dataset.sym) { PPC.sym = b.dataset.sym; PPC.ceK = PPC.peK = null; PPC.off = 0; ppcLoad(true); }
   if (b.dataset.tf) { PPC.tf = b.dataset.tf; ppcLoad(true); }
+  if (b.dataset.act === "alerts") { ppcEnableAlerts(); return; }
   if (b.dataset.layer) { PPC.layers[b.dataset.layer] = !PPC.layers[b.dataset.layer]; ppcRenderTV(true); return; }
   if (b.dataset.act === "fit") { PPC.charts["ppc-ch-spot"]?.timeScale().fitContent(); return; }
   if (b.dataset.sort) { const k = b.dataset.sort; PPC.sort = { key: k, dir: PPC.sort.key === k ? -PPC.sort.dir : -1 }; ppcRenderRank(); }
@@ -137,7 +147,7 @@ function ppcRender() {
   ppcEl("ppc-quote").innerHTML = `<span class="ppc-qname">${ppcEsc(d.name)}</span><span class="ppc-qpx ${ppcCls(sp.change)}">${ppcNs(sp.price)}</span><span class="${ppcCls(sp.change)}">${ppcSg(sp.change)} (${ppcSg(sp.changePct, 2, "%")})</span>
     <span>O <b>${ppcNs(sp.open)}</b></span><span>H <b>${ppcNs(sp.high)}</b></span><span>L <b>${ppcNs(sp.low)}</b></span><span>Prev close <b>${ppcNs(sp.prevClose)}</b></span>
     <span>ATM <b>${d.atm ?? "—"}</b></span><span>Expiry <b>${ppcEsc(d.expiry || "—")}</b></span>${d.session !== "OPEN" ? `<span class="ppc-warnt">Session ${ppcEsc(sp.sessionDay || "")} — market ${ppcEsc(d.session)}</span>` : ""}`;
-  ppcRenderMaster(); ppcRenderCoach(); ppcRenderTV(); ppcRenderLadder(); ppcRenderPlans(); ppcRenderHistory(); ppcRenderCards(); ppcRenderCharts(); ppcRenderRank();
+  ppcRenderMaster(); ppcRenderRadar(); ppcRenderCoach(); ppcRenderTV(); ppcRenderLadder(); ppcRenderPlans(); ppcRenderHistory(); ppcRenderCards(); ppcRenderCharts(); ppcRenderRank();
   ppcEl("ppc-foot").innerHTML = `${ppcEsc(d.note)} · ${ppcEsc(d.version)} · <span title="${ppcEsc(PPC_TIPS.PROB)}">${ppcEsc(d.validation?.status)}: ${ppcEsc(d.validation?.detail)}</span>`;
 }
 
@@ -470,4 +480,74 @@ function ppcLowRiskIdeas(T) {
   if (res) items.push(`<li class="ppc-dn">PE on a rejection from <b>${ppcNs(res.price)}</b> (${ppcEsc(res.label)}) — stop just above</li>`);
   for (const v of lowBreak.slice(0, 2)) items.push(`<li>${v.price > spot ? "CE" : "PE"} on a 15-min close ${v.price > spot ? "above" : "below"} <b>${ppcNs(v.price)}</b> — LOW-RISK break</li>`);
   return `<div class="ppc-lowrisk"><b>Lowest-risk ideas now</b>${items.length ? `<ul>${items.join("")}</ul>` : '<div class="ppc-sub">none — every nearby level is risky; standing aside is a position</div>'}<div class="ppc-sub">Still needs the 15-min candle, premium confirmation and the arbiter.</div></div>`;
+}
+
+
+// ================================================================ opportunity radar + alerts (catch the move at the right time)
+const PPC_OPP = {
+  IDLE: { cls: "idle", icon: "○", word: "IDLE" }, APPROACHING: { cls: "appr", icon: "◔", word: "APPROACHING — GET READY" },
+  ARMED: { cls: "armed", icon: "◉", word: "ARMED — WAIT FOR THE CLOSE" }, TRIGGERED: { cls: "trig", icon: "●", word: "TRIGGERED" },
+  FAILED: { cls: "fail", icon: "✕", word: "FAILED — STAND ASIDE" }, MISSED: { cls: "miss", icon: "↷", word: "MISSED — DON'T CHASE" },
+};
+function ppcRadarTile(o, nm) {
+  if (!o) return "";
+  const m = PPC_OPP[o.state] || PPC_OPP.IDLE, a = o.distAtr;
+  // progress toward the start: 100 % at the start, 0 % at ≥ 1.5 ATR away
+  const pct = a == null ? 0 : Math.max(0, Math.min(100, Math.round((1 - Math.max(0, a) / 1.5) * 100)));
+  return `<div class="ppc-rt ppc-rt-${m.cls} ${o.side === "CE" ? "ppc-rt-ce" : "ppc-rt-pe"}">
+    <div class="ppc-rt-top"><b>${nm}</b> <span class="ppc-rt-side">${o.side}</span><span class="ppc-rt-state">${m.icon} ${m.word}</span></div>
+    <div class="ppc-rt-mid"><span>Start <b>${o.entry ?? "—"}</b></span><span>${o.distPts == null ? "" : o.distPts > 0 ? `<b>${Math.round(o.distPts)}</b> pts to go` : `<b>${Math.abs(Math.round(o.distPts))}</b> pts beyond`}</span>
+      ${o.state === "ARMED" ? `<span class="ppc-rt-cd" data-closes="${o.closesAt}">closes in —</span>` : o.triggeredAt ? `<span>at ${ppcHm(o.triggeredAt + 900)}</span>` : ""}</div>
+    <div class="ppc-rt-bar"><i style="width:${pct}%"></i></div>
+    <div class="ppc-rt-txt">${ppcEsc(o.text)}</div><div class="ppc-rt-next">→ ${ppcEsc(o.next)}</div></div>`;
+}
+function ppcRenderRadar() {
+  const el = ppcEl("ppc-radar"), R = PPC.d?.trader?.radar; if (!el) return;
+  if (!R) { el.innerHTML = ""; return; }
+  const f = R.forming15;
+  el.innerHTML = `<div class="ppc-rd-head"><b>OPPORTUNITY RADAR</b> <span class="ppc-sub">15-min candle ${f ? `${ppcHm(f.time)}–${ppcHm(f.time + 900)} · O ${ppcR(f.open)} H ${ppcR(f.high)} L ${ppcR(f.low)} C ${ppcR(f.close)}` : R.preOpen ? '<b class="ppc-wait">PRE-OPEN — indicative price only; the plan settles on real trading after 09:15</b>' : "— market not open"}</span>
+      <span class="ppc-rd-clock" id="ppc-rd-clock" data-closes="${R.closesAt || ""}"></span>
+      <button class="ppc-tvbtn" data-act="alerts" id="ppc-alert-btn">${PPC.alertsOn ? "🔔 Alerts on" : "🔕 Enable alerts"}</button></div>
+    <div class="ppc-rd-tiles">${ppcRadarTile(R.bull, "BULL PLAN")}${ppcRadarTile(R.bear, "BEAR PLAN")}</div>`;
+  PPC.clockSkew = R.serverTime ? R.serverTime - Math.floor(Date.now() / 1000) : 0;
+  ppcClock(); ppcAlertOnChange(R);
+}
+function ppcClock() {
+  const now = Math.floor(Date.now() / 1000) + (PPC.clockSkew || 0);
+  document.querySelectorAll("#ppc-root [data-closes]").forEach((e) => {
+    const c = Number(e.dataset.closes); if (!c) { e.textContent = ""; return; }
+    const s = Math.max(0, c - now), txt = `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+    e.textContent = e.id === "ppc-rd-clock" ? `candle closes in ${txt}` : `closes in ${txt}`;
+    e.classList.toggle("ppc-urgent", s <= 60);
+  });
+}
+// alerts: only on a CHANGE of state, per index and side; sound + browser notification + tab title
+function ppcEnableAlerts() {
+  PPC.alertsOn = !PPC.alertsOn;
+  try { localStorage.setItem("ppc-alerts", PPC.alertsOn ? "1" : "0"); } catch { /* private mode */ }
+  if (PPC.alertsOn && "Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {});
+  if (PPC.alertsOn) ppcBeep("TRIGGERED");
+  const b = ppcEl("ppc-alert-btn"); if (b) b.textContent = PPC.alertsOn ? "🔔 Alerts on" : "🔕 Enable alerts";
+}
+try { PPC.alertsOn = localStorage.getItem("ppc-alerts") === "1"; } catch { PPC.alertsOn = false; }
+function ppcBeep(state) {
+  try {
+    const ctx = PPC.audio || (PPC.audio = new (window.AudioContext || window.webkitAudioContext)());
+    const tones = state === "TRIGGERED" ? [880, 1175, 1568] : state === "ARMED" ? [660, 880] : state === "FAILED" ? [440, 330] : [520];
+    tones.forEach((f, i) => { const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f; o.connect(g); g.connect(ctx.destination); const t = ctx.currentTime + i * 0.18; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.25, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16); o.start(t); o.stop(t + 0.17); });
+  } catch { /* no audio */ }
+}
+function ppcAlertOnChange(R) {
+  PPC.lastOpp = PPC.lastOpp || {};
+  for (const o of [R.bull, R.bear]) {
+    if (!o) continue;
+    const key = `${PPC.sym}|${o.side}`, prev = PPC.lastOpp[key];
+    PPC.lastOpp[key] = o.state;
+    if (prev === undefined || prev === o.state || !["APPROACHING", "ARMED", "TRIGGERED", "FAILED"].includes(o.state)) continue;
+    const msg = `${PPC.d.name} ${o.side === "CE" ? "BULL" : "BEAR"}: ${PPC_OPP[o.state].word} — ${o.text}`;
+    if (!PPC.alertsOn) continue;
+    ppcBeep(o.state);
+    try { if ("Notification" in window && Notification.permission === "granted") new Notification("🎯 " + PPC_OPP[o.state].word, { body: msg + "\n→ " + o.next, tag: key }); } catch { /* blocked */ }
+    const t0 = document.title; document.title = `● ${o.side} ${o.state}`; setTimeout(() => { document.title = t0; }, 8000);
+  }
 }

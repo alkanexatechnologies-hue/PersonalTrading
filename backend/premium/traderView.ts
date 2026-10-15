@@ -212,6 +212,7 @@ export function coach(m: CoachIn) {
   const passed = checklist.filter((c) => c.ok === true).length, total = checklist.filter((c) => c.ok !== null).length;
   let action: string, why: string, tone: "bull" | "bear" | "wait" | "stop";
   if (/STALE|DISCONNECTED|UNAVAILABLE/.test(m.dataStatus)) { action = "NO TRADE — DATA NOT LIVE"; why = `Feed is ${m.dataStatus}. Never trade on old prices.`; tone = "stop"; }
+  else if (m.session === "PRE-OPEN") { action = "PRE-OPEN — PLAN READY, WAIT FOR 09:15"; why = `Pre-open prices are indicative. Bull plan starts on a 15-min close above ${m.bull?.entry ?? "—"}, Bear plan below ${m.bear?.entry ?? "—"}; the first 15 minutes set the range.`; tone = "wait"; }
   else if (m.session !== "OPEN") { action = "MARKET CLOSED — PREPARE THE PLAN"; why = `Next session: Bull plan starts on a 15-min close above ${m.bull?.entry ?? "—"}, Bear plan below ${m.bear?.entry ?? "—"}; nothing in between.`; tone = "wait"; }
   else if (m.istMin < 570) { action = "WAIT — OPENING RANGE"; why = "First 15 minutes set the range. Let the 09:30 candle close before acting."; tone = "wait"; }
   else if (m.istMin > 885) { action = "NO NEW TRADES — LATE SESSION"; why = "After 14:45 theta and the 15:12 exit leave too little room for a buyer."; tone = "stop"; }
@@ -277,4 +278,34 @@ export function levelRisks(o: { levels: Level[]; spot: number; atr: number; dail
     const bounce = !far && strong && (d === bounceDir || h === bounceDir) ? (above ? `strong resistance — lower-risk PE on a rejection (stop just above ${Math.round(v.price)})` : `strong support — lower-risk CE on a bounce (stop just below ${Math.round(v.price)})`) : null;
     return { price: v.price, side: above ? "ABOVE" : "BELOW", risk, score, reasons, bounce, rejections: rej, roomPts: room != null ? Math.round(room) : null };
   });
+}
+
+// ---------------------------------------------------------------- opportunity radar (catch the move at the right time)
+export type OppState = "IDLE" | "APPROACHING" | "ARMED" | "TRIGGERED" | "FAILED" | "MISSED";
+export interface Opp { side: "CE" | "PE"; state: OppState; entry: number | null; distPts: number | null; distAtr: number | null; triggeredAt: number | null; closesAt: number | null; text: string; next: string }
+/**
+ * One plan's live state from CLOSED 15-min candles + the forming one (kept separate — it is never a confirmation):
+ * MISSED (already past T1 — do not chase) · FAILED (triggered in the last 4 closed bars, then closed back inside the level) ·
+ * TRIGGERED (a closed bar beyond the start within the last 4 bars and still beyond) · ARMED (the forming bar is beyond the
+ * start) · APPROACHING (within 0.3·ATR) · IDLE.
+ */
+export function opportunity(p: Plan | null, closed15: Candle[], forming15: Candle | null, atr: number): Opp {
+  const side = p?.side ?? "CE", base = { side, entry: p?.entry ?? null, triggeredAt: null as number | null, closesAt: forming15 ? forming15.time + 900 : null };
+  if (!p) return { ...base, state: "IDLE", distPts: null, distAtr: null, text: "no plan on this side", next: "—" };
+  const dir = p.side === "CE" ? 1 : -1, px = forming15 ? forming15.close : closed15[closed15.length - 1]?.close;
+  if (px == null) return { ...base, state: "IDLE", distPts: null, distAtr: null, text: "no price", next: "—" };
+  const dist = r2(dir * (p.entry - px)), distAtr = atr > 0 ? r2(dist / atr) : null;   // > 0 = still to go
+  const recent = closed15.slice(-4);
+  const trigIdx = recent.findIndex((c, i) => dir * (c.close - p.entry) >= 0 && (i === 0 ? true : dir * (recent[i - 1].close - p.entry) < 0));
+  const trig = trigIdx >= 0 ? recent[trigIdx] : null;
+  if (dir * (px - p.t1) >= 0) return { ...base, state: "MISSED", distPts: dist, distAtr, triggeredAt: trig?.time ?? null, text: `price ${Math.round(px)} is already past Target 1 ${Math.round(p.t1)}`, next: "do not chase — wait for a pullback to the start or a new plan" };
+  if (trig) {
+    const after = recent.slice(trigIdx + 1);
+    if (after.some((c) => dir * (c.close - p.trigger) < 0) || (forming15 && dir * (forming15.close - p.stop) <= 0))
+      return { ...base, state: "FAILED", distPts: dist, distAtr, triggeredAt: trig.time, text: `triggered ${p.side} but closed back ${dir > 0 ? "below" : "above"} ${Math.round(p.trigger)}`, next: "stand aside — failed breaks often run the other way" };
+    return { ...base, state: "TRIGGERED", distPts: dist, distAtr, triggeredAt: trig.time, text: `15-min close ${Math.round(trig.close)} ${dir > 0 ? "above" : "below"} ${p.entry}`, next: `${p.side} plan live: stop ${p.stop}, T1 ${Math.round(p.t1)} — confirm premium + arbiter` };
+  }
+  if (forming15 && dir * (forming15.close - p.entry) >= 0) return { ...base, state: "ARMED", distPts: dist, distAtr, text: `forming 15-min candle is ${dir > 0 ? "above" : "below"} ${p.entry} — not closed yet`, next: `needs the candle to CLOSE ${dir > 0 ? "above" : "below"} ${p.entry}` };
+  if (dist <= 0.3 * atr) return { ...base, state: "APPROACHING", distPts: dist, distAtr, text: `${Math.round(dist)} pts from the start ${p.entry}`, next: "get ready: strike, quantity, stop decided now" };
+  return { ...base, state: "IDLE", distPts: dist, distAtr, text: `${Math.round(dist)} pts to the start ${p.entry}`, next: "nothing to do" };
 }
