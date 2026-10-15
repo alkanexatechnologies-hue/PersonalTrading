@@ -7728,3 +7728,28 @@ body.ppc-fullwidth .watchlist, body.ppc-fullwidth #watchlist { display: none !im
 .ppc-zh-tr { font-size: 12px; margin-top: 6px; color: #b2b5be; } .ppc-zh-v { font-size: 12.5px; margin-top: 4px; font-weight: 700; }
 .ppc-zh-rules { font-size: 11.5px; color: #9598a1; margin: 6px 0 0; padding-left: 18px; }
 @media (max-width: 700px) { .ppc-zh-cards { grid-template-columns: 1fr; } .ppc-zh-g { grid-template-columns: 1fr 1fr; } }
+/* ---- Premium Prediction: COMPACT layout ---- */
+.ppc-wrap { padding: 4px 8px 16px; }
+.ppc-head { margin-bottom: 4px; gap: 6px 10px; } .ppc-title { font-size: 14px; } .ppc-title .ppc-sub { display: none; }
+.ppc-pill, .ppc-back, .ppc-ctl select { min-height: 32px; padding: 4px 8px; }
+.ppc-quote { padding: 4px 8px; margin-bottom: 6px; gap: 4px 12px; } .ppc-qpx { font-size: 18px; }
+.ppc-radar { padding: 6px 8px; margin-bottom: 6px; } .ppc-rd-head { margin-bottom: 4px; }
+.ppc-rt { padding: 6px 8px; } .ppc-rt-mid { margin: 2px 0; } .ppc-rt-mid b { font-size: 14px; } .ppc-rt-txt { display: none; }
+.ppc-coach { padding: 6px 10px; margin-bottom: 6px; gap: 4px 12px; } .ppc-k-act { font-size: 17px; } .ppc-k-why { font-size: 12px; margin-top: 2px; }
+.ppc-k-list { display: block; } .ppc-k-list summary { cursor: pointer; } .ppc-k-list[open] { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 12px; }
+.ppc-trendstrip { margin-bottom: 6px; gap: 4px; } .ppc-tchip { padding: 4px 6px; } .ppc-tchip b { font-size: 13px; } .ppc-tchip em { display: none; }
+.ppc-main { margin-bottom: 6px; } .ppc-side { max-height: 560px; } .ppc-lad-why { display: none; }
+.ppc-plans { margin-bottom: 6px; gap: 6px; } .ppc-plan { padding: 6px 8px; } .ppc-pl-start { font-size: 13px; margin: 2px 0; } .ppc-pl-start b { font-size: 18px; }
+.ppc-pl-tbl { font-size: 12.5px; } .ppc-pl-tbl td { padding: 2px 4px; } .ppc-pl-nt .ppc-sub { display: none; } .ppc-lowrisk { margin-top: 4px; }
+.ppc-more { background: #131722; border: 1px solid #2a2e39; border-radius: 8px; padding: 6px 8px; } .ppc-more > summary { cursor: pointer; color: #82a8ff; font-weight: 700; font-size: 12.5px; }
+.ppc-more[open] > summary { margin-bottom: 6px; }
+/* zero-hero today strip */
+.ppc-zht { margin-bottom: 6px; }
+.ppc-zht-none { font-size: 12px; color: #787b86; padding: 2px 4px; }
+.ppc-zht-row { background: #171022; border: 1px solid #6a3d7a; border-radius: 8px; padding: 6px 8px; margin-bottom: 4px; } .ppc-zht-row.trig { border: 2px solid #ab47bc; }
+.ppc-zht-h { font-size: 12.5px; margin-bottom: 4px; } .ppc-zht-h b { color: #ce93d8; }
+.ppc-zht-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.ppc-zht-s { font-size: 12.5px; padding: 4px 6px; border-radius: 6px; background: #131722; } .ppc-zht-s.on { outline: 1px solid #ab47bc; }
+.ppc-zht-s .ppc-sub { display: block; margin-top: 2px; }
+.ppc-zht-hist { font-size: 11px; color: #ef9a9a; margin-top: 4px; }
+@media (max-width: 700px) { .ppc-zht-sides { grid-template-columns: 1fr; } .ppc-k-list[open] { grid-template-columns: 1fr; } }

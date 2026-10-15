@@ -61,7 +61,7 @@ export function zeroHero(o: ZhInput) {
     // trigger: first 5-min CLOSE beyond the day's range set before it, closing 13:30–14:45
     let trig: ZhSide["trigger"] = { state: isExpiry && o.istMin >= 810 && o.istMin <= 885 ? "WAIT" : "NOT IN WINDOW", at: null, level: null, detail: "" };
     const bars = o.closed5Today;
-    for (let j = 1; j < bars.length; j++) {
+    for (let j = 1; isExpiry && j < bars.length; j++) {   // the trigger is only judged on the expiry day itself
       const c = bars[j].time + 300, m = Math.floor(((c + 19800) % 86400) / 60); if (m < 810 || m > 885) continue;
       const prior = bars.slice(0, j), hi = Math.max(...prior.map((b) => b.high)), lo = Math.min(...prior.map((b) => b.low));
       if (dir > 0 ? bars[j].close > hi : bars[j].close < lo) { trig = { state: "TRIGGERED", at: c, level: r2(dir > 0 ? hi : lo), detail: `5-min close ${r2(bars[j].close)} ${dir > 0 ? "above the day high" : "below the day low"} ${r2(dir > 0 ? hi : lo)}` }; break; }

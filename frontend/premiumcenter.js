@@ -36,6 +36,7 @@ function initPremiumCenter() {
     root.innerHTML = ppcShell();
     root.addEventListener("click", ppcOnClick);
     root.addEventListener("change", ppcOnChange);
+    root.addEventListener("toggle", (e) => { if (e.target && e.target.id === "ppc-more" && e.target.open && PPC.d) { ppcRenderCards(); ppcRenderCharts(); ppcRenderRank(); } }, true);
   } else {
     try { const mcSym = (typeof MC !== "undefined" && MC.sym) || null; if (mcSym && mcSym !== PPC.sym && PPC_SYMS.some((s) => s[0] === mcSym)) { PPC.sym = mcSym; PPC.ceK = PPC.peK = null; } } catch { /* keep */ }
   }
@@ -68,8 +69,8 @@ function ppcShell() {
     <div class="ppc-status" id="ppc-status">loading…</div>
   </div>
   <div id="ppc-quote" class="ppc-quote"></div>
+  <div id="ppc-zh-today" class="ppc-zht"></div>
   <div id="ppc-radar" class="ppc-radar"></div>
-  <details class="ppc-card ppc-zh" id="ppc-zh-box"><summary><b>🎲 Zero-Hero (expiry day)</b> <span class="ppc-sub">cheap OTM on expiry afternoon — with its real 2-year record</span> <span id="ppc-zh-sum"></span></summary><div id="ppc-zh"></div></details>
   <div id="ppc-coach" class="ppc-coach"></div>
   <div id="ppc-trend" class="ppc-trendstrip"></div>
   <div class="ppc-main">
@@ -86,8 +87,10 @@ function ppcShell() {
     <div class="ppc-side"><div class="ppc-side-h">Level ladder <span class="ppc-sub">★ confluence · risk = for a buyer trading the break</span></div><div class="ppc-rk-key"><i class="ppc-rk ppc-rk-low">LOW RISK</i><i class="ppc-rk ppc-rk-med">MED RISK</i><i class="ppc-rk ppc-rk-high">HIGH RISK</i><i class="ppc-rk ppc-rk-far">FAR</i> <span class="ppc-sub">hover a level for why</span></div><div id="ppc-ladder"></div></div>
   </div>
   <div class="ppc-plans" id="ppc-plans"></div>
+  <details class="ppc-more" id="ppc-more"><summary>More details — next-session map · past breaks · arbiter &amp; risk gates · CE/PE cards · premium charts · strike ranking · zero-hero detail</summary>
   <div class="ppc-row2"><div class="ppc-card" id="ppc-tomorrow"></div><div class="ppc-card" id="ppc-history"></div></div>
   <details class="ppc-card ppc-arb"><summary><b>Arbiter &amp; risk gates</b> <span class="ppc-sub">final authority — the screen never overrides it</span> <span id="ppc-arb-sum"></span></summary><div id="ppc-master" class="ppc-master"></div></details>
+  <details class="ppc-card ppc-zh" id="ppc-zh-box"><summary><b>🎲 Zero-Hero detail ({SYM})</b> <span id="ppc-zh-sum"></span></summary><div id="ppc-zh"></div></details>
   <div class="ppc-cards"><div id="ppc-card-ce" class="ppc-card"></div><div id="ppc-card-pe" class="ppc-card"></div><div id="ppc-card-cmp" class="ppc-card"></div></div>
   <div class="ppc-charts2">
     <div class="ppc-card ppc-chartcard"><div class="ppc-ch-head"><b>CE premium</b> <span id="ppc-ce-legend" class="ppc-sub"></span></div><div id="ppc-ch-ce" class="ppc-ch"></div></div>
@@ -95,6 +98,7 @@ function ppcShell() {
   </div>
   <div class="ppc-card ppc-chartcard"><div class="ppc-ch-head"><b>CE vs PE — % move since the session's first candle</b> <span class="ppc-sub">(same strikes as the cards)</span></div><div id="ppc-ch-cmp" class="ppc-ch ppc-ch-cmp"></div></div>
   <details class="ppc-card"><summary class="ppc-ch-head"><b>Strike ranking</b> <span class="ppc-sub">ATM ± 3 · ranked by structure alignment, quote quality and modelled move after the spread — never by premium price alone</span></summary><div id="ppc-rank" class="ppc-rankwrap"></div></details>
+  </details>
   <div class="ppc-foot" id="ppc-foot"></div>`;
 }
 
@@ -149,7 +153,7 @@ function ppcRender() {
   ppcEl("ppc-quote").innerHTML = `<span class="ppc-qname">${ppcEsc(d.name)}</span><span class="ppc-qpx ${ppcCls(sp.change)}">${ppcNs(sp.price)}</span><span class="${ppcCls(sp.change)}">${ppcSg(sp.change)} (${ppcSg(sp.changePct, 2, "%")})</span>
     <span>O <b>${ppcNs(sp.open)}</b></span><span>H <b>${ppcNs(sp.high)}</b></span><span>L <b>${ppcNs(sp.low)}</b></span><span>Prev close <b>${ppcNs(sp.prevClose)}</b></span>
     <span>ATM <b>${d.atm ?? "—"}</b></span><span>Expiry <b>${ppcEsc(d.expiry || "—")}</b></span>${d.session !== "OPEN" ? `<span class="ppc-warnt">Session ${ppcEsc(sp.sessionDay || "")} — market ${ppcEsc(d.session)}</span>` : ""}`;
-  ppcRenderMaster(); ppcRenderRadar(); ppcLoadZH(); ppcRenderCoach(); ppcRenderTV(); ppcRenderLadder(); ppcRenderPlans(); ppcRenderHistory(); ppcRenderCards(); ppcRenderCharts(); ppcRenderRank();
+  ppcRenderMaster(); ppcRenderRadar(); ppcLoadZH(); ppcLoadZHToday(); ppcRenderCoach(); ppcRenderTV(); ppcRenderLadder(); ppcRenderPlans(); ppcRenderHistory(); if (ppcEl("ppc-more")?.open) { ppcRenderCards(); ppcRenderCharts(); ppcRenderRank(); }
   ppcEl("ppc-foot").innerHTML = `${ppcEsc(d.note)} · ${ppcEsc(d.version)} · <span title="${ppcEsc(PPC_TIPS.PROB)}">${ppcEsc(d.validation?.status)}: ${ppcEsc(d.validation?.detail)}</span>`;
 }
 
@@ -290,7 +294,7 @@ function ppcRenderCoach() {
   const c = T.coach;
   el.className = `ppc-coach ppc-k-${c.tone}`;
   el.innerHTML = `<div class="ppc-k-main"><div class="ppc-k-lbl">WHAT I'D DO NOW</div><div class="ppc-k-act">${ppcEsc(c.action)}</div><div class="ppc-k-why">${ppcEsc(c.why)}</div></div>
-    <div class="ppc-k-list"><div class="ppc-k-lbl">CHECKLIST ${c.total ? `${c.passed}/${c.total}` : ""}</div>${c.checklist.map((x) => `<div class="${x.ok === true ? "ppc-up" : x.ok === false ? "ppc-dn" : "ppc-sub ppc-k-na"}">${x.ok === true ? "✓" : x.ok === false ? "✗" : "·"} ${ppcEsc(x.item)} <span class="ppc-sub">${ppcEsc(x.detail)}</span></div>`).join("")}</div>`;
+    <details class="ppc-k-list"><summary class="ppc-k-lbl">CHECKLIST ${c.total ? `${c.passed}/${c.total}` : ""} ▾</summary>${c.checklist.map((x) => `<div class="${x.ok === true ? "ppc-up" : x.ok === false ? "ppc-dn" : "ppc-sub ppc-k-na"}">${x.ok === true ? "✓" : x.ok === false ? "✗" : "·"} ${ppcEsc(x.item)} <span class="ppc-sub">${ppcEsc(x.detail)}</span></div>`).join("")}</details>`;
   const tr = ppcEl("ppc-trend");
   tr.innerHTML = (T.trends || []).map((t) => `<div class="ppc-tchip ppc-t-${t.verdict === "UP" ? "up" : t.verdict === "DOWN" ? "dn" : "rg"}" title="${ppcEsc(t.reasons.join(" · "))}"><span>${ppcEsc(t.tf)}</span><b>${t.verdict === "UP" ? "▲ UP" : t.verdict === "DOWN" ? "▼ DOWN" : t.verdict === "RANGE" ? "▬ RANGE" : "NO DATA"}</b><em>${ppcEsc(t.reasons.slice(1).join(" · ") || t.reasons[0] || "")}</em></div>`).join("")
     + `<div class="ppc-tchip ppc-t-note"><span>Rule</span><b>Trade with the higher timeframe</b><em>${ppcEsc(ppcHtfLine(T.trends))}</em></div>`;
@@ -304,7 +308,7 @@ function ppcHtfLine(tr) {
 
 function ppcMkTV(id) {
   const host = ppcEl(id); if (!host || typeof LightweightCharts === "undefined") return null;
-  const h = window.innerWidth < 700 ? 380 : Math.max(480, Math.min(640, window.innerHeight - 260));
+  const h = window.innerWidth < 700 ? 340 : Math.max(400, Math.min(540, window.innerHeight - 300));
   return LightweightCharts.createChart(host, {
     width: host.clientWidth || 800, height: h,
     layout: { background: { type: "solid", color: TVC.bg }, textColor: TVC.text, fontSize: 11, fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif" },
@@ -588,4 +592,33 @@ async function ppcLoadZH(force) {
       <div class="ppc-zh-cards">${d.sides.map(card).join("")}</div>
       <ul class="ppc-zh-rules">${d.rules.map((r) => `<li>${ppcEsc(r)}</li>`).join("")}</ul>`;
   } catch (e) { el.innerHTML = `<div class="ppc-na">NOT AVAILABLE — ${ppcEsc(e.message || "")}</div>`; }
+}
+
+
+// ================================================================ Zero-Hero TODAY: NIFTY + SENSEX (+ selected) — shows whichever expires today
+async function ppcLoadZHToday(force) {
+  const el = ppcEl("ppc-zh-today"); if (!el) return;
+  if (!force && PPC._zhtAt && Date.now() - PPC._zhtAt < 14000) return; PPC._zhtAt = Date.now();
+  const syms = [...new Set(["^NSEI", "^BSESN", PPC.sym])];
+  let budget = ""; try { budget = localStorage.getItem("ppc-zh-budget") || ""; } catch { /* private */ }
+  // each index renders as soon as its own data arrives (a slow chain never blocks the others)
+  PPC._zht = PPC._zht || {};
+  await Promise.all(syms.map((s) => fetch(`/api/zero-hero-live?symbol=${encodeURIComponent(s)}&zht=1${budget ? "&budget=" + budget : ""}`).then((r) => r.json()).then((d) => { if (d) { PPC._zht[s] = d; ppcRenderZHToday(); } }).catch(() => {})));
+}
+function ppcRenderZHToday() {
+  const el = ppcEl("ppc-zh-today"); if (!el) return;
+  const live = Object.values(PPC._zht || {}).filter((d) => d && d.available);
+  const exp = live.filter((d) => d.isExpiry);
+  if (!exp.length) {
+    el.innerHTML = `<div class="ppc-zht-none">🎲 Zero-hero: no expiry today · next ${live.map((d) => `${ppcEsc(d.name.replace(" 50", ""))} ${ppcEsc(String(d.expiry).slice(5))}`).join(" · ")}</div>`; return;
+  }
+  const side = (d, x) => {
+    const t = x.trigger.state, c = t === "TRIGGERED" ? "on" : "";
+    return `<div class="ppc-zht-s ${c}"><b class="${x.side === "CE" ? "ppc-up" : "ppc-dn"}">${x.side} ${x.strike ?? "—"}</b> ₹${ppcNs(x.premium)} <span class="ppc-chip ppc-c-${t === "TRIGGERED" ? "bull" : "wait"}">${ppcEsc(t)}</span>
+      <span class="ppc-sub">2× at ${ppcNs(x.doubleAt, 0)} (${x.moveToDouble != null ? Math.round(x.moveToDouble) : "—"} pts) · touch ${x.pTouchDouble != null ? Math.round(x.pTouchDouble) + "%" : "—"} · writers ${x.writersCovering == null ? "—" : x.writersCovering ? "covering" : "adding"}${x.costPerLot ? ` · ₹${Math.round(x.costPerLot)}/lot` : ""}</span></div>`;
+  };
+  el.innerHTML = exp.map((d) => `<div class="ppc-zht-row ${d.sides.some((x) => x.trigger.state === "TRIGGERED") ? "trig" : ""}">
+      <div class="ppc-zht-h">🎲 <b>${ppcEsc(d.name.replace(" 50", ""))} EXPIRY TODAY</b> · ${ppcEsc(d.window)} · ${d.minutesToClose} min left · market prices ±${ppcNs(d.straddle, 0)} pts</div>
+      <div class="ppc-zht-sides">${d.sides.map((x) => side(d, x)).join("")}</div>
+      ${d.history ? `<div class="ppc-zht-hist">2-yr: ${ppcEsc(d.history.text)}</div>` : ""}</div>`).join("");
 }
