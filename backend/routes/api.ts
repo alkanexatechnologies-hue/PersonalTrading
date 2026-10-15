@@ -71,6 +71,7 @@ import * as TV from "../premium/traderView";
 import { zeroHero as zeroHeroLive, newZhTrade, stepZhTrade, freshTrigger, ZhTrade } from "../premium/zeroHero";
 import { readCandle } from "../premium/candleRead";
 import * as CP from "../premium/copilot";
+import * as EYE from "../premium/marketEye";
 import { Decision } from "../decision/types";
 import { runHtf as runTestLabHtf } from "../testlab/htfRunner";
 import { abcComparison as htfAbc, timingDiagnostic as htfTiming, perCandleAudit as htfPerCandle } from "../testlab/htfAudit";
@@ -7918,12 +7919,19 @@ async function zeroHeroPayload(query: Record<string, any>): Promise<any> {
       const ix = ({ "^NSEI": "NIFTY", "^BSESN": "SENSEX" } as Record<string, string>)[def.symbol];
       const f = ix ? path.join(process.cwd(), "data", "research-zero-hero", `${ix}.json`) : null;
       if (f && fs.existsSync(f)) {
-        const r = JSON.parse(fs.readFileSync(f, "utf8")), rows = Object.values<any>(r.variants || {}).flatMap((v: any) => [v.DEV, v.VALIDATION]).filter((x: any) => x && x.n);
+        const r = JSON.parse(fs.readFileSync(f, "utf8")), rows = Object.values<any>(r.variants || {}).flatMap((v: any) => [v.DEV, v.VALIDATION]).filter((x: any) => x && x.n >= 10);   // tiny samples distort the range
         const n = rows.reduce((a: number, x: any) => a + x.n, 0) / Math.max(1, Object.keys(r.variants || {}).length), avgs = rows.map((x: any) => x.avgNet), hits = rows.map((x: any) => x.hit2xPct);
         history = { text: `${ix}, 2 years of expiry days (~${Math.round(n)} trades per rule): day-range breakout after 13:30 — reached 2× in ${Math.min(...hits)}–${Math.max(...hits)} % of trades; average ${Math.min(...avgs)} to ${Math.max(...avgs)} premium pts per trade after costs.`, hit2x: `${Math.min(...hits)}–${Math.max(...hits)} %`, avg: `${Math.min(...avgs)} to ${Math.max(...avgs)}` };
       }
     } catch { history = null; }
     const z = zeroHeroLive({ symbol: def.symbol, expiry: String(ch.expiry), today, istMin, spot, step, lot, chain: strikes, closed5Today: closed5, oiNow, oi15Ago: oi15, budget, history });
+    const lastClosedZh = Math.max(0, ...(_zhLedger.day === today ? _zhLedger.trades : []).filter((t: ZhTrade) => t.symbol === def.symbol).map((t: ZhTrade) => t.closedAt || 0));
+    if (lastClosedZh > 0) for (const sd of z.sides) {
+      const ft = freshTrigger(closed5, sd.side, lastClosedZh), dirUp = sd.side === "CE";
+      if (ft) sd.trigger = { state: "TRIGGERED", at: ft.at, level: ft.level, detail: `FRESH 5-min close ${ft.close} ${dirUp ? "above the day high" : "below the day low"} ${ft.level} after the last trade ended` };
+      else { const hi = closed5.length ? Math.max(...closed5.map((b) => b.high)) : null, lo = closed5.length ? Math.min(...closed5.map((b) => b.low)) : null, lvl = dirUp ? hi : lo;
+        sd.trigger = { state: z.window.startsWith("ACTIVE") ? "WAIT" : "NOT IN WINDOW", at: null, level: lvl, detail: `needs a FRESH 5-min close ${dirUp ? "above the day high" : "below the day low"} ${lvl != null ? Math.round(lvl * 100) / 100 : "—"} (the earlier trigger was used by the closed trade)` }; }
+    }
     const zhTrades = (_zhLedger.day === today ? _zhLedger.trades : []).filter((t: ZhTrade) => t.symbol === def.symbol).map((t: ZhTrade) => {
       const row = strikes.find((x: any) => x.strike === t.strike), live = row ? (t.side === "CE" ? row.ceLtp : row.peLtp) ?? null : null;
       return { ...t, livePrem: t.state === "CLOSED" ? null : live, livePnlPct: t.state === "CLOSED" || live == null ? null : Math.round(((live / t.entryPrem) - 1) * 1000) / 10 };
@@ -8691,6 +8699,37 @@ async function dayRangeTick() {
   if (slot && !_rangeSummariesSent.has(slot)) { _rangeSummariesSent.add(slot); notifyDetached("INDEX_ALERT", rangeSummaryMessage(rows, `${slot} IST`)); }
 }
 function addMinutesHm(hm: string, m: number) { const t = +hm.slice(0, 2) * 60 + +hm.slice(3) + m; return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; }
+// ===================== Market Eye: next-30-minute tendency from 2 years of NIFTY / SENSEX history =====================
+const _eye = new Map<string, EYE.EyeRow[]>();
+async function eyeBuild() {
+  try {
+    const { assemble } = await import("../research/nifty20/data"), { assembleIndex } = await import("../research/multiIndex/data");
+    const prep = (days: any[]) => { const out: any[] = []; let pc: number | null = null; for (const d of days) { const m = [...d.spot.entries()].sort((a: any, b: any) => a[0] - b[0]).filter(([t]: any) => { const k = Math.floor(((t + 19800) % 86400) / 60); return k >= 555 && k <= 929; }); if (pc && m.length) out.push({ day: d.day, minutes: m, prevClose: pc }); if (m.length) pc = m[m.length - 1][1]; } return out; };
+    try { const r = EYE.buildRows(prep(assemble("2024-10-14", "2026-10-12").days)); if (r.length) _eye.set("^NSEI", r); } catch { /* no NIFTY history here */ }
+    try { const r = EYE.buildRows(prep(assembleIndex("SENSEX", "2024-10-14", "2026-10-12"))); if (r.length) _eye.set("^BSESN", r); } catch { /* no SENSEX history here */ }
+    console.log(`[market-eye] rows: NIFTY ${_eye.get("^NSEI")?.length ?? 0} · SENSEX ${_eye.get("^BSESN")?.length ?? 0}`);
+  } catch (e: any) { console.log("[market-eye] unavailable:", e?.message); }
+}
+setTimeout(() => { eyeBuild().catch(() => {}); }, 20_000);
+/** Live state → the most similar past moments' next 30 minutes. Needs today's 5-min candles for the 30 / 5-minute moves. */
+async function eyeFor(sym: string, spot: { price: number; changePct: number | null; high: number | null; low: number | null }) {
+  const rows = _eye.get(sym); if (!rows || !(spot.price > 0) || spot.changePct == null || spot.high == null || spot.low == null) return null;
+  const nowSec = Math.floor(Date.now() / 1000), min = Math.floor(((nowSec + 19800) % 86400) / 60), today = new Date((nowSec + 19800) * 1000).toISOString().slice(0, 10);
+  if (min < 570 || min > 915) return null;
+  const c5: any[] = ((await getCandlesCached(sym, "5m" as Interval).catch(() => [])) as any[]).filter((c) => new Date((c.time + 19800) * 1000).toISOString().slice(0, 10) === today);
+  const at = (minsAgo: number) => { const t = nowSec - minsAgo * 60; const c = [...c5].reverse().find((x) => x.time <= t); return c ? c.close : null; };
+  const p30 = at(30), p5 = at(5); if (p30 == null || p5 == null) return null;
+  const s = { min, dayChg: spot.changePct, fromHigh: (spot.high - spot.price) / spot.price * 100, fromLow: (spot.price - spot.low) / spot.price * 100, ret30: (spot.price / p30 - 1) * 100, ret5: (spot.price / p5 - 1) * 100 };
+  const res = EYE.lookup(rows, s, 30, today);
+  return res ? { ...res, text: EYE.eyeText(sym === "^BSESN" ? "SENSEX" : "NIFTY", res, spot.price) } : null;
+}
+router.get("/market-eye", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  const sym = String(req.query.symbol || "^NSEI"), def = findSymbolDef(sym); if (!def) return res.status(400).json({ error: "symbol" });
+  const q: any = await cached(`quote:${sym}`, TTL_QUOTE, () => getProvider().getQuote(sym)).catch(() => null);
+  const r = q ? await eyeFor(sym, { price: q.price, changePct: q.changePercent, high: q.dayHigh, low: q.dayLow }) : null;
+  res.json({ available: !!r, symbol: sym, ready: _eye.has(sym), ...(r || {}) });
+});
+
 // ===================== Zero-hero ledger: FROZEN trades, one at a time per index (expiry afternoons) =====================
 // A trade is fixed at its trigger (number, time, strike, entry premium at the trigger candle close, T1 2×, T2 3×, stops) and
 // never re-planned. No new zero-hero trade on that index until the open one ends (stop / target / 15:20).
@@ -8783,7 +8822,7 @@ async function copilotTick() {
     }
     if (istMin >= 555 && istMin <= 916) {
       _cpTick++;
-      const syms = _cpTick % 2 ? ["^NSEI"] : ["^NSEI", "^BSESN", "^NSEBANK"];
+      const syms = _cpTick % 2 && istMin % 15 !== 0 ? ["^NSEI"] : ["^NSEI", "^BSESN", "^NSEBANK"];
       for (const sym of syms) {
         const d: any = await pay(sym).catch(() => null); if (!d?.available || !d.trader || d.trader.error || d.dataStatus !== "LIVE") continue;
         const T = d.trader, tracked = sym === "^NSEI" || sym === "^BSESN";
@@ -8811,12 +8850,14 @@ async function copilotTick() {
         }
         cpSave();
         // NIFTY 15-minute update, right after each 15-min candle closes (09:30 … 15:15)
-        if (sym === "^NSEI" && istMin >= 570 && istMin % 15 === 0 && sec >= 20 && !_cp.sent[`u|${istMin}`]) {
-          _cp.sent[`u|${istMin}`] = true; cpSave();
-          const zh = await zeroHeroPayload({ symbol: "^NSEI" }).catch(() => null);
-          let text = CP.fifteenMinUpdate(d, _cp.trades["^NSEI"] || null, zh?.available ? zh : null, cpOdds("^NSEI"));
+        if ((sym === "^NSEI" || sym === "^BSESN") && istMin >= 570 && istMin % 15 === 0 && sec >= 20 && !_cp.sent[`u|${sym}|${istMin}`]) {
+          _cp.sent[`u|${sym}|${istMin}`] = true; cpSave();
+          const zh = await zeroHeroPayload({ symbol: sym }).catch(() => null);
+          let text = CP.fifteenMinUpdate(d, _cp.trades[sym] || null, zh?.available ? zh : null, cpOdds(sym));
+          const eye = await eyeFor(sym, { price: d.spot.price, changePct: d.spot.changePct, high: d.spot.high, low: d.spot.low }).catch(() => null);
+          if (eye) text += `\n  ${eye.text}`;
           const zs = await zeroHeroPayload({ symbol: "^BSESN" }).catch(() => null);
-          if (zs?.available && zs.isExpiry && istMin >= 810 && istMin <= 900) text += `\n  🎲 SENSEX zero-hero (${zs.window}): ${zs.sides.map((x: any) => `${x.side} ${x.strike} ₹${x.premium != null ? Math.round(x.premium) : "—"} · ${x.trigger.state}${x.moveToDouble != null ? ` · 2× needs ${Math.round(x.moveToDouble)} pts` : ""}`).join(" | ")}${zs.history?.text ? `\n     2-yr: ${zs.history.text}` : ""}`;
+          if (sym === "^NSEI" && zs?.available && zs.isExpiry && istMin >= 810 && istMin <= 900) text += `\n  🎲 SENSEX zero-hero (${zs.window}): ${zs.sides.map((x: any) => `${x.side} ${x.strike} ₹${x.premium != null ? Math.round(x.premium) : "—"} · ${x.trigger.state}${x.moveToDouble != null ? ` · 2× needs ${Math.round(x.moveToDouble)} pts` : ""}`).join(" | ")}${zs.history?.text ? `\n     2-yr: ${zs.history.text}` : ""}`;
           cpSend(text);
         }
       }
@@ -8838,7 +8879,8 @@ router.post("/copilot/update-now", requirePermission("oiAnalysis"), async (req: 
     const sym = String(req.query.symbol || "^NSEI"), d: any = await premiumCenterPayload({ symbol: sym, interval: "15m" });
     if (!d?.available) return res.json({ ok: false, error: d?.error || "unavailable" });
     const zh = await zeroHeroPayload({ symbol: sym }).catch(() => null);
-    const text = CP.fifteenMinUpdate(d, (_cp.trades || {})[sym] || null, zh?.available ? zh : null, cpOdds(sym));
+    let text = CP.fifteenMinUpdate(d, (_cp.trades || {})[sym] || null, zh?.available ? zh : null, cpOdds(sym));
+    const eye = await eyeFor(sym, { price: d.spot.price, changePct: d.spot.changePct, high: d.spot.high, low: d.spot.low }).catch(() => null); if (eye) text += `\n  ${eye.text}`;
     cpSend(text); res.json({ ok: true, text: CP.stripTags(text) });
   } catch (e: any) { res.json({ ok: false, error: e?.message || "failed" }); }
 });

@@ -71,6 +71,7 @@ function ppcShell() {
   <div id="ppc-quote" class="ppc-quote"></div>
   <div id="ppc-zh-today" class="ppc-zht"></div>
   <div id="ppc-radar" class="ppc-radar"></div>
+  <div id="ppc-eye" class="ppc-eye"></div>
   <div id="ppc-coach" class="ppc-coach"></div>
   <div id="ppc-trend" class="ppc-trendstrip"></div>
   <div class="ppc-main">
@@ -153,7 +154,7 @@ function ppcRender() {
   ppcEl("ppc-quote").innerHTML = `<span class="ppc-qname">${ppcEsc(d.name)}</span><span class="ppc-qpx ${ppcCls(sp.change)}">${ppcNs(sp.price)}</span><span class="${ppcCls(sp.change)}">${ppcSg(sp.change)} (${ppcSg(sp.changePct, 2, "%")})</span>
     <span>O <b>${ppcNs(sp.open)}</b></span><span>H <b>${ppcNs(sp.high)}</b></span><span>L <b>${ppcNs(sp.low)}</b></span><span>Prev close <b>${ppcNs(sp.prevClose)}</b></span>
     <span>ATM <b>${d.atm ?? "—"}</b></span><span>Expiry <b>${ppcEsc(d.expiry || "—")}</b></span>${d.session !== "OPEN" ? `<span class="ppc-warnt">Session ${ppcEsc(sp.sessionDay || "")} — market ${ppcEsc(d.session)}</span>` : ""}`;
-  ppcRenderMaster(); ppcRenderRadar(); ppcLoadZH(); ppcLoadZHToday(); ppcRenderCoach(); ppcRenderTV(); ppcRenderLadder(); ppcRenderPlans(); ppcRenderHistory(); if (ppcEl("ppc-more")?.open) { ppcRenderCards(); ppcRenderCharts(); ppcRenderRank(); }
+  ppcRenderMaster(); ppcRenderRadar(); ppcLoadZH(); ppcLoadZHToday(); ppcLoadEye(); ppcRenderCoach(); ppcRenderTV(); ppcRenderLadder(); ppcRenderPlans(); ppcRenderHistory(); if (ppcEl("ppc-more")?.open) { ppcRenderCards(); ppcRenderCharts(); ppcRenderRank(); }
   ppcEl("ppc-foot").innerHTML = `${ppcEsc(d.note)} · ${ppcEsc(d.version)} · <span title="${ppcEsc(PPC_TIPS.PROB)}">${ppcEsc(d.validation?.status)}: ${ppcEsc(d.validation?.detail)}</span>`;
 }
 
@@ -622,12 +623,29 @@ function ppcRenderZHToday() {
     const st = t.state === "CLOSED" ? `CLOSED — ${ppcEsc(t.exitWhy || "")} @ ${rp(t.exitPrem)} (${t.exitPrem != null ? Math.round(((t.exitPrem / t.entryPrem) - 1) * 100) + "%" : "—"})` : t.state === "T1" ? "T1 HIT — half booked, stop at entry" : "OPEN";
     return `<div class="ppc-zht-trade ${t.state === "CLOSED" ? "closed" : "open"}">
       <div class="ppc-zht-th"><b>TRADE #${t.n}</b> · ${hm2(t.openedAt)} · <b class="${t.side === "CE" ? "ppc-up" : "ppc-dn"}">${t.strike} ${t.side}</b> · <span class="ppc-chip ppc-c-${t.state === "CLOSED" ? "muted" : "bull"}">${st}</span>${t.state !== "CLOSED" && t.livePrem != null ? ` · now <b>${rp(t.livePrem)}</b> <span class="${t.livePnlPct >= 0 ? "ppc-up" : "ppc-dn"}">(${t.livePnlPct >= 0 ? "+" : ""}${t.livePnlPct}%)</span>` : ""}</div>
-      <div class="ppc-zht-tg"><span>Entry <b>${rp(t.entryPrem)}</b><em>index ${Math.round(t.entryIndex)}</em></span><span>T1 (2×) <b class="ppc-up">${rp(t.t1Prem)}</b><em>book half</em></span><span>T2 (3×) <b class="ppc-up">${rp(t.t2Prem)}</b><em>exit rest</em></span><span>Stop <b class="ppc-dn">${t.state === "T1" ? rp(t.entryPrem) : t.rechecked ? rp(t.floorPrem) + " floor" : "recheck " + rp(Math.round(0.49 * t.entryPrem * 10) / 10)}</b><em>${ppcEsc(t.slIndexRule)}${t.recheckNote ? " · recheck: " + ppcEsc(t.recheckNote) : " · at −51% recheck: hold or RESET"}</em></span><span>Time exit <b>15:20</b></span></div>
+      <div class="ppc-zht-tg"><span>Entry <b>${rp(t.entryPrem)}</b><em>index ${Math.round(t.entryIndex)}</em></span><span>T1 (2×) <b class="ppc-up">${rp(t.t1Prem)}</b><em>book half</em></span><span>T2 (3×) <b class="ppc-up">${rp(t.t2Prem)}</b><em>exit rest</em></span>${t.state === "CLOSED"
+        ? `<span>Exit <b class="${(t.exitPrem ?? 0) >= t.entryPrem ? "ppc-up" : "ppc-dn"}">${rp(t.exitPrem)}</b><em>${t.closedAt ? hm2(t.closedAt) : ""} · ${t.exitPrem != null ? Math.round(((t.exitPrem / t.entryPrem) - 1) * 100) + "%" : ""}</em></span><span>Reason <b>${ppcEsc((t.exitWhy || "").split(" (")[0])}</b><em>${ppcEsc((t.exitWhy || "").includes("(") ? "(" + (t.exitWhy || "").split(" (").slice(1).join(" (") : "")}</em></span>`
+        : `<span>Stop <b class="ppc-dn">${t.state === "T1" ? rp(t.entryPrem) : t.rechecked ? rp(t.floorPrem) + " floor" : "recheck " + rp(Math.round(0.49 * t.entryPrem * 10) / 10)}</b><em>${ppcEsc(t.slIndexRule)}${t.recheckNote ? " · recheck: " + ppcEsc(t.recheckNote) : " · at −51% recheck: hold or RESET"}</em></span><span>Time exit <b>15:20</b></span>`}</div>
       ${t.events.length > 1 ? `<div class="ppc-sub">${t.events.slice(1).map((e) => `${hm2(e.t)} ${ppcEsc(e.what)} @ ${rp(e.prem)}`).join(" · ")}</div>` : ""}</div>`;
   };
   el.innerHTML = exp.map((d) => { const trades = d.zhTrades || [], open = trades.find((t) => t.state !== "CLOSED"); return `<div class="ppc-zht-row ${open || d.sides.some((x) => x.trigger.state === "TRIGGERED") ? "trig" : ""}">
       <div class="ppc-zht-h">🎲 <b>${ppcEsc(d.name.replace(" 50", ""))} EXPIRY TODAY</b> · ${ppcEsc(d.window)} · ${d.minutesToClose} min left · market prices ±${ppcNs(d.straddle, 0)} pts</div>
       ${trades.map(tradeCard).join("")}
+      ${!open && trades.length ? `<div class="ppc-zht-lock">↻ Trade #${trades[trades.length - 1].n} is closed — a new zero-hero on ${ppcEsc(d.name.replace(" 50", ""))} needs a FRESH trigger (below). Window ${ppcEsc(d.window)}.</div>` : ""}
       ${open ? `<div class="ppc-zht-lock">🔒 Trade #${open.n} is open — its levels are fixed and no new zero-hero is given on ${ppcEsc(d.name.replace(" 50", ""))} until it hits its stop, target or 15:20.</div>` : `<div class="ppc-zht-sides">${d.sides.map((x) => side(d, x)).join("")}</div>`}
       ${d.history ? `<div class="ppc-zht-hist">2-yr: ${ppcEsc(d.history.text)}</div>` : ""}</div>`; }).join("");
+}
+
+
+// ================================================================ Market Eye (next 30 min in the most similar past moments)
+async function ppcLoadEye() {
+  const el = ppcEl("ppc-eye"); if (!el) return;
+  if (!["^NSEI", "^BSESN"].includes(PPC.sym)) { el.innerHTML = ""; return; }
+  if (PPC._eyeAt && Date.now() - PPC._eyeAt < 55000 && PPC._eyeSym === PPC.sym) return; PPC._eyeAt = Date.now(); PPC._eyeSym = PPC.sym;
+  try {
+    const d = await fetch(`/api/market-eye?symbol=${encodeURIComponent(PPC.sym)}`).then((r) => r.json());
+    if (!d.available) { el.innerHTML = `<span class="ppc-sub">👁 Market Eye: ${d.ready ? "available 09:30–15:15" : "learning from 2 years of history…"}</span>`; return; }
+    const c = d.lead === "UP" ? "ppc-up" : d.lead === "DOWN" ? "ppc-dn" : "ppc-wait";
+    el.innerHTML = `👁 <b>Market Eye</b> — next 30 min in the ${d.n} most similar past moments: <span class="ppc-up">UP ${d.upPct}%</span> · <span class="ppc-wait">SIDEWAYS ${d.sidePct}%</span> · <span class="ppc-dn">DOWN ${d.downPct}%</span> · median ${d.medianPct >= 0 ? "+" : ""}${d.medianPct}% → <b class="${c}">${ppcEsc(d.lead)}</b> <span class="ppc-sub">history, not a forecast</span>`;
+  } catch { el.innerHTML = ""; }
 }
