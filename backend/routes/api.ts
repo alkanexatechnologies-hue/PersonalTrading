@@ -7807,7 +7807,10 @@ router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Reque
           const levels = spot != null ? TV.ladder({ daily, sessionDay, today, lines: lineLv, chain: strikes, spot, atr: atr15 }) : [];
           // break history on the chart's own timeframe (what the trader sees), outcome horizon ≈ 4 hours
           const k = 3, horizon = interval === "15m" ? 16 : 48, events = TV.breakEvents(closed as any, k, horizon);
-          const pb = spot != null ? TV.plans({ levels, spot, atr: atr15, chain: strikes, expiry, events }) : { bull: null, bear: null, noTrade: null };
+          // FIXED session plan: anchored to the previous close, rolled only when a plan plays out on a closed 15-min candle
+          const prevCloseForPlan = (() => { const pd = [...daily].reverse().find((x: any) => dayOfT(x.time) < sessionDay); return pd?.close ?? spot; })();
+          const todays15 = closed15.filter((c: any) => dayOfT(c.time) === sessionDay);
+          const pb: any = spot != null ? TV.anchoredPlans({ levels, spot, prevClose: prevCloseForPlan, todays15, atr: atr15, chain: strikes, expiry, events }) : { bull: null, bear: null, noTrade: null, anchor: null };
           const arbFresh = !!(arb && arb.candleTime && nowSec - arb.candleTime <= 15 * 60);
           const cz = TV.coach({ session, istMin, dataStatus, spot: spot ?? 0, atr: atr15, closed15, bull: pb.bull, bear: pb.bear, trends,
             arbiter: arb ? { finalAction: arb.finalAction, reason: arb.reason, fresh: arbFresh } : null,

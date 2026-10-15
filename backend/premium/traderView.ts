@@ -148,17 +148,19 @@ export interface Plan {
   strike: number | null; expiry: string | null; premNow: number | null; premAtTrigger: number | null; premAtStop: number | null; premAtT1: number | null; premAtT2: number | null;
   delta: number | null; history: ReturnType<typeof breakStats>; flags: string[];
 }
-export function plans(o: { levels: Level[]; spot: number; atr: number; chain: OiStrike[]; expiry: string | null; events: BreakEvent[]; nowMs?: number }) {
-  const lv = o.levels, a = o.atr, minGap = 0.15 * a;
+export function plans(o: { levels: Level[]; spot: number; ref?: number; atr: number; chain: OiStrike[]; expiry: string | null; events: BreakEvent[]; nowMs?: number }) {
+  // `ref` = the price the plan is ANCHORED to (fixed through the session); `spot` = live price, used only for premium estimates
+  const lv = o.levels, a = o.atr, minGap = 0.15 * a, ref = o.ref ?? o.spot;
   const uniq = (xs: Level[]) => xs.filter((x, i) => i === 0 || Math.abs(x.price - xs[i - 1].price) > 0.1 * a);
-  const above = uniq(lv.filter((x) => x.price > o.spot + minGap).sort((x, y) => x.price - y.price));
-  const below = uniq(lv.filter((x) => x.price < o.spot - minGap).sort((x, y) => y.price - x.price));
+  const above = uniq(lv.filter((x) => x.price > ref + minGap).sort((x, y) => x.price - y.price));
+  const below = uniq(lv.filter((x) => x.price < ref - minGap).sort((x, y) => y.price - x.price));
   const strikes = o.chain.map((s) => s.strike);
   const build = (side: "CE" | "PE"): Plan | null => {
     const seq = side === "CE" ? above : below; if (!seq.length) return null;
     const dir = side === "CE" ? 1 : -1;
     // levels within 0.75·ATR of each other are ONE zone (e.g. OI wall + prev-day high + trendline): break the whole zone
-    let z = 0; while (z + 1 < seq.length && Math.abs(seq[z + 1].price - seq[z].price) <= 0.75 * a) z++;
+    // ...but a zone is never wider than 1·ATR in total (dense levels must not chain into one giant band)
+    let z = 0; while (z + 1 < seq.length && Math.abs(seq[z + 1].price - seq[z].price) <= 0.75 * a && Math.abs(seq[z + 1].price - seq[0].price) <= a) z++;
     const zone = seq.slice(0, z + 1), trig = zone[zone.length - 1];
     const zoneLabel = zone.length > 1 ? `zone ${Math.round(zone[0].price)}–${Math.round(trig.price)}: ${zone.map((x) => x.label).join(" + ")}` : trig.label + (trig.confluence ? ` ★ (+ ${trig.with!.join(", ")})` : "");
     // the plan STARTS on a 15-min close beyond the level + the engine's break buffer (0.1·ATR) — one exact whole number
@@ -308,4 +310,27 @@ export function opportunity(p: Plan | null, closed15: Candle[], forming15: Candl
   if (forming15 && dir * (forming15.close - p.entry) >= 0) return { ...base, state: "ARMED", distPts: dist, distAtr, text: `forming 15-min candle is ${dir > 0 ? "above" : "below"} ${p.entry} — not closed yet`, next: `needs the candle to CLOSE ${dir > 0 ? "above" : "below"} ${p.entry}` };
   if (dist <= 0.3 * atr) return { ...base, state: "APPROACHING", distPts: dist, distAtr, text: `${Math.round(dist)} pts from the start ${p.entry}`, next: "get ready: strike, quantity, stop decided now" };
   return { ...base, state: "IDLE", distPts: dist, distAtr, text: `${Math.round(dist)} pts to the start ${p.entry}`, next: "nothing to do" };
+}
+
+/**
+ * The session plan stays FIXED: it is anchored to the previous close (the morning plan) and only rolls to the next levels
+ * when a plan has PLAYED OUT on a closed 15-min candle — triggered and then reached Target 1, or triggered and closed back
+ * inside the level (failed). Re-anchored to that candle's close. Closed candles only, so it never repaints.
+ */
+export function anchoredPlans(o: { levels: Level[]; spot: number; prevClose: number; todays15: Candle[]; atr: number; chain: OiStrike[]; expiry: string | null; events: BreakEvent[]; nowMs?: number }) {
+  let ref = o.prevClose, since: number | null = null, why = "morning plan (anchored to the previous close)";
+  const mk = () => plans({ levels: o.levels, spot: o.spot, ref, atr: o.atr, chain: o.chain, expiry: o.expiry, events: o.events, nowMs: o.nowMs });
+  let pb = mk(), trig = { CE: false, PE: false };
+  const rolls: { time: number; ref: number; why: string }[] = [];
+  for (const c of o.todays15) {
+    for (const [side, p] of [["CE", pb.bull], ["PE", pb.bear]] as const) {
+      if (!p) continue; const dir = side === "CE" ? 1 : -1;
+      if (!trig[side] && dir * (c.close - p.entry) >= 0) { trig[side] = true; continue; }
+      if (trig[side] && (dir * (c.close - p.t1) >= 0 || dir * (c.close - p.trigger) < 0)) {
+        why = dir * (c.close - p.t1) >= 0 ? `${side === "CE" ? "Bull" : "Bear"} plan reached Target 1 ${Math.round(p.t1)} — rolled to the next levels` : `${side === "CE" ? "Bull" : "Bear"} plan failed (closed back past ${Math.round(p.trigger)}) — re-planned from here`;
+        ref = c.close; since = c.time; rolls.push({ time: c.time, ref: c.close, why }); pb = mk(); trig = { CE: false, PE: false }; break;
+      }
+    }
+  }
+  return { ...pb, anchor: { ref: r2(ref), since, why, rolls } };
 }

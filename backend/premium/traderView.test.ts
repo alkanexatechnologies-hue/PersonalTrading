@@ -53,6 +53,10 @@ test("plans: trigger = nearest level beyond the noise, targets ≥ ½ ATR apart,
   const q = plans({ levels: z, spot: 130, atr: 10, chain: [], expiry: null, events: [] }).bull!;
   assert.equal(q.trigger, 145); assert.equal(q.zoneFrom, 140);   // 145.2 is within 0.1·ATR of 145 = the same level assert.equal(q.t1, 160); assert.match(q.triggerLabel, /zone 140–145/);
   assert.ok(q.flags.some((f) => /OI wall is in the trigger zone/.test(f)));
+  // dense levels 6 apart over 30 pts: the zone stops at 1 ATR (10) wide
+  const dense: Level[] = [0, 6, 12, 18, 24, 30].map((d) => ({ price: 140 + d, label: "L" + d, kind: "PIVOT" as const }));
+  const zz = plans({ levels: dense, spot: 130, atr: 10, chain: [], expiry: null, events: [] }).bull!;
+  assert.equal(zz.zoneFrom, 140); assert.equal(zz.trigger, 146);
 });
 const C = (o: Partial<CoachIn> = {}): CoachIn => ({ session: "OPEN", istMin: 630, dataStatus: "LIVE", spot: 130, atr: 10, closed15: [bar(0, 129), bar(1, 130)],
   bull: { side: "CE", trigger: 141, entry: 142, stop: 137, t1: 150, rr: 1.6 } as any, bear: { side: "PE", trigger: 120, entry: 119, stop: 124, t1: 110, rr: 2 } as any,
@@ -99,4 +103,15 @@ test("opportunity radar: approaching → armed (forming only) → triggered (clo
   assert.equal(opportunity(p, [...base, k(3, 103)], k(4, 121), 10).state, "MISSED");
   const q: any = { side: "PE", trigger: 100, entry: 98, stop: 103, t1: 80 };
   assert.equal(opportunity(q, [k(0, 105), k(1, 97)], k(2, 96), 10).state, "TRIGGERED");
+});
+test("session plan stays fixed while price moves; rolls only after Target 1 or a failure on a closed candle", async () => {
+  const { anchoredPlans } = await import("./traderView");
+  const lv: Level[] = [{ price: 160, label: "R2", kind: "PIVOT" }, { price: 150, label: "R1", kind: "PIVOT" }, { price: 141, label: "PDH", kind: "PREV DAY" }, { price: 120, label: "PDL", kind: "PREV DAY" }, { price: 110, label: "S1", kind: "PIVOT" }];
+  const k = (i: number, c: number) => ({ time: 1_790_000_000 + i * 900, open: c, high: c + 1, low: c - 1, close: c, volume: 0 });
+  // price drifts up to 140 (inside the zone): the plan must NOT move
+  let r = anchoredPlans({ levels: lv, spot: 140, prevClose: 130, todays15: [k(0, 135), k(1, 140)], atr: 10, chain: [], expiry: null, events: [] });
+  assert.equal(r.bull!.entry, 142); assert.equal(r.bear!.entry, 119); assert.equal(r.anchor.rolls.length, 0);
+  // triggers (close 143) then reaches T1 150 → rolls to the next levels
+  r = anchoredPlans({ levels: lv, spot: 151, prevClose: 130, todays15: [k(0, 143), k(1, 151)], atr: 10, chain: [], expiry: null, events: [] });
+  assert.equal(r.anchor.rolls.length, 1); assert.match(r.anchor.why, /Target 1/); assert.equal(r.bull!.trigger, 160);
 });
