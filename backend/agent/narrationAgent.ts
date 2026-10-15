@@ -10,8 +10,8 @@
 //   • Fires on state changes only (the events centralLog already records), never
 //     on a fixed poll. Silence = nothing changed = current view still accurate.
 //   • Text generation is pluggable: a DETERMINISTIC TEMPLATE by default (cannot
-//     invent numbers), or Claude when ANTHROPIC_API_KEY is set. LLM failure/timeout
-//     degrades silently — it never blocks or delays the pipeline.
+//     invent numbers), or Claude when ANTHROPIC_API_KEY is set. LLM failure/timeout/usage limit
+//     falls back to the template — it never blocks or delays the pipeline.
 //   • Never narrates its own channel (no feedback loop).
 
 import * as centralLog from "../log/centralLog";
@@ -144,8 +144,10 @@ function narratorMode(): "llm" | "template" {
 /** Produce narration text for one entry (exported for testing). */
 export async function produceNarration(e: LogEntry): Promise<string | null> {
   if (narratorMode() === "llm") {
-    // LLM path: one call; on failure the spec says stay silent (no narration).
-    return await claudeNarration(e, buildContext(e));
+    // LLM path: one call (6 s timeout). If Claude is unavailable (no credit / usage limit / network), fall back to the
+    // deterministic template so the app never depends on Claude being reachable.
+    const viaClaude = await claudeNarration(e, buildContext(e)).catch(() => null);
+    if (viaClaude) return viaClaude;
   }
   return templateNarration(e);
 }
