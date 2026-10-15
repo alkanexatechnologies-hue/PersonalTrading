@@ -8855,6 +8855,7 @@ async function copilotTick() {
         // NIFTY 15-minute update, right after each 15-min candle closes (09:30 … 15:15)
       }
     }
+    if (istMin >= 555 && istMin <= 930) await btsdTick(nowSec, istMin).catch(() => {});
     // ⭐ every 15 min: BEST OPPORTUNITY for NIFTY + SENSEX together · 📊 every 30 min: the full read of each index
     if (istMin >= 570 && istMin <= 915 && istMin % 15 === 0 && sec >= 20 && !_cp.sent[`best|${istMin}`]) {
       _cp.sent[`best|${istMin}`] = true; cpSave();
@@ -8879,6 +8880,59 @@ async function copilotTick() {
     }
   } catch { /* the co-pilot never affects the app */ } finally { _cpBusy = false; }
 }
+// ===================== BTSD Trade: the user's OWN trades, followed like the co-pilot's (advisory journal) =====================
+// The user records the side they actually took (CE/PE, strike, price paid). Stop/T1/T2 default to the current plan of that
+// side and are fixed once confirmed. Followed every 30 s: T1 (book half, stop → breakeven), T2, 15-min-close stop, 15:12.
+const BTSD_FILE = path.join(process.cwd(), "data", "btsd-trades.json");
+let _btsd: { trades: (CP.CoTrade & { id: string; n: number; day: string; lots: number | null; userNote?: string })[] } = (() => { try { return JSON.parse(fs.readFileSync(BTSD_FILE, "utf8")); } catch { return { trades: [] }; } })();
+const btsdSave = () => { try { fs.writeFileSync(BTSD_FILE, JSON.stringify(_btsd, null, 1)); } catch { /* best-effort */ } };
+router.get("/btsd/trades", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
+  const day = new Date(Date.now() + 19800000).toISOString().slice(0, 10);
+  res.json({ trades: _btsd.trades.filter((t) => req.query.all ? true : t.day === day) });
+});
+router.post("/btsd/trade", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  try {
+    const b = req.body || {}, sym = String(b.symbol || "^NSEI"), side = b.side === "PE" ? "PE" : "CE", def = findSymbolDef(sym);
+    if (!def || def.type !== "index") return res.status(400).json({ error: "index symbol required" });
+    const d: any = await premiumCenterPayload({ symbol: sym, interval: "15m" }); if (!d?.available) return res.json({ ok: false, error: d?.error || "market data unavailable" });
+    const plan = d.trader?.plans?.[side === "CE" ? "bull" : "bear"] || null, num = (v: any) => (v === "" || v == null || !Number.isFinite(Number(v)) ? null : Number(v));
+    const strike = num(b.strike) ?? plan?.strike ?? d.atm, live = (d.ranking || []).find((x: any) => x.side === side && x.strike === strike)?.ltp ?? null;
+    const entryPrem = num(b.entryPrem) ?? live, stop = num(b.stop) ?? plan?.stop, t1 = num(b.t1) ?? plan?.t1, t2 = num(b.t2) ?? plan?.t2 ?? null;
+    if (strike == null || entryPrem == null || stop == null || t1 == null) return res.json({ ok: false, error: "strike, price, stop and T1 are needed (no plan on that side right now — enter them)" });
+    const dir = side === "CE" ? 1 : -1, spot = d.spot.price;
+    if (dir * (stop - spot) >= 0) return res.json({ ok: false, error: `the stop ${stop} must be ${side === "CE" ? "below" : "above"} the index (${Math.round(spot)})` });
+    if (dir * (t1 - spot) <= 0) return res.json({ ok: false, error: `T1 ${t1} must be ${side === "CE" ? "above" : "below"} the index (${Math.round(spot)})` });
+    const nowSec = Math.floor(Date.now() / 1000), day = new Date((nowSec + 19800) * 1000).toISOString().slice(0, 10), n = _btsd.trades.filter((t) => t.day === day).length + 1;
+    const t = { id: `${day}|${n}`, n, day, index: sym, name: def.name, side, strike, openedAt: nowSec, entrySpot: spot, entryPrem, stop, t1, t2, state: "OPEN" as const, lots: num(b.lots), userNote: String(b.note || "").slice(0, 120) };
+    _btsd.trades.push(t as any); btsdSave();
+    cpSend(`🧑 YOUR BTSD TRADE #${n} RECORDED — ${def.name} ${strike} ${side}\n  Entry ₹${entryPrem} at index ${Math.round(spot)}${t.lots ? ` · ${t.lots} lot(s)` : ""}\n  🎯 T1 ${Math.round(t1)}${t2 ? ` · T2 ${Math.round(t2)}` : ""} · 🛑 SL: 15-min close ${side === "CE" ? "below" : "above"} ${Math.round(stop)} · exit by 15:12\n  → I will message you at T1 (book half), T2, SL or 15:12. Levels are fixed.`);
+    res.json({ ok: true, trade: t });
+  } catch (e: any) { res.json({ ok: false, error: e?.message || "failed" }); }
+});
+router.post("/btsd/trade/:id/close", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  const t = _btsd.trades.find((x) => x.id === String(req.params.id)); if (!t) return res.status(404).json({ error: "not found" });
+  if (t.state === "CLOSED") return res.json({ ok: true, trade: t });
+  const d: any = await premiumCenterPayload({ symbol: t.index, interval: "15m" }).catch(() => null);
+  const live = (d?.ranking || []).find((x: any) => x.side === t.side && x.strike === t.strike)?.ltp ?? null, px = Number(req.body?.exitPrem) || live;
+  Object.assign(t, { state: "CLOSED", closedAt: Math.floor(Date.now() / 1000), exitWhy: "CLOSED BY YOU", exitPrem: px }); btsdSave();
+  cpSend(`🧑 YOUR BTSD TRADE #${t.n} — CLOSED BY YOU\n  ${t.name} ${t.strike} ${t.side} · ₹${t.entryPrem} → ₹${px ?? "—"}${px != null && t.entryPrem ? ` (${Math.round(((px / t.entryPrem) - 1) * 100)}%)` : ""}`);
+  res.json({ ok: true, trade: t });
+});
+/** Follow the user's open BTSD trades (called by the co-pilot tick). */
+async function btsdTick(nowSec: number, istMin: number) {
+  const open = _btsd.trades.filter((t) => t.state !== "CLOSED"); if (!open.length) return;
+  for (const sym of [...new Set(open.map((t) => t.index))]) {
+    const d: any = await premiumCenterPayload({ symbol: sym, interval: "15m" }).catch(() => null); if (!d?.available) continue;
+    const c15 = (d.chart?.candles || []).filter((c: any) => c.time + 900 <= nowSec), last15 = c15.length ? { time: c15[c15.length - 1].time + 900, close: c15[c15.length - 1].close } : null;
+    for (const t of open.filter((x) => x.index === sym)) {
+      const prem = (d.ranking || []).find((x: any) => x.side === t.side && x.strike === t.strike)?.ltp ?? null;
+      const msgs = CP.stepTrade(t, { spot: d.spot.price, prem, last15, nowSec, istMin });
+      for (const m of msgs) cpSend(`🧑 YOUR BTSD TRADE #${t.n}\n` + m);
+      if (msgs.length) btsdSave();
+    }
+  }
+}
+
 router.get("/copilot/state", requirePermission("oiAnalysis"), (_req: Request, res: Response) => { res.json(_cp); });
 router.post("/copilot/update-now", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
   try {

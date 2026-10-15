@@ -72,6 +72,7 @@ function ppcShell() {
   <div id="ppc-zh-today" class="ppc-zht"></div>
   <div id="ppc-radar" class="ppc-radar"></div>
   <div id="ppc-eye" class="ppc-eye"></div>
+  <div id="ppc-btsd" class="ppc-btsd"></div>
   <div id="ppc-coach" class="ppc-coach"></div>
   <div id="ppc-trend" class="ppc-trendstrip"></div>
   <div class="ppc-main">
@@ -109,6 +110,10 @@ function ppcOnClick(e) {
   if (b.dataset.sym) { PPC.sym = b.dataset.sym; PPC.ceK = PPC.peK = null; PPC.off = 0; ppcLoad(true); }
   if (b.dataset.tf) { PPC.tf = b.dataset.tf; ppcLoad(true); }
   if (b.dataset.act === "alerts") { ppcEnableAlerts(); return; }
+  if (b.dataset.btsd) { ppcBTSDForm(b.dataset.btsd); return; }
+  if (b.dataset.act === "btsd-cancel") { PPC._btsdSide = null; ppcRenderBTSD(true); return; }
+  if (b.dataset.act === "btsd-save") { ppcBTSDSave(); return; }
+  if (b.dataset.btsdClose) { ppcBTSDClose(b.dataset.btsdClose); return; }
   if (b.dataset.layer) { PPC.layers[b.dataset.layer] = !PPC.layers[b.dataset.layer]; ppcRenderTV(true); return; }
   if (b.dataset.act === "fit") { PPC.charts["ppc-ch-spot"]?.timeScale().fitContent(); return; }
   if (b.dataset.sort) { const k = b.dataset.sort; PPC.sort = { key: k, dir: PPC.sort.key === k ? -PPC.sort.dir : -1 }; ppcRenderRank(); }
@@ -154,7 +159,7 @@ function ppcRender() {
   ppcEl("ppc-quote").innerHTML = `<span class="ppc-qname">${ppcEsc(d.name)}</span><span class="ppc-qpx ${ppcCls(sp.change)}">${ppcNs(sp.price)}</span><span class="${ppcCls(sp.change)}">${ppcSg(sp.change)} (${ppcSg(sp.changePct, 2, "%")})</span>
     <span>O <b>${ppcNs(sp.open)}</b></span><span>H <b>${ppcNs(sp.high)}</b></span><span>L <b>${ppcNs(sp.low)}</b></span><span>Prev close <b>${ppcNs(sp.prevClose)}</b></span>
     <span>ATM <b>${d.atm ?? "—"}</b></span><span>Expiry <b>${ppcEsc(d.expiry || "—")}</b></span>${d.session !== "OPEN" ? `<span class="ppc-warnt">Session ${ppcEsc(sp.sessionDay || "")} — market ${ppcEsc(d.session)}</span>` : ""}`;
-  ppcRenderMaster(); ppcRenderRadar(); ppcLoadZH(); ppcLoadZHToday(); ppcLoadEye(); ppcRenderCoach(); ppcRenderTV(); ppcRenderLadder(); ppcRenderPlans(); ppcRenderHistory(); if (ppcEl("ppc-more")?.open) { ppcRenderCards(); ppcRenderCharts(); ppcRenderRank(); }
+  ppcRenderMaster(); ppcRenderRadar(); ppcLoadZH(); ppcLoadZHToday(); ppcLoadEye(); ppcRenderBTSD(); ppcRenderCoach(); ppcRenderTV(); ppcRenderLadder(); ppcRenderPlans(); ppcRenderHistory(); if (ppcEl("ppc-more")?.open) { ppcRenderCards(); ppcRenderCharts(); ppcRenderRank(); }
   ppcEl("ppc-foot").innerHTML = `${ppcEsc(d.note)} · ${ppcEsc(d.version)} · <span title="${ppcEsc(PPC_TIPS.PROB)}">${ppcEsc(d.validation?.status)}: ${ppcEsc(d.validation?.detail)}</span>`;
 }
 
@@ -648,4 +653,52 @@ async function ppcLoadEye() {
     const c = d.lead === "UP" ? "ppc-up" : d.lead === "DOWN" ? "ppc-dn" : "ppc-wait";
     el.innerHTML = `👁 <b>Market Eye</b> — next 30 min in the ${d.n} most similar past moments: <span class="ppc-up">UP ${d.upPct}%</span> · <span class="ppc-wait">SIDEWAYS ${d.sidePct}%</span> · <span class="ppc-dn">DOWN ${d.downPct}%</span> · median ${d.medianPct >= 0 ? "+" : ""}${d.medianPct}% → <b class="${c}">${ppcEsc(d.lead)}</b> <span class="ppc-sub">history, not a forecast</span>`;
   } catch { el.innerHTML = ""; }
+}
+
+
+// ================================================================ BTSD Trade — the user's own trades, followed with Telegram follow-ups
+async function ppcRenderBTSD(force) {
+  const el = ppcEl("ppc-btsd"); if (!el || !PPC.d) return;
+  if (PPC._btsdSide) return;   // keep the open form while the user types
+  ppcBTSDPaint();   // draw the buttons at once; the list refreshes when it arrives
+  if (!force && PPC._btsdAt && Date.now() - PPC._btsdAt < 14000) return;
+  PPC._btsdAt = Date.now();
+  try { const r = await fetch("/api/btsd/trades").then((x) => x.json()); PPC._btsd = r.trades || []; } catch { /* keep the last list */ }
+  ppcBTSDPaint();
+}
+function ppcBTSDPaint() {
+  const el = ppcEl("ppc-btsd"); if (!el || PPC._btsdSide) return;
+  const live = (t) => (PPC.d.ranking || []).find((x) => x.side === t.side && x.strike === t.strike)?.ltp ?? null;
+  const rows = (PPC._btsd || []).filter((t) => t.index === PPC.sym).map((t) => {
+    const now = t.state === "CLOSED" ? t.exitPrem : live(t), pnl = now != null && t.entryPrem ? Math.round(((now / t.entryPrem) - 1) * 100) : null;
+    const st = t.state === "CLOSED" ? `CLOSED — ${ppcEsc(t.exitWhy || "")}` : t.state === "T1" ? "T1 hit · half booked · SL at breakeven" : "OPEN";
+    return `<div class="ppc-bt-row ${t.state === "CLOSED" ? "closed" : ""}"><b>#${t.n}</b> <b class="${t.side === "CE" ? "ppc-up" : "ppc-dn"}">${t.strike} ${t.side}</b> · entry ₹${ppcNs(t.entryPrem)} · ${t.state === "CLOSED" ? "exit" : "now"} ₹${ppcNs(now)} <span class="${pnl >= 0 ? "ppc-up" : "ppc-dn"}">${pnl != null ? (pnl >= 0 ? "+" : "") + pnl + "%" : ""}</span>
+      · 🎯 ${ppcR(t.t1)}${t.t2 ? "/" + ppcR(t.t2) : ""} · 🛑 ${t.state === "T1" ? ppcR(t.entrySpot) + " (BE)" : ppcR(t.stop)} · <span class="ppc-chip ppc-c-${t.state === "CLOSED" ? "muted" : "bull"}">${st}</span>
+      ${t.state !== "CLOSED" ? `<button class="ppc-tvbtn" data-btsd-close="${ppcEsc(t.id)}">Close</button>` : ""}</div>`;
+  }).join("");
+  el.innerHTML = `<div class="ppc-bt-head"><b>🧑 BTSD Trade</b> <span class="ppc-sub">record the side you took — I follow it and message you at T1 / T2 / SL / 15:12</span>
+      <button class="ppc-bt-btn ce" data-btsd="CE">🟢 I BOUGHT CE</button><button class="ppc-bt-btn pe" data-btsd="PE">🔴 I BOUGHT PE</button></div>${rows}`;
+}
+function ppcBTSDForm(side) {
+  const el = ppcEl("ppc-btsd"), d = PPC.d, p = d?.trader?.plans?.[side === "CE" ? "bull" : "bear"] || {};
+  const strike = p.strike ?? d.atm, prem = (d.ranking || []).find((x) => x.side === side && x.strike === strike)?.ltp ?? p.premNow ?? "";
+  PPC._btsdSide = side;
+  const f = (id, label, v, step) => `<label>${label}<input id="ppc-bt-${id}" type="number" step="${step}" value="${v == null ? "" : Math.round(v * 100) / 100}"></label>`;
+  el.innerHTML = `<div class="ppc-bt-form"><b class="${side === "CE" ? "ppc-up" : "ppc-dn"}">I bought ${ppcEsc(d.name)} ${side}</b> <span class="ppc-sub">pre-filled from the current ${side === "CE" ? "Bull" : "Bear"} plan — change anything</span>
+    <div class="ppc-bt-f">${f("strike", "Strike", strike, d.step || 50)}${f("price", "My price ₹", prem, 0.05)}${f("lots", "Lots", 1, 1)}${f("stop", "SL (index, 15-min close)", p.stop, 1)}${f("t1", "T1 (index)", p.t1, 1)}${f("t2", "T2 (index)", p.t2, 1)}</div>
+    <div class="ppc-bt-actions"><button class="ppc-bt-btn ${side === "CE" ? "ce" : "pe"}" data-act="btsd-save">✔ Record my trade</button><button class="ppc-tvbtn" data-act="btsd-cancel">Cancel</button> <span id="ppc-bt-msg" class="ppc-sub"></span></div></div>`;
+}
+async function ppcBTSDSave() {
+  const v = (id) => (ppcEl("ppc-bt-" + id) || {}).value, msg = ppcEl("ppc-bt-msg");
+  const body = { symbol: PPC.sym, side: PPC._btsdSide, strike: v("strike"), entryPrem: v("price"), lots: v("lots"), stop: v("stop"), t1: v("t1"), t2: v("t2") };
+  try {
+    const r = await fetch("/api/btsd/trade", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((x) => x.json());
+    if (!r.ok) { if (msg) msg.innerHTML = `<span class="ppc-dn">${ppcEsc(r.error || "failed")}</span>`; return; }
+    PPC._btsdSide = null; ppcRenderBTSD(true);
+  } catch (e) { if (msg) msg.textContent = e.message || "failed"; }
+}
+async function ppcBTSDClose(id) {
+  if (!confirm("Close this BTSD trade at the current premium?")) return;
+  await fetch(`/api/btsd/trade/${encodeURIComponent(id)}/close`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => {});
+  ppcRenderBTSD(true);
 }
