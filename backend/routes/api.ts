@@ -68,7 +68,7 @@ import { getDecision, latestDecision, ledgerFor, DecisionDeps, IndexDef, openArb
 import { runSession as runBreakoutSession, BREAKOUT_CONFIG } from "../signals/breakoutEngine";
 import * as PC from "../premium/premiumCenter";
 import * as TV from "../premium/traderView";
-import { zeroHero as zeroHeroLive, newZhTrade, stepZhTrade, ZhTrade } from "../premium/zeroHero";
+import { zeroHero as zeroHeroLive, newZhTrade, stepZhTrade, freshTrigger, ZhTrade } from "../premium/zeroHero";
 import { readCandle } from "../premium/candleRead";
 import * as CP from "../premium/copilot";
 import { Decision } from "../decision/types";
@@ -8699,7 +8699,7 @@ let _zhLedger: { day: string; trades: ZhTrade[] } = (() => { try { return JSON.p
 const zhSave = () => { try { fs.writeFileSync(ZH_FILE, JSON.stringify(_zhLedger, null, 1)); } catch { /* best-effort */ } };
 const zhR = (v: number | null | undefined) => (v == null ? "—" : `₹${Math.round(v * 10) / 10}`);
 function zhCard(t: ZhTrade) {
-  return `🎲 ZERO-HERO TRADE #${t.n} — ${t.name} ${t.strike} ${t.side} (expiry ${t.expiry})\n  Time ${new Date((t.openedAt + 19800) * 1000).toISOString().slice(11, 16)} · entry ${zhR(t.entryPrem)} (index ${Math.round(t.entryIndex)})\n  T1 ${zhR(t.t1Prem)} (2× — book half) · T2 ${zhR(t.t2Prem)} (3× — exit rest)\n  SL: ${t.slIndexRule} OR premium ${zhR(t.slPrem)} (−50%) · time exit 15:20\n  These levels are FIXED — no new zero-hero on ${t.name} until this trade ends.`;
+  return `🎲 ZERO-HERO TRADE #${t.n} — ${t.name} ${t.strike} ${t.side} (expiry ${t.expiry})\n  Time ${new Date((t.openedAt + 19800) * 1000).toISOString().slice(11, 16)} · entry ${zhR(t.entryPrem)} (index ${Math.round(t.entryIndex)})\n  T1 ${zhR(t.t1Prem)} (2× — book half) · T2 ${zhR(t.t2Prem)} (3× — exit rest)\n  SL: ${t.slIndexRule} · RECHECK at −51% (${zhR(Math.round(0.49 * t.entryPrem * 10) / 10)}): hold only if the breakout, the time and the recovery room all still support it — otherwise RESET · time exit 15:20\n  These levels are FIXED — no new zero-hero on ${t.name} until this trade ends. (The −51% recheck rule is not yet back-tested.)`;
 }
 let _zhBusy = false;
 async function zeroHeroLedgerTick() {
@@ -8714,15 +8714,17 @@ async function zeroHeroLedgerTick() {
       const c5: any[] = ((await getCandlesCached(sym, "5m" as Interval).catch(() => [])) as any[]).filter((c) => new Date((c.time + 19800) * 1000).toISOString().slice(0, 10) === day && c.time + 300 <= nowSec);
       if (open) {
         const ch: any = _pcLastChain.get(`${sym}:0`)?.v, row = ch?.strikes?.find((x: any) => x.strike === open.strike), prem = row ? (open.side === "CE" ? row.ceLtp : row.peLtp) ?? null : null;
-        const lb = c5[c5.length - 1], fired = stepZhTrade(open, { prem, spot: zp.spot, last5: lb ? { time: lb.time + 300, close: lb.close } : null, nowSec, istMin });
-        for (const f of fired) cpSend(`${f === "T1" ? "✅" : /TARGET 2/.test(f) ? "🏁" : /STOP|failed/.test(f) ? "🛑" : "⏰"} ZERO-HERO #${open.n} ${open.name} ${open.strike} ${open.side}: ${open.events[open.events.length - 1].what}\n  Premium ${zhR(prem)} (entry ${zhR(open.entryPrem)}${prem != null ? `, ${Math.round(((prem / open.entryPrem) - 1) * 100)}%` : ""}) · index ${Math.round(zp.spot)}${f === "T1" ? `\n  → Book HALF now. Rest: T2 ${zhR(open.t2Prem)}; stop now at entry ${zhR(open.entryPrem)}.` : open.state === "CLOSED" ? `\n  → Trade #${open.n} closed. A new zero-hero on ${open.name} is allowed only on a fresh trigger.` : ""}`);
+        const lb = c5[c5.length - 1], fired = stepZhTrade(open, { prem, spot: zp.spot, last5: lb ? { time: lb.time + 300, close: lb.close } : null, nowSec, istMin, straddle: zp.straddle ?? null });
+        for (const f of fired) cpSend(`${f === "T1" ? "✅" : /TARGET 2/.test(f) ? "🏁" : f === "RECHECK_HOLD" ? "🔁" : /^RESET/.test(f) ? "♻️" : /STOP|failed/.test(f) ? "🛑" : "⏰"} ZERO-HERO #${open.n} ${open.name} ${open.strike} ${open.side}: ${open.events[open.events.length - 1].what}${/^RESET/.test(f) ? "\n  → Exit now. Looking for a FRESH zero-hero: a new 5-min close beyond the day range from here, new strike from the current ATM." : f === "RECHECK_HOLD" ? `\n  → Holding: T1/T2 unchanged; final floor ${zhR(open.floorPrem)}.` : ""}\n  Premium ${zhR(prem)} (entry ${zhR(open.entryPrem)}${prem != null ? `, ${Math.round(((prem / open.entryPrem) - 1) * 100)}%` : ""}) · index ${Math.round(zp.spot)}${f === "T1" ? `\n  → Book HALF now. Rest: T2 ${zhR(open.t2Prem)}; stop now at entry ${zhR(open.entryPrem)}.` : open.state === "CLOSED" ? `\n  → Trade #${open.n} closed. A new zero-hero on ${open.name} is allowed only on a fresh trigger.` : ""}`);
         if (fired.length) zhSave();
         continue;
       }
       if (istMin > 885) continue;   // no new zero-hero after 14:45
       const lastClosed = Math.max(0, ...mine.map((t) => t.closedAt || 0));
       for (const x of zp.sides) {
-        const tg = x.trigger; if (tg.state !== "TRIGGERED" || !tg.at || tg.at <= lastClosed || mine.some((t) => t.side === x.side)) continue;
+        // a NEW 5-min close beyond the day range after the last trade ended (the first trigger of the day when none yet)
+        const ft = freshTrigger(c5.map((c) => ({ time: c.time, high: c.high, low: c.low, close: c.close })), x.side, lastClosed);
+        const tg = ft ? { at: ft.at, level: ft.level } : null; if (!tg) continue;
         // freeze the trade at the TRIGGER candle: index close, 2-step OTM strike of that moment, premium at that candle's close
         const bar = c5.find((c) => c.time + 300 === tg.at), entryIndex = bar ? bar.close : zp.spot;
         const ks = (_pcLastChain.get(`${sym}:0`)?.v?.strikes || []).map((r: any) => r.strike), step = ks.length > 1 ? Math.min(...ks.slice(1).map((k: number, i: number) => k - ks[i]).filter((v: number) => v > 0)) : 50;
@@ -8745,7 +8747,19 @@ router.get("/zero-hero/trades", requirePermission("oiAnalysis"), (_req: Request,
 const CP_FILE = path.join(process.cwd(), "data", "copilot-state.json");
 let _cp: any = (() => { try { return JSON.parse(fs.readFileSync(CP_FILE, "utf8")); } catch { return {}; } })();
 const cpSave = () => { try { fs.writeFileSync(CP_FILE, JSON.stringify(_cp)); } catch { /* best-effort */ } };
-const cpSend = (text: string) => { notifyDetached("INDEX_ALERT", CP.stripTags(text)); try { fs.appendFileSync(path.join(process.cwd(), "data", "copilot-log.txt"), `\n[${new Date(Date.now() + 19800000).toISOString().slice(0, 19)}]\n${CP.stripTags(text)}\n`); } catch { /* best-effort */ } };
+// One message at a time, ≥ 1.5 s apart, retried up to 3× (Telegram rejects bursts to a group — a stop message must never be lost)
+const _cpQueue: string[] = []; let _cpSending = false;
+async function cpDrain() {
+  if (_cpSending) return; _cpSending = true;
+  try {
+    while (_cpQueue.length) {
+      const msg = _cpQueue.shift()!;
+      for (let a = 0; a < 3; a++) { const r = await notify("INDEX_ALERT", msg).catch(() => ({ ok: false } as any)); if (r.ok) break; await new Promise((res) => setTimeout(res, 4000 * (a + 1))); }
+      await new Promise((res) => setTimeout(res, 1500));
+    }
+  } finally { _cpSending = false; }
+}
+const cpSend = (text: string) => { _cpQueue.push(CP.stripTags(text)); cpDrain().catch(() => {}); try { fs.appendFileSync(path.join(process.cwd(), "data", "copilot-log.txt"), `\n[${new Date(Date.now() + 19800000).toISOString().slice(0, 19)}]\n${CP.stripTags(text)}\n`); } catch { /* best-effort */ } };
 function cpOdds(sym: string): string | undefined {
   try {
     if (sym === "^NSEI") { const r = JSON.parse(fs.readFileSync(path.join(process.cwd(), "data", "research-early-breakout", "results_dev_val.json"), "utf8")); const a = r.periods.DEV.T15_ALL, b = r.periods.VALIDATION.T15_ALL; return `2-yr NIFTY 15-min breakout record after costs: ${a.winPct}–${b.winPct}% wins, ${a.avgNet} / ${b.avgNet} pts per trade (no proven edge — size small).`; }

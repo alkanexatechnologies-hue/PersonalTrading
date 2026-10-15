@@ -26,7 +26,7 @@ export interface ZhSide {
   lots: number | null; costPerLot: number | null; verdict: string;
 }
 /** Years from now to 15:30 IST today (expiry), floored at 1 minute. */
-const yearsToClose = (istMin: number) => Math.max(1, 930 - istMin) / (375 * 252);   // trading-time convention: 375 min/day, 252 days
+export const yearsToClose = (istMin: number) => Math.max(1, 930 - istMin) / (375 * 252);   // trading-time convention: 375 min/day, 252 days
 
 /** Index level at which the option's premium reaches `target` (Black-Scholes at its own IV, remaining time to 15:30). */
 export function levelForPremium(side: "CE" | "PE", strike: number, spot: number, iv: number, t: number, target: number): number | null {
@@ -95,6 +95,7 @@ export interface ZhTrade {
   openedAt: number; entryPrem: number; entryIndex: number; triggerLevel: number;
   t1Prem: number; t2Prem: number; slPrem: number; slIndexRule: string;
   state: "OPEN" | "T1" | "CLOSED"; events: ZhEvent[]; exitPrem?: number | null; exitWhy?: string; closedAt?: number;
+  rechecked?: boolean; floorPrem?: number; recheckNote?: string; reset?: boolean;
 }
 /** Freeze a new trade from a trigger. Every number here is fixed for the life of the trade. */
 export function newZhTrade(o: { n: number; day: string; symbol: string; name: string; side: "CE" | "PE"; strike: number; expiry: string; lot: number | null; at: number; entryPrem: number; entryIndex: number; triggerLevel: number }): ZhTrade {
@@ -103,16 +104,52 @@ export function newZhTrade(o: { n: number; day: string; symbol: string; name: st
     openedAt: o.at, entryPrem: r2(p), entryIndex: r2(o.entryIndex), triggerLevel: r2(o.triggerLevel), t1Prem: r2(2 * p), t2Prem: r2(3 * p), slPrem: r2(0.5 * p),
     slIndexRule: `5-min close ${o.side === "CE" ? "below" : "above"} ${r2(o.triggerLevel)} (breakout failed)`, state: "OPEN", events: [{ t: o.at, what: "ENTRY", prem: r2(p), index: r2(o.entryIndex) }] };
 }
+/**
+ * Recheck at −51%: is the trade still alive? Keep only if (1) the index is still on the breakout side of the broken
+ * day high/low, (2) ≥ 30 min remain before 15:20, and (3) the index move needed to bring the premium back to entry is
+ * ≤ half of the move the market still prices (ATM straddle). Pure; returns the verdict and the reasons.
+ */
+export function recheckZh(tr: ZhTrade, x: { prem: number; spot: number; istMin: number; straddle: number | null }) {
+  const dir = tr.side === "CE" ? 1 : -1, t = yearsToClose(x.istMin), reasons: string[] = [];
+  const alive = dir * (x.spot - tr.triggerLevel) > 0;
+  reasons.push(alive ? `breakout intact (index ${Math.round(x.spot)} ${dir > 0 ? "above" : "below"} ${Math.round(tr.triggerLevel)})` : `breakout gone (index back ${dir > 0 ? "below" : "above"} ${Math.round(tr.triggerLevel)})`);
+  const timeOk = x.istMin <= 890; reasons.push(timeOk ? `${920 - x.istMin} min left` : `only ${Math.max(0, 920 - x.istMin)} min left`);
+  const iv = impliedVolNow(tr.side, tr.strike, x.spot, t, x.prem), backAt = iv ? levelForPremium(tr.side, tr.strike, x.spot, iv, t, tr.entryPrem) : null;
+  const need = backAt != null ? Math.abs(backAt - x.spot) : null, room = x.straddle != null ? 0.5 * x.straddle : null;
+  const reachable = need != null && room != null && need <= room;
+  reasons.push(need == null ? "recovery move not computable" : `needs ${Math.round(need)} pts to get back to entry vs ±${room != null ? Math.round(room) : "—"} still realistic`);
+  return { keep: alive && timeOk && reachable, reasons, need, backAt };
+}
 /** Advance a frozen trade. The levels never change; only the state moves forward. Returns event names that fired. */
-export function stepZhTrade(tr: ZhTrade, x: { prem: number | null; spot: number | null; last5: { time: number; close: number } | null; nowSec: number; istMin: number }): string[] {
+export function stepZhTrade(tr: ZhTrade, x: { prem: number | null; spot: number | null; last5: { time: number; close: number } | null; nowSec: number; istMin: number; straddle?: number | null }): string[] {
   if (tr.state === "CLOSED") return [];
   const fired: string[] = [], dir = tr.side === "CE" ? 1 : -1;
   const close = (why: string) => { tr.state = "CLOSED"; tr.exitWhy = why; tr.exitPrem = x.prem; tr.closedAt = x.nowSec; tr.events.push({ t: x.nowSec, what: why, prem: x.prem, index: x.spot }); fired.push(why); };
   if (x.prem != null && tr.state === "OPEN" && x.prem >= tr.t1Prem) { tr.state = "T1"; tr.events.push({ t: x.nowSec, what: "TARGET 1 (2×) — half booked, premium stop moved to entry", prem: x.prem, index: x.spot }); fired.push("T1"); }
   if (x.prem != null && x.prem >= tr.t2Prem) { close("TARGET 2 (3×)"); return fired; }
-  const premStop = tr.state === "T1" ? tr.entryPrem : tr.slPrem;
-  if (x.prem != null && x.prem <= premStop) { close(tr.state === "T1" ? "BREAKEVEN STOP (after T1)" : "STOP LOSS (premium −50%)"); return fired; }
+  if (tr.state === "T1" && x.prem != null && x.prem <= tr.entryPrem) { close("BREAKEVEN STOP (after T1)"); return fired; }
+  // −51 %: recheck once (hold with a −75 % floor if still alive, otherwise RESET); after a hold, the floor is final
+  if (tr.state === "OPEN" && x.prem != null && x.spot != null) {
+    if (!tr.rechecked && x.prem <= 0.49 * tr.entryPrem) {
+      const r = recheckZh(tr, { prem: x.prem, spot: x.spot, istMin: x.istMin, straddle: x.straddle ?? null });
+      tr.rechecked = true; tr.recheckNote = r.reasons.join(" · ");
+      if (r.keep) { tr.floorPrem = r2(0.25 * tr.entryPrem); tr.events.push({ t: x.nowSec, what: `RECHECK at −51% → HOLD (${tr.recheckNote}); final floor ${tr.floorPrem}`, prem: x.prem, index: x.spot }); fired.push("RECHECK_HOLD"); }
+      else { tr.reset = true; close(`RESET at −51% — no longer an opportunity (${tr.recheckNote})`); return fired; }
+    }
+    if (tr.rechecked && tr.floorPrem != null && x.prem <= tr.floorPrem) { close("STOP — final floor −75% after recheck"); return fired; }
+  }
   if (x.last5 && x.last5.time > tr.openedAt && dir * (x.last5.close - tr.triggerLevel) < 0) { close(tr.state === "T1" ? "EXIT — breakout failed (after T1)" : "STOP LOSS (breakout failed)"); return fired; }
   if (x.istMin >= 920) close("TIME EXIT 15:20");
   return fired;
+}
+
+/** First 5-min CLOSE beyond the day's range (as it stood before that bar) after `after`, inside 13:30–14:45. */
+export function freshTrigger(bars: ZhCandle[], side: "CE" | "PE", after: number): { at: number; level: number; close: number } | null {
+  const dir = side === "CE" ? 1 : -1;
+  for (let j = 1; j < bars.length; j++) {
+    const c = bars[j].time + 300, m = Math.floor(((c + 19800) % 86400) / 60); if (c <= after || m < 810 || m > 885) continue;
+    const prior = bars.slice(0, j), hi = Math.max(...prior.map((b) => b.high)), lo = Math.min(...prior.map((b) => b.low));
+    if (dir > 0 ? bars[j].close > hi : bars[j].close < lo) return { at: c, level: r2(dir > 0 ? hi : lo), close: bars[j].close };
+  }
+  return null;
 }

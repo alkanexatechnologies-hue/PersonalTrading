@@ -38,9 +38,24 @@ test("frozen zero-hero trade: levels fixed; T1 2× → breakeven; T2 3×; stops;
   assert.deepEqual(stepZhTrade(t, { prem: 81, spot: 74420, last5: null, nowSec: 1400, istMin: 835 }), ["T1"]); assert.equal(t.state, "T1");
   assert.deepEqual(stepZhTrade(t, { prem: 121, spot: 74480, last5: null, nowSec: 1500, istMin: 840 }), ["TARGET 2 (3×)"]); assert.equal(t.state, "CLOSED");
   assert.equal(JSON.stringify([t.entryPrem, t.t1Prem, t.t2Prem, t.slPrem, t.triggerLevel]), frozen);   // never changed
-  t = mk(); assert.deepEqual(stepZhTrade(t, { prem: 19, spot: 74230, last5: null, nowSec: 1200, istMin: 832 }), ["STOP LOSS (premium −50%)"]);
+  // −51 %: breakout still intact, time left, recovery within reach → HOLD with a −75 % floor; below the floor → stop
+  t = mk(); assert.deepEqual(stepZhTrade(t, { prem: 19, spot: 74230, last5: null, nowSec: 1200, istMin: 832, straddle: 250 }), ["RECHECK_HOLD"]);
+  assert.equal(t.floorPrem, 10); assert.equal(t.state, "OPEN");
+  assert.deepEqual(stepZhTrade(t, { prem: 9.5, spot: 74222, last5: null, nowSec: 1250, istMin: 840, straddle: 250 }), ["STOP — final floor −75% after recheck"]);
+  // −51 % with too little time left → RESET (closed, ready for a fresh opportunity)
+  t = mk(); const f = stepZhTrade(t, { prem: 19, spot: 74230, last5: null, nowSec: 1200, istMin: 895, straddle: 250 });
+  assert.match(f[0], /^RESET/); assert.equal(t.state, "CLOSED"); assert.equal(t.reset, true);
   t = mk(); assert.deepEqual(stepZhTrade(t, { prem: 30, spot: 74200, last5: { time: 1300, close: 74210 }, nowSec: 1310, istMin: 832 }), ["STOP LOSS (breakout failed)"]);
   t = mk(); stepZhTrade(t, { prem: 82, spot: 74420, last5: null, nowSec: 1400, istMin: 835 });
   assert.deepEqual(stepZhTrade(t, { prem: 39, spot: 74300, last5: null, nowSec: 1500, istMin: 840 }), ["BREAKEVEN STOP (after T1)"]);
   t = mk(); assert.deepEqual(stepZhTrade(t, { prem: 45, spot: 74260, last5: null, nowSec: 2000, istMin: 920 }), ["TIME EXIT 15:20"]);
+});
+
+test("fresh trigger after a reset needs a NEW 5-min close beyond the day range", async () => {
+  const { freshTrigger } = await import("./zeroHero");
+  const T2 = (hm: string) => Math.floor(Date.parse(`2026-10-15T${hm}:00Z`) / 1000) - 19800;
+  const b = (hm: string, h: number, l: number, c: number) => ({ time: T2(hm), high: h, low: l, close: c });
+  const bars = [b("09:15", 110, 90, 100), b("13:25", 112, 100, 111), b("13:30", 113, 105, 112.5), b("13:45", 116, 108, 115)];
+  assert.equal(freshTrigger(bars, "CE", T2("13:30") + 300)?.close, 115);   // after the reset, only the 13:45 close counts
+  assert.equal(freshTrigger(bars, "CE", T2("13:50")), null);
 });
