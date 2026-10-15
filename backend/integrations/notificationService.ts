@@ -72,10 +72,10 @@ function istTimeNow(): string {
  * Sends one notification. NEVER throws - the caller can ignore the result
  * entirely and the trading path stays unaffected either way.
  */
-export async function notify(kind: NotificationKind, text: string): Promise<NotifyResult> {
+export async function notify(kind: NotificationKind, text: string, opts: { html?: boolean } = {}): Promise<NotifyResult> {
   const at = Date.now();
   try {
-    const r = await sendTelegram(text);
+    const r = await sendTelegram(text, undefined, opts);
     const out: NotifyResult = {
       ok: r.ok, channel: "telegram", kind,
       code: r.code, error: r.error, detail: r.detail,
@@ -83,7 +83,7 @@ export async function notify(kind: NotificationKind, text: string): Promise<Noti
     appendLog({
       at, istTime: istTimeNow(), kind, channel: "telegram", ok: r.ok,
       code: r.code, error: r.error,
-      preview: String(text || "").split("\n")[0].slice(0, 120),
+      preview: String(text || "").replace(/<[^>]+>/g, "").split("\n")[0].slice(0, 120),
     });
     return out;
   } catch (e: any) {

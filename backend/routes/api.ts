@@ -72,6 +72,7 @@ import { zeroHero as zeroHeroLive, newZhTrade, stepZhTrade, freshTrigger, ZhTrad
 import { readCandle } from "../premium/candleRead";
 import * as CP from "../premium/copilot";
 import * as EYE from "../premium/marketEye";
+import * as TG from "../premium/tgFormat";
 import { Decision } from "../decision/types";
 import { runHtf as runTestLabHtf } from "../testlab/htfRunner";
 import { abcComparison as htfAbc, timingDiagnostic as htfTiming, perCandleAudit as htfPerCandle } from "../testlab/htfAudit";
@@ -8788,18 +8789,19 @@ const CP_FILE = path.join(process.cwd(), "data", "copilot-state.json");
 let _cp: any = (() => { try { return JSON.parse(fs.readFileSync(CP_FILE, "utf8")); } catch { return {}; } })();
 const cpSave = () => { try { fs.writeFileSync(CP_FILE, JSON.stringify(_cp)); } catch { /* best-effort */ } };
 // One message at a time, ≥ 1.5 s apart, retried up to 3× (Telegram rejects bursts to a group — a stop message must never be lost)
-const _cpQueue: string[] = []; let _cpSending = false;
+const _cpQueue: { text: string; html: boolean }[] = []; let _cpSending = false;
 async function cpDrain() {
   if (_cpSending) return; _cpSending = true;
   try {
     while (_cpQueue.length) {
       const msg = _cpQueue.shift()!;
-      for (let a = 0; a < 3; a++) { const r = await notify("INDEX_ALERT", msg).catch(() => ({ ok: false } as any)); if (r.ok) break; await new Promise((res) => setTimeout(res, 4000 * (a + 1))); }
+      for (let a = 0; a < 3; a++) { const r = await notify("INDEX_ALERT", msg.text, { html: msg.html }).catch(() => ({ ok: false } as any)); if (r.ok) break; await new Promise((res) => setTimeout(res, 4000 * (a + 1))); }
       await new Promise((res) => setTimeout(res, 1500));
     }
   } finally { _cpSending = false; }
 }
-const cpSend = (text: string) => { _cpQueue.push(CP.stripTags(text)); cpDrain().catch(() => {}); try { fs.appendFileSync(path.join(process.cwd(), "data", "copilot-log.txt"), `\n[${new Date(Date.now() + 19800000).toISOString().slice(0, 19)}]\n${CP.stripTags(text)}\n`); } catch { /* best-effort */ } };
+// plain builder text → HTML alert (bold title / action lines, escaped); pre-built HTML messages pass `html: true`
+const cpSend = (text: string, htmlReady = false) => { _cpQueue.push({ text: htmlReady ? text : TG.htmlify(CP.stripTags(text)), html: true }); cpDrain().catch(() => {}); try { fs.appendFileSync(path.join(process.cwd(), "data", "copilot-log.txt"), `\n[${new Date(Date.now() + 19800000).toISOString().slice(0, 19)}]\n${String(text).replace(/<[^>]+>/g, "")}\n`); } catch { /* best-effort */ } };
 function cpOdds(sym: string): string | undefined {
   try {
     if (sym === "^NSEI") { const r = JSON.parse(fs.readFileSync(path.join(process.cwd(), "data", "research-early-breakout", "results_dev_val.json"), "utf8")); const a = r.periods.DEV.T15_ALL, b = r.periods.VALIDATION.T15_ALL; return `2-yr NIFTY 15-min breakout record after costs: ${a.winPct}–${b.winPct}% wins, ${a.avgNet} / ${b.avgNet} pts per trade (no proven edge — size small).`; }
@@ -8851,17 +8853,20 @@ async function copilotTick() {
         }
         cpSave();
         // NIFTY 15-minute update, right after each 15-min candle closes (09:30 … 15:15)
-        if ((sym === "^NSEI" || sym === "^BSESN") && istMin >= 570 && istMin % 15 === 0 && sec >= 20 && !_cp.sent[`u|${sym}|${istMin}`]) {
-          _cp.sent[`u|${sym}|${istMin}`] = true; cpSave();
-          const zh = await zeroHeroPayload({ symbol: sym }).catch(() => null);
-          let text = CP.fifteenMinUpdate(d, _cp.trades[sym] || null, zh?.available ? zh : null, cpOdds(sym));
-          const eye = await eyeFor(sym, { price: d.spot.price, changePct: d.spot.changePct, high: d.spot.high, low: d.spot.low }).catch(() => null);
-          if (eye) text += `\n  ${eye.text}`;
-          const zs = await zeroHeroPayload({ symbol: "^BSESN" }).catch(() => null);
-          if (sym === "^NSEI" && zs?.available && zs.isExpiry && istMin >= 570 && istMin <= 915) text += `\n  🎲 SENSEX zero-hero (${zs.window}): ${zs.sides.map((x: any) => `${x.side} ${x.strike} ₹${x.premium != null ? Math.round(x.premium) : "—"} · ${x.trigger.state}${x.moveToDouble != null ? ` · 2× needs ${Math.round(x.moveToDouble)} pts` : ""}`).join(" | ")}${zs.history?.text ? `\n     2-yr: ${zs.history.text}` : ""}`;
-          cpSend(text);
-        }
       }
+    }
+    // ⭐ every 15 min: BEST OPPORTUNITY for NIFTY + SENSEX together · 📊 every 30 min: the full read of each index
+    if (istMin >= 570 && istMin <= 915 && istMin % 15 === 0 && sec >= 20 && !_cp.sent[`best|${istMin}`]) {
+      _cp.sent[`best|${istMin}`] = true; cpSave();
+      const items: any[] = [];
+      for (const sym of ["^NSEI", "^BSESN"]) {
+        const d: any = await pay(sym).catch(() => null); if (!d?.available) continue;
+        const eye = await eyeFor(sym, { price: d.spot.price, changePct: d.spot.changePct, high: d.spot.high, low: d.spot.low }).catch(() => null);
+        const zh = await zeroHeroPayload({ symbol: sym }).catch(() => null);
+        items.push({ d, trade: _cp.trades[sym] || null, eye, zh: zh?.available ? zh : null });
+      }
+      if (items.length) cpSend(TG.bestOpportunityMsg(items), true);
+      if (istMin % 30 === 0) for (const it of items) cpSend(TG.fullReadMsg(it.d, it.trade, it.eye, it.zh, cpOdds(it.d.symbol)), true);
     }
     // 15:35 review
     if (istMin >= 935 && istMin <= 945 && !_cp.sent.review) {
@@ -8880,9 +8885,9 @@ router.post("/copilot/update-now", requirePermission("oiAnalysis"), async (req: 
     const sym = String(req.query.symbol || "^NSEI"), d: any = await premiumCenterPayload({ symbol: sym, interval: "15m" });
     if (!d?.available) return res.json({ ok: false, error: d?.error || "unavailable" });
     const zh = await zeroHeroPayload({ symbol: sym }).catch(() => null);
-    let text = CP.fifteenMinUpdate(d, (_cp.trades || {})[sym] || null, zh?.available ? zh : null, cpOdds(sym));
-    const eye = await eyeFor(sym, { price: d.spot.price, changePct: d.spot.changePct, high: d.spot.high, low: d.spot.low }).catch(() => null); if (eye) text += `\n  ${eye.text}`;
-    cpSend(text); res.json({ ok: true, text: CP.stripTags(text) });
+    const eye = await eyeFor(sym, { price: d.spot.price, changePct: d.spot.changePct, high: d.spot.high, low: d.spot.low }).catch(() => null);
+    const text = String(req.query.kind) === "best" ? TG.bestOpportunityMsg([{ d, trade: (_cp.trades || {})[sym] || null, eye, zh: zh?.available ? zh : null }]) : TG.fullReadMsg(d, (_cp.trades || {})[sym] || null, eye, zh?.available ? zh : null, cpOdds(sym));
+    cpSend(text, true); res.json({ ok: true, text: text.replace(/<[^>]+>/g, "") });
   } catch (e: any) { res.json({ ok: false, error: e?.message || "failed" }); }
 });
 

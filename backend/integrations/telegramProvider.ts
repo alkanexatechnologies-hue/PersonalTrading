@@ -201,12 +201,20 @@ export async function getChat(cfg = loadTelegramConfig()): Promise<TelegramCallR
  * (₹, *, _, +, -, |, .), and a parse failure would silently drop a trade alert.
  * Keeping it plain preserves the existing message content exactly.
  */
-export async function sendTelegram(text: string, cfg = loadTelegramConfig()): Promise<TelegramCallResult<{ message_id: number }>> {
+export async function sendTelegram(text: string, cfg = loadTelegramConfig(), opts: { html?: boolean } = {}): Promise<TelegramCallResult<{ message_id: number }>> {
   const ready = telegramReady(cfg);
   if (!ready.ok) return { ok: false, code: ready.code, error: ready.reason };
   // Telegram's hard limit is 4096 characters per message.
   const body = String(text || "").slice(0, 4000);
   if (!body.trim()) return { ok: false, code: "UNEXPECTED_RESPONSE", error: "Refusing to send an empty message." };
+  if (opts.html) {
+    // Opt-in HTML (the caller escapes its dynamic text). If Telegram rejects the markup, resend as plain text so an
+    // alert is never dropped.
+    const r = await call<{ message_id: number }>("sendMessage", { chat_id: cfg.chatId, text: body, parse_mode: "HTML", disable_web_page_preview: true }, cfg);
+    if (r.ok || !/parse|entit|tag/i.test(String((r as any).detail || r.error || ""))) return r;
+    const plain = body.replace(/<[^>]+>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+    return call("sendMessage", { chat_id: cfg.chatId, text: plain, disable_web_page_preview: true }, cfg);
+  }
   return call("sendMessage", { chat_id: cfg.chatId, text: body, disable_web_page_preview: true }, cfg);
 }
 
