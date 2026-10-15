@@ -111,6 +111,10 @@ test("session plan stays fixed while price moves; rolls only after Target 1 or a
   // price drifts up to 140 (inside the zone): the plan must NOT move
   let r = anchoredPlans({ levels: lv, spot: 140, prevClose: 130, todays15: [k(0, 135), k(1, 140)], atr: 10, chain: [], expiry: null, events: [] });
   assert.equal(r.bull!.entry, 142); assert.equal(r.bear!.entry, 119); assert.equal(r.anchor.rolls.length, 0);
+  // today's low appearing above the anchor (e.g. a gap-up day) must not re-shape the plan
+  const withToday = [...lv, { price: 133, label: "Today low", kind: "TODAY" as const }];
+  r = anchoredPlans({ levels: withToday, spot: 140, prevClose: 130, todays15: [k(0, 135)], atr: 10, chain: [], expiry: null, events: [] });
+  assert.equal(r.bull!.entry, 142);
   // triggers (close 143) then reaches T1 150 → rolls to the next levels
   r = anchoredPlans({ levels: lv, spot: 151, prevClose: 130, todays15: [k(0, 143), k(1, 151)], atr: 10, chain: [], expiry: null, events: [] });
   assert.equal(r.anchor.rolls.length, 1); assert.match(r.anchor.why, /Target 1/); assert.equal(r.bull!.trigger, 160);

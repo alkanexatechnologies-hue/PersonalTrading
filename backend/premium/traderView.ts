@@ -319,7 +319,9 @@ export function opportunity(p: Plan | null, closed15: Candle[], forming15: Candl
  */
 export function anchoredPlans(o: { levels: Level[]; spot: number; prevClose: number; todays15: Candle[]; atr: number; chain: OiStrike[]; expiry: string | null; events: BreakEvent[]; nowMs?: number }) {
   let ref = o.prevClose, since: number | null = null, why = "morning plan (anchored to the previous close)";
-  const mk = () => plans({ levels: o.levels, spot: o.spot, ref, atr: o.atr, chain: o.chain, expiry: o.expiry, events: o.events, nowMs: o.nowMs });
+  // today's own high/low keep changing as the day trades — shown on the chart, but they never re-shape the fixed plan
+  const planLevels = o.levels.filter((x) => x.kind !== "TODAY");
+  const mk = () => plans({ levels: planLevels, spot: o.spot, ref, atr: o.atr, chain: o.chain, expiry: o.expiry, events: o.events, nowMs: o.nowMs });
   let pb = mk(), trig = { CE: false, PE: false };
   const rolls: { time: number; ref: number; why: string }[] = [];
   for (const c of o.todays15) {
