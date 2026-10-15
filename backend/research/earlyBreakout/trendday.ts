@@ -19,7 +19,8 @@ const vName = (v: V) => `s${v.s}_T${Math.floor(v.T / 60)}${String(v.T % 60).padS
 
 export interface DayFeat { day: string; period: P; D: number; f1: boolean; f2: boolean; f3: boolean; f4: boolean; score: number; T: number }
 
-export function analyse(days: DayData[], variants = VARIANTS) {
+export function analyse(days: DayData[], variants = VARIANTS, opt: { step?: number; lot?: number } = {}) {
+  const STEP = opt.step ?? 50, BAND = 3 * STEP;
   const trades: any[] = [], feats: DayFeat[] = []; let hist15: Bar[] = [];
   const prepared = days.map((d) => {
     const m = [...d.spot.entries()].sort((a, b) => a[0] - b[0]).filter(([t]) => minOf(t) >= 555 && minOf(t) <= 929) as [number, number][];
@@ -36,7 +37,7 @@ export function analyse(days: DayData[], variants = VARIANTS) {
     if (!a) continue;
     const pC = prev.m[prev.m.length - 1][1], open = m[0][1], spotAt = new Map(m);
     const or = m.filter(([t]) => minOf(t) < 570), orH = Math.max(...or.map((x) => x[1])), orL = Math.min(...or.map((x) => x[1]));
-    const lot = expiryFor(d.day).lot || 75, cache = new Map<string, Map<number, Min>>();
+    const lot = opt.lot ?? (expiryFor(d.day).lot || 75), cache = new Map<string, Map<number, Min>>();
     const leg = (k: string) => { let x = cache.get(k); if (!x) { x = new Map((d.legs.get(k) || []).map((b) => [b.t, b])); cache.set(k, x); } return x; };
     const prem = (k: string, t: number, f: "o" | "c") => { const L = leg(k), b = L.get(t); if (b && b[f] > 0) return b[f]; for (let j = 1; j <= 5; j++) { const q = L.get(t - j * 60); if (q && q.c > 0) return q.c; } return null; };
     const oiAt = (k: string, t: number) => { const L = leg(k); for (let j = 0; j <= 5; j++) { const q = L.get(t - j * 60); if (q && q.oi != null) return q.oi; } return null; };
@@ -48,7 +49,7 @@ export function analyse(days: DayData[], variants = VARIANTS) {
       const upto = m.filter(([t]) => t < tT), twap = upto.reduce((s, x) => s + x[1], 0) / upto.length, f3 = D * (px - twap) > 0;
       const t0 = m.find(([t]) => minOf(t) === 560)?.[0];
       let dPE = 0, dCE = 0;
-      if (t0) for (let k = Math.round((px - 150) / 50) * 50; k <= px + 150; k += 50) {
+      if (t0) for (let k = Math.round((px - BAND) / STEP) * STEP; k <= px + BAND; k += STEP) {
         for (const side of ["CE", "PE"] as const) { const o1 = oiAt(`${k}${side}`, t0), o2 = oiAt(`${k}${side}`, tT - 60); if (o1 != null && o2 != null) { if (side === "CE") dCE += o2 - o1; else dPE += o2 - o1; } }
       }
       const f4 = D * (dPE - dCE) > 0;
@@ -57,7 +58,7 @@ export function analyse(days: DayData[], variants = VARIANTS) {
     for (const Tm of [600, 615]) { const f = featAt(Tm); if (f && Tm === 600) feats.push(f); if (!f) continue;
       for (const v of variants.filter((x) => x.T === Tm)) {
         if (f.score < v.s) continue;
-        const side = f.D > 0 ? "CE" : "PE", s0 = spotAt.get(f.T - 60)!, k = `${Math.round(s0 / 50) * 50}${side}`, e = prem(k, f.T, "o"); if (e == null) continue;
+        const side = f.D > 0 ? "CE" : "PE", s0 = spotAt.get(f.T - 60)!, k = `${Math.round(s0 / STEP) * STEP}${side}`, e = prem(k, f.T, "o"); if (e == null) continue;
         let stop = s0 - f.D * a, trail = false, exit: number | null = null, why = "", tEnd = f.T;
         for (let t = f.T; ; t += 60) {
           const mm = minOf(t), px = spotAt.get(t);

@@ -68,6 +68,7 @@ import { getDecision, latestDecision, ledgerFor, DecisionDeps, IndexDef, openArb
 import { runSession as runBreakoutSession, BREAKOUT_CONFIG } from "../signals/breakoutEngine";
 import * as PC from "../premium/premiumCenter";
 import * as TV from "../premium/traderView";
+import { zeroHero as zeroHeroLive } from "../premium/zeroHero";
 import { Decision } from "../decision/types";
 import { runHtf as runTestLabHtf } from "../testlab/htfRunner";
 import { abcComparison as htfAbc, timingDiagnostic as htfTiming, perCandleAudit as htfPerCandle } from "../testlab/htfAudit";
@@ -7856,6 +7857,57 @@ router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Reque
       note: "Advisory only. Probabilities are not shown until validated out of sample. The arbiter and existing risk gates decide trades.",
     });
   } catch (e: any) { res.json({ available: false, version: PC_VERSION, error: e?.message || "premium center failed" }); }
+});
+
+// ===================== Zero-Hero (expiry-day cheap OTM) — live read; advisory only =====================
+// /api/zero-hero-live?symbol=^NSEI|^BSESN|...&budget=3000 · uses the same cached chain (with last-good fallback), 5-min
+// candles and the 1-minute OI log; adds no new Dhan load beyond the shared caches.
+router.get("/zero-hero-live", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
+  if (!def || def.type !== "index" || !def.fno || !def.nseSymbol) return res.status(400).json({ error: "F&O index symbol required" });
+  const budget = Math.max(0, Number(req.query.budget) || 0) || null;
+  const nowSec = Math.floor(Date.now() / 1000), istMin = Math.floor(((nowSec + 19800) % 86400) / 60), today = new Date((nowSec + 19800) * 1000).toISOString().slice(0, 10);
+  try {
+    const [chain, c5, quote] = await Promise.all([
+      cached(`pc-chain:${def.symbol}:0`, 30_000, () => dhanChainForExpiry(def, 0)).catch((e: any) => ({ available: false, message: e?.message })).then((c: any) => {
+        const k = `${def.symbol}:0`; if (c?.available) { _pcLastChain.set(k, { at: Date.now(), v: c }); return c; }
+        const lg = _pcLastChain.get(k); return lg && Date.now() - lg.at < 5 * 60_000 ? { ...lg.v, staleChain: true } : c;
+      }),
+      getCandlesCached(def.symbol, "5m" as Interval).catch(() => [] as any[]),
+      cached(`quote:${def.symbol}`, TTL_QUOTE, () => getProvider().getQuote(def.symbol)).catch(() => null),
+    ]);
+    const ch: any = chain; if (!ch?.available) return res.json({ available: false, error: ch?.message || "option chain unavailable" });
+    const strikes: any[] = ch.strikes, ks = strikes.map((x) => x.strike), step = ks.length > 1 ? Math.min(...ks.slice(1).map((k: number, i: number) => k - ks[i]).filter((d: number) => d > 0)) : 50;
+    const spot = (quote as any)?.price > 0 ? (quote as any).price : ch.spot;
+    const dayOf = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(0, 10);
+    const closed5 = ((c5 as any[]) || []).filter((c) => dayOf(c.time) === today && c.time + 300 <= nowSec).map((c) => ({ time: c.time, high: c.high, low: c.low, close: c.close }));
+    // OI now vs ~15 min ago from the 1-minute OI log (this expiry)
+    let oiNow: Map<number, any> | null = null, oi15: Map<number, any> | null = null;
+    try {
+      const snaps = loadMinuteDay(today, def.symbol, String(ch.expiry));
+      if (snaps.length) {
+        const last = snaps[snaps.length - 1], back = [...snaps].reverse().find((x) => x.captureT <= last.captureT - 14 * 60) || null;
+        const toMap = (sn: any) => new Map<number, any>(sn.strikes.map((r: any) => [r.strike, { ceOi: r.ceOi, peOi: r.peOi }] as [number, any]));
+        oiNow = toMap(last); oi15 = back ? toMap(back) : null;
+      }
+    } catch { /* no OI log */ }
+    let lot: number | null = null;
+    try { const atmK = ks.reduce((b: number, k: number) => (Math.abs(k - spot) < Math.abs(b - spot) ? k : b), ks[0]); const inst: any = await findOption(def.nseSymbol!.toUpperCase(), "CE", atmK, String(ch.expiry)); lot = inst?.lotSize ?? null; } catch { lot = null; }
+    // 2-year record read from the research output at request time (appears as soon as a study finishes — no restart)
+    let history: any = null;
+    try {
+      const ix = ({ "^NSEI": "NIFTY", "^BSESN": "SENSEX" } as Record<string, string>)[def.symbol];
+      const f = ix ? path.join(process.cwd(), "data", "research-zero-hero", `${ix}.json`) : null;
+      if (f && fs.existsSync(f)) {
+        const r = JSON.parse(fs.readFileSync(f, "utf8")), rows = Object.values<any>(r.variants || {}).flatMap((v: any) => [v.DEV, v.VALIDATION]).filter((x: any) => x && x.n);
+        const n = rows.reduce((a: number, x: any) => a + x.n, 0) / Math.max(1, Object.keys(r.variants || {}).length), avgs = rows.map((x: any) => x.avgNet), hits = rows.map((x: any) => x.hit2xPct);
+        history = { text: `${ix}, 2 years of expiry days (~${Math.round(n)} trades per rule): day-range breakout after 13:30 — reached 2× in ${Math.min(...hits)}–${Math.max(...hits)} % of trades; average ${Math.min(...avgs)} to ${Math.max(...avgs)} premium pts per trade after costs.`, hit2x: `${Math.min(...hits)}–${Math.max(...hits)} %`, avg: `${Math.min(...avgs)} to ${Math.max(...avgs)}` };
+      }
+    } catch { history = null; }
+    const z = zeroHeroLive({ symbol: def.symbol, expiry: String(ch.expiry), today, istMin, spot, step, lot, chain: strikes, closed5Today: closed5, oiNow, oi15Ago: oi15, budget, history });
+    res.json({ available: true, symbol: def.symbol, name: def.name, expiry: ch.expiry, lot, budget, chainStale: !!ch.staleChain, generatedAt: nowSec, ...z,
+      note: "Advisory only. Zero-hero options usually expire worthless; the 2-year record is shown so you see the real odds." });
+  } catch (e: any) { res.json({ available: false, error: e?.message || "zero-hero failed" }); }
 });
 
 router.get("/option-candles", async (req: Request, res: Response) => {

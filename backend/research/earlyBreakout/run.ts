@@ -28,7 +28,8 @@ function atr14(b: Bar[]) { let a: number | null = null; for (let i = 1; i < b.le
 const weekOf = (d: string) => { const t = new Date(d + "T00:00:00Z"), wd = (t.getUTCDay() + 6) % 7; return new Date(t.getTime() - wd * 86400_000).toISOString().slice(0, 10); };
 
 export const missed: Record<string, number> = {};
-export function runStudy(days: DayData[]) {
+export function runStudy(days: DayData[], opt: { step?: number; lot?: number } = {}) {
+  const STEP = opt.step ?? 50;
   const trades: Trade[] = [], prepared = days.map((d) => { const m = spotMinutes(d); return { d, m, b5: bars(m, 5), b15: bars(m, 15) }; });
   let hist15: Bar[] = [];
   for (let i = 1; i < prepared.length; i++) {
@@ -47,7 +48,7 @@ export function runStudy(days: DayData[]) {
     if (pwm.length) { levels.push({ price: Math.max(...pwm), label: "PWH", kind: "WEEK" }, { price: Math.min(...pwm), label: "PWL", kind: "WEEK" }); }
     levels.sort((x, y) => y.price - x.price);
     const pb = plans({ levels, spot: pC, ref: pC, atr: a, chain: [], expiry: null, events: [] });
-    const lot = expiryFor(d.day).lot || 75;
+    const lot = opt.lot ?? (expiryFor(d.day).lot || 75);
     const spotAt = new Map(m), legCache = new Map<string, Map<number, Min>>();
     const leg = (k: string) => { let x = legCache.get(k); if (!x) { x = new Map((d.legs.get(k) || []).map((b) => [b.t, b])); legCache.set(k, x); } return x; };
     const premAt = (k: string, t: number, field: "o" | "c"): { v: number | null; gap: boolean } => {
@@ -58,7 +59,7 @@ export function runStudy(days: DayData[]) {
     const simulate = (sig: Sig, side: "CE" | "PE", sigClose: number, stop: number, target: number) => {
       const s0 = spotAt.get(sigClose - 60) ?? spotAt.get(sigClose); if (s0 == null) return;
       if ((side === "CE" ? 1 : -1) * (s0 - target) >= 0) { missed[sig] = (missed[sig] || 0) + 1; return; }   // live radar: MISSED — never chase
-      const strike = Math.round(s0 / 50) * 50, k = `${strike}${side}`;
+      const strike = Math.round(s0 / STEP) * STEP, k = `${strike}${side}`;
       const e = premAt(k, sigClose, "o"); if (e.v == null) return;
       const dir = side === "CE" ? 1 : -1; let exit: number | null = null, why = "", gap = e.gap, tEnd = sigClose;
       for (let t = sigClose; ; t += 60) {
@@ -81,7 +82,7 @@ export function runStudy(days: DayData[]) {
         const c = b.time + 300; if (!inWindow(c)) continue;
         if (!done.has("E5" + sd) && dir * (b.close - p.entry) >= 0) { done.add("E5" + sd); simulate("E5", side, c, p.stop, p.t1); }
         if (!done.has("E5P" + sd) && dir * (b.close - p.entry) >= 0) {
-          const s0 = spotAt.get(c - 60), k = s0 != null ? `${Math.round(s0 / 50) * 50}${side}` : "";
+          const s0 = spotAt.get(c - 60), k = s0 != null ? `${Math.round(s0 / STEP) * STEP}${side}` : "";
           const L = [...leg(k).values()].filter((x) => x.t < c), recent = L.filter((x) => x.t >= c - 300), before = L.filter((x) => x.t < c - 300);
           if (recent.length && before.length && Math.max(...recent.map((x) => x.h)) > Math.max(...before.map((x) => x.h))) { done.add("E5P" + sd); simulate("E5P", side, c, p.stop, p.t1); }
         }

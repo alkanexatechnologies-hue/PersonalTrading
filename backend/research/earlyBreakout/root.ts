@@ -28,7 +28,8 @@ const atr14 = (b: Bar[]) => { let a: number | null = null; for (let i = 1; i < b
 const weekOf = (d: string) => { const t = new Date(d + "T00:00:00Z"), wd = (t.getUTCDay() + 6) % 7; return new Date(t.getTime() - wd * 86400_000).toISOString().slice(0, 10); };
 const ema = (v: number[], p: number) => { const k = 2 / (p + 1); const o: number[] = []; let e = v[0]; v.forEach((x, i) => { e = i ? x * k + e * (1 - k) : x; o.push(e); }); return o; };
 
-export function run(days: DayData[], variants: V[] = VARIANTS) {
+export function run(days: DayData[], variants: V[] = VARIANTS, opt: { step?: number; lot?: number } = {}) {
+  const STEP = opt.step ?? 50, ROUND = 2 * STEP;
   const prep = days.map((d) => { const m = mins(d); return { d, m, b5: bars(m, 5), b15: bars(m, 15) }; });
   const out: Trade[] = []; let hist15: Bar[] = [];
   for (let i = 1; i < prep.length; i++) {
@@ -41,12 +42,12 @@ export function run(days: DayData[], variants: V[] = VARIANTS) {
     const wk = weekOf(d.day), pw = prep.slice(Math.max(0, i - 10), i).filter((x) => weekOf(x.d.day) < wk), lw = pw.length ? weekOf(pw[pw.length - 1].d.day) : null;
     const pwm = lw ? pw.filter((x) => weekOf(x.d.day) === lw).flatMap((x) => x.m.map((y) => y[1])) : [];
     if (pwm.length) hurdles.push(Math.max(...pwm), Math.min(...pwm));
-    for (let r = Math.floor((pC - 3 * a) / 100) * 100; r <= pC + 3 * a; r += 100) hurdles.push(r);
+    for (let r = Math.floor((pC - 3 * a) / ROUND) * ROUND; r <= pC + 3 * a; r += ROUND) hurdles.push(r);
     const nextHurdle = (px: number, dir: number) => { const c = hurdles.filter((h) => dir * (h - px) > 0.05 * a).sort((x, y) => dir * (x - y)); return c[0] ?? null; };
     // 15-min EMA21 slope known at a time t: closed 15-min bars of history + today before t
     const closes15 = hist15.map((b) => b.close);
     const trendAt = (t: number) => { const today = b15.filter((b) => b.time + 900 <= t).map((b) => b.close), e = ema(closes15.concat(today), 21), n = e.length; return n > 3 ? Math.sign(e[n - 1] - e[n - 4]) : 0; };
-    const lot = expiryFor(d.day).lot || 75, spotAt = new Map(m), legCache = new Map<string, Map<number, Min>>();
+    const lot = opt.lot ?? (expiryFor(d.day).lot || 75), spotAt = new Map(m), legCache = new Map<string, Map<number, Min>>();
     const leg = (k: string) => { let x = legCache.get(k); if (!x) { x = new Map((d.legs.get(k) || []).map((b) => [b.t, b])); legCache.set(k, x); } return x; };
     const prem = (k: string, t: number, f: "o" | "c") => { const L = leg(k), b = L.get(t); if (b && b[f] > 0) return b[f]; for (let j = 1; j <= 5; j++) { const q = L.get(t - j * 60); if (q && q.c > 0) return q.c; } return null; };
     for (const v of variants) {
@@ -61,7 +62,7 @@ export function run(days: DayData[], variants: V[] = VARIANTS) {
         const target = nextHurdle(sb.close, dir); if (target == null || dir * (target - sb.close) < a) continue;   // room ≥ 1 ATR
         usedBase = j - 1;
         // simulate
-        const s0 = spotAt.get(c - 60) ?? sb.close, k = `${Math.round(s0 / 50) * 50}${side}`, e = prem(k, c, "o"); if (e == null) continue;
+        const s0 = spotAt.get(c - 60) ?? sb.close, k = `${Math.round(s0 / STEP) * STEP}${side}`, e = prem(k, c, "o"); if (e == null) continue;
         let stop = dir > 0 ? lo - 0.05 * a : hi + 0.05 * a, trailOn = false, exit: number | null = null, why = "", tEnd = c;
         for (let t = c; ; t += 60) {
           const mm = minOf(t), px = spotAt.get(t);
