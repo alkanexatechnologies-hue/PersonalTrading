@@ -36,3 +36,10 @@ and the 10:00 score is ≥ 3. Shows whether "trade only on detector days" reduce
 DEV 2024-10-14 → 2025-10-31 (choose the best variant with ≥ 40 trades) · VALIDATION 2025-11-01 → 2026-05-31 ·
 HOLDOUT 2026-06-01 → 2026-10-12 opened only if the chosen variant is positive in DEV and VALIDATION. Usable only if
 the day-bootstrap 95 % lower bound of net expectancy > 0 in VALIDATION and HOLDOUT. Otherwise NO VALIDATED EDGE.
+
+## Confirmatory test C1 (written after the first run, BEFORE looking at it — the first stay-out split had look-ahead)
+The first stay-out split applied the 10:00 score to breakouts that fired before 10:00 (information not yet known).
+C1 removes that: only breakout signals whose candle closes **at or after 10:00** count, and the detector is the 10:00
+score (data before 10:00). Rule: take the **E5** (5-min close) breakout only if score ≥ 3 and its side equals D.
+Fixed now, no other choice made: E5 (not T15), score ≥ 3, 10:00. C1 passes only if net expectancy > 0 in DEV and
+VALIDATION, and then HOLDOUT is opened once; usable only if the HOLDOUT day-bootstrap 95 % lower bound > 0.
