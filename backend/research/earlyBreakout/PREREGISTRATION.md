@@ -43,3 +43,9 @@ earlier than T15 (same day and side), and "false early" = E5 trades on days T15 
 An early signal is **preferred** only if its net expectancy beats T15 in DEV **and** VALIDATION **and** HOLDOUT and is
 positive in all three. Otherwise the live screen keeps T15 as the trigger and shows the early signal only as
 information with its measured statistics. Every statistic quoted live states n and the period.
+
+## Amendment 1 (after the first DEV+VALIDATION run — recorded openly)
+The first run let a signal enter even when the signal candle had already closed **beyond Target 1** (66 of 125 T15
+"target" exits happened in minute 0 with ~0 gain minus costs). The live screen never triggers there — its radar shows
+MISSED ("do not chase"). The simulation now applies the same rule: a signal whose close is already at/beyond T1 is
+skipped (counted as MISSED). Nothing else changed. HOLDOUT is still unopened.
