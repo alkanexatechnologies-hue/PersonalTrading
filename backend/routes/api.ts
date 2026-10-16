@@ -71,6 +71,7 @@ import * as TV from "../premium/traderView";
 import { zeroHero as zeroHeroLive, newZhTrade, stepZhTrade, freshTrigger, ZhTrade } from "../premium/zeroHero";
 import { readCandle } from "../premium/candleRead";
 import * as CP from "../premium/copilot";
+import * as MD from "../premium/marketDiary";
 import * as EYE from "../premium/marketEye";
 import * as TG from "../premium/tgFormat";
 import { Decision } from "../decision/types";
@@ -8858,6 +8859,7 @@ async function copilotTick() {
       for (const sym of syms) {
         const d: any = await pay(sym).catch(() => null); if (!d?.available || !d.trader || d.trader.error || d.dataStatus !== "LIVE") continue;
         const T = d.trader, tracked = sym === "^NSEI" || sym === "^BSESN";
+        if (T.plans?.anchor) { _cp.anchor = _cp.anchor || {}; _cp.anchor[sym] = T.plans.anchor; }
         // gap open beyond a start: the plan was re-anchored to the opening price — send the refreshed plan once
         const gapRoll = (T.plans?.anchor?.rolls || []).find((x: any) => /^Gap-(up|down) open/.test(x.why));
         if (gapRoll && !_cp.sent[`gap|${sym}`]) { _cp.sent[`gap|${sym}`] = nowSec; cpSave(); cpSend([`🔄 <b>${d.name} — PLAN REFRESHED AT THE OPEN</b>`, `  ${gapRoll.why}`, ...CP.planLines(d).slice(1), cpOdds(sym) ? `  📊 ${cpOdds(sym)}` : ""].filter(Boolean).join("\n")); }
@@ -8910,6 +8912,8 @@ async function copilotTick() {
         cpSend(CP.dayReview(list) + (tr.length ? `\nTrades given today:\n${tr.join("\n")}` : "\nNo trade was given today."));
       }
     }
+    // 15:45 market diary — the app's memory of the session
+    if (istMin >= 945 && istMin <= 975 && !_cp.sent.diary) { _cp.sent.diary = true; cpSave(); await diarySave(day).catch(() => {}); }
     // 15:40 next-day plan (NIFTY + SENSEX) — after the close the payload's plan is for the next session
     if (istMin >= 940 && istMin <= 960 && !_cp.sent.nextDay) {
       const items = (await Promise.all(["^NSEI", "^BSESN"].map((x) => pay(x).catch(() => null)))).filter((x: any) => x?.available && x.trader && !x.trader.error);
@@ -8970,6 +8974,46 @@ async function btsdTick(nowSec: number, istMin: number) {
   }
 }
 
+// ===================== Market Diary: one record per index per day (data/market-diary/<day>.json) =====================
+const DIARY_DIR = path.join(process.cwd(), "data", "market-diary");
+const DIARY_SYMS = ["^NSEI", "^BSESN", "^NSEBANK"];
+async function diarySave(day: string) {
+  const dayOfT = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(0, 10);
+  const out: Record<string, any> = {};
+  for (const sym of DIARY_SYMS) {
+    const d: any = await premiumCenterPayload({ symbol: sym, interval: "5m" }).catch(() => null); if (!d?.available) continue;
+    const cs: any[] = d.chart?.candles || [], idx = cs.map((c, i) => [c, i] as const).filter(([c]) => dayOfT(c.time) === day);
+    if (!idx.length) continue;
+    const before = cs.filter((c) => dayOfT(c.time) < day), prevClose = before.length ? before[before.length - 1].close : d.spot?.prevClose;
+    const vw = d.chart?.vwap?.[idx[idx.length - 1][1]];
+    const trades = [
+      ...[...(_cp.day === day ? _cp.closed || [] : []), ...Object.values(_cp.day === day ? _cp.trades || {} : {}).filter(Boolean)].filter((t: any) => t.index === sym).map((t: any) => ({ source: "co-pilot", side: t.side, strike: t.strike, entryPrem: t.entryPrem, exitPrem: t.exitPrem ?? null, exitWhy: t.exitWhy ?? t.state, openedAt: t.openedAt })),
+      ..._btsd.trades.filter((t) => t.day === day && t.index === sym).map((t) => ({ source: "BTSD (mine)", side: t.side, strike: t.strike, entryPrem: t.entryPrem, exitPrem: t.exitPrem ?? null, exitWhy: t.exitWhy ?? t.state, openedAt: t.openedAt })),
+      ...(_zhLedger.day === day ? _zhLedger.trades : []).filter((t) => t.symbol === sym).map((t: any) => ({ source: "zero-hero", side: t.side, strike: t.strike, entryPrem: t.entryPrem, exitPrem: t.exitPrem ?? null, exitWhy: t.exitWhy ?? t.state, openedAt: t.openedAt })),
+    ];
+    const e = MD.buildDiary({ symbol: sym, name: d.name, day, bars: idx.map(([c]) => c), prevClose, vwapClose: Number.isFinite(vw) ? Math.round(vw * 100) / 100 : null, anchor: _cp.day === day ? _cp.anchor?.[sym] ?? null : null, trades });
+    if (e) out[sym] = e;
+  }
+  if (!Object.keys(out).length) return null;
+  fs.mkdirSync(DIARY_DIR, { recursive: true });
+  const f = path.join(DIARY_DIR, `${day}.json`); let prev: any = {}; try { prev = JSON.parse(fs.readFileSync(f, "utf8")); } catch { /* new day */ }
+  const rec = { day, savedAt: new Date().toISOString(), entries: { ...(prev.entries || {}), ...out } };
+  fs.writeFileSync(f, JSON.stringify(rec, null, 1));
+  return rec;
+}
+router.get("/market-diary", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
+  try {
+    const n = Math.min(60, Number(req.query.days) || 10);
+    const files = fs.existsSync(DIARY_DIR) ? fs.readdirSync(DIARY_DIR).filter((x) => /^\d{4}-\d{2}-\d{2}\.json$/.test(x)).sort().reverse().slice(0, n) : [];
+    const days = files.map((x) => JSON.parse(fs.readFileSync(path.join(DIARY_DIR, x), "utf8")));
+    res.json({ days, text: req.query.text ? days.flatMap((r: any) => Object.values(r.entries).map((e: any) => MD.diaryText(e))).join("\n\n") : undefined });
+  } catch (e: any) { res.json({ days: [], error: e?.message }); }
+});
+router.post("/market-diary/save", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.day || "")) ? String(req.query.day) : new Date(Date.now() + 19800000).toISOString().slice(0, 10);
+  const rec = await diarySave(day).catch(() => null);
+  res.json(rec ? { ok: true, ...rec } : { ok: false, error: `no intraday data for ${day} in the chart window` });
+});
 router.get("/copilot/state", requirePermission("oiAnalysis"), (_req: Request, res: Response) => { res.json(_cp); });
 // The next-day plan on demand (same message as the 15:40 job); ?send=1 also posts it to Telegram
 router.get("/copilot/next-day-plan", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
