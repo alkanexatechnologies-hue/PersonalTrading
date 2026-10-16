@@ -52,7 +52,7 @@ export function trend(card: Scorecard, day: string) {
 export function closingStatementMsg(o: { day: string; indices: { name: string; close: number; changePct: number; high: number; low: number; dayType?: string }[]; graded: Graded[]; tr: ReturnType<typeof trend> }) {
   const LINE = "━━━━━━━━━━━━━━━";
   const L = [`🔔 <b>MARKET CLOSED — CLOSING STATEMENT</b> · ${esc(o.day)}`, LINE];
-  for (const x of o.indices) L.push(`${/SENSEX/.test(x.name) ? "🟣" : "🔵"} <b>${esc(x.name.replace(" 50", ""))}</b> ${n0(x.close)} ${x.changePct >= 0 ? "▲ +" : "▼ "}${esc(x.changePct)}% · H ${n0(x.high)} · L ${n0(x.low)}${x.dayType ? ` · <i>${esc(x.dayType)}</i>` : ""}`);
+  for (const [i, x] of o.indices.entries()) L.push(...(i ? [""] : []), `${/SENSEX/.test(x.name) ? "🟣" : "🔵"} <b>${esc(x.name.replace(" 50", ""))}</b> ${n0(x.close)} ${x.changePct >= 0 ? "▲ +" : "▼ "}${esc(x.changePct)}% · H ${n0(x.high)} · L ${n0(x.low)}${x.dayType ? ` · <i>${esc(x.dayType)}</i>` : ""}`);
   L.push(LINE, `📋 <b>TRADES TODAY (${o.graded.length})</b>`);
   if (!o.graded.length) L.push("  No trade was given or recorded today — nothing to score.");
   o.graded.forEach((g, i) => {

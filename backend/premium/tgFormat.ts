@@ -6,6 +6,8 @@ export const esc = (s: any) => String(s ?? "").replace(/&/g, "&amp;").replace(/<
 const n0 = (v: number | null | undefined) => (v == null || !Number.isFinite(v) ? "—" : Math.round(v).toLocaleString("en-IN"));
 const hm = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(11, 16);
 const LINE = "━━━━━━━━━━━━━━━";
+/** Clear gap between the NIFTY and SENSEX sections of one message. */
+const GAP = `\n\n${LINE}\n\n`;
 const arrow = (v: number | null | undefined) => (v == null ? "" : v > 0 ? "▲" : v < 0 ? "▼" : "▬");
 const short = (name: string) => String(name || "").replace(" 50", "");
 const priceLine = (d: any) => `<b>${n0(d.spot?.price)}</b>  ${arrow(d.spot?.change)} ${d.spot?.change > 0 ? "+" : ""}${n0(d.spot?.change)} (${d.spot?.changePct > 0 ? "+" : ""}${esc(d.spot?.changePct)}%) · H ${n0(d.spot?.high)} · L ${n0(d.spot?.low)}`;
@@ -50,7 +52,7 @@ function bestBlock(d: any, trade: any | null, eye: any | null, zh: any | null): 
 /** 15-minute message: the best opportunity on NIFTY and SENSEX, together. */
 export function bestOpportunityMsg(items: { d: any; trade: any | null; eye: any | null; zh: any | null }[]): string {
   const t = hm(Math.floor(Date.now() / 1000));
-  return [`⭐ <b>BEST OPPORTUNITY</b> · ${t}`, LINE, ...items.filter((x) => x.d?.available).map((x) => bestBlock(x.d, x.trade, x.eye, x.zh)).join(`\n${LINE}\n`).split("\n"), LINE, "<i>Start = a 15-min candle CLOSE beyond the level · advisory only, the arbiter decides</i>"].join("\n");
+  return [`⭐ <b>BEST OPPORTUNITY</b> · ${t}`, LINE, ...items.filter((x) => x.d?.available).map((x) => bestBlock(x.d, x.trade, x.eye, x.zh)).join(GAP).split("\n"), LINE, "<i>Start = a 15-min candle CLOSE beyond the level · advisory only, the arbiter decides</i>"].join("\n");
 }
 /** 30-minute message: the full read of one index. */
 export function fullReadMsg(d: any, trade: any | null, eye: any | null, zh: any | null, odds?: string): string {
@@ -86,7 +88,8 @@ export function nextDayPlanMsg(items: { d: any; odds?: string }[]): string {
   const ok = items.filter((x) => x.d?.available && x.d.trader && !x.d.trader.error);
   const forDay = ok[0]?.d.trader.planFor ?? "next session";
   const L = [`🗓 <b>NEXT-DAY PLAN</b> · for <b>${esc(forDay)}</b>`, `<i>prepared ${hm(Math.floor(Date.now() / 1000))} from today's finished session</i>`];
-  for (const { d, odds } of ok) {
+  for (const [ix, { d, odds }] of ok.entries()) {
+    if (ix > 0) L.push("", "");   // clear gap between NIFTY and SENSEX
     const T = d.trader, s = d.spot, b = T.plans?.bull, r = T.plans?.bear, px = s?.price;
     const prem = (p: any) => (p?.premNow != null && p.premNow >= 1 ? `₹${n0(p.premNow)}` : "premium at the open");
     L.push(LINE, `${d.symbol === "^BSESN" ? "🟣" : "🔵"} <b>${esc(short(d.name))}</b>  closed <b>${n0(px)}</b> ${arrow(s?.change)} ${s?.changePct > 0 ? "+" : ""}${esc(s?.changePct)}%`);

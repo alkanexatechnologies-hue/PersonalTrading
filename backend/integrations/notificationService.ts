@@ -72,10 +72,17 @@ function istTimeNow(): string {
  * Sends one notification. NEVER throws - the caller can ignore the result
  * entirely and the trading path stays unaffected either way.
  */
+/** Date + time (IST) at the top and the bottom of every message (plain text: valid in HTML and plain mode). */
+export function stampMessage(text: string, nowMs = Date.now()): string {
+  const d = new Date(nowMs + 19800000), mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getUTCMonth()];
+  const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()];
+  const st = `🕒 ${day} ${d.getUTCDate()} ${mon} ${d.getUTCFullYear()} · ${d.toISOString().slice(11, 16)} IST`;
+  return `${st}\n${String(text ?? "").trim()}\n${st}`;
+}
 export async function notify(kind: NotificationKind, text: string, opts: { html?: boolean } = {}): Promise<NotifyResult> {
   const at = Date.now();
   try {
-    const r = await sendTelegram(text, undefined, opts);
+    const r = await sendTelegram(stampMessage(text, at), undefined, opts);
     const out: NotifyResult = {
       ok: r.ok, channel: "telegram", kind,
       code: r.code, error: r.error, detail: r.detail,

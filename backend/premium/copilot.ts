@@ -16,7 +16,7 @@ export function planLines(d: any): string[] {
   return L;
 }
 export function morningPlan(list: any[], odds: Record<string, string>): string {
-  return [`☀️ <b>Today's plan</b> (${new Date(Date.now() + 19800000).toISOString().slice(0, 10)}) — first 15 minutes set the range; nothing counts until a 15-min candle CLOSES beyond a start.`, ...list.flatMap((d) => [...planLines(d), odds[d.symbol] ? `  📊 ${odds[d.symbol]}` : ""]).filter(Boolean), "Advisory only — the arbiter has the final word."].join("\n");
+  return [`☀️ <b>Today's plan</b> (${new Date(Date.now() + 19800000).toISOString().slice(0, 10)}) — first 15 minutes set the range; nothing counts until a 15-min candle CLOSES beyond a start.`, ...list.flatMap((d, i) => [...(i ? ["\u2063", "━━━━━━━━━━━━━━━", "\u2063"] : []), ...planLines(d), odds[d.symbol] ? `  📊 ${odds[d.symbol]}` : ""]).filter(Boolean), "Advisory only — the arbiter has the final word."].join("\n");
 }
 export function candleLine(d: any): string {
   const c = d?.trader?.candles; return [c?.m15?.text, c?.m5?.text].filter(Boolean).map((x: string) => `  🕯 ${x}`).join("\n");
