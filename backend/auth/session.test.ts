@@ -5,6 +5,7 @@
 // the REAL current admin credentials (never logged/printed) so this exercises
 // the actual production code path, not a fake stand-in. passwordless dev mode
 // is temporarily forced off for determinism, then restored to whatever it was.
+import "../routes/aiPaperTestEnv";   // FIRST: private temp DATA_DIR — never touch the real data/users.json or credentials
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "fs";
@@ -13,7 +14,7 @@ import { login, validate, logout, getSession, revokeUserSessions } from "./sessi
 import { getCredentials, setPasswordless } from "./credentials";
 import { createUser, setUserStatus, editUser } from "./userStore";
 
-const USERS_FILE = path.join(process.cwd(), "data", "users.json");
+const USERS_FILE = path.join(process.env.DATA_DIR as string, "users.json");
 let originalUsersFileContent: string | null = null;
 let originalPasswordless = false;
 

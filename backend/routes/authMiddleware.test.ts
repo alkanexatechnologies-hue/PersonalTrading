@@ -3,6 +3,7 @@
 // routes/api.ts attaches to /api/admin/* and the permission-gated feature
 // routes. Isolates its effect on data/users.json (backup/restore) the same
 // way session.test.ts does.
+import "./aiPaperTestEnv";   // FIRST: private temp DATA_DIR — never touch the real data/users.json or credentials
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "fs";
@@ -12,7 +13,7 @@ import { login } from "../auth/session";
 import { getCredentials, setPasswordless } from "../auth/credentials";
 import { createUser } from "../auth/userStore";
 
-const USERS_FILE = path.join(process.cwd(), "data", "users.json");
+const USERS_FILE = path.join(process.env.DATA_DIR as string, "users.json");
 let originalUsersFileContent: string | null = null;
 let originalPasswordless = false;
 

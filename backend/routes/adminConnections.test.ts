@@ -3,6 +3,7 @@
 // No real Groww/Dhan/Telegram network calls are made - these test the
 // AUTHORIZATION boundary and the NO-SECRET-LEAK guarantee, not live
 // connectivity (that's what the manual "Test Connection" button is for).
+import "./aiPaperTestEnv";   // FIRST: private temp DATA_DIR — never touch the real data/users.json or credentials
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "fs";
@@ -14,7 +15,7 @@ import { createUser } from "../auth/userStore";
 import { readAuditLog, logAuditEvent } from "../auth/loginAudit";
 import { saveDhanConfig, loadDhanConfig } from "../data/dhanConfig";
 
-const USERS_FILE = path.join(process.cwd(), "data", "users.json");
+const USERS_FILE = path.join(process.env.DATA_DIR as string, "users.json");
 let originalUsersFileContent: string | null = null;
 let originalPasswordless = false;
 let originalDhanConfig: any;

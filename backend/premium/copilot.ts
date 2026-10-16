@@ -10,8 +10,8 @@ export function planLines(d: any): string[] {
   const T = d?.trader; if (!T || T.error) return [`${d?.name ?? "?"}: plan unavailable`];
   const b = T.plans?.bull, r = T.plans?.bear, tr = (T.trends || []).map((x: any) => `${x.tf} ${x.verdict}`).join(" · ");
   const L: string[] = [`<b>${d.name}</b> ${r0(d.spot?.price)} (${d.spot?.changePct > 0 ? "+" : ""}${d.spot?.changePct ?? "—"}%) · ${tr}`];
-  if (b) L.push(`  🟢 Bull: 15-min close above <b>${r0(b.entry)}</b> → ${b.strike} CE · stop ${r0(b.stop)} · T1 ${r0(b.t1)}${b.t2 ? ` · T2 ${r0(b.t2)}` : ""} · R:R 1:${b.rr} · risk ${b.triggerRisk?.risk ?? "—"}`);
-  if (r) L.push(`  🔴 Bear: 15-min close below <b>${r0(r.entry)}</b> → ${r.strike} PE · stop ${r0(r.stop)} · T1 ${r0(r.t1)}${r.t2 ? ` · T2 ${r0(r.t2)}` : ""} · R:R 1:${r.rr} · risk ${r.triggerRisk?.risk ?? "—"}`);
+  if (b) L.push(`  🟢 Bull: trigger = 15-min close above <b>${r0(b.entry)}</b> → buy ${b.strike} CE (₹${b.premNow != null ? Math.round(b.premNow) : "—"})`, `      Stop Loss ${r0(b.stop)} · Target 1 ${r0(b.t1)}${b.t2 ? ` · Target 2 ${r0(b.t2)}` : ""} · R:R 1:${b.rr} · risk ${b.triggerRisk?.risk ?? "—"}`);
+  if (r) L.push(`  🔴 Bear: trigger = 15-min close below <b>${r0(r.entry)}</b> → buy ${r.strike} PE (₹${r.premNow != null ? Math.round(r.premNow) : "—"})`, `      Stop Loss ${r0(r.stop)} · Target 1 ${r0(r.t1)}${r.t2 ? ` · Target 2 ${r0(r.t2)}` : ""} · R:R 1:${r.rr} · risk ${r.triggerRisk?.risk ?? "—"}`);
   if (T.plans?.noTrade) L.push(`  ⏸ No-trade zone ${r0(T.plans.noTrade.from)} – ${r0(T.plans.noTrade.to)}`);
   return L;
 }

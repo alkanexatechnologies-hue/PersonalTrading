@@ -21,8 +21,10 @@ test("next-day plan: date, both sides with SL/targets/risk, nearest levels, expi
   x.trader.tomorrow = { scenarios: ["Gap-up above 23060: wait"] };
   const m = nextDayPlanMsg([{ d: x, odds: "no proven edge" }]);
   assert.match(m, /NEXT-DAY PLAN<\/b> · for <b>2026-10-16/);
-  assert.match(m, /BULL<\/b> 15-min close above <b>23,060<\/b> → 23050 CE \(premium at the open\)/);
-  assert.match(m, /BEAR<\/b> 15-min close below <b>22,890<\/b> → 22900 PE \(₹110\)/);
+  assert.match(m, /BUY 23050 CE<\/b> \(NIFTY\) · premium at the open/);
+  assert.match(m, /Trigger:<\/b> 15-min candle CLOSES above <b>23,060<\/b>/);
+  assert.match(m, /BUY 22900 PE<\/b> \(NIFTY\) · premium now ₹110/);
+  assert.match(m, /Stop Loss: index 22,910<\/b>/); assert.match(m, /Target 1: index 22,850<\/b>/);
   assert.match(m, /risk <b>HIGH<\/b>/);
   assert.match(m, /⬆ 23,157 <i>R1 pivot<\/i> · 24,000/);
   assert.match(m, /⬇ 22,897 <i>Pivot &lt;PP&gt;<\/i>/);
@@ -38,4 +40,20 @@ test("emphasize: SL / targets / danger in bold, never nested inside existing bol
   assert.ok(!/<b>[^<]*<b>/.test(m), "no nested bold"); assert.match(m, /day high 23,150$/);
   assert.equal(emphasize("T1 done, stop at breakeven"), "T1 done, stop at breakeven");
   assert.match(emphasize("⚠️ NIFTY BULL FAILED — stand aside"), /^<b>⚠️ NIFTY BULL FAILED — stand aside<\/b>$/);
+});
+test("trade card: trigger, Entry / Stop Loss / Target 1 / Target 2 with index → premium, delta line, short 5-min read", async () => {
+  const { tradeCard, tradeAlert } = await import("./tgFormat");
+  const x = d();
+  Object.assign(x.trader.plans.bull, { t2: 23200, premAtEntry: 130, premAtStop: 122, premAtT1: 145, premAtT2: 190, delta: 0.42, triggerLabel: "Prev day high" });
+  (x.trader as any).candles = { m5: { tf: "5-min", time: 1_792_144_500, tone: "bull", pattern: "BULLISH ENGULFING", shape: "bullish momentum candle (body 90%)", closeLoc: 95, at: "PDH 23,056" } };
+  const L = tradeCard(x, "bull").join("\n");
+  assert.match(L, /Trigger:<\/b> 15-min candle CLOSES above <b>23,060<\/b> · index now 23,000 \(60 pts away\)/);
+  assert.match(L, /why this level: Prev day high/);
+  assert.match(L, /<b>Entry: index 23,060<\/b> → CE ≈ ₹130/);
+  assert.match(L, /<b>Stop Loss: index 23,040<\/b> <i>\(15-min close below\)<\/i> → CE ≈ ₹122 · −20 pts \/ −₹8/);
+  assert.match(L, /<b>Target 1: index 23,100<\/b> → CE ≈ ₹145 · \+40 pts \/ \+₹15 · book half/);
+  assert.match(L, /<b>Target 2: index 23,200<\/b> → CE ≈ ₹190 · \+140 pts \/ \+₹60/);
+  assert.match(L, /Δ 0\.42: every 10 index pts ≈ ₹4\.2/);
+  assert.match(L, /5-min 15:25 ▲ BULLISH ENGULFING · closed at 95% of its range · at PDH 23,056/);
+  assert.match(tradeAlert(x, "bull", "TRIGGERED"), /NIFTY BULL TRIGGERED/);
 });

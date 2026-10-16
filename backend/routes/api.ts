@@ -8892,14 +8892,14 @@ async function copilotTick() {
             const rv = TRV.reviewTrade(d, side, { istMin, eye, lossesToday: cpLossesToday() });
             const rvH = rv ? "\n" + TRV.reviewHtml(rv) : "";
             const free = tracked && !(_cp.trades[sym] && _cp.trades[sym].state !== "CLOSED") && nowSec - (_cp.sent[`cool|${sym}`] || 0) > 15 * 60;
-            const opp = TG.htmlify(CP.stripTags(CP.opportunity(d, side, "TRIGGERED", cpOdds(sym))));
+            const opp = TG.tradeAlert(d, side, "TRIGGERED", cpOdds(sym));
             if (free && rv && rv.grade !== "C") { const t: any = CP.openTrade(d, side, nowSec); if (t) { t.review = { grade: rv.grade, score: rv.score, passed: rv.passed, failed: rv.failed }; _cp.trades[sym] = t; cpSend(`📌 <b>TRADE GIVEN (review ${rv.grade}${rv.grade === "B" ? " — HALF SIZE" : ""})</b> — I will follow it and message you at Target 1, Target 2, stop or 15:12.\n` + opp + rvH, true); } }
             else if (free && rv?.grade === "C") cpSend(`⚠️ <b>REVIEW SAYS SKIP — not given as a trade (watch only)</b>\n` + opp + rvH, true);
             else cpSend(opp + rvH + (tracked ? "\n  (A trade on this index is already open — shown for information.)" : ""), true);
           } else if (o.state === "ARMED" && nowSec - (_cp.sent[`armed|${key}`] || 0) > 20 * 60) {
             _cp.sent[`armed|${key}`] = nowSec;
             const rv = TRV.reviewTrade(d, side, { istMin, lossesToday: cpLossesToday() });
-            cpSend(TG.htmlify(CP.stripTags(CP.opportunity(d, side, "ARMED", cpOdds(sym)))) + (rv ? "\n" + TRV.reviewHtml(rv, false) + "\n  <i>(full review with the trader's reasoning when the candle closes)</i>" : ""), true);
+            cpSend(TG.tradeAlert(d, side, "ARMED", cpOdds(sym)) + (rv ? "\n" + TRV.reviewHtml(rv, false) + "\n  <i>(full review with the trader's reasoning when the candle closes)</i>" : ""), true);
           }
         }
         cpSave();
