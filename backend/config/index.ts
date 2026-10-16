@@ -44,7 +44,7 @@ export const DEFAULT_SYMBOLS: SymbolDef[] = [
   { symbol: "INFY.NS", name: "Infosys", type: "equity", fno: true, lotSize: 400, strikeStep: 20, nseSymbol: "INFY" },
   { symbol: "TCS.NS", name: "Tata Consultancy Services", type: "equity", fno: true, lotSize: 175, strikeStep: 20, nseSymbol: "TCS" },
   { symbol: "SBIN.NS", name: "State Bank of India", type: "equity", fno: true, lotSize: 750, strikeStep: 10, nseSymbol: "SBIN" },
-  { symbol: "TATAMOTORS.NS", name: "Tata Motors", type: "equity", fno: true, lotSize: 550, strikeStep: 10, nseSymbol: "TATAMOTORS" },
+  { symbol: "TMPV.NS", name: "Tata Motors Passenger Vehicles", type: "equity", fno: true, lotSize: 1600, strikeStep: 5, nseSymbol: "TMPV" },
   { symbol: "AXISBANK.NS", name: "Axis Bank", type: "equity", fno: true, lotSize: 625, strikeStep: 10, nseSymbol: "AXISBANK" },
   { symbol: "ITC.NS", name: "ITC", type: "equity", fno: true, lotSize: 1600, strikeStep: 5, nseSymbol: "ITC" },
   { symbol: "BHARTIARTL.NS", name: "Bharti Airtel", type: "equity", fno: true, lotSize: 475, strikeStep: 20, nseSymbol: "BHARTIARTL" },
@@ -130,7 +130,7 @@ export const SWING_SYMBOLS: SymbolDef[] = [
   { symbol: "ANGELONE.NS", name: "Angel One", type: "equity", sector: "Fintech" },
   { symbol: "KFINTECH.NS", name: "KFin Technologies", type: "equity", sector: "Fintech" },
   // Auto / ancillary
-  { symbol: "TATAMOTORS.NS", name: "Tata Motors", type: "equity", sector: "Auto" },
+  { symbol: "TMPV.NS", name: "Tata Motors Passenger Vehicles", type: "equity", sector: "Auto" },
   { symbol: "ASHOKLEY.NS", name: "Ashok Leyland", type: "equity", sector: "Auto" },
   { symbol: "MOTHERSON.NS", name: "Samvardhana Motherson", type: "equity", sector: "Auto" },
   { symbol: "BHARATFORG.NS", name: "Bharat Forge", type: "equity", sector: "Auto" },

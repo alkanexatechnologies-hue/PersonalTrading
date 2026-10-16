@@ -170,7 +170,7 @@ export const NIFTY_IT_MAJORS = ["INFY.NS", "TCS.NS", "HCLTECH.NS"];
 export const NIFTY_SECTOR_PROXIES: Record<string, string[]> = {
   Bank: ["HDFCBANK.NS", "ICICIBANK.NS", "AXISBANK.NS", "KOTAKBANK.NS", "SBIN.NS"],
   IT: NIFTY_IT_MAJORS,
-  Auto: ["TATAMOTORS.NS", "M&M.NS", "MARUTI.NS"],
+  Auto: ["TMPV.NS", "M&M.NS", "MARUTI.NS"],
   "Oil & Gas": ["RELIANCE.NS"],
   Metals: ["TATASTEEL.NS"],
   Pharma: ["SUNPHARMA.NS"],
