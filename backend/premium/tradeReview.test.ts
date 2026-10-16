@@ -41,3 +41,18 @@ test("learning: per-check win rates, shown only with enough trades on both sides
   assert.deepEqual(learnedLines(s), ["premium: passed → 67% wins (n=12) · failed → 20% (n=10)"]);
   assert.deepEqual(learnedLines(learn({ checks: {}, trades: 0 }, many.slice(0, 5))), []);
 });
+test("15th point: logic pillars + decisive trader's reasoning (A = take it, C = pass with the reason)", () => {
+  const a = reviewTrade(mk(), "bull", { istMin: 600, eye: { lead: "UP", upPct: 50, downPct: 20 } })!;
+  assert.equal(a.checks.find((c) => c.key === "logic")!.ok, true);
+  assert.match(a.reasoning.join("\n"), /WITH the higher timeframes/); assert.match(a.reasoning.join("\n"), /CLOSED above 23,061/);
+  assert.match(a.reasoning.join("\n"), /closes below 23,040 — then the idea is dead/);
+  assert.match(a.reasoning[a.reasoning.length - 1], /^Decision: TAKE IT/);
+  const d = mk({ spot: { price: 22890 }, ranking: [{ side: "PE", strike: 22900, change: -5, oiChg: 9000, liquidity: "GOOD" }] });
+  d.trader.radar.bear.state = "TRIGGERED";
+  const b = reviewTrade(d, "bear", { istMin: 600 })!;
+  assert.match(b.reasoning.join("\n"), /AGAINST the higher timeframes/); assert.match(b.reasoning.join("\n"), /trap/);
+  const c = reviewTrade(mk(), "bull", { istMin: 600, lossesToday: 2 })!;
+  assert.match(c.reasoning[c.reasoning.length - 1], /^Decision: PASS\. discipline/);
+  assert.match(reviewHtml(a), /Trader's reasoning<\/b>[\s\S]*<b>Decision: TAKE IT/);
+  assert.ok(!/Trader's reasoning/.test(reviewHtml(a, false)));
+});

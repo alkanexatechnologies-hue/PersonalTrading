@@ -2,7 +2,8 @@
 // The checks an experienced index-option trader runs before pressing BUY: trend on the higher timeframes, a CLOSED 15-min
 // candle beyond the start, not chasing, room to the next wall, VWAP side, the option premium and its OI flow confirming,
 // liquidity, the arbiter and risk gates, time left in the day, the measured follow-through record, Market Eye and the day's
-// discipline (2 losses = stop). Grade A = take, B = take small, C = skip (still shown with the reasons — never hidden).
+// discipline (2 losses = stop), and whether the LOGIC lines up (trend · location · fuel · road), followed by the trader's
+// reasoning in plain words. Grade A = take, B = take small, C = skip (still shown with the reasons — never hidden).
 // Learning: each graded trade stores which checks passed; the closing statement reports which checks separated winners
 // from losers once the sample is large enough. Rules are never changed automatically.
 
@@ -34,7 +35,7 @@ export function reviewTrade(d: any, side: "bull" | "bear", x: { istMin: number; 
   add({ key: "vwap", label: "VWAP side", weight: 1, ok: vw == null ? null : dir * (spot - vw) > 0, detail: vw == null ? "—" : `price ${r(spot)} is ${spot >= vw ? "above" : "below"} VWAP ${r(vw)}` });
   // 7. the option premium confirming
   const leg = ce ? d.ce : d.pe, resp = leg?.behaviour?.response;
-  add({ key: "premium", label: "premium confirming", weight: 1.5, ok: resp === "RISING" ? true : resp === "FALLING" ? false : null, detail: `${ce ? "CE" : "PE"} premium ${resp ?? "—"}` });
+  add({ key: "premium", label: "premium confirming", weight: 1.5, ok: resp === "RISING" ? true : resp === "FALLING" ? false : null, detail: `${ce ? "CE" : "PE"} premium ${resp ? resp.toLowerCase() : "—"}` });
   // 8. OI flow on the plan strike
   const row = (d.ranking || []).find((z: any) => z.side === (ce ? "CE" : "PE") && z.strike === p.strike) || leg;
   const chg = row?.change, oic = row?.oiChg;
@@ -59,20 +60,45 @@ export function reviewTrade(d: any, side: "bull" | "bear", x: { istMin: number; 
   const lt = x.lossesToday ?? 0;
   add({ key: "discipline", label: "discipline", weight: 1, critical: lt >= 2, ok: lt >= 2 ? false : true, detail: lt >= 2 ? `${lt} losses today — stop for the day` : `${lt} loss(es) today` });
 
+  // 15. LOGIC LINES UP — the four pillars a veteran needs before any trade: trend, location, fuel, road
+  const get = (k: string) => C.find((c) => c.key === k)?.ok;
+  const pillars = [
+    { name: "trend", ok: get("trend") },
+    { name: "location", ok: get("close") === true && get("chase") !== false },
+    { name: "fuel", ok: get("premium") === true || get("oi") === true ? (get("premium") === false || get("oi") === false ? null : true) : get("premium") === false && get("oi") === false ? false : null },
+    { name: "road", ok: get("room") === true && get("rr") !== false },
+  ];
+  const strong = pillars.filter((x) => x.ok === true).length, broken = pillars.filter((x) => x.ok === false).map((x) => x.name);
+  add({ key: "logic", label: "logic lines up", weight: 2, ok: strong >= 3 && !broken.length ? true : broken.length >= 2 ? false : null, detail: `${strong}/4 pillars solid${broken.length ? ` · broken: ${broken.join(", ")}` : ""}` });
+
   const tot = C.reduce((a, c) => a + c.weight, 0), got = C.reduce((a, c) => a + c.weight * (c.ok === true ? 1 : c.ok === null ? 0.5 : 0), 0);
   const score = r((got / tot) * 100), crit = C.filter((c) => c.critical && c.ok === false);
   const grade: "A" | "B" | "C" = crit.length ? "C" : score >= 75 ? "A" : score >= 60 ? "B" : "C";
   const verdict = grade === "A" ? "TAKE — normal size" : grade === "B" ? "TAKE SMALL — half size" : "SKIP — watch only";
-  return { side, grade, score, verdict, checks: C, critical: crit.map((c) => `${c.label}: ${c.detail}`), passed: C.filter((c) => c.ok === true).map((c) => c.key), failed: C.filter((c) => c.ok === false).map((c) => c.key) };
+  // THE TRADER'S REASONING — decisive, built only from the numbers above (nothing invented)
+  const n = (v: number) => Math.round(v).toLocaleString("en-IN"), why: string[] = [];
+  const tc = C.find((c) => c.key === "trend")!, pc = C.find((c) => c.key === "premium")!, oc = C.find((c) => c.key === "oi")!;
+  why.push(tc.ok === true ? `Trend: ${tc.detail} — we trade WITH the higher timeframes.` : tc.ok === false ? `Trend: ${tc.detail} — this is AGAINST the higher timeframes; counter-trend trades get paid less and stopped more.` : `Trend: ${tc.detail} — mixed; no tailwind, the level has to do the work.`);
+  why.push(st === "TRIGGERED" ? `Location: a 15-min candle CLOSED ${ce ? "above" : "below"} ${n(p.entry)}${p.triggerLabel ? ` (${p.triggerLabel})` : ""} — the level gave way, that is the trigger.` : st === "ARMED" ? `Location: price is through ${n(p.entry)} but the candle is not closed — no close, no trade.` : `Location: ${n(p.entry)}${p.triggerLabel ? ` (${p.triggerLabel})` : ""} is not broken on a close — nothing to do yet.`);
+  why.push(pc.ok === true || oc.ok === true ? `Fuel: ${pc.detail}, ${oc.detail} — money is moving our way.` : pc.ok === false || oc.ok === false ? `Fuel: ${pc.detail}, ${oc.detail} — the option is not confirming; a breakout without premium follow-through is a trap.` : `Fuel: ${pc.detail} — no confirmation either way yet.`);
+  why.push(`Road: ${C.find((c) => c.key === "room")!.detail}; target ${n(p.t1)}${p.t2 ? ` then ${n(p.t2)}` : ""}, R:R 1:${p.rr ?? "—"}.`);
+  why.push(`Wrong if: a 15-min candle closes ${ce ? "below" : "above"} ${n(p.stop)} — then the idea is dead: exit, no averaging, no hoping.`);
+  const worst = C.filter((c) => c.ok === false && c.key !== "logic").sort((a, b) => b.weight - a.weight)[0];
+  if (worst && !(worst.critical && crit[0] === worst)) why.push(`Respect: ${worst.label} — ${worst.detail}.`);
+  why.push(grade === "A" ? `Decision: TAKE IT. Normal size. The logic lines up — execute, don't second-guess.`
+    : grade === "B" ? `Decision: TAKE SMALL — half size. ${worst ? `${worst.label} is the weak spot` : "One pillar is soft"}; if it confirms, the trade will show it quickly.`
+    : `Decision: PASS. ${crit.length ? `${crit[0].label} — ${crit[0].detail}` : `only ${strong}/4 pillars solid`}. No trade is also a position — capital waits for the clean one.`);
+  return { side, grade, score, verdict, reasoning: why, checks: C, critical: crit.map((c) => `${c.label}: ${c.detail}`), passed: C.filter((c) => c.ok === true).map((c) => c.key), failed: C.filter((c) => c.ok === false).map((c) => c.key) };
 }
 export type Review = NonNullable<ReturnType<typeof reviewTrade>>;
 
 /** Compact HTML block for Telegram. */
-export function reviewHtml(rv: Review): string {
+export function reviewHtml(rv: Review, full = true): string {
   const L = [`🧪 <b>Trade review: ${rv.grade}</b> (${rv.score}%) → <b>${esc(rv.verdict)}</b>`];
   L.push(`  ${rv.checks.map((c) => `${c.ok === true ? "✓" : c.ok === false ? "✗" : "~"} ${esc(c.label)}`).join(" · ")}`);
   const bad = rv.checks.filter((c) => c.ok === false);
   if (bad.length) L.push(`  ⚠️ ${bad.map((c) => `${esc(c.label)}: ${esc(c.detail)}`).join(" | ")}`);
+  if (full && rv.reasoning?.length) L.push(`🧠 <b>Trader's reasoning</b>`, ...rv.reasoning.map((x, i) => (i === rv.reasoning.length - 1 ? `  <b>${esc(x)}</b>` : `  • ${esc(x)}`)));
   return L.join("\n");
 }
 

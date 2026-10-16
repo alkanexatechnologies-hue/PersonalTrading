@@ -439,7 +439,8 @@ function ppcReviewLine(rv) {
   if (!rv) return "";
   const c = rv.grade === "A" ? "ppc-up" : rv.grade === "B" ? "ppc-wait" : "ppc-dn";
   return `<div class="ppc-rv"><b class="${c}">🧪 Review ${ppcEsc(rv.grade)}</b> <span class="ppc-sub">${rv.score}%</span> → <b class="${c}">${ppcEsc(rv.verdict)}</b>
-    <div class="ppc-rv-ck">${rv.checks.map((k) => `<span class="${k.ok === true ? "ok" : k.ok === false ? "bad" : "mid"}" title="${ppcEsc(k.detail)}">${k.ok === true ? "✓" : k.ok === false ? "✗" : "~"} ${ppcEsc(k.label)}</span>`).join("")}</div></div>`;
+    <div class="ppc-rv-ck">${rv.checks.map((k) => `<span class="${k.ok === true ? "ok" : k.ok === false ? "bad" : "mid"}" title="${ppcEsc(k.detail)}">${k.ok === true ? "✓" : k.ok === false ? "✗" : "~"} ${ppcEsc(k.label)}</span>`).join("")}</div>
+    ${rv.reasoning?.length ? `<details class="ppc-rv-why"><summary>🧠 Trader's reasoning</summary><ul>${rv.reasoning.map((x, i) => `<li${i === rv.reasoning.length - 1 ? ' class="dec"' : ""}>${ppcEsc(x)}</li>`).join("")}</ul></details>` : ""}</div>`;
 }
 function ppcPlanCard(p, side) {
   const bull = side === "CE", nm = bull ? "BULL PLAN" : "BEAR PLAN", cls = bull ? "ppc-pl-ce" : "ppc-pl-pe";

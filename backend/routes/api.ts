@@ -8899,7 +8899,7 @@ async function copilotTick() {
           } else if (o.state === "ARMED" && nowSec - (_cp.sent[`armed|${key}`] || 0) > 20 * 60) {
             _cp.sent[`armed|${key}`] = nowSec;
             const rv = TRV.reviewTrade(d, side, { istMin, lossesToday: cpLossesToday() });
-            cpSend(TG.htmlify(CP.stripTags(CP.opportunity(d, side, "ARMED", cpOdds(sym)))) + (rv ? "\n" + TRV.reviewHtml(rv) + "\n  <i>(final review when the candle closes)</i>" : ""), true);
+            cpSend(TG.htmlify(CP.stripTags(CP.opportunity(d, side, "ARMED", cpOdds(sym)))) + (rv ? "\n" + TRV.reviewHtml(rv, false) + "\n  <i>(full review with the trader's reasoning when the candle closes)</i>" : ""), true);
           }
         }
         cpSave();
