@@ -74,6 +74,7 @@ import * as CP from "../premium/copilot";
 import * as MD from "../premium/marketDiary";
 import * as CL from "../premium/closing";
 import * as TRV from "../premium/tradeReview";
+import * as OFL from "../premium/oiFlow";
 import * as EYE from "../premium/marketEye";
 import * as TG from "../premium/tgFormat";
 import { Decision } from "../decision/types";
@@ -7640,6 +7641,7 @@ router.get("/backtest/option/strikes", async (req: Request, res: Response) => {
 const PC_VERSION = "premium-center/v1";
 const _pcLastChain = new Map<string, { at: number; v: any }>();
 const _pcWalls = new Map<string, { at: number; expiry: string; strikes: any[] }>();
+const _oiSnaps = new Map<string, { t: number; expiry: string; strikes: OFL.Strike[] }[]>();
 async function pcOptionCandles(underlying: string, side: "CE" | "PE", strike: number, expiry: string, intervalMin: number) {
   return cached(`pc-opt:${underlying}:${side}:${strike}:${expiry}:${intervalMin}`, 20_000, async () => {
     const o = await lookupDhanOption(underlying, side, strike, expiry);
@@ -7706,6 +7708,12 @@ async function premiumCenterPayload(query: Record<string, any>): Promise<any> {
     const wk = `${def.symbol}:${off}`, today0 = new Date(Date.now() + 19800000).toISOString().slice(0, 10);
     if (strikes.length && ch?.expiry) _pcWalls.set(wk, { at: Date.now(), expiry: ch.expiry, strikes });
     const wl = _pcWalls.get(wk);
+    // OI snapshots (live chain only) so the OI section can say what moved in the last ~15 minutes
+    if (strikes.length && ch?.expiry && !ch.staleChain) {
+      const arr = _oiSnaps.get(wk) || [], nowMs = Date.now();
+      if (!arr.length || nowMs - arr[arr.length - 1].t >= 60_000) arr.push({ t: nowMs, expiry: ch.expiry, strikes: strikes.map((x: any) => ({ strike: x.strike, ceOi: x.ceOi, peOi: x.peOi, ceChg: x.ceChg, peChg: x.peChg })) });
+      _oiSnaps.set(wk, arr.filter((x) => nowMs - x.t <= 40 * 60_000));
+    }
     const planChain: any[] = strikes.length ? strikes : wl && wl.expiry >= today0 && Date.now() - wl.at < 60 * 60_000 ? wl.strikes : strikes;
     const spot = (quote as any)?.price > 0 ? (quote as any).price : closed.length ? closed[closed.length - 1].close : null;
     const ks = strikes.map((s) => s.strike), step = ks.length > 1 ? Math.min(...ks.slice(1).map((k: number, i: number) => k - ks[i]).filter((d: number) => d > 0)) : (def as any).strikeStep || 50;
@@ -7890,6 +7898,16 @@ async function premiumCenterPayload(query: Record<string, any>): Promise<any> {
       note: "Advisory only. Probabilities are not shown until validated out of sample. The arbiter and existing risk gates decide trades.",
     });
     // Trade Review Desk: both plans checked against all the data above (Market Eye / day's losses are added by the co-pilot)
+    if (strikes.length && out.spot?.price != null) {
+      // snapshots closest to 15 / 10 / 5 minutes ago (±2.5 min) → three 5-minute windows of OI movement
+      const all = (_oiSnaps.get(wk) || []).filter((x) => x.expiry === expiry), nowMs = Date.now(), used = new Set<number>();
+      const snaps: OFL.Snap[] = [];
+      for (const m of [15, 10, 5]) {
+        const c = all.filter((x) => !used.has(x.t) && Math.abs(nowMs - x.t - m * 60_000) <= 150_000).sort((a, b) => Math.abs(nowMs - a.t - m * 60_000) - Math.abs(nowMs - b.t - m * 60_000))[0];
+        if (c) { used.add(c.t); snaps.push({ ageMin: (nowMs - c.t) / 60_000, strikes: c.strikes }); }
+      }
+      out.oi = OFL.oiFlow({ strikes, spot: out.spot.price, step: out.step || 50, snaps });
+    }
     if (out.trader && !out.trader.error) out.trader.review = { bull: TRV.reviewTrade(out, "bull", { istMin }), bear: TRV.reviewTrade(out, "bear", { istMin }) };
     return out;
   } catch (e: any) { return { available: false, version: PC_VERSION, error: e?.message || "premium center failed" }; }

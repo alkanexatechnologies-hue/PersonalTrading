@@ -1,3 +1,4 @@
+import { oiHtml } from "./oiFlow";
 // ============================ Telegram message design (HTML; every dynamic value escaped) ============================
 // 15-minute "Best Opportunity" (NIFTY + SENSEX in one message) · 30-minute full read per index · event alerts.
 // Advisory only — the arbiter and risk gates decide trades.
@@ -40,6 +41,7 @@ function bestBlock(d: any, trade: any | null, eye: any | null, zh: any | null): 
     const rv = T?.review?.[side];
     if (rv) L.push(`  🧪 Review <b>${esc(rv.grade)}</b> (${esc(rv.score)}%) → ${esc(rv.verdict)}${rv.failed?.length ? ` · ✗ ${rv.failed.map((k: string) => esc(k)).join(", ")}` : ""}`);
   } else L.push(`  ⏸ No setup near — ${esc(T?.coach?.action ?? "wait")}`);
+  if (d.oi) L.push(...oiHtml(d.oi, { compact: true }).map((x) => `  ${x}`));
   if (eye) L.push(`  👁 Next 30m (history): ↑${eye.upPct}% ↔${eye.sidePct}% ↓${eye.downPct}% → <b>${esc(eye.lead)}</b>`);
   if (zh?.isExpiry) {
     const open = (zh.zhTrades || []).find((t: any) => t.state !== "CLOSED"), trig = (zh.sides || []).find((x: any) => x.trigger?.state === "TRIGGERED");
@@ -65,6 +67,7 @@ export function fullReadMsg(d: any, trade: any | null, eye: any | null, zh: any 
   L.push(LINE);
   void b; void r; void rb; void rr;
   L.push(...planBlock(d, "bull"), LINE, ...noTradeBlock(d), LINE, ...planBlock(d, "bear"));
+  if (d.oi) L.push(LINE, ...oiHtml(d.oi, { expiry: d.expiry }));
   L.push(`🧭 <b>${esc(T.coach?.action ?? "")}</b>`);
   if (T.coach?.why) L.push(`<i>${esc(T.coach.why)}</i>`);
   if (trade && trade.state !== "CLOSED") L.push(`📌 Open trade ${trade.strike} ${trade.side} from ${n0(trade.entrySpot)} (₹${n0(trade.entryPrem)}) · ${trade.state === "T1" ? "T1 done, SL at breakeven" : `SL ${n0(trade.stop)} · T1 ${n0(trade.t1)}`}`);
@@ -102,6 +105,7 @@ export function nextDayPlanMsg(items: { d: any; odds?: string }[]): string {
     void prem;
     void b; void r;
     L.push(...planBlock(d, "bull"), ...noTradeBlock(d), ...planBlock(d, "bear"));
+    if (d.oi) L.push(...oiHtml(d.oi, { expiry: d.expiry }));
     for (const sc of (T.tomorrow?.scenarios || []).slice(0, 3)) L.push(`  • ${esc(sc)}`);
     if (d.expiry && d.expiry === forDay) L.push(`  🎲 <b>Expiry day</b> — zero-hero search 09:30–15:10`);
     if (odds) L.push(`  <i>📊 ${esc(odds)}</i>`);
@@ -169,6 +173,7 @@ export function tradeAlert(d: any, side: "bull" | "bear", state: string, odds?: 
   const L = [`${head} · ${hm(Math.floor(Date.now() / 1000))}`];
   if (o?.text) L.push(`<i>${esc(o.text)}</i>`);
   L.push(...planBlock(d, side, { candle: true }));
+  if (d.oi) L.push(...oiHtml(d.oi, { compact: true }));
   if (odds) L.push(`<i>📊 ${esc(odds)}</i>`);
   return L.join("\n");
 }
@@ -221,5 +226,6 @@ export function noTradeBlock(d: any): string[] {
 export function planBoardMsg(d: any, title = "TRADE PLAN"): string {
   const L = [`${d?.symbol === "^BSESN" ? "🟣" : "🔵"} <b>${esc(short(d?.name))} — ${esc(title)}</b> · ${n0(d?.spot?.price)} · ${hm(Math.floor(Date.now() / 1000))}`, LINE];
   L.push(...planBlock(d, "bull"), LINE, ...noTradeBlock(d), LINE, ...planBlock(d, "bear"));
+  if (d?.oi) L.push(LINE, ...oiHtml(d.oi, { expiry: d.expiry }));
   return L.join("\n");
 }
