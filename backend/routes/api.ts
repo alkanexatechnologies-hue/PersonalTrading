@@ -7833,7 +7833,8 @@ async function premiumCenterPayload(query: Record<string, any>): Promise<any> {
           // FIXED session plan: anchored to the previous close, rolled only when a plan plays out on a closed 15-min candle
           const prevCloseForPlan = (() => { const pd = [...daily].reverse().find((x: any) => dayOfT(x.time) < sessionDay); return pd?.close ?? spot; })();
           const todays15 = closed15.filter((c: any) => dayOfT(c.time) === sessionDay);
-          const pb: any = spot != null ? TV.anchoredPlans({ levels, spot, prevClose: prevCloseForPlan, todays15, atr: atr15, chain: strikes, expiry, events, levelsAt: (ref: number) => TV.ladder({ daily, sessionDay, today, lines: lineLv, chain: strikes, spot: ref, atr: atr15 }) }) : { bull: null, bear: null, noTrade: null, anchor: null };
+          const firstToday = session === "PRE-OPEN" ? null : c15All.find((c: any) => dayOfT(c.time) === sessionDay);   // the real 09:15 open (never the pre-open price)
+          const pb: any = spot != null ? TV.anchoredPlans({ open: firstToday ? { price: firstToday.open, time: firstToday.time } : null, levels, spot, prevClose: prevCloseForPlan, todays15, atr: atr15, chain: strikes, expiry, events, levelsAt: (ref: number) => TV.ladder({ daily, sessionDay, today, lines: lineLv, chain: strikes, spot: ref, atr: atr15 }) }) : { bull: null, bear: null, noTrade: null, anchor: null };
           const arbFresh = !!(arb && arb.candleTime && nowSec - arb.candleTime <= 15 * 60);
           const cz = TV.coach({ session, istMin, dataStatus, spot: spot ?? 0, atr: atr15, closed15, bull: pb.bull, bear: pb.bear, trends,
             arbiter: arb ? { finalAction: arb.finalAction, reason: arb.reason, fresh: arbFresh } : null,
@@ -8850,6 +8851,9 @@ async function copilotTick() {
       for (const sym of syms) {
         const d: any = await pay(sym).catch(() => null); if (!d?.available || !d.trader || d.trader.error || d.dataStatus !== "LIVE") continue;
         const T = d.trader, tracked = sym === "^NSEI" || sym === "^BSESN";
+        // gap open beyond a start: the plan was re-anchored to the opening price — send the refreshed plan once
+        const gapRoll = (T.plans?.anchor?.rolls || []).find((x: any) => /^Gap-(up|down) open/.test(x.why));
+        if (gapRoll && !_cp.sent[`gap|${sym}`]) { _cp.sent[`gap|${sym}`] = nowSec; cpSave(); cpSend([`🔄 <b>${d.name} — PLAN REFRESHED AT THE OPEN</b>`, `  ${gapRoll.why}`, ...CP.planLines(d).slice(1), cpOdds(sym) ? `  📊 ${cpOdds(sym)}` : ""].filter(Boolean).join("\n")); }
         // follow the open trade
         const tr: CP.CoTrade | null = _cp.trades[sym] || null;
         if (tr && tr.state !== "CLOSED") {

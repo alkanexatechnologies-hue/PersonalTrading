@@ -150,3 +150,20 @@ test("significant lines: a smooth staircase of lower highs (no 3-bar pivot) stil
   assert.equal(s.minor, true);
   assert.ok(s.p2.price < s.p1.price);
 });
+test("gap open beyond a start re-anchors the plan to the opening price (once); an open inside the zone keeps it", async () => {
+  const { anchoredPlans } = await import("./traderView");
+  const lv: Level[] = [{ price: 160, label: "R2", kind: "PIVOT" }, { price: 150, label: "R1", kind: "PIVOT" }, { price: 141, label: "PDH", kind: "PREV DAY" }, { price: 120, label: "PDL", kind: "PREV DAY" }, { price: 110, label: "S1", kind: "PIVOT" }];
+  const t0 = 1_790_000_000, k = (i: number, c: number) => ({ time: t0 + i * 900, open: c, high: c + 1, low: c - 1, close: c, volume: 0 });
+  const base = { levels: lv, prevClose: 130, atr: 10, chain: [], expiry: null, events: [] };
+  // open 135 is inside 119–142: the previous-close plan stays
+  let r = anchoredPlans({ ...base, spot: 135, todays15: [], open: { price: 135, time: t0 } });
+  assert.equal(r.bull!.entry, 142); assert.equal(r.anchor.rolls.length, 0);
+  // gap-up open 144 is above the Bull start 142: re-anchored to 144, new starts on both sides of the open
+  r = anchoredPlans({ ...base, spot: 144, todays15: [], open: { price: 144, time: t0 } });
+  assert.equal(r.anchor.rolls.length, 1); assert.match(r.anchor.why, /Gap-up open 144 above the Bull start 142/);
+  assert.equal(r.anchor.ref, 144); assert.ok(r.bull!.entry > 144); assert.ok(r.bear!.entry < 144);
+  assert.equal(r.anchor.since, t0 - 1);   // the first 15-min candle still counts for the new plan
+  // gap-down open 115 below the Bear start
+  r = anchoredPlans({ ...base, spot: 115, todays15: [], open: { price: 115, time: t0 } });
+  assert.match(r.anchor.why, /Gap-down open 115/); assert.ok(r.bull!.entry > 115);
+});

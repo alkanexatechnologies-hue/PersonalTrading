@@ -317,7 +317,7 @@ export function opportunity(p: Plan | null, closed15: Candle[], forming15: Candl
  * when a plan has PLAYED OUT on a closed 15-min candle — triggered and then reached Target 1, or triggered and closed back
  * inside the level (failed). Re-anchored to that candle's close. Closed candles only, so it never repaints.
  */
-export function anchoredPlans(o: { levels: Level[]; spot: number; prevClose: number; todays15: Candle[]; atr: number; chain: OiStrike[]; expiry: string | null; events: BreakEvent[]; nowMs?: number; levelsAt?: (ref: number) => Level[] }) {
+export function anchoredPlans(o: { levels: Level[]; spot: number; prevClose: number; todays15: Candle[]; atr: number; chain: OiStrike[]; expiry: string | null; events: BreakEvent[]; nowMs?: number; levelsAt?: (ref: number) => Level[]; open?: { price: number; time: number } | null }) {
   let ref = o.prevClose, since: number | null = null, why = "morning plan (anchored to the previous close)";
   // today's own high/low keep changing as the day trades — shown on the chart, but they never re-shape the fixed plan.
   // OI walls are ranked against the plan's ANCHOR (not the live price), so a wall never reshuffles the plan as price moves.
@@ -325,6 +325,13 @@ export function anchoredPlans(o: { levels: Level[]; spot: number; prevClose: num
   const mk = () => plans({ levels: planLevels(), spot: o.spot, ref, atr: o.atr, chain: o.chain, expiry: o.expiry, events: o.events, nowMs: o.nowMs });
   let pb = mk(), trig = { CE: false, PE: false };
   const rolls: { time: number; ref: number; why: string }[] = [];
+  // Gap open: when the 09:15 open is already beyond a start, the previous-close plan is stale (start behind price, target
+  // close by) — re-anchor once to the opening price. The first 15-min candle still counts for the new plan.
+  if (o.open && Number.isFinite(o.open.price)) {
+    const op = o.open.price, b = pb.bull, r = pb.bear;
+    const gap = b && op >= b.entry ? `Gap-up open ${Math.round(op)} above the Bull start ${Math.round(b.entry)}` : r && op <= r.entry ? `Gap-down open ${Math.round(op)} below the Bear start ${Math.round(r.entry)}` : null;
+    if (gap) { ref = op; since = o.open.time - 1; why = `${gap} — plan re-anchored to the opening price`; rolls.push({ time: o.open.time, ref: r2(op), why }); pb = mk(); }
+  }
   for (const c of o.todays15) {
     for (const [side, p] of [["CE", pb.bull], ["PE", pb.bear]] as const) {
       if (!p) continue; const dir = side === "CE" ? 1 : -1;
