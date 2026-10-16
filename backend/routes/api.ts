@@ -7636,6 +7636,7 @@ router.get("/backtest/option/strikes", async (req: Request, res: Response) => {
 // decision and the existing risk state (cooldown, open trade, time window). Probabilities are NOT shown until validated.
 const PC_VERSION = "premium-center/v1";
 const _pcLastChain = new Map<string, { at: number; v: any }>();
+const _pcWalls = new Map<string, { at: number; expiry: string; strikes: any[] }>();
 async function pcOptionCandles(underlying: string, side: "CE" | "PE", strike: number, expiry: string, intervalMin: number) {
   return cached(`pc-opt:${underlying}:${side}:${strike}:${expiry}:${intervalMin}`, 20_000, async () => {
     const o = await lookupDhanOption(underlying, side, strike, expiry);
@@ -7697,6 +7698,12 @@ async function premiumCenterPayload(query: Record<string, any>): Promise<any> {
     // ---- option chain + selected contracts ----
     const ch: any = chain;
     const strikes: any[] = ch?.available ? ch.strikes : [];
+    // OI walls for the PLAN: a chain dropout (e.g. a Dhan 429 at the open) must not reshape the plan — walls move slowly, so
+    // the last good chain of the same expiry is used for plan levels for up to 60 min (premiums still show live/stale as-is).
+    const wk = `${def.symbol}:${off}`, today0 = new Date(Date.now() + 19800000).toISOString().slice(0, 10);
+    if (strikes.length && ch?.expiry) _pcWalls.set(wk, { at: Date.now(), expiry: ch.expiry, strikes });
+    const wl = _pcWalls.get(wk);
+    const planChain: any[] = strikes.length ? strikes : wl && wl.expiry >= today0 && Date.now() - wl.at < 60 * 60_000 ? wl.strikes : strikes;
     const spot = (quote as any)?.price > 0 ? (quote as any).price : closed.length ? closed[closed.length - 1].close : null;
     const ks = strikes.map((s) => s.strike), step = ks.length > 1 ? Math.min(...ks.slice(1).map((k: number, i: number) => k - ks[i]).filter((d: number) => d > 0)) : (def as any).strikeStep || 50;
     const atm = spot != null && ks.length ? ks.reduce((b: number, k: number) => (Math.abs(k - spot) < Math.abs(b - spot) ? k : b), ks[0]) : null;
@@ -7827,14 +7834,14 @@ async function premiumCenterPayload(query: Record<string, any>): Promise<any> {
           const finished = lastDay && lastDay < sessionDay ? closed.filter((c: any) => dayOfT(c.time) === lastDay) : [];   // the session that just ended
           const justEnded = finished.length ? { high: Math.max(...finished.map((c: any) => c.high)), low: Math.min(...finished.map((c: any) => c.low)) } : null;
           const today = todayBars.length ? { high: session === "OPEN" ? (quote as any)?.dayHigh ?? Math.max(...todayBars.map((c: any) => c.high)) : Math.max(...todayBars.map((c: any) => c.high)), low: session === "OPEN" ? (quote as any)?.dayLow ?? Math.min(...todayBars.map((c: any) => c.low)) : Math.min(...todayBars.map((c: any) => c.low)) } : { high: null, low: null };
-          const levels = spot != null ? TV.ladder({ daily, sessionDay, today, lines: lineLv, chain: strikes, spot, atr: atr15 }) : [];
+          const levels = spot != null ? TV.ladder({ daily, sessionDay, today, lines: lineLv, chain: planChain, spot, atr: atr15 }) : [];
           // break history on the chart's own timeframe (what the trader sees), outcome horizon ≈ 4 hours
           const k = 3, horizon = interval === "15m" ? 16 : 48, events = TV.breakEvents(closed as any, k, horizon);
           // FIXED session plan: anchored to the previous close, rolled only when a plan plays out on a closed 15-min candle
           const prevCloseForPlan = (() => { const pd = [...daily].reverse().find((x: any) => dayOfT(x.time) < sessionDay); return pd?.close ?? spot; })();
           const todays15 = closed15.filter((c: any) => dayOfT(c.time) === sessionDay);
           const firstToday = session === "PRE-OPEN" ? null : c15All.find((c: any) => dayOfT(c.time) === sessionDay);   // the real 09:15 open (never the pre-open price)
-          const pb: any = spot != null ? TV.anchoredPlans({ open: firstToday ? { price: firstToday.open, time: firstToday.time } : null, levels, spot, prevClose: prevCloseForPlan, todays15, atr: atr15, chain: strikes, expiry, events, levelsAt: (ref: number) => TV.ladder({ daily, sessionDay, today, lines: lineLv, chain: strikes, spot: ref, atr: atr15 }) }) : { bull: null, bear: null, noTrade: null, anchor: null };
+          const pb: any = spot != null ? TV.anchoredPlans({ open: firstToday ? { price: firstToday.open, time: firstToday.time } : null, levels, spot, prevClose: prevCloseForPlan, todays15, atr: atr15, chain: planChain, expiry, events, levelsAt: (ref: number) => TV.ladder({ daily, sessionDay, today, lines: lineLv, chain: planChain, spot: ref, atr: atr15 }) }) : { bull: null, bear: null, noTrade: null, anchor: null };
           const arbFresh = !!(arb && arb.candleTime && nowSec - arb.candleTime <= 15 * 60);
           const cz = TV.coach({ session, istMin, dataStatus, spot: spot ?? 0, atr: atr15, closed15, bull: pb.bull, bear: pb.bear, trends,
             arbiter: arb ? { finalAction: arb.finalAction, reason: arb.reason, fresh: arbFresh } : null,
