@@ -30,3 +30,12 @@ test("next-day plan: date, both sides with SL/targets/risk, nearest levels, expi
   assert.match(m, /Expiry day/);
   assert.match(nextDayPlanMsg([]), /Plan unavailable/);
 });
+test("emphasize: SL / targets / danger in bold, never nested inside existing bold", async () => {
+  const { emphasize } = await import("./tgFormat");
+  const m = emphasize("🎯 T1 23,157 · T2 23,316 · 🛑 SL 23,040 · risk HIGH\n  stop: 15-min close below 23,040\n  Target 1 23,157\n<b>SL 100 already bold</b> · day high 23,150");
+  assert.match(m, /<b>T1 23,157<\/b>/); assert.match(m, /<b>T2 23,316<\/b>/); assert.match(m, /<b>🛑 SL 23,040<\/b>/);
+  assert.match(m, /<b>risk HIGH<\/b>/); assert.match(m, /<b>stop: 15-min close below 23,040<\/b>/); assert.match(m, /<b>Target 1 23,157<\/b>/);
+  assert.ok(!/<b>[^<]*<b>/.test(m), "no nested bold"); assert.match(m, /day high 23,150$/);
+  assert.equal(emphasize("T1 done, stop at breakeven"), "T1 done, stop at breakeven");
+  assert.match(emphasize("⚠️ NIFTY BULL FAILED — stand aside"), /^<b>⚠️ NIFTY BULL FAILED — stand aside<\/b>$/);
+});

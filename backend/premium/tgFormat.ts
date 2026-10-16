@@ -104,6 +104,22 @@ export function nextDayPlanMsg(items: { d: any; odds?: string }[]): string {
     if (odds) L.push(`  <i>📊 ${esc(odds)}</i>`);
   }
   if (!ok.length) L.push("Plan unavailable — data not loaded.");
-  L.push(LINE, "<i>Re-checked at 09:05 with the live open · advisory only, the arbiter decides</i>");
+  L.push(LINE, "<i>Re-checked at 09:13 with the live open · advisory only, the arbiter decides</i>");
   return L.join("\n");
+}
+/**
+ * Bold every Stop-loss / Target value and every danger detail in an HTML message, outside existing <b>…</b> (no nesting,
+ * which Telegram may reject). Works on already-escaped HTML.
+ */
+const LEVEL = String.raw`(?:🛑\s*)?\b(?:SL|Stop|stop|STOP|Target|TARGET|T1|T2)\b(?:\s*[12](?![\d,]))?(?:\s*\([^)<]*\))?\s*:?\s*(?:15-min close (?:below|above)\s*)?(?:at\s*)?(?:breakeven\s*)?₹?\s?\d[\d,]*(?:\.\d+)?`;
+const DANGER = String.raw`⚠️[^\n<]*|\b(?:HIGH RISK|risk HIGH|HIGH|FAILED|STOP LOSS|SL HIT|STOP HIT|MISSED|DANGER|CAUTION|COUNTER-TREND|no proven edge|NOT SUCCESSFUL)\b`;
+const EMPH = new RegExp(`${LEVEL}|${DANGER}`, "g");
+export function emphasize(html: string): string {
+  let depth = 0;
+  return String(html).split(/(<[^>]+>)/).map((part) => {
+    if (/^<b>$/i.test(part)) { depth++; return part; }
+    if (/^<\/b>$/i.test(part)) { depth = Math.max(0, depth - 1); return part; }
+    if (part.startsWith("<") || depth > 0 || !part) return part;
+    return part.replace(EMPH, (m) => `<b>${m}</b>`);
+  }).join("");
 }

@@ -72,6 +72,7 @@ import { zeroHero as zeroHeroLive, newZhTrade, stepZhTrade, freshTrigger, ZhTrad
 import { readCandle } from "../premium/candleRead";
 import * as CP from "../premium/copilot";
 import * as MD from "../premium/marketDiary";
+import * as CL from "../premium/closing";
 import * as EYE from "../premium/marketEye";
 import * as TG from "../premium/tgFormat";
 import { Decision } from "../decision/types";
@@ -8809,8 +8810,8 @@ async function zeroHeroLedgerTick() {
 router.get("/zero-hero/trades", requirePermission("oiAnalysis"), (_req: Request, res: Response) => { res.json(_zhLedger); });
 
 // ===================== Daily trading co-pilot (Telegram) — advisory only =====================
-// 09:05 plan · NIFTY 15-minute updates · opportunity alerts with risk grade + 2-year odds (risk is a label, never a filter)
-// · ONE tracked trade per index (NIFTY, SENSEX) with follow-ups on Target 1 / Target 2 / stop / 15:12 · 15:35 review.
+// 09:13 plan · 15-minute best opportunity · opportunity alerts with risk grade + 2-year odds (risk is a label, never a filter)
+// · ONE tracked trade per index (NIFTY, SENSEX) with follow-ups on Target 1 / Target 2 / stop / 15:12 · 15:30 closing statement.
 const CP_FILE = path.join(process.cwd(), "data", "copilot-state.json");
 let _cp: any = (() => { try { return JSON.parse(fs.readFileSync(CP_FILE, "utf8")); } catch { return {}; } })();
 const cpSave = () => { try { fs.writeFileSync(CP_FILE, JSON.stringify(_cp)); } catch { /* best-effort */ } };
@@ -8827,7 +8828,7 @@ async function cpDrain() {
   } finally { _cpSending = false; }
 }
 // plain builder text → HTML alert (bold title / action lines, escaped); pre-built HTML messages pass `html: true`
-const cpSend = (text: string, htmlReady = false) => { _cpQueue.push({ text: htmlReady ? text : TG.htmlify(CP.stripTags(text)), html: true }); cpDrain().catch(() => {}); try { fs.appendFileSync(path.join(process.cwd(), "data", "copilot-log.txt"), `\n[${new Date(Date.now() + 19800000).toISOString().slice(0, 19)}]\n${String(text).replace(/<[^>]+>/g, "")}\n`); } catch { /* best-effort */ } };
+const cpSend = (text: string, htmlReady = false) => { _cpQueue.push({ text: TG.emphasize(htmlReady ? text : TG.htmlify(CP.stripTags(text))), html: true }); cpDrain().catch(() => {}); try { fs.appendFileSync(path.join(process.cwd(), "data", "copilot-log.txt"), `\n[${new Date(Date.now() + 19800000).toISOString().slice(0, 19)}]\n${String(text).replace(/<[^>]+>/g, "")}\n`); } catch { /* best-effort */ } };
 const _published = (() => { try { return JSON.parse(fs.readFileSync(path.join(process.cwd(), "backend", "research", "published", "odds.json"), "utf8")); } catch { return null; } })();
 function cpOdds(sym: string): string | undefined {
   const ix = ({ "^NSEI": "NIFTY", "^NSEBANK": "BANKNIFTY", "^BSESN": "SENSEX", "^CNXFIN": "FINNIFTY", "^NSEMDCP50": "MIDCPNIFTY" } as Record<string, string>)[sym];
@@ -8848,8 +8849,8 @@ async function copilotTick() {
     if (wd === 0 || wd === 6) return;
     if (_cp.day !== day) { _cp = { day, trades: {}, closed: [], sent: {}, seen: {} }; cpSave(); }
     const pay = (sym: string) => premiumCenterPayload({ symbol: sym, interval: "15m" });
-    // 09:05 plan
-    if (istMin >= 545 && istMin <= 552 && !_cp.sent.plan) {
+    // 09:13 plan (every co-pilot message stays inside market hours 09:13–15:30; the next-day plan follows at 15:31)
+    if (istMin >= 553 && istMin <= 560 && !_cp.sent.plan) {
       const list = (await Promise.all(["^NSEI", "^NSEBANK", "^BSESN"].map((x) => pay(x).catch(() => null)))).filter((x: any) => x?.available);
       if (list.length) { _cp.sent.plan = true; cpSave(); cpSend(CP.morningPlan(list, Object.fromEntries(list.map((d: any) => [d.symbol, cpOdds(d.symbol) || ""])))); }
     }
@@ -8903,19 +8904,13 @@ async function copilotTick() {
       if (items.length) cpSend(TG.bestOpportunityMsg(items), true);
       if (istMin % 30 === 0) for (const it of items) cpSend(TG.fullReadMsg(it.d, it.trade, it.eye, it.zh, cpOdds(it.d.symbol)), true);
     }
-    // 15:35 review
-    if (istMin >= 935 && istMin <= 945 && !_cp.sent.review) {
-      const list = (await Promise.all(["^NSEI", "^NSEBANK", "^BSESN"].map((x) => pay(x).catch(() => null)))).filter((x: any) => x?.available);
-      if (list.length) {
-        _cp.sent.review = true; cpSave();
-        const tr = (_cp.closed || []).map((t: any) => `  ${t.name} ${t.strike} ${t.side}: ${t.exitWhy}${t.entryPrem != null && t.exitPrem != null ? ` · ₹${Math.round(t.entryPrem)} → ₹${Math.round(t.exitPrem)}` : ""}${t.t1Prem != null ? ` (half at T1 ₹${Math.round(t.t1Prem)})` : ""}`);
-        cpSend(CP.dayReview(list) + (tr.length ? `\nTrades given today:\n${tr.join("\n")}` : "\nNo trade was given today."));
-      }
+    // 15:30 CLOSING STATEMENT: diary saved, every trade graded (points, success / failure + why), day-by-day scorecard
+    if (istMin >= 930 && istMin <= 940 && (istMin > 930 || sec >= 20) && !_cp.sent.closing) {
+      _cp.sent.closing = true; _cp.sent.review = true; cpSave();
+      await closingStatement(day).catch(() => {});
     }
-    // 15:45 market diary — the app's memory of the session
-    if (istMin >= 945 && istMin <= 975 && !_cp.sent.diary) { _cp.sent.diary = true; cpSave(); await diarySave(day).catch(() => {}); }
     // 15:40 next-day plan (NIFTY + SENSEX) — after the close the payload's plan is for the next session
-    if (istMin >= 940 && istMin <= 960 && !_cp.sent.nextDay) {
+    if (istMin >= 931 && istMin <= 950 && !_cp.sent.nextDay) {
       const items = (await Promise.all(["^NSEI", "^BSESN"].map((x) => pay(x).catch(() => null)))).filter((x: any) => x?.available && x.trader && !x.trader.error);
       if (items.length) { _cp.sent.nextDay = true; cpSave(); cpSend(TG.nextDayPlanMsg(items.map((d: any) => ({ d, odds: cpOdds(d.symbol) }))), true); }
     }
@@ -9001,6 +8996,29 @@ async function diarySave(day: string) {
   fs.writeFileSync(f, JSON.stringify(rec, null, 1));
   return rec;
 }
+const SCORE_FILE = path.join(process.cwd(), "data", "trade-scorecard.json");
+/** Grade every trade of `day` (co-pilot, BTSD, zero-hero), update the scorecard and send the closing statement. */
+async function closingStatement(day: string, send = true) {
+  const diary: any = await diarySave(day).catch(() => null);
+  const cpT = _cp.day === day ? [...(_cp.closed || []), ...Object.values(_cp.trades || {}).filter(Boolean)] : [];
+  const rows: CL.ReviewTrade[] = [
+    ...cpT.map((t: any) => ({ source: "co-pilot", name: t.name, side: t.side, strike: t.strike, openedAt: t.openedAt, closedAt: t.closedAt ?? null, entrySpot: t.entrySpot, exitSpot: t.exitSpot ?? null, entryPrem: t.entryPrem, exitPrem: t.exitPrem ?? null, t1Prem: t.t1Prem ?? null, exitWhy: t.exitWhy ?? null, state: t.state })),
+    ..._btsd.trades.filter((t) => t.day === day).map((t: any) => ({ source: "BTSD (mine)", name: t.name, side: t.side, strike: t.strike, openedAt: t.openedAt, closedAt: t.closedAt ?? null, entrySpot: t.entrySpot, exitSpot: t.exitSpot ?? null, entryPrem: t.entryPrem, exitPrem: t.exitPrem ?? null, t1Prem: t.t1Prem ?? null, exitWhy: t.exitWhy ?? null, state: t.state })),
+    ...(_zhLedger.day === day ? _zhLedger.trades : []).map((t: any) => ({ source: "zero-hero", name: t.name, side: t.side, strike: t.strike, openedAt: t.openedAt, closedAt: t.closedAt ?? null, entrySpot: t.entryIndex, exitSpot: null, entryPrem: t.entryPrem, exitPrem: t.exitPrem ?? null, t1Prem: t.state === "CLOSED" && (t.events || []).some((e: any) => /T1/.test(e.what)) ? t.t1Prem : null, exitWhy: t.exitWhy ?? null, state: t.state })),
+  ].sort((a, b) => a.openedAt - b.openedAt);
+  const graded = rows.map(CL.gradeTrade);
+  let card: CL.Scorecard = { days: {} }; try { card = JSON.parse(fs.readFileSync(SCORE_FILE, "utf8")); } catch { /* first day */ }
+  card.days[day] = CL.dayScore(graded);
+  try { fs.writeFileSync(SCORE_FILE, JSON.stringify(card, null, 1)); } catch { /* best-effort */ }
+  const indices = ["^NSEI", "^BSESN"].map((sym) => diary?.entries?.[sym]).filter(Boolean).map((e: any) => ({ name: e.name, close: e.close, changePct: e.changePct, high: e.high, low: e.low, dayType: e.dayType }));
+  const html = CL.closingStatementMsg({ day, indices, graded, tr: CL.trend(card, day) });
+  if (send) cpSend(html, true);
+  return { html, graded, score: card.days[day], trend: CL.trend(card, day) };
+}
+router.get("/closing-statement", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.day || "")) ? String(req.query.day) : new Date(Date.now() + 19800000).toISOString().slice(0, 10);
+  try { res.json({ ok: true, ...(await closingStatement(day, !!req.query.send)) }); } catch (e: any) { res.json({ ok: false, error: e?.message }); }
+});
 router.get("/market-diary", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
   try {
     const n = Math.min(60, Number(req.query.days) || 10);
@@ -10751,7 +10769,7 @@ export function startHourlyScheduler() {
   });
   // Day high / low break alerts + index level summaries → Telegram (context only, uses cached chains; 5 quote calls/min).
   setInterval(() => { if (isTradingTimeIST() && jobOn("dayRangeAlerts")) dayRangeTick().catch(() => {}); }, 60_000);
-  // Daily trading co-pilot (09:05 plan, NIFTY 15-min updates, tracked trades with follow-ups, 15:35 review)
+  // Daily trading co-pilot (09:13–15:30: plan, 15-min updates, tracked trades with follow-ups, 15:30 closing statement; next-day plan 15:31)
   setInterval(() => { if (jobOn("coPilot")) copilotTick().catch(() => {}); }, 30_000);
   // Zero-hero ledger (expiry afternoons; frozen trades, one at a time per index)
   setInterval(() => { if (jobOn("coPilot")) zeroHeroLedgerTick().catch(() => {}); }, 30_000);

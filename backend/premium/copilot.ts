@@ -48,13 +48,13 @@ export function dayReview(list: any[]): string {
     return [`<b>${d.name}</b> O ${r0(s.open)} H ${r0(s.high)} L ${r0(s.low)} C ${r0(s.price)} (${s.changePct > 0 ? "+" : ""}${s.changePct}%)`,
       rolls.length ? `  Plans rolled ${rolls.length}×: ${rolls.map((x: any) => `${hm(x.time)} ${x.why}`).join(" | ")}` : "  No plan played out to Target 1 / failure today.",
       `  Tomorrow: ${(T.tomorrow?.scenarios || []).slice(0, 1).join(" ")}`];
-  }), "🗓 The next-day plan follows at 15:40 (re-checked at 09:05)."].join("\n");
+  }), "🗓 The next-day plan follows at 15:31 (re-checked at 09:13)."].join("\n");
 }
 
 // ---------------------------------------------------------------- one trade at a time, followed to its end
 export interface CoTrade {
   index: string; name: string; side: "CE" | "PE"; strike: number; openedAt: number; entrySpot: number; entryPrem: number | null;
-  stop: number; t1: number; t2: number | null; state: "OPEN" | "T1" | "CLOSED"; t1At?: number; t1Prem?: number | null; closedAt?: number; exitWhy?: string; exitPrem?: number | null;
+  stop: number; t1: number; t2: number | null; state: "OPEN" | "T1" | "CLOSED"; t1At?: number; t1Prem?: number | null; closedAt?: number; exitWhy?: string; exitPrem?: number | null; exitSpot?: number;
 }
 export const stripTags = (s: string) => s.replace(/<\/?b>/g, "");
 export function openTrade(d: any, side: "bull" | "bear", nowSec: number): CoTrade | null {
@@ -70,7 +70,7 @@ export function stepTrade(tr: CoTrade, x: { spot: number; prem: number | null; l
   if (tr.state === "CLOSED") return [];
   const dir = tr.side === "CE" ? 1 : -1, msgs: string[] = [], pr = (v: number | null | undefined) => (v == null ? "—" : `₹${Math.round(v)}`);
   const pnl = (v: number | null) => (v != null && tr.entryPrem != null ? `${v - tr.entryPrem >= 0 ? "+" : ""}${Math.round(v - tr.entryPrem)} per unit (${Math.round(((v / tr.entryPrem) - 1) * 100)}%)` : "");
-  const close = (why: string) => { tr.state = "CLOSED"; tr.closedAt = x.nowSec; tr.exitWhy = why; tr.exitPrem = x.prem; };
+  const close = (why: string) => { tr.state = "CLOSED"; tr.closedAt = x.nowSec; tr.exitWhy = why; tr.exitPrem = x.prem; tr.exitSpot = x.spot; };
   const head = `${tr.name} ${tr.strike} ${tr.side}`;
   if (tr.state === "OPEN" && dir * (x.spot - tr.t1) >= 0) {
     tr.state = "T1"; tr.t1At = x.nowSec; tr.t1Prem = x.prem;
