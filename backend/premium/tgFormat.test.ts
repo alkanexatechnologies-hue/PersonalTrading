@@ -21,14 +21,13 @@ test("next-day plan: date, both sides with SL/targets/risk, nearest levels, expi
   x.trader.tomorrow = { scenarios: ["Gap-up above 23060: wait"] };
   const m = nextDayPlanMsg([{ d: x, odds: "no proven edge" }]);
   assert.match(m, /NEXT-DAY PLAN<\/b> · for <b>2026-10-16/);
-  assert.match(m, /BUY 23050 CE<\/b> \(NIFTY\) · premium at the open/);
-  assert.match(m, /Trigger:<\/b> 15-min candle CLOSES above <b>23,060<\/b>/);
-  assert.match(m, /BUY 22900 PE<\/b> \(NIFTY\) · premium now ₹110/);
-  assert.match(m, /Stop Loss: index 22,910<\/b>/); assert.match(m, /Target 1: index 22,850<\/b>/);
-  assert.match(m, /risk <b>HIGH<\/b>/);
+  assert.match(m, /BULL PLAN<\/b>/); assert.match(m, /Starts on a 15-min close above <b>23,060<\/b>/);
+  assert.match(m, /Buy <b>23050 CE<\/b> \(premium at the open\)/); assert.match(m, /Buy <b>22900 PE<\/b> \(now ₹110\)/);
+  assert.match(m, /<pre>[\s\S]*Stop\s+23,040[\s\S]*Target 1\s+23,100[\s\S]*<\/pre>/);
+  assert.match(m, /HIGH RISK/);
   assert.match(m, /⬆ 23,157 <i>R1 pivot<\/i> · 24,000/);
   assert.match(m, /⬇ 22,897 <i>Pivot &lt;PP&gt;<\/i>/);
-  assert.match(m, /No-trade zone 22,890 – 23,060/);
+  assert.match(m, /NO-TRADE ZONE<\/b> 22,890 – 23,060/);
   assert.match(m, /Expiry day/);
   assert.match(nextDayPlanMsg([]), /Plan unavailable/);
 });
@@ -56,4 +55,18 @@ test("trade card: trigger, Entry / Stop Loss / Target 1 / Target 2 with index �
   assert.match(L, /Δ 0\.42: every 10 index pts ≈ ₹4\.2/);
   assert.match(L, /5-min 15:25 ▲ BULLISH ENGULFING · closed at 95% of its range · at PDH 23,056/);
   assert.match(tradeAlert(x, "bull", "TRIGGERED"), /NIFTY BULL TRIGGERED/);
+});
+test("plan board: screen layout, monospace table untouched by bold, lowest-risk ideas", async () => {
+  const { planBoardMsg, emphasize } = await import("./tgFormat");
+  const x = d();
+  Object.assign(x.trader.plans.bull, { t2: 23200, premAtEntry: 130, premAtStop: 122, premAtT1: 145, premAtT2: 190 });
+  (x.trader as any).plans.noTrade = { from: 22890, to: 23060 }; (x.trader as any).atr15 = 40;
+  (x.trader as any).levels = [{ price: 22950, label: "OI put wall", risk: { risk: "MEDIUM", bounce: true } }, { price: 23100, label: "R1", risk: { risk: "LOW" } }];
+  (x.trader as any).review = { bull: { grade: "B", score: 66, verdict: "TAKE SMALL — half size", checks: [{ ok: true, label: "trend" }, { ok: false, label: "15-min close" }] } };
+  const m = emphasize(planBoardMsg(x));
+  assert.match(m, /NIFTY — TRADE PLAN/); assert.match(m, /Review B<\/b> 66% → <b>TAKE SMALL/); assert.match(m, /✓ trend · ✗ 15-min close/);
+  const pre = m.match(/<pre>([\s\S]*?)<\/pre>/)![1];
+  assert.ok(!/<b>/.test(pre), "no tags inside <pre>"); assert.match(pre, /Target 2\s+23,200\s+₹190\s+\+140/);
+  assert.match(m, /NO-TRADE ZONE<\/b> 22,890 – 23,060\n170 pts wide \(4\.3 × ATR\)/);
+  assert.match(m, /CE on a bounce from <b>22,950<\/b> \(OI put wall\)/); assert.match(m, /CE on a 15-min close above <b>23,100<\/b> — LOW-RISK break/);
 });

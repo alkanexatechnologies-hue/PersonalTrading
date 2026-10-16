@@ -34,8 +34,7 @@ function bestBlock(d: any, trade: any | null, eye: any | null, zh: any | null): 
     const { o, side } = b;
     const tag = o.state === "TRIGGERED" ? "✅ TRIGGERED" : o.state === "ARMED" ? "⏳ ARMED — wait for the close" : o.state === "APPROACHING" ? "👀 APPROACHING" : "· watching";
     L.push(`  Status: <b>${tag}</b>`);
-    L.push(...tradeCard(d, side, { compact: true }).map((x) => `  ${x}`));
-    const c5 = candleShort(T?.candles?.m5); if (c5) L.push(`  🕯 ${c5}`);
+    L.push(...planBlock(d, side, { candle: true }));
     const rv = T?.review?.[side];
     if (rv) L.push(`  🧪 Review <b>${esc(rv.grade)}</b> (${esc(rv.score)}%) → ${esc(rv.verdict)}${rv.failed?.length ? ` · ✗ ${rv.failed.map((k: string) => esc(k)).join(", ")}` : ""}`);
   } else L.push(`  ⏸ No setup near — ${esc(T?.coach?.action ?? "wait")}`);
@@ -62,9 +61,8 @@ export function fullReadMsg(d: any, trade: any | null, eye: any | null, zh: any 
   if (c?.m5) L.push(`• ${candleShort(c.m5)}`); if (c?.m15) L.push(`• ${candleShort(c.m15)}`);
   L.push(`📐 <b>Trend</b>  ${(T.trends || []).map((x: any) => `${esc(x.tf)} ${x.verdict === "UP" ? "▲" : x.verdict === "DOWN" ? "▼" : "▬"}`).join(" · ")}`);
   L.push(LINE);
-  if (b) L.push(`🟢 <b>Bull</b> trigger above <b>${n0(b.entry)}</b> → ${b.strike} CE · Stop Loss ${n0(b.stop)} · Target 1 ${n0(b.t1)}${b.t2 ? ` · Target 2 ${n0(b.t2)}` : ""} · risk <b>${esc(b.triggerRisk?.risk ?? "—")}</b> · ${esc(rb?.state ?? "")}`);
-  if (r) L.push(`🔴 <b>Bear</b> trigger below <b>${n0(r.entry)}</b> → ${r.strike} PE · Stop Loss ${n0(r.stop)} · Target 1 ${n0(r.t1)}${r.t2 ? ` · Target 2 ${n0(r.t2)}` : ""} · risk <b>${esc(r.triggerRisk?.risk ?? "—")}</b> · ${esc(rr?.state ?? "")}`);
-  if (T.plans?.noTrade) L.push(`⏸ No-trade zone ${n0(T.plans.noTrade.from)} – ${n0(T.plans.noTrade.to)}`);
+  void b; void r; void rb; void rr;
+  L.push(...planBlock(d, "bull"), LINE, ...noTradeBlock(d), LINE, ...planBlock(d, "bear"));
   L.push(`🧭 <b>${esc(T.coach?.action ?? "")}</b>`);
   if (T.coach?.why) L.push(`<i>${esc(T.coach.why)}</i>`);
   if (trade && trade.state !== "CLOSED") L.push(`📌 Open trade ${trade.strike} ${trade.side} from ${n0(trade.entrySpot)} (₹${n0(trade.entryPrem)}) · ${trade.state === "T1" ? "T1 done, SL at breakeven" : `SL ${n0(trade.stop)} · T1 ${n0(trade.t1)}`}`);
@@ -99,9 +97,8 @@ export function nextDayPlanMsg(items: { d: any; odds?: string }[]): string {
     if (above.length) L.push(`  ⬆ ${above.map((x: any) => `${n0(x.price)} <i>${esc(x.label)}</i>`).join(" · ")}`);
     if (below.length) L.push(`  ⬇ ${below.map((x: any) => `${n0(x.price)} <i>${esc(x.label)}</i>`).join(" · ")}`);
     void prem;
-    if (b) L.push(...tradeCard(d, "bull", { compact: true }).map((x) => `  ${x}`));
-    if (r) L.push(...tradeCard(d, "bear", { compact: true }).map((x) => `  ${x}`));
-    if (T.plans?.noTrade) L.push(`  ⏸ No-trade zone ${n0(T.plans.noTrade.from)} – ${n0(T.plans.noTrade.to)}`);
+    void b; void r;
+    L.push(...planBlock(d, "bull"), ...noTradeBlock(d), ...planBlock(d, "bear"));
     for (const sc of (T.tomorrow?.scenarios || []).slice(0, 3)) L.push(`  • ${esc(sc)}`);
     if (d.expiry && d.expiry === forDay) L.push(`  🎲 <b>Expiry day</b> — zero-hero search 09:30–15:10`);
     if (odds) L.push(`  <i>📊 ${esc(odds)}</i>`);
@@ -120,8 +117,8 @@ const EMPH = new RegExp(`${LEVEL}|${DANGER}`, "g");
 export function emphasize(html: string): string {
   let depth = 0;
   return String(html).split(/(<[^>]+>)/).map((part) => {
-    if (/^<b>$/i.test(part)) { depth++; return part; }
-    if (/^<\/b>$/i.test(part)) { depth = Math.max(0, depth - 1); return part; }
+    if (/^<(b|pre|code)>$/i.test(part)) { depth++; return part; }
+    if (/^<\/(b|pre|code)>$/i.test(part)) { depth = Math.max(0, depth - 1); return part; }
     if (part.startsWith("<") || depth > 0 || !part) return part;
     return part.replace(EMPH, (m) => `<b>${m}</b>`);
   }).join("");
@@ -168,7 +165,58 @@ export function tradeAlert(d: any, side: "bull" | "bear", state: string, odds?: 
   const head = state === "TRIGGERED" ? `🎯 <b>${nm} ${ce ? "BULL" : "BEAR"} TRIGGERED</b>` : state === "ARMED" ? `⏳ <b>${nm} ${ce ? "BULL" : "BEAR"} — GET READY</b> (15-min candle not closed yet)` : `ℹ️ <b>${nm} ${esc(state)}</b>`;
   const L = [`${head} · ${hm(Math.floor(Date.now() / 1000))}`];
   if (o?.text) L.push(`<i>${esc(o.text)}</i>`);
-  L.push(...tradeCard(d, side));
+  L.push(...planBlock(d, side, { candle: true }));
   if (odds) L.push(`<i>📊 ${esc(odds)}</i>`);
+  return L.join("\n");
+}
+
+// ---------------------------------------------------------------- the PLAN BOARD — same layout as the Premium Prediction screen
+const RISKW: Record<string, string> = { LOW: "LOW RISK", MEDIUM: "MED RISK", HIGH: "HIGH RISK", FAR: "FAR" };
+const pad = (v: string, n: number, right = false) => (right ? v.padStart(n) : v.padEnd(n));
+/** One plan exactly like the screen card: risk, start, buy, review + chips, Start/Stop/Target table, R:R. */
+export function planBlock(d: any, side: "bull" | "bear", o: { candle?: boolean } = {}): string[] {
+  const T = d?.trader, p = T?.plans?.[side], ce = side === "bull", leg = ce ? "CE" : "PE", idx = short(d?.name);
+  if (!p) return [`${ce ? "🟢" : "🔴"} <b>${ce ? "BULL" : "BEAR"} PLAN</b> — no level ${ce ? "above" : "below"} the price`];
+  const expired = p.premNow != null && p.premNow < 1;
+  const rk = p.triggerRisk?.risk, L: string[] = [];
+  L.push(`${ce ? "🟢" : "🔴"} <b>${ce ? "BULL" : "BEAR"} PLAN</b>${rk ? ` · <b>${esc(RISKW[rk] ?? rk)}</b>` : ""}`);
+  L.push(`Starts on a 15-min close ${ce ? "above" : "below"} <b>${n0(p.entry)}</b>`);
+  L.push(`Buy <b>${p.strike ?? "—"} ${leg}</b> ${expired ? "(premium at the open)" : p.premNow != null ? `(now ₹${n0(p.premNow)})` : ""}`);
+  const rv = T?.review?.[side];
+  if (rv) {
+    L.push(`🧪 <b>Review ${esc(rv.grade)}</b> ${esc(rv.score)}% → <b>${esc(rv.verdict)}</b>`);
+    L.push(rv.checks.map((c: any) => `${c.ok === true ? "✓" : c.ok === false ? "✗" : "~"} ${esc(c.label)}`).join(" · "));
+  }
+  const pr = (v: number | null | undefined) => (expired || v == null || !Number.isFinite(v) ? "—" : `₹${n0(v)}`);
+  const row = (lbl: string, lvl: number, pv: number | null | undefined, pts: string) => `${pad(lbl, 9)}${pad(n0(lvl), 7, true)}${pad(pr(pv), 7, true)}${pad(pts, 7, true)}`;
+  const d1 = (lvl: number) => `${(ce ? lvl - p.entry : p.entry - lvl) >= 0 ? "+" : "−"}${n0(Math.abs(lvl - p.entry))}`;
+  const tbl = [`${pad("", 9)}${pad(esc(idx), 7, true)}${pad(leg, 7, true)}${pad("pts", 7, true)}`,
+    row("Start", p.entry, p.premAtEntry ?? p.premAtTrigger, ""), row("Stop", p.stop, p.premAtStop, d1(p.stop)), row("Target 1", p.t1, p.premAtT1, d1(p.t1))];
+  if (p.t2 != null) tbl.push(row("Target 2", p.t2, p.premAtT2, d1(p.t2)));
+  L.push(`<pre>${tbl.join("\n")}</pre>`);
+  L.push(`Reward : risk <b>1 : ${esc(p.rr ?? "—")}</b> · exit by 15:12`);
+  if (o.candle) { const c5 = candleShort(T?.candles?.m5); if (c5) L.push(`🕯 ${c5}`); }
+  return L;
+}
+/** The no-trade zone and the lowest-risk ideas (same rules as the screen). */
+export function noTradeBlock(d: any): string[] {
+  const T = d?.trader, nt = T?.plans?.noTrade, spot = d?.spot?.price; if (!T) return [];
+  const L: string[] = [];
+  if (nt) L.push(`⏸ <b>NO-TRADE ZONE</b> ${n0(nt.from)} – ${n0(nt.to)}`, `${n0(nt.to - nt.from)} pts wide (${((nt.to - nt.from) / (T.atr15 || 1)).toFixed(1)} × ATR)`);
+  if (spot == null) return L;
+  const lv = (T.levels || []).filter((v: any) => v.risk && v.risk.risk !== "FAR");
+  const near = (arr: any[]) => arr.sort((a, b) => Math.abs(a.price - spot) - Math.abs(b.price - spot))[0];
+  const sup = near(lv.filter((v: any) => v.price < spot && v.risk.bounce)), res = near(lv.filter((v: any) => v.price > spot && v.risk.bounce));
+  const items: string[] = [];
+  if (sup) items.push(`• CE on a bounce from <b>${n0(sup.price)}</b> (${esc(sup.label)}) — stop just below`);
+  if (res) items.push(`• PE on a rejection from <b>${n0(res.price)}</b> (${esc(res.label)}) — stop just above`);
+  for (const v of lv.filter((x: any) => x.risk.risk === "LOW").slice(0, 2)) items.push(`• ${v.price > spot ? "CE" : "PE"} on a 15-min close ${v.price > spot ? "above" : "below"} <b>${n0(v.price)}</b> — LOW-RISK break`);
+  L.push(`<b>Lowest-risk ideas now</b>`, ...(items.length ? items : ["• none — every nearby level is risky; standing aside is a position"]));
+  return L;
+}
+/** The whole board for one index: Bull plan · No-trade zone · Bear plan. */
+export function planBoardMsg(d: any, title = "TRADE PLAN"): string {
+  const L = [`${d?.symbol === "^BSESN" ? "🟣" : "🔵"} <b>${esc(short(d?.name))} — ${esc(title)}</b> · ${n0(d?.spot?.price)} · ${hm(Math.floor(Date.now() / 1000))}`, LINE];
+  L.push(...planBlock(d, "bull"), LINE, ...noTradeBlock(d), LINE, ...planBlock(d, "bear"));
   return L.join("\n");
 }
