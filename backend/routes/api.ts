@@ -73,6 +73,7 @@ import { readCandle } from "../premium/candleRead";
 import * as CP from "../premium/copilot";
 import * as MD from "../premium/marketDiary";
 import * as CL from "../premium/closing";
+import * as TRV from "../premium/tradeReview";
 import * as EYE from "../premium/marketEye";
 import * as TG from "../premium/tgFormat";
 import { Decision } from "../decision/types";
@@ -7768,7 +7769,7 @@ async function premiumCenterPayload(query: Record<string, any>): Promise<any> {
     if (tl.seller) (tl.seller.status === "BROKEN" ? supporting : contra).push(`Seller trendline ${tl.seller.status.toLowerCase()} (now ${tl.seller.valueNow})`);
     if (tl.buyer) (tl.buyer.status === "BROKEN" ? contra : supporting).push(`Buyer trendline ${tl.buyer.status.toLowerCase()} (now ${tl.buyer.valueNow})`);
     const ctx15 = c15 && (c15 as any[]).length > 25 ? (() => { const cl = (c15 as any[]).map((c) => c.close), e = ema(cl, 21); const v = last(e); return v == null ? null : cl[cl.length - 1] > v ? "15-min close above EMA21 (up context)" : "15-min close below EMA21 (down context)"; })() : null;
-    return ({
+    const out: any = ({
       version: PC_VERSION, available: true, symbol: def.symbol, name: def.name, interval, session, dataStatus,
       exchangeTs: lastTs, ageSec, quoteTs: (quote as any)?.marketTime || null, generatedAt: nowSec, provider: dhanOn ? "Dhan (connected)" : "Dhan (not connected)",
       spot: await (async () => {
@@ -7888,6 +7889,9 @@ async function premiumCenterPayload(query: Record<string, any>): Promise<any> {
       validation: VAL,
       note: "Advisory only. Probabilities are not shown until validated out of sample. The arbiter and existing risk gates decide trades.",
     });
+    // Trade Review Desk: both plans checked against all the data above (Market Eye / day's losses are added by the co-pilot)
+    if (out.trader && !out.trader.error) out.trader.review = { bull: TRV.reviewTrade(out, "bull", { istMin }), bear: TRV.reviewTrade(out, "bear", { istMin }) };
+    return out;
   } catch (e: any) { return { available: false, version: PC_VERSION, error: e?.message || "premium center failed" }; }
 }
 router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
@@ -8841,6 +8845,8 @@ function cpOdds(sym: string): string | undefined {
     return `2-yr ${ix} 15-min breakout record after costs: ${t.DEV.winPct}–${t.VALIDATION.winPct}% wins, ${t.DEV.avgNet} / ${t.VALIDATION.avgNet} pts per trade (no proven edge — size small).`;
   } catch { return fromPub; }
 }
+/** Co-pilot trades closed today below their entry premium (discipline check: 2 losses = stop). */
+const cpLossesToday = () => (_cp.closed || []).filter((t: any) => t.entryPrem != null && t.exitPrem != null && (t.t1Prem != null ? 0.5 * (t.t1Prem - t.entryPrem) + 0.5 * (t.exitPrem - t.entryPrem) : t.exitPrem - t.entryPrem) < 0).length;
 let _cpBusy = false, _cpTick = 0;
 async function copilotTick() {
   if (_cpBusy) return; _cpBusy = true;
@@ -8881,10 +8887,20 @@ async function copilotTick() {
           if (!confirmed || istMin < 570 || istMin > 870) continue;
           if (o.state === "TRIGGERED" && !_cp.sent[`trig|${key}|${p.entry}`]) {
             _cp.sent[`trig|${key}|${p.entry}`] = nowSec;
+            // REVIEW BEFORE SENDING: every check against the Dhan data + Market Eye + today's losses. A/B = given, C = watch only (shown, never hidden)
+            const eye = await eyeFor(sym, { price: d.spot.price, changePct: d.spot.changePct, high: d.spot.high, low: d.spot.low }).catch(() => null);
+            const rv = TRV.reviewTrade(d, side, { istMin, eye, lossesToday: cpLossesToday() });
+            const rvH = rv ? "\n" + TRV.reviewHtml(rv) : "";
             const free = tracked && !(_cp.trades[sym] && _cp.trades[sym].state !== "CLOSED") && nowSec - (_cp.sent[`cool|${sym}`] || 0) > 15 * 60;
-            if (free) { const t = CP.openTrade(d, side, nowSec); if (t) { _cp.trades[sym] = t; cpSend("📌 TRADE GIVEN — I will follow it and message you at Target 1, Target 2, stop or 15:12.\n" + CP.opportunity(d, side, "TRIGGERED", cpOdds(sym))); } }
-            else cpSend(CP.opportunity(d, side, "TRIGGERED", cpOdds(sym)) + (tracked ? "\n  (A trade on this index is already open — shown for information.)" : ""));
-          } else if (o.state === "ARMED" && nowSec - (_cp.sent[`armed|${key}`] || 0) > 20 * 60) { _cp.sent[`armed|${key}`] = nowSec; cpSend(CP.opportunity(d, side, "ARMED", cpOdds(sym))); }
+            const opp = TG.htmlify(CP.stripTags(CP.opportunity(d, side, "TRIGGERED", cpOdds(sym))));
+            if (free && rv && rv.grade !== "C") { const t: any = CP.openTrade(d, side, nowSec); if (t) { t.review = { grade: rv.grade, score: rv.score, passed: rv.passed, failed: rv.failed }; _cp.trades[sym] = t; cpSend(`📌 <b>TRADE GIVEN (review ${rv.grade}${rv.grade === "B" ? " — HALF SIZE" : ""})</b> — I will follow it and message you at Target 1, Target 2, stop or 15:12.\n` + opp + rvH, true); } }
+            else if (free && rv?.grade === "C") cpSend(`⚠️ <b>REVIEW SAYS SKIP — not given as a trade (watch only)</b>\n` + opp + rvH, true);
+            else cpSend(opp + rvH + (tracked ? "\n  (A trade on this index is already open — shown for information.)" : ""), true);
+          } else if (o.state === "ARMED" && nowSec - (_cp.sent[`armed|${key}`] || 0) > 20 * 60) {
+            _cp.sent[`armed|${key}`] = nowSec;
+            const rv = TRV.reviewTrade(d, side, { istMin, lossesToday: cpLossesToday() });
+            cpSend(TG.htmlify(CP.stripTags(CP.opportunity(d, side, "ARMED", cpOdds(sym)))) + (rv ? "\n" + TRV.reviewHtml(rv) + "\n  <i>(final review when the candle closes)</i>" : ""), true);
+          }
         }
         cpSave();
         // NIFTY 15-minute update, right after each 15-min candle closes (09:30 … 15:15)
@@ -8941,6 +8957,9 @@ router.post("/btsd/trade", requirePermission("oiAnalysis"), async (req: Request,
     const nowSec = Math.floor(Date.now() / 1000), day = new Date((nowSec + 19800) * 1000).toISOString().slice(0, 10), n = _btsd.trades.filter((t) => t.day === day).length + 1;
     const t = { id: `${day}|${n}`, n, day, index: sym, name: def.name, side, strike, openedAt: nowSec, entrySpot: spot, entryPrem, stop, t1, t2, state: "OPEN" as const, lots: num(b.lots), userNote: String(b.note || "").slice(0, 120) };
     _btsd.trades.push(t as any); btsdSave();
+    const rvB = plan && plan.strike === strike ? TRV.reviewTrade(d, side === "CE" ? "bull" : "bear", { istMin: Math.floor(((nowSec + 19800) % 86400) / 60) }) : null;
+    if (rvB) (t as any).review = { grade: rvB.grade, score: rvB.score, passed: rvB.passed, failed: rvB.failed };
+    if (rvB) setTimeout(() => cpSend(`🧑 <b>REVIEW OF YOUR TRADE #${n}</b>\n` + TRV.reviewHtml(rvB), true), 0);
     cpSend(`🧑 YOUR BTSD TRADE #${n} RECORDED — ${def.name} ${strike} ${side}\n  Entry ₹${entryPrem} at index ${Math.round(spot)}${t.lots ? ` · ${t.lots} lot(s)` : ""}\n  🎯 T1 ${Math.round(t1)}${t2 ? ` · T2 ${Math.round(t2)}` : ""} · 🛑 SL: 15-min close ${side === "CE" ? "below" : "above"} ${Math.round(stop)} · exit by 15:12\n  → I will message you at T1 (book half), T2, SL or 15:12. Levels are fixed.`);
     res.json({ ok: true, trade: t });
   } catch (e: any) { res.json({ ok: false, error: e?.message || "failed" }); }
@@ -8997,6 +9016,7 @@ async function diarySave(day: string) {
   return rec;
 }
 const SCORE_FILE = path.join(process.cwd(), "data", "trade-scorecard.json");
+const learn2 = (rs: TRV.ReviewStats, t: { passed: string[]; failed: string[]; win: boolean }[], day: string) => ({ ...TRV.learn(rs, t), lastDay: day });
 /** Grade every trade of `day` (co-pilot, BTSD, zero-hero), update the scorecard and send the closing statement. */
 async function closingStatement(day: string, send = true) {
   const diary: any = await diarySave(day).catch(() => null);
@@ -9011,7 +9031,16 @@ async function closingStatement(day: string, send = true) {
   card.days[day] = CL.dayScore(graded);
   try { fs.writeFileSync(SCORE_FILE, JSON.stringify(card, null, 1)); } catch { /* best-effort */ }
   const indices = ["^NSEI", "^BSESN"].map((sym) => diary?.entries?.[sym]).filter(Boolean).map((e: any) => ({ name: e.name, close: e.close, changePct: e.changePct, high: e.high, low: e.low, dayType: e.dayType }));
-  const html = CL.closingStatementMsg({ day, indices, graded, tr: CL.trend(card, day) });
+  // learning: which review checks separated winners from losers (reported only with enough trades; rules never auto-change)
+  const RV_FILE = path.join(process.cwd(), "data", "review-stats.json");
+  let rs: TRV.ReviewStats = { checks: {}, trades: 0, ...(() => { try { return JSON.parse(fs.readFileSync(RV_FILE, "utf8")); } catch { return {}; } })() };
+  const reviewed = [...cpT, ..._btsd.trades.filter((t) => t.day === day)].filter((t: any) => t.review && t.state === "CLOSED").map((t: any) => {
+    const g = CL.gradeTrade({ source: "", name: t.name, side: t.side, strike: t.strike, openedAt: t.openedAt, entryPrem: t.entryPrem, exitPrem: t.exitPrem ?? null, t1Prem: t.t1Prem ?? null, state: t.state });
+    return { passed: t.review.passed, failed: t.review.failed, win: g.result === "SUCCESS" };
+  });
+  if (send && reviewed.length && (rs as any).lastDay !== day) { rs = learn2(rs, reviewed, day); try { fs.writeFileSync(RV_FILE, JSON.stringify(rs, null, 1)); } catch { /* best-effort */ } }
+  const learned = TRV.learnedLines(rs);
+  const html = CL.closingStatementMsg({ day, indices, graded, tr: CL.trend(card, day) }) + `\n🧠 <b>REVIEW LEARNING</b> · ${rs.trades} reviewed trades so far` + (learned.length ? "\n" + learned.map((x) => `  • ${x.replace(/&/g, "&amp;").replace(/</g, "&lt;")}`).join("\n") : "\n  <i>needs ≥10 trades with each check passed and failed before it reports what works</i>");
   if (send) cpSend(html, true);
   return { html, graded, score: card.days[day], trend: CL.trend(card, day) };
 }

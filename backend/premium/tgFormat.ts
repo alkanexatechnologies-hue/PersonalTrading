@@ -36,6 +36,8 @@ function bestBlock(d: any, trade: any | null, eye: any | null, zh: any | null): 
     L.push(`  ${ce ? "🟢 BUY CE" : "🔴 BUY PE"} <b>${p.strike} ${ce ? "CE" : "PE"}</b> (₹${n0(p.premNow)}) — ${tag}`);
     L.push(`  ▶ Start: 15-min close ${ce ? "above" : "below"} <b>${n0(p.entry)}</b>${o.distPts != null && o.state !== "TRIGGERED" ? ` (${Math.round(Math.abs(o.distPts))} pts away)` : ""}`);
     L.push(`  🎯 T1 <b>${n0(p.t1)}</b>${p.t2 ? ` · T2 ${n0(p.t2)}` : ""} · 🛑 SL ${n0(p.stop)} · R:R 1:${esc(p.rr)} · risk <b>${esc(p.triggerRisk?.risk ?? "—")}</b>`);
+    const rv = T?.review?.[side];
+    if (rv) L.push(`  🧪 Review <b>${esc(rv.grade)}</b> (${esc(rv.score)}%) → ${esc(rv.verdict)}${rv.failed?.length ? ` · ✗ ${rv.failed.map((k: string) => esc(k)).join(", ")}` : ""}`);
   } else L.push(`  ⏸ No setup near — ${esc(T?.coach?.action ?? "wait")}`);
   if (eye) L.push(`  👁 Next 30m (history): ↑${eye.upPct}% ↔${eye.sidePct}% ↓${eye.downPct}% → <b>${esc(eye.lead)}</b>`);
   if (zh?.isExpiry) {

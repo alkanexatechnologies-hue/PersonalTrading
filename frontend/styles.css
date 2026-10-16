@@ -7784,3 +7784,8 @@ body.ppc-fullwidth .watchlist, body.ppc-fullwidth #watchlist { display: none !im
 @media (max-width: 700px) { .ppc-sec { margin-top: 6px; } .ppc-ctx .ppc-trendstrip { grid-template-columns: 1fr 1fr; } }
 .ppc-btsd[hidden] { display: none !important; }
 .ppc-sec[hidden], .ppc-zht[hidden] { display: none !important; }
+/* Trade Review Desk line on the plan cards */
+.ppc-rv { margin: 4px 0 6px; font-size: 13px; }
+.ppc-rv-ck { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.ppc-rv-ck span { font-size: 12px; padding: 1px 6px; border-radius: 9px; background: rgba(130,168,255,.08); }
+.ppc-rv-ck .ok { color: #3ddc97; } .ppc-rv-ck .bad { color: #ff6b6b; font-weight: 700; } .ppc-rv-ck .mid { color: #c9b458; }

@@ -434,6 +434,13 @@ function ppcRenderLadder() {
   el.innerHTML = rows.join("");
 }
 
+/** Trade Review Desk grade (A take · B take small · C skip) with every check; hover a check for its detail. */
+function ppcReviewLine(rv) {
+  if (!rv) return "";
+  const c = rv.grade === "A" ? "ppc-up" : rv.grade === "B" ? "ppc-wait" : "ppc-dn";
+  return `<div class="ppc-rv"><b class="${c}">🧪 Review ${ppcEsc(rv.grade)}</b> <span class="ppc-sub">${rv.score}%</span> → <b class="${c}">${ppcEsc(rv.verdict)}</b>
+    <div class="ppc-rv-ck">${rv.checks.map((k) => `<span class="${k.ok === true ? "ok" : k.ok === false ? "bad" : "mid"}" title="${ppcEsc(k.detail)}">${k.ok === true ? "✓" : k.ok === false ? "✗" : "~"} ${ppcEsc(k.label)}</span>`).join("")}</div></div>`;
+}
 function ppcPlanCard(p, side) {
   const bull = side === "CE", nm = bull ? "BULL PLAN" : "BEAR PLAN", cls = bull ? "ppc-pl-ce" : "ppc-pl-pe";
   if (!p) return `<div class="ppc-plan ${cls}"><h4>${nm}</h4><div class="ppc-na">No level ${bull ? "above" : "below"} the price — NOT AVAILABLE</div></div>`;
@@ -444,6 +451,7 @@ function ppcPlanCard(p, side) {
     <div class="ppc-pl-head"><h4>${nm}</h4>${rk ? `<i class="ppc-rk ppc-rk-${rk.cls}">${rk.short}</i>` : ""}</div>
     <div class="ppc-pl-start">Starts on a 15-min close ${bull ? "above" : "below"} <b>${r0(p.entry)}</b></div>
     <div class="ppc-pl-buy">Buy <b>${p.strike ?? "—"} ${side}</b>${p.premNow != null ? ` <span class="ppc-sub">(now ₹${Math.round(p.premNow)})</span>` : ""}</div>
+    ${ppcReviewLine(PPC.d?.trader?.review?.[bull ? "bull" : "bear"])}
     <table class="ppc-pl-tbl"><thead><tr><th></th><th>NIFTY</th><th>${side} premium</th><th></th></tr></thead><tbody>
       ${row("Start", r0(p.entry), pr(p.premAtEntry), bull ? "ppc-ce-t" : "ppc-pe-t")}
       ${row("Stop", r0(p.stop), pr(p.premAtStop), "ppc-dn", `−${Math.abs(Math.round(p.entry - p.stop))} pts`)}
