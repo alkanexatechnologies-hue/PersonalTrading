@@ -166,8 +166,11 @@ export function plans(o: { levels: Level[]; spot: number; ref?: number; atr: num
     // the plan STARTS on a 15-min close beyond the level + the engine's break buffer (0.1·ATR) — one exact whole number
     const buffer = Math.max(1, Math.round(0.1 * a)), entry = dir > 0 ? Math.ceil(trig.price + buffer) : Math.floor(trig.price - buffer);
     const tgts = seq.slice(z + 1).filter((x) => dir * (x.price - entry) >= 0.5 * a);
-    const t1 = tgts[0] ? { p: tgts[0].price, l: tgts[0].label } : { p: Math.round(entry + dir * a), l: "1 ATR (no level beyond)" };
-    const t2 = tgts.find((x) => dir * (x.price - t1.p) >= 0.5 * a) || null;
+    let t1 = tgts[0] ? { p: tgts[0].price, l: tgts[0].label } : { p: Math.round(entry + dir * a), l: "1 ATR (no level beyond)" };
+    let t2: { price: number; label: string } | null = tgts.find((x) => dir * (x.price - t1.p) >= 0.5 * a) || null;
+    // P9 (approved 2026-10-18): an OI wall IN FRONT of Target 1 caps the move — Target 1 = the wall, the old Target 1 = Target 2
+    const wall = wallInFront(seq.slice(z + 1), entry, t1.p, dir, a);
+    if (wall) { t2 = { price: t1.p, label: t1.l }; t1 = { p: wall.price, l: `${wall.label} — OI wall in front` }; }
     // stop: a close back ½·ATR inside = the break failed; R:R from the real entry, not from the level
     const stop = Math.round(entry - dir * 0.5 * a), rr = r2(Math.abs(t1.p - entry) / Math.abs(entry - stop));
     const k = strikes.length ? strikes.reduce((b, s) => (Math.abs(s - entry) < Math.abs(b - entry) ? s : b), strikes[0]) : null;
@@ -186,6 +189,10 @@ export function plans(o: { levels: Level[]; spot: number; ref?: number; atr: num
   return { bull, bear, noTrade: bull && bear ? { from: bear.entry, to: bull.entry } : null };
 }
 
+/** The nearest OI wall between the entry (≥ 0.25·ATR beyond it) and Target 1 (≥ 0.1·ATR before it), in the trade's direction. */
+export function wallInFront(levels: Level[], entry: number, t1: number, dir: 1 | -1, a: number): Level | null {
+  return levels.filter((x) => x.kind === "OI" && dir * (x.price - entry) >= 0.25 * a && dir * (t1 - x.price) > 0.1 * a).sort((x, y) => dir * (x.price - y.price))[0] ?? null;
+}
 // ---------------------------------------------------------------- what I'd do now + checklist
 export interface CoachIn {
   session: string; istMin: number; dataStatus: string; spot: number; atr: number; closed15: Candle[];
@@ -317,32 +324,44 @@ export function opportunity(p: Plan | null, closed15: Candle[], forming15: Candl
  * when a plan has PLAYED OUT on a closed 15-min candle — triggered and then reached Target 1, or triggered and closed back
  * inside the level (failed). Re-anchored to that candle's close. Closed candles only, so it never repaints.
  */
-export function anchoredPlans(o: { levels: Level[]; spot: number; prevClose: number; todays15: Candle[]; atr: number; chain: OiStrike[]; expiry: string | null; events: BreakEvent[]; nowMs?: number; levelsAt?: (ref: number) => Level[]; open?: { price: number; time: number } | null }) {
-  let ref = o.prevClose, since: number | null = null, why = "morning plan (anchored to the previous close)";
-  // today's own high/low keep changing as the day trades — shown on the chart, but they never re-shape the fixed plan.
-  // OI walls are ranked against the plan's ANCHOR (not the live price), so a wall never reshuffles the plan as price moves.
-  const planLevels = () => (o.levelsAt ? o.levelsAt(ref) : o.levels).filter((x) => x.kind !== "TODAY");
-  const mk = () => plans({ levels: planLevels(), spot: o.spot, ref, atr: o.atr, chain: o.chain, expiry: o.expiry, events: o.events, nowMs: o.nowMs });
-  let pb = mk(), trig = { CE: false, PE: false };
-  const rolls: { time: number; ref: number; why: string }[] = [];
-  // Gap open: when the 09:15 open is already beyond a start, the previous-close plan is stale (start behind price, target
-  // close by) — re-anchor once to the opening price. The first 15-min candle still counts for the new plan.
-  if (o.open && Number.isFinite(o.open.price)) {
-    const op = o.open.price, b = pb.bull, r = pb.bear;
+/**
+ * The session plan as a STATE that only moves forward (P8, approved 2026-10-18): it is created once, then advanced candle by
+ * candle. A later change of OI walls can never rewrite what already happened — levels are re-read only at a roll.
+ */
+export interface PlanState { ref: number; since: number | null; why: string; rolls: { time: number; ref: number; why: string }[]; trig: { CE: boolean; PE: boolean }; lastTime: number; openChecked: boolean; pb: ReturnType<typeof plans> }
+type PlanMk = (ref: number) => ReturnType<typeof plans>;
+export function planInit(prevClose: number, mk: PlanMk): PlanState {
+  return { ref: prevClose, since: null, why: "morning plan (anchored to the previous close)", rolls: [], trig: { CE: false, PE: false }, lastTime: 0, openChecked: false, pb: mk(prevClose) };
+}
+/** Advance with the 09:15 open (once) and with closed 15-min candles newer than `lastTime`. */
+export function planStep(st: PlanState, o: { open?: { price: number; time: number } | null; candles: Candle[]; mk: PlanMk }): PlanState {
+  const s: PlanState = { ...st, trig: { ...st.trig }, rolls: [...st.rolls] };
+  if (!s.openChecked && o.open && Number.isFinite(o.open.price)) {
+    s.openChecked = true;
+    const op = o.open.price, b = s.pb.bull, r = s.pb.bear;
     const gap = b && op >= b.entry ? `Gap-up open ${Math.round(op)} above the Bull start ${Math.round(b.entry)}` : r && op <= r.entry ? `Gap-down open ${Math.round(op)} below the Bear start ${Math.round(r.entry)}` : null;
-    if (gap) { ref = op; since = o.open.time - 1; why = `${gap} — plan re-anchored to the opening price`; rolls.push({ time: o.open.time, ref: r2(op), why }); pb = mk(); }
+    if (gap) { s.ref = op; s.since = o.open.time - 1; s.why = `${gap} — plan re-anchored to the opening price`; s.rolls.push({ time: o.open.time, ref: r2(op), why: s.why }); s.pb = o.mk(op); }
   }
-  for (const c of o.todays15) {
-    for (const [side, p] of [["CE", pb.bull], ["PE", pb.bear]] as const) {
+  for (const c of o.candles) {
+    if (c.time <= s.lastTime) continue;
+    s.lastTime = c.time;
+    for (const [side, p] of [["CE", s.pb.bull], ["PE", s.pb.bear]] as const) {
       if (!p) continue; const dir = side === "CE" ? 1 : -1;
-      if (!trig[side] && dir * (c.close - p.entry) >= 0) { trig[side] = true; continue; }
-      if (trig[side] && (dir * (c.close - p.t1) >= 0 || dir * (c.close - p.trigger) < 0)) {
-        why = dir * (c.close - p.t1) >= 0 ? `${side === "CE" ? "Bull" : "Bear"} plan reached Target 1 ${Math.round(p.t1)} — rolled to the next levels` : `${side === "CE" ? "Bull" : "Bear"} plan failed (closed back past ${Math.round(p.trigger)}) — re-planned from here`;
-        ref = c.close; since = c.time; rolls.push({ time: c.time, ref: c.close, why }); pb = mk(); trig = { CE: false, PE: false }; break;
+      if (!s.trig[side] && dir * (c.close - p.entry) >= 0) { s.trig[side] = true; continue; }
+      if (s.trig[side] && (dir * (c.close - p.t1) >= 0 || dir * (c.close - p.trigger) < 0)) {
+        s.why = dir * (c.close - p.t1) >= 0 ? `${side === "CE" ? "Bull" : "Bear"} plan reached Target 1 ${Math.round(p.t1)} — rolled to the next levels` : `${side === "CE" ? "Bull" : "Bear"} plan failed (closed back past ${Math.round(p.trigger)}) — re-planned from here`;
+        s.ref = c.close; s.since = c.time; s.rolls.push({ time: c.time, ref: c.close, why: s.why }); s.pb = o.mk(c.close); s.trig = { CE: false, PE: false }; break;
       }
     }
   }
-  return { ...pb, anchor: { ref: r2(ref), since, why, rolls } };
+  return s;
+}
+export function planOut(s: PlanState) { return { ...s.pb, anchor: { ref: r2(s.ref), since: s.since, why: s.why, rolls: s.rolls } }; }
+export function anchoredPlans(o: { levels: Level[]; spot: number; prevClose: number; todays15: Candle[]; atr: number; chain: OiStrike[]; expiry: string | null; events: BreakEvent[]; nowMs?: number; levelsAt?: (ref: number) => Level[]; open?: { price: number; time: number } | null }) {
+  // today's own high/low keep changing as the day trades — shown on the chart, but they never re-shape the fixed plan.
+  // OI walls are ranked against the plan's ANCHOR (not the live price), so a wall never reshuffles the plan as price moves.
+  const mk: PlanMk = (ref) => plans({ levels: (o.levelsAt ? o.levelsAt(ref) : o.levels).filter((x) => x.kind !== "TODAY"), spot: o.spot, ref, atr: o.atr, chain: o.chain, expiry: o.expiry, events: o.events, nowMs: o.nowMs });
+  return planOut(planStep(planInit(o.prevClose, mk), { open: o.open, candles: o.todays15, mk }));
 }
 
 // ---------------------------------------------------------------- the trendlines an experienced trader keeps on the chart

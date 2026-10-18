@@ -167,3 +167,33 @@ test("gap open beyond a start re-anchors the plan to the opening price (once); a
   r = anchoredPlans({ ...base, spot: 115, todays15: [], open: { price: 115, time: t0 } });
   assert.match(r.anchor.why, /Gap-down open 115/); assert.ok(r.bull!.entry > 115);
 });
+test("P8 locked plan: later level changes (e.g. OI walls moving) never rewrite it; it re-reads levels only at a roll", async () => {
+  const { planInit, planStep, planOut, plans } = await import("./traderView");
+  const base: Level[] = [{ price: 150, label: "R1", kind: "PIVOT" }, { price: 141, label: "PDH", kind: "PREV DAY" }, { price: 120, label: "PDL", kind: "PREV DAY" }, { price: 110, label: "S1", kind: "PIVOT" }];
+  const moved: Level[] = [{ price: 160, label: "R2", kind: "PIVOT" }, { price: 135, label: "OI call wall", kind: "OI" }, { price: 125, label: "OI put wall", kind: "OI" }];
+  let levels = base;
+  const mk = (ref: number) => plans({ levels, spot: ref, ref, atr: 10, chain: [], expiry: null, events: [] });
+  const k = (i: number, c: number) => ({ time: 1_790_000_000 + i * 900, open: c, high: c + 1, low: c - 1, close: c, volume: 0 });
+  let st = planStep(planInit(130, mk), { open: { price: 131, time: 1_790_000_000 }, candles: [k(0, 132)], mk });
+  const entry0 = st.pb.bull!.entry;
+  levels = moved;                                          // the walls move …
+  st = planStep(st, { candles: [k(0, 132), k(1, 133)], mk });   // … and the plan advances without a roll
+  assert.equal(st.pb.bull!.entry, entry0); assert.equal(planOut(st).anchor.rolls.length, 0);
+  st = planStep(st, { candles: [k(2, 143), k(3, 151)], mk });   // triggers, then Target 1 → roll: NOW the new levels are read
+  assert.equal(planOut(st).anchor.rolls.length, 1); assert.match(planOut(st).anchor.why, /Target 1/);
+  assert.equal(st.lastTime, k(3, 0).time);
+});
+test("P9: a wall that appears between the entry and Target 1 is found (used to move a locked plan's Target 1)", async () => {
+  const { plans, wallInFront } = await import("./traderView");
+  const lv: Level[] = [{ price: 170, label: "R2", kind: "PIVOT" }, { price: 160, label: "R1", kind: "PIVOT" }, { price: 141, label: "PDH", kind: "PREV DAY" }, { price: 120, label: "PDL", kind: "PREV DAY" }];
+  const p = plans({ levels: lv, spot: 130, ref: 130, atr: 10, chain: [], expiry: null, events: [] }).bull!;
+  assert.equal(p.entry, 142); assert.equal(p.t1, 160);
+  // later in the day a call wall builds at 155 — in front of Target 1 160
+  const later: Level[] = [...lv, { price: 155, label: "OI call wall (90L)", kind: "OI" }];
+  assert.equal(wallInFront(later, p.entry, p.t1, 1, 10)!.price, 155);
+  assert.equal(wallInFront(later, p.entry, 155.5, 1, 10), null);          // a wall right at Target 1 is not "in front"
+  assert.equal(wallInFront(later, p.entry, p.t1, -1, 10), null);          // wrong direction
+  // a wall that is already the first level beyond the start simply IS Target 1
+  const withWall = plans({ levels: later, spot: 130, ref: 130, atr: 10, chain: [], expiry: null, events: [] }).bull!;
+  assert.equal(withWall.t1, 155);
+});

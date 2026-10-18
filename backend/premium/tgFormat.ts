@@ -46,6 +46,7 @@ function bestBlock(d: any, trade: any | null, eye: any | null, zh: any | null): 
     const { o, side } = b;
     const tag = o.state === "TRIGGERED" ? "✅ TRIGGERED" : o.state === "ARMED" ? "⏳ ARMED — wait for the close" : o.state === "APPROACHING" ? "👀 APPROACHING" : "· watching";
     L.push(`Status: <b>${tag}</b>`);
+    if (T?.rangeDay) L.push(`⚠️ <b>RANGE DAY</b> — ${esc(T.rangeDay.why)}: shown for information, no new trade.`);
     L.push(...planBlock(d, side));
     const rv = T?.review?.[side], why: string[] = rv?.reasoning || [];
     const dec = why[why.length - 1], wrong = why.find((x: string) => /^Wrong if/.test(x));
@@ -53,6 +54,7 @@ function bestBlock(d: any, trade: any | null, eye: any | null, zh: any | null): 
     if (wrong) L.push(`⚠️ ${esc(wrong)}`);
   } else {
     const P = T?.plans, nt = P?.noTrade;
+    if (T?.rangeDay) L.push(`⚠️ <b>RANGE DAY</b> — ${esc(T.rangeDay.why)}: no new trades after ${esc(T.rangeDay.at)}.`);
     L.push(`🧠 <b>Senior trader:</b> nothing to do right now — ${esc(T?.coach?.action ?? "wait")}.`);
     if (P?.bull || P?.bear) L.push(`${P?.bull ? `🟢 Bull only on a 15-min close above <b>${n0(P.bull.entry)}</b>` : ""}${P?.bull && P?.bear ? " · " : ""}${P?.bear ? `🔴 Bear only below <b>${n0(P.bear.entry)}</b>` : ""}`);
     if (nt && d.spot?.price >= nt.from && d.spot?.price <= nt.to) L.push(`<i>Price is in the no-trade zone ${n0(nt.from)}–${n0(nt.to)}: the middle pays nobody — wait for a side to break.</i>`);

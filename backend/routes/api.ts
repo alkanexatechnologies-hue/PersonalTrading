@@ -7645,6 +7645,11 @@ router.get("/backtest/option/strikes", async (req: Request, res: Response) => {
 const PC_VERSION = "premium-center/v1";
 const _pcLastChain = new Map<string, { at: number; v: any }>();
 const _pcWalls = new Map<string, { at: number; expiry: string; strikes: any[] }>();
+// P8 plan lock: one forward-only plan state per index / expiry choice / session day (survives restarts)
+const PLAN_LOCK_FILE = path.join(process.cwd(), "data", "plan-lock.json");
+const _planLock: Map<string, TV.PlanState> = (() => { try { const today = new Date(Date.now() + 19800000).toISOString().slice(0, 10); return new Map(Object.entries(JSON.parse(fs.readFileSync(PLAN_LOCK_FILE, "utf8"))).filter(([k]) => k.endsWith(":" + today)) as [string, TV.PlanState][]); } catch { return new Map(); } })();
+let _planLockT: NodeJS.Timeout | null = null;
+const planLockSave = () => { if (_planLockT) return; _planLockT = setTimeout(() => { _planLockT = null; try { fs.writeFileSync(PLAN_LOCK_FILE, JSON.stringify(Object.fromEntries(_planLock))); } catch { /* best-effort */ } }, 2000); };
 const _oiSnaps = new Map<string, { t: number; expiry: string; strikes: OFL.Strike[] }[]>();
 async function pcOptionCandles(underlying: string, side: "CE" | "PE", strike: number, expiry: string, intervalMin: number) {
   return cached(`pc-opt:${underlying}:${side}:${strike}:${expiry}:${intervalMin}`, 20_000, async () => {
@@ -7866,7 +7871,39 @@ async function premiumCenterPayload(query: Record<string, any>): Promise<any> {
           const prevCloseForPlan = (() => { const pd = [...daily].reverse().find((x: any) => dayOfT(x.time) < sessionDay); return pd?.close ?? spot; })();
           const todays15 = closed15.filter((c: any) => dayOfT(c.time) === sessionDay);
           const firstToday = session === "PRE-OPEN" ? null : c15All.find((c: any) => dayOfT(c.time) === sessionDay);   // the real 09:15 open (never the pre-open price)
-          const pb: any = spot != null ? TV.anchoredPlans({ open: firstToday ? { price: firstToday.open, time: firstToday.time } : null, levels, spot, prevClose: prevCloseForPlan, todays15, atr: atr15, chain: planChain, expiry, events, levelsAt: (ref: number) => TV.ladder({ daily, sessionDay, today, lines: lineLv, chain: planChain, spot: ref, atr: atr15 }) }) : { bull: null, bear: null, noTrade: null, anchor: null };
+          // P8 (approved 2026-10-18): during the session the plan is a LOCKED state that only moves forward with new closed
+          // 15-min candles; levels (incl. OI walls) are re-read only when it rolls. Pre-open / after the close it is computed fresh.
+          const ladAt = (ref: number) => TV.ladder({ daily, sessionDay, today, lines: lineLv, chain: planChain, spot: ref, atr: atr15 }).filter((x) => x.kind !== "TODAY");
+          const mkPlan = (ref: number) => TV.plans({ levels: ladAt(ref), spot: spot ?? ref, ref, atr: atr15, chain: planChain, expiry, events });
+          const openNow = firstToday ? { price: firstToday.open, time: firstToday.time } : null;
+          const lockKey = `${def.symbol}:${off}:${sessionDay}`, lockable = session === "OPEN" && sessionDay === calToday;
+          let pState: TV.PlanState | null = null;
+          if (spot != null) {
+            pState = lockable ? _planLock.get(lockKey) ?? TV.planInit(prevCloseForPlan, mkPlan) : TV.planInit(prevCloseForPlan, mkPlan);
+            pState = TV.planStep(pState, { open: openNow, candles: todays15, mk: mkPlan });
+            if (lockable) {
+              // P9 on a locked plan: a wall that appears IN FRONT of Target 1 later becomes Target 1 (the old Target 1 → Target 2)
+              for (const [p, dir] of [[pState.pb.bull, 1], [pState.pb.bear, -1]] as const) {
+                if (!p) continue;
+                const w = TV.wallInFront(ladAt(pState.ref), p.entry, p.t1, dir, atr15);
+                if (w) { (p as any).t2 = p.t1; (p as any).t2Label = p.t1Label; (p as any).t1 = w.price; (p as any).t1Label = `${w.label} — OI wall in front`; (p as any).rr = Math.round((Math.abs(w.price - p.entry) / Math.abs(p.entry - p.stop)) * 100) / 100; }
+              }
+              // P2 (approved 2026-10-18): RANGE DAY = by the 10:15 close the first hour broke a level UP and a level DOWN → no new trades
+              if ((pState as any).range === undefined && istMin >= 615 && openNow) {
+                const fh = todays15.filter((c: any) => Math.floor(((c.time + 19800) % 86400) / 60) < 615);
+                if (fh.length >= 4) {
+                  const br = LB.detectBreaks(fh as any, ladAt(openNow.price), atr15), up = br.find((e) => e.dir === "UP"), dn = br.find((e) => e.dir === "DOWN");
+                  (pState as any).range = up && dn ? { flag: true, at: "10:15", why: `first hour broke ${Math.round(up.level.price)} (${up.level.label}) UP and ${Math.round(dn.level.price)} (${dn.level.label}) DOWN` } : { flag: false };
+                }
+              }
+              _planLock.set(lockKey, pState); planLockSave();
+            }
+          }
+          const pb: any = pState ? TV.planOut(pState) : { bull: null, bear: null, noTrade: null, anchor: null };
+          if (pb.anchor) pb.anchor.locked = lockable;
+          const rangeDay = (pState as any)?.range?.flag ? (pState as any).range : null;
+          // live parts of a locked plan: the premium of its strike now
+          for (const p of [pb.bull, pb.bear]) if (p && p.strike != null) { const row: any = planChain.find((x: any) => x.strike === p.strike); const lp = row ? (p.side === "CE" ? row.ceLtp : row.peLtp) : null; if (lp != null) p.premNow = lp; }
           const arbFresh = !!(arb && arb.candleTime && nowSec - arb.candleTime <= 15 * 60);
           const cz = TV.coach({ session, istMin, dataStatus, spot: spot ?? 0, atr: atr15, closed15, bull: pb.bull, bear: pb.bear, trends,
             arbiter: arb ? { finalAction: arb.finalAction, reason: arb.reason, fresh: arbFresh } : null,
@@ -7895,7 +7932,7 @@ async function premiumCenterPayload(query: Record<string, any>): Promise<any> {
               const today5 = c5c.filter((c: any) => dayOfT(c.time) === dayOfT(nowSec)), today15 = closed15.filter((c: any) => dayOfT(c.time) === dayOfT(nowSec));
               return { m15: today15.length ? readCandle(today15.slice(-2), "15-min", lv, atr15) : null, m5: today5.length ? readCandle(today5.slice(-2), "5-min", lv, atr15 / Math.sqrt(3)) : null };
             })(),
-            plans: pb, coach: cz, lines: draw, future, tomorrow: tm, atr15: Math.round(atr15 * 100) / 100, planFor: sessionDay,
+            plans: pb, coach: cz, lines: draw, future, tomorrow: tm, atr15: Math.round(atr15 * 100) / 100, planFor: sessionDay, rangeDay,
             radar: (() => {
               // the forming 15-min candle (live only) — shown and counted down, never used as a confirmation
               const f15 = session === "OPEN" && c15All.length && c15All[c15All.length - 1].time + 900 > nowSec ? c15All[c15All.length - 1] : null;
@@ -8926,19 +8963,23 @@ async function copilotTick() {
           cpSave();
         }
         // new opportunities (every setup, with its risk grade — never hidden), confirmed on two consecutive polls
+        // Fix 3 (approved 2026-10-18): a plan whose Bear start is at/above its Bull start is a CONFLICT — stand aside, no triggers
+        const conflict = T.plans?.bull && T.plans?.bear && T.plans.bear.entry >= T.plans.bull.entry;
+        if (conflict && istMin >= 570 && istMin <= 870 && !_cp.sent[`conflict|${sym}`]) { _cp.sent[`conflict|${sym}`] = nowSec; cpSave(); cpSend(`⚠️ <b>${d.name} · PLAN CONFLICT — STAND ASIDE</b>\nBear start ${Math.round(T.plans.bear.entry)} is at/above Bull start ${Math.round(T.plans.bull.entry)} — no trade until the plan rolls.`, true); }
         for (const side of ["bull", "bear"] as const) {
-          const o = T.radar?.[side], p = T.plans?.[side]; if (!o || !p || p.strike == null) continue;
-          const key = `${sym}|${side}`, sig = `${o.state}|${p.entry}`, confirmed = _cp.seen[key] === sig; _cp.seen[key] = sig;
+          const o = T.radar?.[side], p = T.plans?.[side]; if (!o || !p || p.strike == null || conflict) continue;
+          const key = `${sym}|${side}`, sig = `${o.state}|${Math.round(p.trigger)}`, confirmed = _cp.seen[key] === sig; _cp.seen[key] = sig;
           if (!confirmed || istMin < 570 || istMin > 870) continue;
-          if (o.state === "TRIGGERED" && !_cp.sent[`trig|${key}|${p.entry}`]) {
-            _cp.sent[`trig|${key}|${p.entry}`] = nowSec;
+          if (o.state === "TRIGGERED" && !_cp.sent[`trig|${key}|${Math.round(p.trigger)}`]) {
+            _cp.sent[`trig|${key}|${Math.round(p.trigger)}`] = nowSec;
             // REVIEW BEFORE SENDING: every check against the Dhan data + Market Eye + today's losses. A/B = given, C = watch only (shown, never hidden)
             const eye = await eyeFor(sym, { price: d.spot.price, changePct: d.spot.changePct, high: d.spot.high, low: d.spot.low }).catch(() => null);
             const rv = TRV.reviewTrade(d, side, { istMin, eye, lossesToday: cpLossesToday() });
             const rvH = rv ? TG.SPLIT + TRV.reviewHtml(rv) : "";
             const free = tracked && !(_cp.trades[sym] && _cp.trades[sym].state !== "CLOSED") && nowSec - (_cp.sent[`cool|${sym}`] || 0) > 15 * 60;
             const opp = TG.tradeAlert(d, side, "TRIGGERED", cpOdds(sym));
-            if (free && rv && rv.grade !== "C") { const t: any = CP.openTrade(d, side, nowSec); if (t) { t.review = { grade: rv.grade, score: rv.score, passed: rv.passed, failed: rv.failed }; _cp.trades[sym] = t; cpSend(`📌 <b>TRADE GIVEN (review ${rv.grade}${rv.grade === "B" ? " — HALF SIZE" : ""})</b> — I will follow it and message you at Target 1, Target 2, stop or 15:12.\n` + opp + rvH, true); } }
+            if (free && T.rangeDay) cpSend(`⚠️ <b>RANGE DAY — shown, not given</b> (${T.rangeDay.why}; no new trades after ${T.rangeDay.at})\n` + opp + rvH, true);
+            else if (free && rv && rv.grade !== "C") { const t: any = CP.openTrade(d, side, nowSec); if (t) { t.review = { grade: rv.grade, score: rv.score, passed: rv.passed, failed: rv.failed }; _cp.trades[sym] = t; cpSend(`📌 <b>TRADE GIVEN (review ${rv.grade}${rv.grade === "B" ? " — HALF SIZE" : ""})</b> — I will follow it and message you at Target 1, Target 2, stop or 15:12.\n` + opp + rvH, true); } }
             else if (free && rv?.grade === "C") cpSend(`⚠️ <b>REVIEW SAYS SKIP — not given as a trade (watch only)</b>\n` + opp + rvH, true);
             else cpSend(opp + rvH + (tracked ? "\n  (A trade on this index is already open — shown for information.)" : ""), true);
           } else if (o.state === "ARMED" && nowSec - (_cp.sent[`armed|${key}`] || 0) > 20 * 60) {
@@ -8995,6 +9036,7 @@ async function copilotTick() {
           const bars = all.filter((c: any) => new Date((c.time + 19800) * 1000).toISOString().slice(0, 10) === day && c.time + mins * 60 <= nowSec);
           for (const e of LB.detectBreaks(bars, levels, a)) {
             if (e.index !== bars.length - 1) continue;   // only the candle that just closed (never replays old breaks)
+            if (tf === "5m" && Math.floor(((e.bar.time + 19800) % 86400) / 60) < 570) continue;   // P7 (approved 2026-10-18): 5-min breaks before 09:30 are noise
             const key = `brk|${sym}|${tf}|${e.dir}|${Math.round(e.level.price)}`; if (_cp.sent[key]) continue;
             _cp.sent[key] = nowSec; cpSave();
             const rec = _lbStats?.rows?.[`${tf}|${e.dir}|${e.q.grade}`] ?? null;
