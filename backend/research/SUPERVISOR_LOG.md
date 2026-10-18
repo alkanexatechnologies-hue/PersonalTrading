@@ -90,3 +90,13 @@ The owner does not want expiry day skipped. Given the expiry study, the owner ch
 - **Normal plan triggers on expiry day** stay "shown, not given".
 
 **Status:** NOT validated as profitable. Promote to normal size only if 6–8 forward expiries are positive after costs.
+
+## 2026-10-18 · Owner's idea: "direction first, enter on the liquidity sweep" (`protrader/RESULTS_STRUCTURE.md`)
+
+**Tested:** 7 versions plus a direction filter on the live logic.
+
+**Verdict: REJECT, all versions.** None beats the live logic in development and validation for both indices. NIFTY stop
+rate is 67% with candle stops; wider structural stops leave too few trades; the direction filter is worse per trade in 3
+of 4 cells.
+
+**Live logic unchanged:** plan trigger + retest entry, expiry-day plan trades not given (expiry mode is paper).

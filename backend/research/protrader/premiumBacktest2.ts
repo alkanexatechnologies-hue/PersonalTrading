@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as TV from "../../premium/traderView";
 import * as LB from "../../premium/levelBreak";
 import { atr } from "../../indicators";
+import { confirmedSwings } from "../../premium/premiumCenter";
 import { assemble, DayData, Min } from "../nifty20/data";
 import { assembleIndex } from "../multiIndex/data";
 
@@ -11,7 +12,7 @@ type Bar = { time: number; open: number; high: number; low: number; close: numbe
 const IST = 19800, mn = (t: number) => Math.floor(((t + IST) % 86400) / 60);
 const COST = (p: number) => Math.max(0.5, 0.0025 * p);
 const IDX = { NIFTY: { step: 50, lot: 75 }, SENSEX: { step: 100, lot: 20 } } as const;
-export type Cfg = { name: string; range: boolean; cutoff: number; skipExpiry: boolean; entry: "plan" | "retest" | "sweep"; wideStop: boolean };
+export type Cfg = { name: string; range: boolean; cutoff: number; skipExpiry: boolean; entry: "plan" | "retest" | "sweep"; wideStop: boolean; structFilter?: boolean };
 const BASE: Cfg = { name: "B_live", range: true, cutoff: 885, skipExpiry: false, entry: "plan", wideStop: false };
 const CFGS: Cfg[] = [
   BASE,
@@ -49,6 +50,9 @@ export function run(cfgs = CFGS) {
       const lad = (ref: number) => TV.ladder({ daily: dly as any, sessionDay: D, today: { high: null, low: null }, lines, chain: [], spot: ref, atr: a }).filter((x) => x.kind !== "TODAY");
       const mk = (ref: number) => TV.plans({ levels: lad(ref), spot: ref, ref, atr: a, chain: [], expiry: null, events: [] });
       const B = b15[i], B5 = b5[i], M = mins[i], pc = dly[dly.length - 1].close, open = { price: B[0].open, time: B[0].time };
+      // owner's "direction first": 15-min structure (yesterday + today) as of a minute → 1 (HH+HL) / −1 (LH+LL) / 0
+      const c15s = [...b15[i - 1], ...B], sw15 = confirmedSwings(c15s as any, 2), n15y = b15[i - 1].length;
+      const structAt = (m: number) => { const k = n15y + Math.floor((m - 555) / 15) - 1; const w = sw15.filter((x) => x.index + 2 <= k), H = w.filter((x) => x.kind === "HIGH"), L = w.filter((x) => x.kind === "LOW"); if (H.length < 2 || L.length < 2) return 0; const up = H[H.length - 1].price > H[H.length - 2].price && L[L.length - 1].price > L[L.length - 2].price, dn = H[H.length - 1].price < H[H.length - 2].price && L[L.length - 1].price < L[L.length - 2].price; return up ? 1 : dn ? -1 : 0; };
       const fh = B.filter((c) => mn(c.time) < 615), br = LB.detectBreaks(fh as any, lad(B[0].open), a);
       const rangeAt = br.some((e) => e.dir === "UP") && br.some((e) => e.dir === "DOWN") ? 615 : null;
       // ---- plan signals (live forward-only plan)
@@ -96,6 +100,7 @@ export function run(cfgs = CFGS) {
           }
           if (cfg.wideStop) g.stop = g.trigger - g.s * 0.75 * a;
           if (g.m < freeAt || g.m > cfg.cutoff) continue;
+          if (cfg.structFilter && structAt(g.m) !== g.s) { trades.push({ cfg: cfg.name, idx: name, day: D, i, n: days.length, res: "AGAINST-STRUCTURE" }); continue; }
           if (cfg.range && rangeAt != null && g.m > rangeAt) { trades.push({ cfg: cfg.name, idx: name, day: D, i, n: days.length, res: "RANGE-SKIP" }); continue; }
           const strike = Math.round(g.entryIdx / step) * step, leg = days[i].legs.get(`${strike}${g.s > 0 ? "CE" : "PE"}`), e0 = premAt(leg, g.t);
           if (e0 == null || e0 <= 0) { trades.push({ cfg: cfg.name, idx: name, day: D, i, n: days.length, res: "NO-PREMIUM" }); continue; }
