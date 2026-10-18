@@ -9,6 +9,15 @@ const hm = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(11, 1
 const LINE = "━━━━━━━━━━━━━━━";
 /** Clear gap between the NIFTY and SENSEX sections of one message. */
 const GAP = `\n\n${LINE}\n\n`;
+/** Section boundary: the sender sends every section as its own short Telegram message, in order. */
+export const SPLIT = "\n\u2063§SPLIT§\u2063\n";
+export function splitParts(text: string): string[] { return String(text).split(SPLIT).map((x) => x.trim()).filter(Boolean); }
+const icon = (d: any) => (d?.symbol === "^BSESN" ? "🟣" : "🔵");
+/** Review in one short line: grade, verdict, how many checks passed and which ones failed. */
+export function reviewShort(rv: any): string[] {
+  const ok = rv.checks.filter((c: any) => c.ok === true).length, bad = rv.checks.filter((c: any) => c.ok === false).map((c: any) => esc(c.label));
+  return [`🧪 <b>Review ${esc(rv.grade)}</b> ${esc(rv.score)}% → <b>${esc(rv.verdict)}</b>`, `✓ ${ok} passed${bad.length ? ` · ✗ ${bad.length} failed: ${bad.join(", ")}` : " · nothing failed"}`];
+}
 const arrow = (v: number | null | undefined) => (v == null ? "" : v > 0 ? "▲" : v < 0 ? "▼" : "▬");
 const short = (name: string) => String(name || "").replace(" 50", "");
 const priceLine = (d: any) => `<b>${n0(d.spot?.price)}</b>  ${arrow(d.spot?.change)} ${d.spot?.change > 0 ? "+" : ""}${n0(d.spot?.change)} (${d.spot?.changePct > 0 ? "+" : ""}${esc(d.spot?.changePct)}%) · H ${n0(d.spot?.high)} · L ${n0(d.spot?.low)}`;
@@ -54,7 +63,7 @@ function bestBlock(d: any, trade: any | null, eye: any | null, zh: any | null): 
 /** 15-minute message: the best opportunity on NIFTY and SENSEX, together. */
 export function bestOpportunityMsg(items: { d: any; trade: any | null; eye: any | null; zh: any | null }[]): string {
   const t = hm(Math.floor(Date.now() / 1000));
-  return [`⭐ <b>BEST OPPORTUNITY</b> · ${t}`, LINE, ...items.filter((x) => x.d?.available).map((x) => bestBlock(x.d, x.trade, x.eye, x.zh)).join(GAP).split("\n"), LINE, "<i>Start = a 15-min candle CLOSE beyond the level · advisory only, the arbiter decides</i>"].join("\n");
+  return items.filter((x) => x.d?.available).map((x) => [`⭐ <b>BEST OPPORTUNITY · ${esc(short(x.d.name))}</b> · ${t}`, bestBlock(x.d, x.trade, x.eye, x.zh), "<i>Start = a 15-min candle CLOSE beyond the level · advisory only</i>"].join("\n")).join(SPLIT);
 }
 /** 30-minute message: the full read of one index. */
 export function fullReadMsg(d: any, trade: any | null, eye: any | null, zh: any | null, odds?: string): string {
@@ -64,10 +73,7 @@ export function fullReadMsg(d: any, trade: any | null, eye: any | null, zh: any 
   L.push("🕯 <b>Candles</b>");
   if (c?.m5) L.push(`• ${candleShort(c.m5)}`); if (c?.m15) L.push(`• ${candleShort(c.m15)}`);
   L.push(`📐 <b>Trend</b>  ${(T.trends || []).map((x: any) => `${esc(x.tf)} ${x.verdict === "UP" ? "▲" : x.verdict === "DOWN" ? "▼" : "▬"}`).join(" · ")}`);
-  L.push(LINE);
   void b; void r; void rb; void rr;
-  L.push(...planBlock(d, "bull"), LINE, ...noTradeBlock(d), LINE, ...planBlock(d, "bear"));
-  if (d.oi) L.push(LINE, ...oiHtml(d.oi, { expiry: d.expiry }));
   L.push(`🧭 <b>${esc(T.coach?.action ?? "")}</b>`);
   if (T.coach?.why) L.push(`<i>${esc(T.coach.why)}</i>`);
   if (trade && trade.state !== "CLOSED") L.push(`📌 Open trade ${trade.strike} ${trade.side} from ${n0(trade.entrySpot)} (₹${n0(trade.entryPrem)}) · ${trade.state === "T1" ? "T1 done, SL at breakeven" : `SL ${n0(trade.stop)} · T1 ${n0(trade.t1)}`}`);
@@ -79,7 +85,7 @@ export function fullReadMsg(d: any, trade: any | null, eye: any | null, zh: any 
   }
   if (odds) L.push(`<i>📊 ${esc(odds)}</i>`);
   L.push("<i>History and levels, not a forecast · the arbiter decides</i>");
-  return L.join("\n");
+  return [L.join("\n"), boardParts(d)].join(SPLIT);
 }
 /** Event alert from a plain-text body: bold title line, emphasised "→" action lines, everything escaped. */
 export function htmlify(plain: string): string {
@@ -90,29 +96,24 @@ export function htmlify(plain: string): string {
 export function nextDayPlanMsg(items: { d: any; odds?: string }[]): string {
   const ok = items.filter((x) => x.d?.available && x.d.trader && !x.d.trader.error);
   const forDay = ok[0]?.d.trader.planFor ?? "next session";
-  const L = [`🗓 <b>NEXT-DAY PLAN</b> · for <b>${esc(forDay)}</b>`, `<i>prepared ${hm(Math.floor(Date.now() / 1000))} from today's finished session</i>`];
-  for (const [ix, { d, odds }] of ok.entries()) {
-    if (ix > 0) L.push("", "");   // clear gap between NIFTY and SENSEX
-    const T = d.trader, s = d.spot, b = T.plans?.bull, r = T.plans?.bear, px = s?.price;
-    const prem = (p: any) => (p?.premNow != null && p.premNow >= 1 ? `₹${n0(p.premNow)}` : "premium at the open");
-    L.push(LINE, `${d.symbol === "^BSESN" ? "🟣" : "🔵"} <b>${esc(short(d.name))}</b>  closed <b>${n0(px)}</b> ${arrow(s?.change)} ${s?.changePct > 0 ? "+" : ""}${esc(s?.changePct)}%`);
-    L.push(`  Today O ${n0(s?.open)} · H ${n0(s?.high)} · L ${n0(s?.low)}`);
+  if (!ok.length) return `🗓 <b>NEXT-DAY PLAN</b> · for <b>${esc(forDay)}</b>\nPlan unavailable — data not loaded.`;
+  const parts: string[] = [];
+  for (const { d, odds } of ok) {
+    // per index: 1 short summary message, then Bull plan · No-trade zone · Bear plan · OI movement
+    const T = d.trader, s = d.spot, px = s?.price;
+    const L = [`🗓 <b>NEXT-DAY PLAN · ${esc(short(d.name))}</b> · for <b>${esc(forDay)}</b>`, `${icon(d)} closed <b>${n0(px)}</b> ${arrow(s?.change)} ${s?.changePct > 0 ? "+" : ""}${esc(s?.changePct)}% · O ${n0(s?.open)} · H ${n0(s?.high)} · L ${n0(s?.low)}`];
     const lv = (T.levels || []).filter((x: any) => Number.isFinite(x.price) && px != null);
     const above = lv.filter((x: any) => x.price > px).sort((a: any, c: any) => a.price - c.price).slice(0, 3);
     const below = lv.filter((x: any) => x.price < px).sort((a: any, c: any) => c.price - a.price).slice(0, 3);
-    if (above.length) L.push(`  ⬆ ${above.map((x: any) => `${n0(x.price)} <i>${esc(x.label)}</i>`).join(" · ")}`);
-    if (below.length) L.push(`  ⬇ ${below.map((x: any) => `${n0(x.price)} <i>${esc(x.label)}</i>`).join(" · ")}`);
-    void prem;
-    void b; void r;
-    L.push(...planBlock(d, "bull"), ...noTradeBlock(d), ...planBlock(d, "bear"));
-    if (d.oi) L.push(...oiHtml(d.oi, { expiry: d.expiry }));
-    for (const sc of (T.tomorrow?.scenarios || []).slice(0, 3)) L.push(`  • ${esc(sc)}`);
-    if (d.expiry && d.expiry === forDay) L.push(`  🎲 <b>Expiry day</b> — zero-hero search 09:30–15:10`);
-    if (odds) L.push(`  <i>📊 ${esc(odds)}</i>`);
+    if (above.length) L.push(`⬆ ${above.map((x: any) => `${n0(x.price)} <i>${esc(x.label)}</i>`).join(" · ")}`);
+    if (below.length) L.push(`⬇ ${below.map((x: any) => `${n0(x.price)} <i>${esc(x.label)}</i>`).join(" · ")}`);
+    for (const sc of (T.tomorrow?.scenarios || []).slice(0, 3)) L.push(`• ${esc(sc)}`);
+    if (d.expiry && d.expiry === forDay) L.push(`🎲 <b>Expiry day</b> — zero-hero search 09:30–15:10`);
+    if (odds) L.push(`<i>📊 ${esc(odds)}</i>`);
+    L.push("<i>Re-checked at 09:13 with the live open · advisory only</i>");
+    parts.push(L.join("\n"), boardParts(d));
   }
-  if (!ok.length) L.push("Plan unavailable — data not loaded.");
-  L.push(LINE, "<i>Re-checked at 09:13 with the live open · advisory only, the arbiter decides</i>");
-  return L.join("\n");
+  return parts.join(SPLIT);
 }
 /**
  * Bold every Stop-loss / Target value and every danger detail in an HTML message, outside existing <b>…</b> (no nesting,
@@ -187,15 +188,12 @@ export function planBlock(d: any, side: "bull" | "bear", o: { candle?: boolean }
   if (!p) return [`${ce ? "🟢" : "🔴"} <b>${ce ? "BULL" : "BEAR"} PLAN</b> — no level ${ce ? "above" : "below"} the price`];
   const expired = p.premNow != null && p.premNow < 1;
   const rk = p.triggerRisk?.risk, L: string[] = [];
-  L.push(`${ce ? "🟢" : "🔴"} <b>${ce ? "BULL" : "BEAR"} PLAN</b>${rk ? ` · <b>${esc(RISKW[rk] ?? rk)}</b>` : ""}`);
+  L.push(`${ce ? "🟢" : "🔴"} <b>${esc(idx)} · ${ce ? "BULL" : "BEAR"} PLAN</b>${rk ? ` · <b>${esc(RISKW[rk] ?? rk)}</b>` : ""}`);
   L.push(`Starts on a 15-min close ${ce ? "above" : "below"} <b>${n0(p.entry)}</b>`);
   L.push(`Buy <b>${p.strike ?? "—"} ${leg}</b> ${expired ? "(premium at the open)" : p.premNow != null ? `(now ₹${n0(p.premNow)})` : ""}`);
   if (p.premPos && !expired) L.push(p.premPos.danger ? `<b>${esc(p.premPos.text)}</b>` : `Premium ${esc(p.premPos.text)}`);
   const rv = T?.review?.[side];
-  if (rv) {
-    L.push(`🧪 <b>Review ${esc(rv.grade)}</b> ${esc(rv.score)}% → <b>${esc(rv.verdict)}</b>`);
-    L.push(rv.checks.map((c: any) => `${c.ok === true ? "✓" : c.ok === false ? "✗" : "~"} ${esc(c.label)}`).join(" · "));
-  }
+  if (rv) L.push(...reviewShort(rv));
   const pr = (v: number | null | undefined) => (expired || v == null || !Number.isFinite(v) ? "—" : `₹${n0(v)}`);
   const row = (lbl: string, lvl: number, pv: number | null | undefined, pts: string) => `${pad(lbl, 9)}${pad(n0(lvl), 7, true)}${pad(pr(pv), 7, true)}${pad(pts, 7, true)}`;
   const d1 = (lvl: number) => `${(ce ? lvl - p.entry : p.entry - lvl) >= 0 ? "+" : "−"}${n0(Math.abs(lvl - p.entry))}`;
@@ -211,7 +209,7 @@ export function planBlock(d: any, side: "bull" | "bear", o: { candle?: boolean }
 export function noTradeBlock(d: any): string[] {
   const T = d?.trader, nt = T?.plans?.noTrade, spot = d?.spot?.price; if (!T) return [];
   const L: string[] = [];
-  if (nt) L.push(`⏸ <b>NO-TRADE ZONE</b> ${n0(nt.from)} – ${n0(nt.to)}`, `${n0(nt.to - nt.from)} pts wide (${((nt.to - nt.from) / (T.atr15 || 1)).toFixed(1)} × ATR)`);
+  if (nt) L.push(`⏸ <b>${esc(short(d?.name))} · NO-TRADE ZONE</b> ${n0(nt.from)} – ${n0(nt.to)}`, `${n0(nt.to - nt.from)} pts wide (${((nt.to - nt.from) / (T.atr15 || 1)).toFixed(1)} × ATR)`);
   if (spot == null) return L;
   const lv = (T.levels || []).filter((v: any) => v.risk && v.risk.risk !== "FAR");
   const near = (arr: any[]) => arr.sort((a, b) => Math.abs(a.price - spot) - Math.abs(b.price - spot))[0];
@@ -224,9 +222,12 @@ export function noTradeBlock(d: any): string[] {
   return L;
 }
 /** The whole board for one index: Bull plan · No-trade zone · Bear plan. */
+/** Bull plan · No-trade zone · Bear plan · OI movement — four short messages. */
+export function boardParts(d: any): string {
+  const parts = [planBlock(d, "bull").join("\n"), noTradeBlock(d).join("\n"), planBlock(d, "bear").join("\n")];
+  if (d?.oi) parts.push(oiHtml(d.oi, { expiry: d.expiry, name: short(d.name) }).join("\n"));
+  return parts.join(SPLIT);
+}
 export function planBoardMsg(d: any, title = "TRADE PLAN"): string {
-  const L = [`${d?.symbol === "^BSESN" ? "🟣" : "🔵"} <b>${esc(short(d?.name))} — ${esc(title)}</b> · ${n0(d?.spot?.price)} · ${hm(Math.floor(Date.now() / 1000))}`, LINE];
-  L.push(...planBlock(d, "bull"), LINE, ...noTradeBlock(d), LINE, ...planBlock(d, "bear"));
-  if (d?.oi) L.push(LINE, ...oiHtml(d.oi, { expiry: d.expiry }));
-  return L.join("\n");
+  return `${icon(d)} <b>${esc(short(d?.name))} — ${esc(title)}</b> · ${n0(d?.spot?.price)} · ${hm(Math.floor(Date.now() / 1000))}\n` + boardParts(d);
 }

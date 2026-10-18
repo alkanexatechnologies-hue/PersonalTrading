@@ -8870,7 +8870,7 @@ async function cpDrain() {
   } finally { _cpSending = false; }
 }
 // plain builder text → HTML alert (bold title / action lines, escaped); pre-built HTML messages pass `html: true`
-const cpSend = (text: string, htmlReady = false) => { _cpQueue.push({ text: TG.emphasize(htmlReady ? text : TG.htmlify(CP.stripTags(text))), html: true }); cpDrain().catch(() => {}); try { fs.appendFileSync(path.join(process.cwd(), "data", "copilot-log.txt"), `\n[${new Date(Date.now() + 19800000).toISOString().slice(0, 19)}]\n${String(text).replace(/<[^>]+>/g, "")}\n`); } catch { /* best-effort */ } };
+const cpSend = (text: string, htmlReady = false) => { for (const part of TG.splitParts(text)) _cpQueue.push({ text: TG.emphasize(htmlReady ? part : TG.htmlify(CP.stripTags(part))), html: true }); cpDrain().catch(() => {}); try { fs.appendFileSync(path.join(process.cwd(), "data", "copilot-log.txt"), `\n[${new Date(Date.now() + 19800000).toISOString().slice(0, 19)}]\n${String(text).replace(/<[^>]+>/g, "")}\n`); } catch { /* best-effort */ } };
 const _published = (() => { try { return JSON.parse(fs.readFileSync(path.join(process.cwd(), "backend", "research", "published", "odds.json"), "utf8")); } catch { return null; } })();
 function cpOdds(sym: string): string | undefined {
   const ix = ({ "^NSEI": "NIFTY", "^NSEBANK": "BANKNIFTY", "^BSESN": "SENSEX", "^CNXFIN": "FINNIFTY", "^NSEMDCP50": "MIDCPNIFTY" } as Record<string, string>)[sym];
@@ -8928,7 +8928,7 @@ async function copilotTick() {
             // REVIEW BEFORE SENDING: every check against the Dhan data + Market Eye + today's losses. A/B = given, C = watch only (shown, never hidden)
             const eye = await eyeFor(sym, { price: d.spot.price, changePct: d.spot.changePct, high: d.spot.high, low: d.spot.low }).catch(() => null);
             const rv = TRV.reviewTrade(d, side, { istMin, eye, lossesToday: cpLossesToday() });
-            const rvH = rv ? "\n" + TRV.reviewHtml(rv) : "";
+            const rvH = rv ? TG.SPLIT + TRV.reviewHtml(rv) : "";
             const free = tracked && !(_cp.trades[sym] && _cp.trades[sym].state !== "CLOSED") && nowSec - (_cp.sent[`cool|${sym}`] || 0) > 15 * 60;
             const opp = TG.tradeAlert(d, side, "TRIGGERED", cpOdds(sym));
             if (free && rv && rv.grade !== "C") { const t: any = CP.openTrade(d, side, nowSec); if (t) { t.review = { grade: rv.grade, score: rv.score, passed: rv.passed, failed: rv.failed }; _cp.trades[sym] = t; cpSend(`📌 <b>TRADE GIVEN (review ${rv.grade}${rv.grade === "B" ? " — HALF SIZE" : ""})</b> — I will follow it and message you at Target 1, Target 2, stop or 15:12.\n` + opp + rvH, true); } }
@@ -8937,7 +8937,7 @@ async function copilotTick() {
           } else if (o.state === "ARMED" && nowSec - (_cp.sent[`armed|${key}`] || 0) > 20 * 60) {
             _cp.sent[`armed|${key}`] = nowSec;
             const rv = TRV.reviewTrade(d, side, { istMin, lossesToday: cpLossesToday() });
-            cpSend(TG.tradeAlert(d, side, "ARMED", cpOdds(sym)) + (rv ? "\n" + TRV.reviewHtml(rv, false) + "\n  <i>(full review with the trader's reasoning when the candle closes)</i>" : ""), true);
+            cpSend(TG.tradeAlert(d, side, "ARMED", cpOdds(sym)) + (rv ? TG.SPLIT + TRV.reviewHtml(rv, false) + "\n  <i>(full review with the trader's reasoning when the candle closes)</i>" : ""), true);
           }
         }
         cpSave();

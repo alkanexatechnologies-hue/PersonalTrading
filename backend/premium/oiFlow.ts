@@ -63,7 +63,7 @@ const esc = (s: any) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&l
 const n0 = (v: number) => Math.round(v).toLocaleString("en-IN");
 const tiltTxt = (t: number | null) => (t == null ? "—" : `Bulls ${t}% · Bears ${100 - t}%`);
 /** Telegram block. compact = totals + tilt + the latest 5-minute window only. */
-export function oiHtml(f: OiFlow, o: { compact?: boolean; expiry?: string | null } = {}): string[] {
+export function oiHtml(f: OiFlow, o: { compact?: boolean; expiry?: string | null; name?: string } = {}): string[] {
   const out: string[] = [];
   const w = (x: OiFlow["windows"][number]) => `${x.fromMin}→${x.toMin} min ago: CE ${sgnL(x.ce)} · PE ${sgnL(x.pe)}${x.top ? ` · most at <b>${x.top.side} ${n0(x.top.strike)} ${sgnL(x.top.chg)}</b> (${esc(x.top.meaning)})` : ""}`;
   const lastW = f.windows[f.windows.length - 1];
@@ -72,7 +72,7 @@ export function oiHtml(f: OiFlow, o: { compact?: boolean; expiry?: string | null
     if (lastW) out.push(`   last 5 min ${w(lastW).replace(/^\d+→\d+ min ago: /, "")}`);
     return out;
   }
-  out.push(`📊 <b>OI MOVEMENT</b>${o.expiry ? ` (expiry ${esc(o.expiry)})` : ""}`);
+  out.push(`📊 <b>${o.name ? `${esc(o.name)} · ` : ""}OI MOVEMENT</b>${o.expiry ? ` (expiry ${esc(o.expiry)})` : ""}`);
   out.push(`Total OI: CE <b>${f.totalCeL}L</b> (${sgnL(f.totalCeChg)} today) · PE <b>${f.totalPeL}L</b> (${sgnL(f.totalPeChg)} today) · PCR <b>${f.pcr ?? "—"}</b>`);
   out.push(`⚖️ OI tilt near the price today: <b>${tiltTxt(f.tiltToday)}</b> → <b>${f.bias}</b> — ${esc(f.biasWhy)}`);
   out.push(`🧱 Call wall <b>${n0(f.callWall.strike)}</b> · ${f.callWall.oiL}L (${sgnL(f.callWall.chg)} today) = resistance${f.callWall.chainMax ? ` · chain's biggest ${n0(f.callWall.chainMax.strike)} (${f.callWall.chainMax.oiL}L)` : ""}`);

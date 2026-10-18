@@ -20,7 +20,7 @@ test("next-day plan: date, both sides with SL/targets/risk, nearest levels, expi
   x.trader.levels = [{ price: 23157, label: "R1 pivot" }, { price: 22897, label: "Pivot <PP>" }, { price: 24000, label: "Major call OI" }];
   x.trader.tomorrow = { scenarios: ["Gap-up above 23060: wait"] };
   const m = nextDayPlanMsg([{ d: x, odds: "no proven edge" }]);
-  assert.match(m, /NEXT-DAY PLAN<\/b> · for <b>2026-10-16/);
+  assert.match(m, /NEXT-DAY PLAN · NIFTY<\/b> · for <b>2026-10-16/);
   assert.match(m, /BULL PLAN<\/b>/); assert.match(m, /Starts on a 15-min close above <b>23,060<\/b>/);
   assert.match(m, /Buy <b>23050 CE<\/b> \(premium at the open\)/); assert.match(m, /Buy <b>22900 PE<\/b> \(now ₹110\)/);
   assert.match(m, /<pre>[\s\S]*Stop\s+23,040[\s\S]*Target 1\s+23,100[\s\S]*<\/pre>/);
@@ -64,9 +64,18 @@ test("plan board: screen layout, monospace table untouched by bold, lowest-risk 
   (x.trader as any).levels = [{ price: 22950, label: "OI put wall", risk: { risk: "MEDIUM", bounce: true } }, { price: 23100, label: "R1", risk: { risk: "LOW" } }];
   (x.trader as any).review = { bull: { grade: "B", score: 66, verdict: "TAKE SMALL — half size", checks: [{ ok: true, label: "trend" }, { ok: false, label: "15-min close" }] } };
   const m = emphasize(planBoardMsg(x));
-  assert.match(m, /NIFTY — TRADE PLAN/); assert.match(m, /Review B<\/b> 66% → <b>TAKE SMALL/); assert.match(m, /✓ trend · ✗ 15-min close/);
+  assert.match(m, /NIFTY — TRADE PLAN/); assert.match(m, /Review B<\/b> 66% → <b>TAKE SMALL/); assert.match(m, /✓ 1 passed · ✗ 1 failed: 15-min close/);
   const pre = m.match(/<pre>([\s\S]*?)<\/pre>/)![1];
   assert.ok(!/<b>/.test(pre), "no tags inside <pre>"); assert.match(pre, /Target 2\s+23,200\s+₹190\s+\+140/);
   assert.match(m, /NO-TRADE ZONE<\/b> 22,890 – 23,060\n170 pts wide \(4\.3 × ATR\)/);
   assert.match(m, /CE on a bounce from <b>22,950<\/b> \(OI put wall\)/); assert.match(m, /CE on a 15-min close above <b>23,100<\/b> — LOW-RISK break/);
+});
+test("messages are split into short sections: board = Bull · No-trade · Bear (· OI); best opportunity = one per index", async () => {
+  const { planBoardMsg, splitParts, bestOpportunityMsg } = await import("./tgFormat");
+  const x = d(); (x.trader as any).plans.noTrade = { from: 22890, to: 23060 }; (x.trader as any).atr15 = 40; (x.trader as any).levels = [];
+  const parts = splitParts(planBoardMsg(x));
+  assert.equal(parts.length, 3); assert.match(parts[0], /NIFTY · BULL PLAN/); assert.match(parts[1], /NIFTY · NO-TRADE ZONE/); assert.match(parts[2], /NIFTY · BEAR PLAN/);
+  const y = d({ symbol: "^BSESN", name: "SENSEX" });
+  const b = splitParts(bestOpportunityMsg([{ d: x, trade: null, eye: null, zh: null }, { d: y, trade: null, eye: null, zh: null }]));
+  assert.equal(b.length, 2); assert.match(b[0], /BEST OPPORTUNITY · NIFTY/); assert.match(b[1], /BEST OPPORTUNITY · SENSEX/);
 });

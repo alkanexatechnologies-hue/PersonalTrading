@@ -95,7 +95,7 @@ export type Review = NonNullable<ReturnType<typeof reviewTrade>>;
 /** Compact HTML block for Telegram. */
 export function reviewHtml(rv: Review, full = true): string {
   const L = [`🧪 <b>Trade review: ${rv.grade}</b> (${rv.score}%) → <b>${esc(rv.verdict)}</b>`];
-  L.push(`  ${rv.checks.map((c) => `${c.ok === true ? "✓" : c.ok === false ? "✗" : "~"} ${esc(c.label)}`).join(" · ")}`);
+  L.push(`  ✓ ${rv.checks.filter((c) => c.ok === true).length} passed${rv.checks.some((c) => c.ok === false) ? ` · ✗ ${rv.checks.filter((c) => c.ok === false).length} failed` : " · nothing failed"}`);
   const bad = rv.checks.filter((c) => c.ok === false);
   if (bad.length) L.push(`  ⚠️ ${bad.map((c) => `${esc(c.label)}: ${esc(c.detail)}`).join(" | ")}`);
   if (full && rv.reasoning?.length) L.push(`🧠 <b>Trader's reasoning</b>`, ...rv.reasoning.map((x, i) => (i === rv.reasoning.length - 1 ? `  <b>${esc(x)}</b>` : `  • ${esc(x)}`)));

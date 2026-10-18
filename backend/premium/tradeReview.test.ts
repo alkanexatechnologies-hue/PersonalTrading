@@ -30,7 +30,7 @@ test("review: bear side against an up trend with writers adding on the PE grades
   assert.ok(rv.failed.includes("trend") && rv.failed.includes("oi") && rv.failed.includes("premium"));
   assert.notEqual(rv.grade, "A");
   const h = reviewHtml(rv);
-  assert.match(h, /<b>Trade review: [BC]<\/b>/); assert.match(h, /✗ trend/); assert.match(h, /writers adding/);
+  assert.match(h, /<b>Trade review: [BC]<\/b>/); assert.match(h, /✗ 4 failed/); assert.match(h, /⚠️ trend:/); assert.match(h, /writers adding/);
   assert.equal(reviewTrade({ trader: { plans: {} } }, "bull", { istMin: 600 }), null);
 });
 test("learning: per-check win rates, shown only with enough trades on both sides", () => {
