@@ -115,3 +115,15 @@ export function fifteenMinUpdate(d: any, trade: CoTrade | null, zh: any | null, 
   if (odds) L.push(`  📊 ${odds}`);
   return L.join("\n");
 }
+
+// ---------------------------------------------------------------- retest entry (ProTrader-approved 2026-10-18, backtest #2)
+/**
+ * After a 15-min trigger, the trade is given only on a RETEST: within 30 minutes a CLOSED 5-min candle comes back to within
+ * 0.25·ATR of the broken level and closes holding beyond it. Same rule as backend/research/protrader/premiumBacktest2.ts.
+ */
+export function retestCheck(p: { side: "bull" | "bear"; trigger: number; atr: number; from: number; until: number }, bars5: { time: number; low: number; high: number; close: number }[], nowSec: number) {
+  const s = p.side === "bull" ? 1 : -1;
+  const closed = bars5.filter((b) => b.time >= p.from && b.time < p.until && b.time + 300 <= nowSec);
+  const hit = closed.find((b) => (s > 0 ? b.low <= p.trigger + 0.25 * p.atr : b.high >= p.trigger - 0.25 * p.atr) && s * (b.close - p.trigger) > 0) || null;
+  return { hit, expired: !hit && nowSec >= p.until + 300 };
+}

@@ -47,3 +47,14 @@ Details: `backend/research/protrader/RESULTS.md`.
 - **Main loss driver:** 41% of trades hit the stop at −26.6% average. Entries after 14:00 and expiry-day entries are the
   worst. These are the next tests.
 - **ProTrader advice to the owner until an edge is validated:** paper or minimum size only.
+
+## 2026-10-18 · ProTrader premium backtest #2: four tests (`protrader/RESULTS2.md`)
+
+- **APPROVE: skip the index's own expiry day + retest entry** (T2 + T3a).
+  - Better in development and validation for both indices.
+  - NIFTY: −₹1.50 L → −₹0.32 L. SENSEX: −₹1.05 L → −₹0.44 L.
+  - SENSEX validation turned positive (+2.5% per trade). Drawdowns much lower.
+  - **Implemented** in the co-pilot: an expiry-day trigger is shown but not given; a trigger becomes "waiting for the
+    retest" (30 min), and the trade is given on the retest, else "no retest, not given".
+- **REJECT:** no entry from 14:00 (not robust); wider stop (NIFTY worse); sweep entry (worse over 2 years).
+- **Status:** not yet proven profitable. Paper or minimum size until forward results confirm.

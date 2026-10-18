@@ -18,3 +18,15 @@ test("trade follow-up: T1 → breakeven → T2; stop on a 15-min CLOSE only; tim
   t = base(); m = stepTrade(t, { spot: 22760, prem: 130, last15: null, nowSec: 1300, istMin: 912 }); assert.match(m[0], /TIME EXIT/);
   assert.equal(stripTags("<b>x</b> y"), "x y");
 });
+test("retest entry: a closed 5-min candle back within 0.25 ATR of the broken level that closes beyond it; else expires after 30 min", async () => {
+  const { retestCheck } = await import("./copilot");
+  const T0 = 1_792_040_400, b = (k: number, low: number, high: number, close: number) => ({ time: T0 + k * 300, low, high, close });
+  const p = { side: "bull" as const, trigger: 100, atr: 20, from: T0, until: T0 + 1800 };
+  const bars = [b(0, 106, 112, 110), b(1, 107, 111, 109), b(2, 101, 106, 104)];   // only bar 2 dips to ≤ 105 (101) and closes 104 > 100
+  assert.equal(retestCheck(p, bars, T0 + 2 * 300 + 299).hit, null);                  // bar 2 not closed yet
+  assert.equal(retestCheck(p, bars, T0 + 3 * 300)!.hit!.close, 104);
+  assert.equal(retestCheck(p, [b(0, 106, 110, 108), b(1, 98, 104, 99)], T0 + 600).hit, null);   // the dip closed back below the level: not a hold
+  const r = retestCheck(p, [b(0, 106, 112, 110)], T0 + 1800 + 300);
+  assert.equal(r.hit, null); assert.equal(r.expired, true);
+  assert.equal(retestCheck({ ...p, side: "bear", trigger: 100 }, [b(0, 92, 99, 95)], T0 + 300)!.hit!.close, 95);
+});

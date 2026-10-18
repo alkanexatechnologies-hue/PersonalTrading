@@ -8935,7 +8935,7 @@ async function copilotTick() {
   try {
     const nowSec = Math.floor(Date.now() / 1000), ist = new Date((nowSec + 19800) * 1000), day = ist.toISOString().slice(0, 10), istMin = ist.getUTCHours() * 60 + ist.getUTCMinutes(), sec = ist.getUTCSeconds(), wd = ist.getUTCDay();
     if (wd === 0 || wd === 6) return;
-    if (_cp.day !== day) { _cp = { day, trades: {}, closed: [], sent: {}, seen: {} }; cpSave(); }
+    if (_cp.day !== day) { _cp = { day, trades: {}, closed: [], sent: {}, seen: {}, pending: {} }; cpSave(); }
     const pay = (sym: string) => premiumCenterPayload({ symbol: sym, interval: "15m" });
     // 09:13 plan (every co-pilot message stays inside market hours 09:13–15:30; the next-day plan follows at 15:31)
     if (istMin >= 553 && istMin <= 560 && !_cp.sent.plan) {
@@ -8962,6 +8962,22 @@ async function copilotTick() {
           if ((tr.state as string) === "CLOSED") { _cp.closed.push(tr); _cp.trades[sym] = null; _cp.sent[`cool|${sym}`] = nowSec; }
           cpSave();
         }
+        // a TRIGGERED setup waiting for its retest → give the trade on the retest, or let it expire after 30 minutes
+        const pd = _cp.pending?.[sym];
+        if (pd && !(_cp.trades[sym] && _cp.trades[sym].state !== "CLOSED")) {
+          const c5: any[] = await getCandlesCached(sym, "5m").catch(() => []) as any[];
+          const r = CP.retestCheck(pd, c5, nowSec), pl = T.plans?.[pd.side];
+          if (r.hit && pl && Math.round(pl.trigger) === Math.round(pd.trigger) && istMin <= 885) {
+            const t: any = CP.openTrade(d, pd.side, nowSec);
+            if (t) {
+              t.review = pd.review; t.entryKind = "RETEST"; _cp.trades[sym] = t; delete _cp.pending[sym]; cpSave();
+              cpSend(`📌 <b>TRADE GIVEN ON THE RETEST (review ${pd.review.grade}${pd.review.grade === "B" ? " — HALF SIZE" : ""})</b>\n5-min candle ${new Date((r.hit.time + 19800) * 1000).toISOString().slice(11, 16)} came back to ${Math.round(pd.side === "bull" ? r.hit.low : r.hit.high)} and closed ${Math.round(r.hit.close)} — ${pd.side === "bull" ? "above" : "below"} ${Math.round(pd.trigger)}. I will follow it to Target 1, Target 2, stop or 15:12.\n` + TG.tradeAlert(d, pd.side, "TRIGGERED", cpOdds(sym)), true);
+            }
+          } else if (r.expired || !pl || Math.round(pl.trigger) !== Math.round(pd.trigger) || istMin > 885) {
+            delete _cp.pending[sym]; cpSave();
+            cpSend(`⏹ <b>${d.name} — NO RETEST, NOT GIVEN</b>\nThe ${pd.side === "bull" ? "breakout" : "breakdown"} at ${Math.round(pd.trigger)} did not come back for a retest within 30 minutes (or the plan changed). ProTrader does not chase.`, true);
+          }
+        }
         // new opportunities (every setup, with its risk grade — never hidden), confirmed on two consecutive polls
         // Fix 3 (approved 2026-10-18): a plan whose Bear start is at/above its Bull start is a CONFLICT — stand aside, no triggers
         const conflict = T.plans?.bull && T.plans?.bear && T.plans.bear.entry >= T.plans.bull.entry;
@@ -8979,7 +8995,16 @@ async function copilotTick() {
             const free = tracked && !(_cp.trades[sym] && _cp.trades[sym].state !== "CLOSED") && nowSec - (_cp.sent[`cool|${sym}`] || 0) > 15 * 60;
             const opp = TG.tradeAlert(d, side, "TRIGGERED", cpOdds(sym));
             if (free && T.rangeDay) cpSend(`⚠️ <b>RANGE DAY — shown, not given</b> (${T.rangeDay.why}; no new trades after ${T.rangeDay.at})\n` + opp + rvH, true);
-            else if (free && rv && rv.grade !== "C") { const t: any = CP.openTrade(d, side, nowSec); if (t) { t.review = { grade: rv.grade, score: rv.score, passed: rv.passed, failed: rv.failed }; _cp.trades[sym] = t; cpSend(`📌 <b>TRADE GIVEN (review ${rv.grade}${rv.grade === "B" ? " — HALF SIZE" : ""})</b> — I will follow it and message you at Target 1, Target 2, stop or 15:12.\n` + opp + rvH, true); } }
+            // ProTrader-approved 2026-10-18 (backtest #2, ~2 yrs real premiums): no trade on the index's own EXPIRY DAY, and the
+            // trade is given only on a RETEST of the broken level (5-min close holding beyond it) within 30 minutes
+            else if (free && rv && rv.grade !== "C" && d.expiry && d.expiry === day) cpSend(`⚠️ <b>EXPIRY DAY — shown, not given</b> (ProTrader rule: expiry-day entries lost ~8.5% per trade over 2 years)\n` + opp + rvH, true);
+            else if (free && rv && rv.grade !== "C" && !_cp.pending?.[sym]) {
+              const c15 = (d.chart?.candles || []).filter((c: any) => c.time + 900 <= nowSec), from = c15.length ? c15[c15.length - 1].time + 900 : nowSec;
+              _cp.pending = _cp.pending || {};
+              _cp.pending[sym] = { side, trigger: p.trigger, atr: T.atr15, from, until: from + 1800, review: { grade: rv.grade, score: rv.score, passed: rv.passed, failed: rv.failed } };
+              cpSave();
+              cpSend(`🎯 <b>TRIGGERED — WAITING FOR THE RETEST</b> (ProTrader rule)\n${side === "bull" ? "CE" : "PE"} is given only if, by ${new Date((from + 1800 + 19800) * 1000).toISOString().slice(11, 16)}, a 5-min candle comes back to within ${Math.round(0.25 * T.atr15)} pts of <b>${Math.round(p.trigger)}</b> and closes ${side === "bull" ? "above" : "below"} it. No chasing.\n` + opp + rvH, true);
+            }
             else if (free && rv?.grade === "C") cpSend(`⚠️ <b>REVIEW SAYS SKIP — not given as a trade (watch only)</b>\n` + opp + rvH, true);
             else cpSend(opp + rvH + (tracked ? "\n  (A trade on this index is already open — shown for information.)" : ""), true);
           } else if (o.state === "ARMED" && nowSec - (_cp.sent[`armed|${key}`] || 0) > 20 * 60) {
