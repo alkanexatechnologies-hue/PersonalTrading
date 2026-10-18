@@ -75,6 +75,7 @@ import * as MD from "../premium/marketDiary";
 import * as CL from "../premium/closing";
 import * as TRV from "../premium/tradeReview";
 import * as OFL from "../premium/oiFlow";
+import * as PPOS from "../premium/premiumPosition";
 import * as EYE from "../premium/marketEye";
 import * as TG from "../premium/tgFormat";
 import { Decision } from "../decision/types";
@@ -7652,6 +7653,16 @@ async function pcOptionCandles(underlying: string, side: "CE" | "PE", strike: nu
   });
 }
 /** The Premium Prediction payload — used by the route and by the daily co-pilot job (no request object needed). */
+/** Premium candles (15-min, 5 days) of one contract → its swing levels (cached); the LIVE premium is measured against them. */
+async function premiumPositionFor(underlying: string, type: "CE" | "PE", strike: number, expiry: string) {
+  const opt = await lookupDhanOption(underlying, type, strike, expiry); if (!opt) return null;
+  const now = Math.floor(Date.now() / 1000), cs: any[] = (await dhanOptionCandles(opt.securityId, now - 5 * 86400, now, 15, opt.exchangeSegment)) || [];
+  if (cs.length < 10) return null;
+  const ms = detectMarketStructure(cs as any, 3, vwap(cs as any));
+  const swings = ms.swingPoints.map((x: any) => ({ kind: (x.type === "HH" || x.type === "LH" ? "HIGH" : "LOW") as "HIGH" | "LOW", price: x.price, time: cs[x.index]?.time ?? null }));
+  const rng = cs.slice(-20).map((c: any) => c.high - c.low).sort((a: number, b: number) => a - b);
+  return { swings, typicalBar: rng[Math.floor(rng.length / 2)] ?? null, lastClose: cs[cs.length - 1].close };
+}
 async function premiumCenterPayload(query: Record<string, any>): Promise<any> {
   const req = { query };
   const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
@@ -7907,6 +7918,15 @@ async function premiumCenterPayload(query: Record<string, any>): Promise<any> {
         if (c) { used.add(c.t); snaps.push({ ageMin: (nowMs - c.t) / 60_000, strikes: c.strikes }); }
       }
       out.oi = OFL.oiFlow({ strikes, spot: out.spot.price, step: out.step || 50, snaps });
+    }
+    // Premium position of each plan's strike against its own swing support / resistance (Dhan premium candles, 15-min)
+    if (out.trader && !out.trader.error && out.expiry && getProvider().name === "dhan") {
+      const und = ((def as any).nseSymbol || def.symbol.replace(/\.NS$/i, "")).toUpperCase();
+      await Promise.all((["bull", "bear"] as const).map(async (sd) => {
+        const p = out.trader.plans?.[sd]; if (!p || p.strike == null) return;
+        const lv: any = await cached(`prempos:${def.symbol}:${p.strike}:${sd}:${out.expiry}`, 90_000, () => premiumPositionFor(und, sd === "bull" ? "CE" : "PE", p.strike, out.expiry)).catch(() => null);
+        if (lv) p.premPos = PPOS.premiumPosition({ current: p.premNow ?? lv.lastClose, swings: lv.swings, typicalBar: lv.typicalBar });
+      }));
     }
     if (out.trader && !out.trader.error) out.trader.review = { bull: TRV.reviewTrade(out, "bull", { istMin }), bear: TRV.reviewTrade(out, "bear", { istMin }) };
     return out;

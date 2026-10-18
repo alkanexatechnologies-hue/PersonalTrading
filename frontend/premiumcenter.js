@@ -452,6 +452,7 @@ function ppcPlanCard(p, side) {
     <div class="ppc-pl-head"><h4>${nm}</h4>${rk ? `<i class="ppc-rk ppc-rk-${rk.cls}">${rk.short}</i>` : ""}</div>
     <div class="ppc-pl-start">Starts on a 15-min close ${bull ? "above" : "below"} <b>${r0(p.entry)}</b></div>
     <div class="ppc-pl-buy">Buy <b>${p.strike ?? "—"} ${side}</b>${p.premNow != null ? ` <span class="ppc-sub">(now ₹${Math.round(p.premNow)})</span>` : ""}</div>
+    ${p.premPos ? `<div class="ppc-pp ${p.premPos.danger ? "danger" : ""}">${ppcEsc(p.premPos.danger ? p.premPos.text : "Premium " + p.premPos.text)}</div>` : ""}
     ${ppcReviewLine(PPC.d?.trader?.review?.[bull ? "bull" : "bear"])}
     <table class="ppc-pl-tbl"><thead><tr><th></th><th>NIFTY</th><th>${side} premium</th><th></th></tr></thead><tbody>
       ${row("Start", r0(p.entry), pr(p.premAtEntry), bull ? "ppc-ce-t" : "ppc-pe-t")}

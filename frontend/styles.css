@@ -7791,3 +7791,4 @@ body.ppc-fullwidth .watchlist, body.ppc-fullwidth #watchlist { display: none !im
 .ppc-rv-ck .ok { color: #3ddc97; } .ppc-rv-ck .bad { color: #ff6b6b; font-weight: 700; } .ppc-rv-ck .mid { color: #c9b458; }
 .ppc-rv-why { margin-top: 4px; font-size: 13px; } .ppc-rv-why summary { cursor: pointer; color: #82a8ff; font-weight: 700; min-height: 28px; }
 .ppc-rv-why ul { margin: 4px 0 0; padding-left: 18px; } .ppc-rv-why li { margin: 2px 0; line-height: 1.35; } .ppc-rv-why li.dec { font-weight: 800; list-style: "➜ "; }
+.ppc-pp { font-size: 13px; margin: 2px 0 4px; color: #9fb3d9; } .ppc-pp.danger { color: #ff6b6b; font-weight: 800; }

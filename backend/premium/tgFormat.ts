@@ -190,6 +190,7 @@ export function planBlock(d: any, side: "bull" | "bear", o: { candle?: boolean }
   L.push(`${ce ? "🟢" : "🔴"} <b>${ce ? "BULL" : "BEAR"} PLAN</b>${rk ? ` · <b>${esc(RISKW[rk] ?? rk)}</b>` : ""}`);
   L.push(`Starts on a 15-min close ${ce ? "above" : "below"} <b>${n0(p.entry)}</b>`);
   L.push(`Buy <b>${p.strike ?? "—"} ${leg}</b> ${expired ? "(premium at the open)" : p.premNow != null ? `(now ₹${n0(p.premNow)})` : ""}`);
+  if (p.premPos && !expired) L.push(p.premPos.danger ? `<b>${esc(p.premPos.text)}</b>` : `Premium ${esc(p.premPos.text)}`);
   const rv = T?.review?.[side];
   if (rv) {
     L.push(`🧪 <b>Review ${esc(rv.grade)}</b> ${esc(rv.score)}% → <b>${esc(rv.verdict)}</b>`);
