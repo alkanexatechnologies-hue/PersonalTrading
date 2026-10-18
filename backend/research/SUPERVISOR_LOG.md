@@ -32,3 +32,18 @@ before costs, no premium test.
 8. Review weights and A/B/C cut-offs are unvalidated.
 9. No trailing stop after Target 1.
 10. Opening-drive days are always MISSED.
+
+## 2026-10-18 · ProTrader premium backtest #1 (≈2 years, real Dhan premiums)
+
+Details: `backend/research/protrader/RESULTS.md`.
+
+- **System:** NOT PROFITABLE for an option buyer after costs.
+  - Live logic B: NIFTY 484 trades, 37% win, −5.7% per trade, −₹1.50 L (1 lot).
+  - SENSEX 508 trades, 40% win, −3.6% per trade, −₹1.05 L.
+- **P2 range-day filter: APPROVE.** Better in development and validation for both indices, and lower drawdown.
+- **P8 lock + fix 3: APPROVE** (bug fix).
+- **P9 wall in front: NEED MORE DATA** (no OI history; the OI-minute log is accumulating).
+- **−30% premium stop: REJECT** (helps NIFTY, hurts SENSEX in both periods).
+- **Main loss driver:** 41% of trades hit the stop at −26.6% average. Entries after 14:00 and expiry-day entries are the
+  worst. These are the next tests.
+- **ProTrader advice to the owner until an edge is validated:** paper or minimum size only.
