@@ -451,7 +451,8 @@ function ppcPlanCard(p, side) {
   const row = (lbl, idx, prem, cls2, note = "") => `<tr><td>${lbl}</td><td class="${cls2}"><b>${idx}</b></td><td>${prem}</td><td class="ppc-sub">${note}</td></tr>`;
   return `<div class="ppc-plan ${cls}">
     <div class="ppc-pl-head"><h4>${nm}</h4>${rk ? `<i class="ppc-rk ppc-rk-${rk.cls}">${rk.short}</i>` : ""}</div>
-    <div class="ppc-pl-start">Starts on a 15-min close ${bull ? "above" : "below"} <b>${r0(p.entry)}</b></div>
+    <div class="ppc-pl-start">Trigger: 15-min close ${bull ? "above" : "below"} <b>${r0(p.entry)}</b></div>
+    <div class="ppc-pl-retest">⏳ <b>Then wait for the retest</b> — trade only when a 5-min candle comes back near <b>${r0(p.trigger)}</b> and closes ${bull ? "above" : "below"} it (within 30 min). <span class="ppc-sub">Never buy the breakout candle itself.</span></div>
     <div class="ppc-pl-buy">Buy <b>${p.strike ?? "—"} ${side}</b>${p.premNow != null ? ` <span class="ppc-sub">(now ₹${Math.round(p.premNow)})</span>` : ""}</div>
     ${p.premPos ? `<div class="ppc-pp ${p.premPos.danger ? "danger" : ""}">${ppcEsc(p.premPos.danger ? p.premPos.text : "Premium " + p.premPos.text)}</div>` : ""}
     ${ppcReviewLine(PPC.d?.trader?.review?.[bull ? "bull" : "bear"])}

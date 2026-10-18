@@ -7798,3 +7798,4 @@ body.ppc-fullwidth .watchlist, body.ppc-fullwidth #watchlist { display: none !im
 .ppc-pt-chip { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: rgba(255,255,255,.06); }
 .ppc-pt-chip.ok { color: #3ddc97; } .ppc-pt-chip.bad { color: #ff6b6b; font-weight: 700; } .ppc-pt-chip.exp { color: #c9a0ff; font-weight: 700; }
 .ppc-pt-row { padding: 3px 0; line-height: 1.4; } .ppc-pt-row.wait { color: #f2c94c; } .ppc-pt-row.quiet { color: #8a96b0; }
+.ppc-pl-retest { font-size: 13px; color: #f2c94c; margin: 2px 0 4px; line-height: 1.35; }
