@@ -58,3 +58,20 @@ Details: `backend/research/protrader/RESULTS.md`.
     retest" (30 min), and the trade is given on the retest, else "no retest, not given".
 - **REJECT:** no entry from 14:00 (not robust); wider stop (NIFTY worse); sweep entry (worse over 2 years).
 - **Status:** not yet proven profitable. Paper or minimum size until forward results confirm.
+
+## 2026-10-18 · Expiry-day study (`protrader/RESULTS_EXPIRY.md`)
+
+**Requested by the owner:** do not simply skip the expiry day.
+
+**What was tested:**
+- 6 strategy families.
+- A 24-version grid: chosen on development, judged on validation.
+
+**Result:** no profitable expiry-day buyer strategy is validated.
+- The pre-chosen pick failed validation (overfit).
+- Expiry management roughly halves to quarters the loss, and lifts the win rate from 23% to 43–48%, compared with today's
+  logic on expiry day.
+
+**Verdict:**
+- Live: expiry-day skip stays.
+- Proposed to the owner: a labelled paper / minimum-size forward test of the EMA20-pullback ITM method.

@@ -22,11 +22,11 @@ const CFGS: Cfg[] = [
   { ...BASE, name: "T4_sweep_entry", entry: "sweep", range: false, cutoff: 839 },
   { ...BASE, name: "T1+T2", cutoff: 839, skipExpiry: true },
 ];
-const barsOf = (minutes: [number, number][], step: number): Bar[] => { const out: Bar[] = []; let cur: Bar | null = null, key = -1; for (const [t, p] of minutes) { const k = Math.floor((mn(t) - 555) / step); if (k !== key || !cur) { if (cur) out.push(cur); cur = { time: t - (mn(t) - 555 - k * step) * 60, open: p, high: p, low: p, close: p, volume: 0 }; key = k; } else { cur.high = Math.max(cur.high, p); cur.low = Math.min(cur.low, p); cur.close = p; } } if (cur) out.push(cur); return out; };
-const premAt = (leg: Min[] | undefined, t: number) => { if (!leg?.length) return null; let v: number | null = null; for (const m of leg) { if (m.t > t) break; v = m.c; } return v; };
+export const barsOf = (minutes: [number, number][], step: number): Bar[] => { const out: Bar[] = []; let cur: Bar | null = null, key = -1; for (const [t, p] of minutes) { const k = Math.floor((mn(t) - 555) / step); if (k !== key || !cur) { if (cur) out.push(cur); cur = { time: t - (mn(t) - 555 - k * step) * 60, open: p, high: p, low: p, close: p, volume: 0 }; key = k; } else { cur.high = Math.max(cur.high, p); cur.low = Math.min(cur.low, p); cur.close = p; } } if (cur) out.push(cur); return out; };
+export const premAt = (leg: Min[] | undefined, t: number) => { if (!leg?.length) return null; let v: number | null = null; for (const m of leg) { if (m.t > t) break; v = m.c; } return v; };
 
 /** Expiry days read from the data: the ATM straddle at the last minute collapses (< 35% of the index's median close straddle). */
-function expiryDays(days: DayData[], step: number) {
+export function expiryDays(days: DayData[], step: number) {
   const st = days.map((d) => { const ms = [...d.spot.entries()].sort((a, b) => a[0] - b[0]); const last = ms.filter(([t]) => mn(t) <= 925).pop(); if (!last) return null; const k = Math.round(last[1] / step) * step; const ce = premAt(d.legs.get(`${k}CE`), last[0]), pe = premAt(d.legs.get(`${k}PE`), last[0]); return ce != null && pe != null ? ce + pe : null; });
   const med = [...st.filter((x): x is number => x != null)].sort((a, b) => a - b)[Math.floor(st.filter((x) => x != null).length / 2)];
   return new Set(days.filter((_, i) => st[i] != null && st[i]! < 0.35 * med).map((d) => d.day));
