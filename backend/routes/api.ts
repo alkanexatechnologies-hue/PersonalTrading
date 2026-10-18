@@ -77,6 +77,7 @@ import * as TRV from "../premium/tradeReview";
 import * as OFL from "../premium/oiFlow";
 import * as PPOS from "../premium/premiumPosition";
 import * as SWP from "../premium/sweepMsg";
+import * as LW from "../premium/lunchWindow";
 import * as EYE from "../premium/marketEye";
 import * as TG from "../premium/tgFormat";
 import { Decision } from "../decision/types";
@@ -8971,6 +8972,16 @@ async function copilotTick() {
           _cp.sent[key] = nowSec; cpSave(); cpSend(SWP.sweepAlertMsg(liq, l), true);
         }
         if ((istMin === 570 || istMin === 720) && !_cp.sent[`sweepmap|${sym}|${istMin}`]) { _cp.sent[`sweepmap|${sym}|${istMin}`] = nowSec; cpSave(); cpSend(SWP.sweepMapMsg(liq, new Date((nowSec + 19800) * 1000).toISOString().slice(11, 16)), true); }
+      }
+    }
+    // ⚠️ 12:00 lunch-window CAUTION (NIFTY + SENSEX) — a warning only; plans, reviews and trades are not changed by it
+    if (istMin >= 720 && istMin <= 725 && (istMin > 720 || sec >= 30)) {
+      for (const sym of ["^NSEI", "^BSESN"]) {
+        if (_cp.sent[`lunch|${sym}`]) continue;
+        const bars: any[] = await (getProvider() as any).getCandles(sym, "5m", 60).catch(() => []);
+        if (bars.length < 300) continue;
+        _cp.sent[`lunch|${sym}`] = nowSec; cpSave();
+        cpSend(LW.lunchCautionMsg(findSymbolDef(sym)?.name || sym, LW.lunchStats(bars, day)), true);
       }
     }
     // 15:30 CLOSING STATEMENT: diary saved, every trade graded (points, success / failure + why), day-by-day scorecard
