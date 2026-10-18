@@ -79,6 +79,7 @@ import * as PPOS from "../premium/premiumPosition";
 import * as SWP from "../premium/sweepMsg";
 import * as LW from "../premium/lunchWindow";
 import * as LB from "../premium/levelBreak";
+import * as EXP from "../premium/expiryMode";
 import * as EYE from "../premium/marketEye";
 import * as TG from "../premium/tgFormat";
 import { Decision } from "../decision/types";
@@ -8978,6 +8979,27 @@ async function copilotTick() {
             cpSend(`⏹ <b>${d.name} — NO RETEST, NOT GIVEN</b>\nThe ${pd.side === "bull" ? "breakout" : "breakdown"} at ${Math.round(pd.trigger)} did not come back for a retest within 30 minutes (or the plan changed). ProTrader does not chase.`, true);
           }
         }
+        // 🎲 EXPIRY MODE (owner's choice 2026-10-18): on the index's OWN expiry day, the best-tested expiry method runs as a
+        // labelled PAPER / MIN SIZE forward test (EMA20 pullback, 1 strike ITM, premium management) — scored separately
+        if (tracked && d.expiry && d.expiry === day && Number.isFinite(T.atr15)) {
+          _cp.exp = _cp.exp || {}; const ex = (_cp.exp[sym] = _cp.exp[sym] || { trades: [], seen: {} });
+          const ltpOf = (side: string, strike: number) => (d.ranking || []).find((x: any) => x.side === side && x.strike === strike)?.ltp
+            ?? (() => { const row = (_pcLastChain.get(`${sym}:0`)?.v?.strikes || []).find((r: any) => r.strike === strike); return row ? (side === "CE" ? row.ceLtp : row.peLtp) ?? null : null; })();
+          const open = ex.trades.find((x: any) => x.state !== "CLOSED");
+          if (open) { const msgs = EXP.stepExpiryTrade(open, ltpOf(open.side, open.strike), nowSec); for (const m of msgs) cpSend(m, true); if (msgs.length) cpSave(); }
+          else if (ex.trades.length < EXP.EXPIRY_RULES.maxTrades) {
+            const c5: any[] = ((await getCandlesCached(sym, "5m").catch(() => [])) as any[]).filter((c: any) => new Date((c.time + 19800) * 1000).toISOString().slice(0, 10) === day && c.time + 300 <= nowSec);
+            const sig = c5.length ? EXP.expirySignal(c5, ema(c5.map((c: any) => c.close), 20) as any, d.spot?.open ?? c5[0].open, T.atr15) : null;
+            if (sig && !ex.seen[sig.bar.time]) {
+              ex.seen[sig.bar.time] = 1;
+              const strike = EXP.itmStrike(d.spot.price, d.step || 50, sig.side), prem = ltpOf(sig.side, strike);
+              if (prem != null && prem > 0.5) {
+                const t: EXP.ExpTrade = { index: sym, name: d.name, side: sig.side, strike, openedAt: nowSec, entrySpot: d.spot.price, entryPrem: Math.round(prem * 10) / 10, state: "OPEN" };
+                ex.trades.push(t); cpSave(); cpSend(EXP.expiryEntryMsg(t, sig, ex.trades.length), true);
+              }
+            }
+          }
+        }
         // new opportunities (every setup, with its risk grade — never hidden), confirmed on two consecutive polls
         // Fix 3 (approved 2026-10-18): a plan whose Bear start is at/above its Bull start is a CONFLICT — stand aside, no triggers
         const conflict = T.plans?.bull && T.plans?.bear && T.plans.bear.entry >= T.plans.bull.entry;
@@ -8997,7 +9019,7 @@ async function copilotTick() {
             if (free && T.rangeDay) cpSend(`⚠️ <b>RANGE DAY — shown, not given</b> (${T.rangeDay.why}; no new trades after ${T.rangeDay.at})\n` + opp + rvH, true);
             // ProTrader-approved 2026-10-18 (backtest #2, ~2 yrs real premiums): no trade on the index's own EXPIRY DAY, and the
             // trade is given only on a RETEST of the broken level (5-min close holding beyond it) within 30 minutes
-            else if (free && rv && rv.grade !== "C" && d.expiry && d.expiry === day) cpSend(`⚠️ <b>EXPIRY DAY — shown, not given</b> (ProTrader rule: expiry-day entries lost ~8.5% per trade over 2 years)\n` + opp + rvH, true);
+            else if (free && rv && rv.grade !== "C" && d.expiry && d.expiry === day) cpSend(`⚠️ <b>EXPIRY DAY — plan trigger shown, not given</b> (normal plan lost ~8.5%/trade on expiry over 2 yrs). Today's expiry trades come from 🎲 EXPIRY MODE (paper / min size).\n` + opp + rvH, true);
             else if (free && rv && rv.grade !== "C" && !_cp.pending?.[sym]) {
               const c15 = (d.chart?.candles || []).filter((c: any) => c.time + 900 <= nowSec), from = c15.length ? c15[c15.length - 1].time + 900 : nowSec;
               _cp.pending = _cp.pending || {};
@@ -9185,6 +9207,7 @@ async function closingStatement(day: string, send = true) {
   const rows: CL.ReviewTrade[] = [
     ...cpT.map((t: any) => ({ source: "co-pilot", name: t.name, side: t.side, strike: t.strike, openedAt: t.openedAt, closedAt: t.closedAt ?? null, entrySpot: t.entrySpot, exitSpot: t.exitSpot ?? null, entryPrem: t.entryPrem, exitPrem: t.exitPrem ?? null, t1Prem: t.t1Prem ?? null, exitWhy: t.exitWhy ?? null, state: t.state })),
     ..._btsd.trades.filter((t) => t.day === day).map((t: any) => ({ source: "BTSD (mine)", name: t.name, side: t.side, strike: t.strike, openedAt: t.openedAt, closedAt: t.closedAt ?? null, entrySpot: t.entrySpot, exitSpot: t.exitSpot ?? null, entryPrem: t.entryPrem, exitPrem: t.exitPrem ?? null, t1Prem: t.t1Prem ?? null, exitWhy: t.exitWhy ?? null, state: t.state })),
+    ...(_cp.day === day ? Object.values(_cp.exp || {}).flatMap((e: any) => e.trades || []) : []).map((t: any) => ({ source: "expiry-mode (paper)", name: t.name, side: t.side, strike: t.strike, openedAt: t.openedAt, closedAt: t.closedAt ?? null, entrySpot: t.entrySpot, exitSpot: null, entryPrem: t.entryPrem, exitPrem: t.exitPrem ?? null, t1Prem: t.halfPrem ?? null, exitWhy: t.exitWhy ?? null, state: t.state === "CLOSED" ? "CLOSED" : "OPEN" })),
     ...(_zhLedger.day === day ? _zhLedger.trades : []).map((t: any) => ({ source: "zero-hero", name: t.name, side: t.side, strike: t.strike, openedAt: t.openedAt, closedAt: t.closedAt ?? null, entrySpot: t.entryIndex, exitSpot: null, entryPrem: t.entryPrem, exitPrem: t.exitPrem ?? null, t1Prem: t.state === "CLOSED" && (t.events || []).some((e: any) => /T1/.test(e.what)) ? t.t1Prem : null, exitWhy: t.exitWhy ?? null, state: t.state })),
   ].sort((a, b) => a.openedAt - b.openedAt);
   const graded = rows.map(CL.gradeTrade);

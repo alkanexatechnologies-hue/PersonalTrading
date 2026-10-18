@@ -75,3 +75,18 @@ Details: `backend/research/protrader/RESULTS.md`.
 **Verdict:**
 - Live: expiry-day skip stays.
 - Proposed to the owner: a labelled paper / minimum-size forward test of the EMA20-pullback ITM method.
+
+## 2026-10-18 · Owner's decision: EXPIRY MODE as a paper / minimum-size forward test
+
+The owner does not want expiry day skipped. Given the expiry study, the owner chose **"Expiry mode, paper / min size"**.
+
+**Live rules** (`backend/premium/expiryMode.ts`):
+- **When:** the index's own expiry day only. Entries 10:30–13:30, max 2, one at a time.
+- **Entry:** EMA20 pullback with the day's trend, on a closed 5-min candle.
+- **Strike:** one strike in the money.
+- **Exits, on the premium:** −40% stop · half at 1.5× · then stop at the entry premium · rest at 2.5× · 40-min time
+  stop · out by 15:15.
+- **Label:** "EXPIRY MODE · PAPER / MIN SIZE", scored separately in the closing statement as "expiry-mode (paper)".
+- **Normal plan triggers on expiry day** stay "shown, not given".
+
+**Status:** NOT validated as profitable. Promote to normal size only if 6–8 forward expiries are positive after costs.
