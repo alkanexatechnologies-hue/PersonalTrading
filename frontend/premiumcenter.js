@@ -704,12 +704,12 @@ async function ppcCalcRun() {
     if (!r.ok) { out.innerHTML = `<div class="ppc-na">${ppcEsc(r.error || "not available")}</div>`; return; }
     const by = {}; for (const x of r.rows) (by[x.strike] = by[x.strike] || {})[x.side] = x;
     const P = PPC.d?.trader?.plans || {}, planK = new Set([P.bull?.strike, P.bear?.strike].filter((v) => v != null));
-    const cell = (x) => !x ? "<td>—</td>" : `<td>₹${x.ltp ?? "—"} → <b>₹${x.est ?? "—"}</b> <span class="${(x.chg ?? 0) >= 0 ? "ppc-up" : "ppc-dn"}">${x.chgPct != null ? (x.chgPct >= 0 ? "+" : "") + x.chgPct + "%" : ""}</span></td>`;
-    out.innerHTML = `<div class="ppc-calc-head">Index <b>${Math.round(r.spot).toLocaleString("en-IN")}</b> → <b>${Math.round(r.level).toLocaleString("en-IN")}</b> (<span class="${r.move >= 0 ? "ppc-up" : "ppc-dn"}">${r.move >= 0 ? "+" : ""}${Math.round(r.move)} pts</span>)${Number(r.mins) ? ` · after ${r.mins} min` : " · now"} · expiry ${ppcEsc(r.expiry || "—")} (${r.daysToExpiry ?? "—"} days)</div>
+    const cell = (x) => !x ? "<td>—</td>" : `<td>₹${x.ltp ?? "—"}${x.stale ? ' <span class="ppc-dn" title="quoted premium is below its intrinsic value — stale quote; the model price is used">⚠ stale</span>' : ""} → <b>₹${x.est ?? "—"}</b> <span class="${(x.chg ?? 0) >= 0 ? "ppc-up" : "ppc-dn"}">${x.chgPct != null ? (x.chgPct >= 0 ? "+" : "") + x.chgPct + "%" : ""}</span></td>`;
+    out.innerHTML = `<div class="ppc-calc-head">Index <b>${Math.round(r.spot).toLocaleString("en-IN")}</b> → <b>${Math.round(r.level).toLocaleString("en-IN")}</b> (<span class="${r.move >= 0 ? "ppc-up" : "ppc-dn"}">${r.move >= 0 ? "+" : ""}${Math.round(r.move)} pts</span>)${Number(r.mins) ? ` · after ${r.mins} min` : " · now"} · expiry ${ppcEsc(r.expiry || "—")} (${r.daysToExpiry ?? "—"} days) · IV ${r.iv ?? "—"}%</div>
       <table class="ppc-calc-tbl"><thead><tr><th>Strike</th><th>CE now → then</th><th>PE now → then</th></tr></thead><tbody>
       ${Object.keys(by).map(Number).sort((a, b) => a - b).map((k) => `<tr class="${planK.has(k) ? "plan" : ""}${by[k].CE?.money === "ATM" ? " atm" : ""}"><td><b>${k}</b>${by[k].CE?.money === "ATM" ? " <span class='ppc-sub'>ATM</span>" : ""}${planK.has(k) ? " <span class='ppc-sub'>plan</span>" : ""}</td>${cell(by[k].CE)}${cell(by[k].PE)}</tr>`).join("")}
       </tbody></table>
-      <div class="ppc-sub">Estimate from each strike's live IV (Black-Scholes), the same model as the plan cards; "after N min" includes time decay. Real premiums also move with IV and demand.</div>`;
+      <div class="ppc-sub">Estimate: live premium + Black-Scholes change at one IV for the expiry (average of the ATM call and put IV); "after N min" includes time decay; ⚠ stale = the quote was below intrinsic value, the model price is used. Real premiums also move with IV and demand.</div>`;
   } catch (e) { out.innerHTML = `<div class="ppc-na">calculator unavailable — ${ppcEsc(e.message || "")}</div>`; }
 }
 
