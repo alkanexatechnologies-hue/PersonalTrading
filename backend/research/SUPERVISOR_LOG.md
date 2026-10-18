@@ -1,6 +1,6 @@
-# Logic Supervisor log
+# ProTrader (supervisor) log
 
-Every trading-logic change is reviewed by the Logic Supervisor (`.claude/agents/option-supervisor.md`) before it goes
+Every trading-logic change is reviewed by ProTrader (`.claude/agents/protrader.md`) before it goes
 live. One entry per verdict, newest at the bottom.
 
 ## 2026-10-18 · Changes approved by the OWNER (before the supervisor gate existed)

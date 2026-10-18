@@ -8912,7 +8912,7 @@ async function cpDrain() {
   } finally { _cpSending = false; }
 }
 // plain builder text → HTML alert (bold title / action lines, escaped); pre-built HTML messages pass `html: true`
-const cpSend = (text: string, htmlReady = false) => { for (const part of TG.splitParts(text)) _cpQueue.push({ text: TG.emphasize(htmlReady ? part : TG.htmlify(CP.stripTags(part))), html: true }); cpDrain().catch(() => {}); try { fs.appendFileSync(path.join(process.cwd(), "data", "copilot-log.txt"), `\n[${new Date(Date.now() + 19800000).toISOString().slice(0, 19)}]\n${String(text).replace(/<[^>]+>/g, "")}\n`); } catch { /* best-effort */ } };
+const cpSend = (text: string, htmlReady = false) => { for (const part of TG.splitParts(text)) _cpQueue.push({ text: "🎖 <b>ProTrader</b>\n" + TG.emphasize(htmlReady ? part : TG.htmlify(CP.stripTags(part))), html: true }); cpDrain().catch(() => {}); try { fs.appendFileSync(path.join(process.cwd(), "data", "copilot-log.txt"), `\n[${new Date(Date.now() + 19800000).toISOString().slice(0, 19)}]\n${String(text).replace(/<[^>]+>/g, "")}\n`); } catch { /* best-effort */ } };
 const _published = (() => { try { return JSON.parse(fs.readFileSync(path.join(process.cwd(), "backend", "research", "published", "odds.json"), "utf8")); } catch { return null; } })();
 function cpOdds(sym: string): string | undefined {
   const ix = ({ "^NSEI": "NIFTY", "^NSEBANK": "BANKNIFTY", "^BSESN": "SENSEX", "^CNXFIN": "FINNIFTY", "^NSEMDCP50": "MIDCPNIFTY" } as Record<string, string>)[sym];
@@ -8985,7 +8985,7 @@ async function copilotTick() {
           } else if (o.state === "ARMED" && nowSec - (_cp.sent[`armed|${key}`] || 0) > 20 * 60) {
             _cp.sent[`armed|${key}`] = nowSec;
             const rv = TRV.reviewTrade(d, side, { istMin, lossesToday: cpLossesToday() });
-            cpSend(TG.tradeAlert(d, side, "ARMED", cpOdds(sym)) + (rv ? TG.SPLIT + TRV.reviewHtml(rv, false) + "\n  <i>(full review with the trader's reasoning when the candle closes)</i>" : ""), true);
+            cpSend(TG.tradeAlert(d, side, "ARMED", cpOdds(sym)) + (rv ? TG.SPLIT + TRV.reviewHtml(rv) + "\n  <i>(ProTrader's analysis BEFORE the close — confirmed or cancelled when the 15-min candle closes)</i>" : ""), true);
           }
         }
         cpSave();
