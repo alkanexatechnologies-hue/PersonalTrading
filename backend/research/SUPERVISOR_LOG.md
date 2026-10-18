@@ -100,3 +100,16 @@ rate is 67% with candle stops; wider structural stops leave too few trades; the 
 of 4 cells.
 
 **Live logic unchanged:** plan trigger + retest entry, expiry-day plan trades not given (expiry mode is paper).
+
+## 2026-10-18 · ProTrader daily routine set up (owner's request)
+
+- **15:30 daily review** with the closing statement:
+  - stop-loss reasons from the recorded facts (late entry, range day, review grade and failed checks, premium lost)
+  - triggers shown but not given (no retest, range day, expiry day, review C, conflict)
+  - the forward scoreboard, live and expiry mode (`data/protrader-forward.json`)
+  - a BTSD reminder
+- **15:50** silent data refresh (`refreshData.ts`).
+- **Friday 16:05** weekly re-check (`weekly.ts`). The first dry run, data to 16 Oct:
+  - NIFTY: 2-year −0.8% per trade; last 20 sessions +1.9%.
+  - SENSEX: 2-year −2.8%; last 20 sessions −0.1%.
+  - Both "in line with the long run".

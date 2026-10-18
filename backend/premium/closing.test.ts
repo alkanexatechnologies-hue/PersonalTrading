@@ -31,3 +31,14 @@ test("trend: pooled rates and direction; statement bolds result, SL failures and
   assert.match(m, /<b>NIFTY 23050 PE: -30 pts<\/b> — STOP LOSS/); assert.match(m, /TREND &lt;UP&gt;/);
   assert.match(closingStatementMsg({ day: d(11), indices: [], graded: [], tr: trend(card, d(11)) }), /nothing to score/);
 });
+test("ProTrader daily review: stop-loss reasons from recorded facts, not-given list, forward scoreboard", async () => {
+  const { slReasons, dailyReviewMsg } = await import("./closing");
+  const at = (h: number, m: number) => Date.UTC(2026, 9, 19, h, m) / 1000 - 19800;
+  assert.deepEqual(slReasons({ name: "NIFTY 50", strike: 23100, side: "CE", openedAt: at(14, 20), premPct: -35, review: { grade: "B", failed: ["trend"] }, rangeDay: false }),
+    ["late entry (after 14:00 — the 2-yr record for late entries is the worst)", "review B (half size) — one pillar was soft", "against the higher-timeframe trend", "premium lost 35% before the index stop fired"]);
+  assert.match(slReasons({ name: "X", strike: 1, side: "PE", openedAt: at(10, 0), premPct: -20, review: { grade: "A", failed: [] } })[0], /setup was clean/);
+  const m = dailyReviewMsg({ day: "2026-10-19", sl: [], notGiven: [{ index: "NIFTY 50", side: "CE", time: at(10, 45), level: 23226, why: "NO RETEST" }, { index: "SENSEX", side: "PE", time: at(11, 0), level: null, why: "RANGE DAY" }],
+    board: { since: "2026-10-19", n: 4, wins: 3, avgPct: 6.2 }, expiryBoard: { since: null, n: 0, wins: 0, avgPct: null }, btsdToday: 0 });
+  assert.match(m, /STOP LOSSES — WHY \(0\)<\/b>\n  none today/); assert.match(m, /NO RETEST<\/b> ×1: NIFTY CE 23,226 10:45/);
+  assert.match(m, /Live trades: 3\/4 wins \(75%\) · avg \+6\.2% per trade on premium/); assert.match(m, /Expiry mode \(paper\): no trades yet/); assert.match(m, /record your own trades/);
+});

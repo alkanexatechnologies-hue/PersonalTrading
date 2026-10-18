@@ -76,6 +76,20 @@ Messages, formatting, warnings and research do not need your verdict.
 
 **NEED MORE DATA** if the sample is too small to tell. Say what data would settle it.
 
+## Daily routine (automated in the server, owner's request 2026-10-18)
+
+- **09:13–15:30:** the live co-pilot (signed 🎖 ProTrader).
+- **15:30:** closing statement + **PROTRADER DAILY REVIEW**:
+  - why each stop loss happened (recorded facts)
+  - every trigger shown but not given, and why
+  - the forward scoreboard (live and expiry mode, kept separately)
+  - a reminder to log BTSD trades
+- **15:50:** silent refresh of the research data: today's 1-minute premiums, via `backend/research/protrader/refreshData.ts`.
+- **Friday 16:05:** **weekly re-check** of the live logic on the refreshed data (`weekly.ts`): long run vs the last 20
+  sessions, drift flag.
+
+The routine reports and proposes. Logic changes still go through the full gate below.
+
 ## Accountability: "why did I miss / why did it hit the stop?"
 
 Investigate from the record and the market, never from memory:

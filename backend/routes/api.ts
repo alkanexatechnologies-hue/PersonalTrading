@@ -8926,10 +8926,18 @@ function cpOdds(sym: string): string | undefined {
     return `2-yr ${ix} 15-min breakout record after costs: ${t.DEV.winPct}–${t.VALIDATION.winPct}% wins, ${t.DEV.avgNet} / ${t.VALIDATION.avgNet} pts per trade (no proven edge — size small).`;
   } catch { return fromPub; }
 }
+/** ProTrader daily review: remember every trigger that was shown but NOT given, and why. */
+const cpNotGiven = (index: string, side: string, level: number | null, why: CL.NotGiven["why"]) => { _cp.notGiven = _cp.notGiven || []; _cp.notGiven.push({ index, side, time: Math.floor(Date.now() / 1000), level: level != null ? Math.round(level) : null, why }); cpSave(); };
 /** Co-pilot trades closed today below their entry premium (discipline check: 2 losses = stop). */
 const cpLossesToday = () => (_cp.closed || []).filter((t: any) => t.entryPrem != null && t.exitPrem != null && (t.t1Prem != null ? 0.5 * (t.t1Prem - t.entryPrem) + 0.5 * (t.exitPrem - t.entryPrem) : t.exitPrem - t.entryPrem) < 0).length;
 /** Backtest record of break candles (backend/research/levelBreaks) quoted in each break alert. */
 const _lbStats: any = (() => { try { return JSON.parse(fs.readFileSync(path.join(process.cwd(), "backend", "research", "published", "levelBreaks.json"), "utf8")); } catch { return null; } })();
+/** Run a ProTrader research script in its own process (never blocks the server); resolves with its stdout. */
+const ptScript = (file: string, args: string[]) => new Promise<string>((resolve, reject) => {
+  const cp = require("child_process").spawn(process.execPath, [path.join(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs"), path.join(process.cwd(), "backend", "research", "protrader", file), ...args], { env: { ...process.env, NODE_OPTIONS: "--use-system-ca" } });
+  let out = ""; cp.stdout.on("data", (d: Buffer) => { out += d; }); cp.stderr.on("data", () => { /* noise */ });
+  cp.on("close", (code: number) => (code === 0 ? resolve(out) : reject(new Error(`${file} exit ${code}`))));
+});
 let _cpBusy = false, _cpTick = 0;
 async function copilotTick() {
   if (_cpBusy) return; _cpBusy = true;
@@ -8976,6 +8984,7 @@ async function copilotTick() {
             }
           } else if (r.expired || !pl || Math.round(pl.trigger) !== Math.round(pd.trigger) || istMin > 885) {
             delete _cp.pending[sym]; cpSave();
+            cpNotGiven(d.name, pd.side === "bull" ? "CE" : "PE", pd.trigger, "NO RETEST");
             cpSend(`⏹ <b>${d.name} — NO RETEST, NOT GIVEN</b>\nThe ${pd.side === "bull" ? "breakout" : "breakdown"} at ${Math.round(pd.trigger)} did not come back for a retest within 30 minutes (or the plan changed). ProTrader does not chase.`, true);
           }
         }
@@ -9003,7 +9012,7 @@ async function copilotTick() {
         // new opportunities (every setup, with its risk grade — never hidden), confirmed on two consecutive polls
         // Fix 3 (approved 2026-10-18): a plan whose Bear start is at/above its Bull start is a CONFLICT — stand aside, no triggers
         const conflict = T.plans?.bull && T.plans?.bear && T.plans.bear.entry >= T.plans.bull.entry;
-        if (conflict && istMin >= 570 && istMin <= 870 && !_cp.sent[`conflict|${sym}`]) { _cp.sent[`conflict|${sym}`] = nowSec; cpSave(); cpSend(`⚠️ <b>${d.name} · PLAN CONFLICT — STAND ASIDE</b>\nBear start ${Math.round(T.plans.bear.entry)} is at/above Bull start ${Math.round(T.plans.bull.entry)} — no trade until the plan rolls.`, true); }
+        if (conflict && istMin >= 570 && istMin <= 870 && !_cp.sent[`conflict|${sym}`]) { _cp.sent[`conflict|${sym}`] = nowSec; cpNotGiven(d.name, "—", null, "CONFLICT"); cpSend(`⚠️ <b>${d.name} · PLAN CONFLICT — STAND ASIDE</b>\nBear start ${Math.round(T.plans.bear.entry)} is at/above Bull start ${Math.round(T.plans.bull.entry)} — no trade until the plan rolls.`, true); }
         for (const side of ["bull", "bear"] as const) {
           const o = T.radar?.[side], p = T.plans?.[side]; if (!o || !p || p.strike == null || conflict) continue;
           const key = `${sym}|${side}`, sig = `${o.state}|${Math.round(p.trigger)}`, confirmed = _cp.seen[key] === sig; _cp.seen[key] = sig;
@@ -9016,10 +9025,10 @@ async function copilotTick() {
             const rvH = rv ? TG.SPLIT + TRV.reviewHtml(rv) : "";
             const free = tracked && !(_cp.trades[sym] && _cp.trades[sym].state !== "CLOSED") && nowSec - (_cp.sent[`cool|${sym}`] || 0) > 15 * 60;
             const opp = TG.tradeAlert(d, side, "TRIGGERED", cpOdds(sym));
-            if (free && T.rangeDay) cpSend(`⚠️ <b>RANGE DAY — shown, not given</b> (${T.rangeDay.why}; no new trades after ${T.rangeDay.at})\n` + opp + rvH, true);
+            if (free && T.rangeDay) (cpNotGiven(d.name, side === "bull" ? "CE" : "PE", p.trigger, "RANGE DAY"), cpSend(`⚠️ <b>RANGE DAY — shown, not given</b> (${T.rangeDay.why}; no new trades after ${T.rangeDay.at})\n` + opp + rvH, true));
             // ProTrader-approved 2026-10-18 (backtest #2, ~2 yrs real premiums): no trade on the index's own EXPIRY DAY, and the
             // trade is given only on a RETEST of the broken level (5-min close holding beyond it) within 30 minutes
-            else if (free && rv && rv.grade !== "C" && d.expiry && d.expiry === day) cpSend(`⚠️ <b>EXPIRY DAY — plan trigger shown, not given</b> (normal plan lost ~8.5%/trade on expiry over 2 yrs). Today's expiry trades come from 🎲 EXPIRY MODE (paper / min size).\n` + opp + rvH, true);
+            else if (free && rv && rv.grade !== "C" && d.expiry && d.expiry === day) (cpNotGiven(d.name, side === "bull" ? "CE" : "PE", p.trigger, "EXPIRY DAY"), cpSend(`⚠️ <b>EXPIRY DAY — plan trigger shown, not given</b> (normal plan lost ~8.5%/trade on expiry over 2 yrs). Today's expiry trades come from 🎲 EXPIRY MODE (paper / min size).\n` + opp + rvH, true));
             else if (free && rv && rv.grade !== "C" && !_cp.pending?.[sym]) {
               const c15 = (d.chart?.candles || []).filter((c: any) => c.time + 900 <= nowSec), from = c15.length ? c15[c15.length - 1].time + 900 : nowSec;
               _cp.pending = _cp.pending || {};
@@ -9027,7 +9036,7 @@ async function copilotTick() {
               cpSave();
               cpSend(`🎯 <b>TRIGGERED — WAITING FOR THE RETEST</b> (ProTrader rule)\n${side === "bull" ? "CE" : "PE"} is given only if, by ${new Date((from + 1800 + 19800) * 1000).toISOString().slice(11, 16)}, a 5-min candle comes back to within ${Math.round(0.25 * T.atr15)} pts of <b>${Math.round(p.trigger)}</b> and closes ${side === "bull" ? "above" : "below"} it. No chasing.\n` + opp + rvH, true);
             }
-            else if (free && rv?.grade === "C") cpSend(`⚠️ <b>REVIEW SAYS SKIP — not given as a trade (watch only)</b>\n` + opp + rvH, true);
+            else if (free && rv?.grade === "C") (cpNotGiven(d.name, side === "bull" ? "CE" : "PE", p.trigger, "REVIEW C"), cpSend(`⚠️ <b>REVIEW SAYS SKIP — not given as a trade (watch only)</b>\n` + opp + rvH, true));
             else cpSend(opp + rvH + (tracked ? "\n  (A trade on this index is already open — shown for information.)" : ""), true);
           } else if (o.state === "ARMED" && nowSec - (_cp.sent[`armed|${key}`] || 0) > 20 * 60) {
             _cp.sent[`armed|${key}`] = nowSec;
@@ -9092,6 +9101,17 @@ async function copilotTick() {
           }
         }
       }
+    }
+    // 🎖 ProTrader daily routine — 15:50 refresh of the research data (today's 1-minute premiums for NIFTY + SENSEX, silent)
+    if (istMin >= 950 && istMin <= 970 && !_cp.sent.ptRefresh) {
+      _cp.sent.ptRefresh = true; cpSave();
+      ptScript("refreshData.ts", [day]).then((o) => console.log("[protrader] data refresh", o.trim().slice(-200))).catch((e) => console.log("[protrader] data refresh failed", e?.message));
+    }
+    // 🎖 Friday 16:05 weekly re-check of the live logic on the refreshed data (reports drift; proposes, never changes logic)
+    if (wd === 5 && istMin >= 965 && istMin <= 990 && !_cp.sent.ptWeekly) {
+      _cp.sent.ptWeekly = true; cpSave();
+      const outF = path.join(process.cwd(), "data", "protrader-weekly.json");
+      ptScript("weekly.ts", [outF]).then(() => { try { cpSend(JSON.parse(fs.readFileSync(outF, "utf8")).html, true); } catch { /* best-effort */ } }).catch((e) => console.log("[protrader] weekly failed", e?.message));
     }
     // ⚠️ 12:00 lunch-window CAUTION (NIFTY + SENSEX) — a warning only; plans, reviews and trades are not changed by it
     if (istMin >= 720 && istMin <= 725 && (istMin > 720 || sec >= 30)) {
@@ -9225,8 +9245,25 @@ async function closingStatement(day: string, send = true) {
   if (send && reviewed.length && (rs as any).lastDay !== day) { rs = learn2(rs, reviewed, day); try { fs.writeFileSync(RV_FILE, JSON.stringify(rs, null, 1)); } catch { /* best-effort */ } }
   const learned = TRV.learnedLines(rs);
   const html = CL.closingStatementMsg({ day, indices, graded, tr: CL.trend(card, day) }) + `\n🧠 <b>REVIEW LEARNING</b> · ${rs.trades} reviewed trades so far` + (learned.length ? "\n" + learned.map((x) => `  • ${x.replace(/&/g, "&amp;").replace(/</g, "&lt;")}`).join("\n") : "\n  <i>needs ≥10 trades with each check passed and failed before it reports what works</i>");
-  if (send) cpSend(html, true);
-  return { html, graded, score: card.days[day], trend: CL.trend(card, day) };
+  // ---- ProTrader DAILY REVIEW: why each stop loss happened, what was shown but not given, the forward scoreboard
+  const FWD_FILE = path.join(process.cwd(), "data", "protrader-forward.json");
+  let fwd: any = { since: null, lastDay: null, live: { n: 0, wins: 0, sum: 0 }, expiry: { n: 0, wins: 0, sum: 0 } };
+  try { fwd = { ...fwd, ...JSON.parse(fs.readFileSync(FWD_FILE, "utf8")) }; } catch { /* first day */ }
+  const scored = graded.filter((g) => g.result === "SUCCESS" || g.result === "FAILED" || g.result === "FLAT");
+  if (send && fwd.lastDay !== day && (scored.length || fwd.since)) {
+    for (const g of scored) { const k = /^expiry-mode/.test(g.source) ? "expiry" : g.source === "co-pilot" ? "live" : null; if (!k) continue; fwd[k].n++; if (g.result === "SUCCESS") fwd[k].wins++; fwd[k].sum += g.premPct ?? 0; }
+    fwd.since = fwd.since ?? day; fwd.lastDay = day;
+    try { fs.writeFileSync(FWD_FILE, JSON.stringify(fwd, null, 1)); } catch { /* best-effort */ }
+  }
+  const board = (k: "live" | "expiry"): CL.Board => ({ since: fwd.since, n: fwd[k].n, wins: fwd[k].wins, avgPct: fwd[k].n ? Math.round((fwd[k].sum / fwd[k].n) * 10) / 10 : null });
+  const pctOf = (t: any) => CL.gradeTrade({ source: "", name: t.name, side: t.side, strike: t.strike, openedAt: t.openedAt, entryPrem: t.entryPrem, exitPrem: t.exitPrem ?? null, t1Prem: t.t1Prem ?? t.halfPrem ?? null, state: "CLOSED" }).premPct;
+  const sl: CL.SlCase[] = [
+    ...cpT.filter((t: any) => t.state === "CLOSED" && t.exitWhy === "STOP LOSS").map((t: any) => ({ name: t.name, strike: t.strike, side: t.side, openedAt: t.openedAt, premPct: pctOf(t), review: t.review ? { grade: t.review.grade, failed: t.review.failed || [] } : null, rangeDay: !!(_planLock.get(`${t.index}:0:${day}`) as any)?.range?.flag, entryKind: t.entryKind ?? null })),
+    ...(_cp.day === day ? Object.values(_cp.exp || {}).flatMap((e: any) => e.trades || []) : []).filter((t: any) => /PREMIUM STOP/.test(t.exitWhy || "")).map((t: any) => ({ name: t.name + " (expiry mode)", strike: t.strike, side: t.side, openedAt: t.openedAt, premPct: pctOf(t), review: null })),
+  ];
+  const review = CL.dailyReviewMsg({ day, sl, notGiven: _cp.day === day ? _cp.notGiven || [] : [], board: board("live"), expiryBoard: board("expiry"), btsdToday: _btsd.trades.filter((t) => t.day === day).length });
+  if (send) cpSend(html + TG.SPLIT + review, true);
+  return { html, review, graded, score: card.days[day], trend: CL.trend(card, day) };
 }
 router.get("/closing-statement", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
   const day = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.day || "")) ? String(req.query.day) : new Date(Date.now() + 19800000).toISOString().slice(0, 10);

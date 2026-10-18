@@ -13,6 +13,7 @@ import { confirmedSwings } from "../../premium/premiumCenter";
 import { atr, ema } from "../../indicators";
 import { assemble, DayData, Min } from "../nifty20/data";
 import { assembleIndex } from "../multiIndex/data";
+import { FROM, latestRawDay } from "./dataRange";
 import { barsOf, premAt, expiryDays } from "./premiumBacktest2";
 
 type Bar = { time: number; open: number; high: number; low: number; close: number; volume: number };
@@ -23,7 +24,7 @@ export type SCfg = { name: string; strike: 0 | 1; entry: "cross" | "close"; stop
 export const SCFGS: SCfg[] = [{ name: "S1_ATM_cross", strike: 0, entry: "cross" }, { name: "S2_ITM1_cross", strike: 1, entry: "cross" }, { name: "S3_ATM_close", strike: 0, entry: "close" }];
 
 export function run(cfgs = SCFGS) {
-  const data: Record<string, DayData[]> = { NIFTY: assemble("2024-10-01", "2026-10-16").days, SENSEX: assembleIndex("SENSEX", "2024-10-01", "2026-10-16") };
+  const data: Record<string, DayData[]> = { NIFTY: assemble(FROM, latestRawDay()).days, SENSEX: assembleIndex("SENSEX", FROM, latestRawDay()) };
   const trades: any[] = [];
   for (const name of ["NIFTY", "SENSEX"] as const) {
     const { step, lot } = IDX[name], days = data[name].filter((d) => d.spot.size >= 300), exp = expiryDays(days, step);

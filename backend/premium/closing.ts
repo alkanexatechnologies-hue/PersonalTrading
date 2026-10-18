@@ -73,3 +73,37 @@ export function closingStatementMsg(o: { day: string; indices: { name: string; c
   L.push("<i>Graded on the actual premium (half at T1 when booked) · history, not a promise · the plan rules decide trades</i>");
   return L.join("\n");
 }
+
+// ---------------------------------------------------------------- ProTrader DAILY REVIEW (sent with the 15:30 closing statement)
+export interface NotGiven { index: string; side: string; time: number; level: number | null; why: "NO RETEST" | "RANGE DAY" | "EXPIRY DAY" | "REVIEW C" | "CONFLICT" }
+export interface SlCase { name: string; strike: number; side: string; openedAt: number; premPct: number | null; review?: { grade: string; failed: string[] } | null; rangeDay?: boolean; entryKind?: string | null }
+/** Why a stop loss happened, from facts recorded at the time (no guessing). */
+export function slReasons(c: SlCase): string[] {
+  const r: string[] = [], m = Math.floor(((c.openedAt + 19800) % 86400) / 60);
+  if (m >= 840) r.push("late entry (after 14:00 — the 2-yr record for late entries is the worst)");
+  if (c.rangeDay) r.push("range day");
+  if (c.review?.grade === "B") r.push("review B (half size) — one pillar was soft");
+  const f = c.review?.failed || [];
+  if (f.includes("trend")) r.push("against the higher-timeframe trend");
+  if (f.includes("premium") || f.includes("oi")) r.push("the option was not confirming (premium / OI flow)");
+  if (f.includes("room")) r.push("little room to the next wall");
+  if (c.premPct != null && c.premPct <= -30) r.push(`premium lost ${Math.abs(Math.round(c.premPct))}% before the index stop fired`);
+  if (!r.length) r.push("setup was clean — the market simply went the other way (a good trade can lose)");
+  return r;
+}
+export interface Board { since: string | null; n: number; wins: number; avgPct: number | null }
+export function dailyReviewMsg(o: { day: string; sl: SlCase[]; notGiven: NotGiven[]; board: Board; expiryBoard: Board; btsdToday: number }) {
+  const LINE = "━━━━━━━━━━━━━━━", L = [`🎖 <b>PROTRADER DAILY REVIEW</b> · ${esc(o.day)}`, LINE];
+  L.push(`🛑 <b>STOP LOSSES — WHY (${o.sl.length})</b>`);
+  if (!o.sl.length) L.push("  none today");
+  for (const c of o.sl) L.push(`  ❌ <b>${esc(c.name.replace(" 50", ""))} ${c.strike} ${c.side}</b> ${hm(c.openedAt)}${c.premPct != null ? ` (${c.premPct}%)` : ""}: ${esc(slReasons(c).join("; "))}`);
+  L.push(LINE, `⏹ <b>SHOWN BUT NOT GIVEN (${o.notGiven.length})</b>`);
+  if (!o.notGiven.length) L.push("  none today");
+  const by: Record<string, NotGiven[]> = {}; for (const x of o.notGiven) (by[x.why] = by[x.why] || []).push(x);
+  for (const [why, xs] of Object.entries(by)) L.push(`  • <b>${esc(why)}</b> ×${xs.length}: ${xs.map((x) => `${esc(x.index.replace(" 50", ""))} ${esc(x.side)}${x.level != null ? " " + n0(x.level) : ""} ${hm(x.time)}`).join(", ")}`);
+  const b = (x: Board) => (x.n ? `${x.wins}/${x.n} wins (${Math.round((x.wins / x.n) * 100)}%) · avg ${x.avgPct != null && x.avgPct >= 0 ? "+" : ""}${x.avgPct}% per trade on premium` : "no trades yet");
+  L.push(LINE, `📈 <b>FORWARD SCOREBOARD</b>${o.board.since ? ` since ${esc(o.board.since)}` : ""}`, `  Live trades: ${b(o.board)}`, `  🎲 Expiry mode (paper): ${b(o.expiryBoard)}`);
+  L.push(`📝 BTSD: ${o.btsdToday ? `${o.btsdToday} of your own trade(s) logged today — thank you` : "none logged today — record your own trades/skips so I can learn your edge"}`);
+  L.push("<i>Logic changes only after ProTrader's backtest on real Dhan data · advisory only</i>");
+  return L.join("\n");
+}

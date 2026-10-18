@@ -7,6 +7,7 @@ import { atr } from "../../indicators";
 import { confirmedSwings } from "../../premium/premiumCenter";
 import { assemble, DayData, Min } from "../nifty20/data";
 import { assembleIndex } from "../multiIndex/data";
+import { FROM, latestRawDay } from "./dataRange";
 
 type Bar = { time: number; open: number; high: number; low: number; close: number; volume: number };
 const IST = 19800, mn = (t: number) => Math.floor(((t + IST) % 86400) / 60);
@@ -34,7 +35,7 @@ export function expiryDays(days: DayData[], step: number) {
 }
 
 export function run(cfgs = CFGS) {
-  const data: Record<string, DayData[]> = { NIFTY: assemble("2024-10-01", "2026-10-16").days, SENSEX: assembleIndex("SENSEX", "2024-10-01", "2026-10-16") };
+  const data: Record<string, DayData[]> = { NIFTY: assemble(FROM, latestRawDay()).days, SENSEX: assembleIndex("SENSEX", FROM, latestRawDay()) };
   const trades: any[] = [], expiries: Record<string, string[]> = {};
   for (const name of ["NIFTY", "SENSEX"] as const) {
     const { step, lot } = IDX[name], days = data[name].filter((d) => d.spot.size >= 300), exp = expiryDays(days, step); expiries[name] = [...exp];

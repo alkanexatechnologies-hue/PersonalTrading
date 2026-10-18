@@ -161,6 +161,10 @@ Every change to the **main trading logic** goes through ProTrader. Main logic me
 4. **ProTrader's verdict is final.** APPROVE → implement with tests, commit, report to the owner. REJECT or
    NEED MORE DATA → do not implement; report why.
 5. Every verdict is logged in `backend/research/SUPERVISOR_LOG.md`.
+6. **Daily routine (automated):**
+   - 15:30: closing statement + ProTrader daily review (stop-loss reasons, not-given triggers, forward scoreboard).
+   - 15:50: research-data refresh.
+   - Friday 16:05: weekly re-check of the live logic.
 
 Messages, formatting, warnings and research do not need the gate. `AI_MODE=ADVISORY_ONLY` and
 `LIVE_ORDER_EXECUTION=false` stay enforced regardless.

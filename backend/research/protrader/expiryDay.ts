@@ -6,6 +6,7 @@ import * as TV from "../../premium/traderView";
 import { atr, ema } from "../../indicators";
 import { assemble, DayData, Min } from "../nifty20/data";
 import { assembleIndex } from "../multiIndex/data";
+import { FROM, latestRawDay } from "./dataRange";
 import { barsOf, premAt, expiryDays } from "./premiumBacktest2";
 
 type Bar = { time: number; open: number; high: number; low: number; close: number; volume: number };
@@ -60,7 +61,7 @@ function manageNormal(leg: Min[], M: [number, number][], g: Sig) {
 }
 
 export function run(cfgs = XCFGS) {
-  const data: Record<string, DayData[]> = { NIFTY: assemble("2024-10-01", "2026-10-16").days, SENSEX: assembleIndex("SENSEX", "2024-10-01", "2026-10-16") };
+  const data: Record<string, DayData[]> = { NIFTY: assemble(FROM, latestRawDay()).days, SENSEX: assembleIndex("SENSEX", FROM, latestRawDay()) };
   const trades: any[] = [];
   for (const name of ["NIFTY", "SENSEX"] as const) {
     const { step, lot } = IDX[name], days = data[name].filter((d) => d.spot.size >= 300), exp = expiryDays(days, step);
