@@ -78,6 +78,7 @@ import * as OFL from "../premium/oiFlow";
 import * as PPOS from "../premium/premiumPosition";
 import * as SWP from "../premium/sweepMsg";
 import * as LW from "../premium/lunchWindow";
+import * as LB from "../premium/levelBreak";
 import * as EYE from "../premium/marketEye";
 import * as TG from "../premium/tgFormat";
 import { Decision } from "../decision/types";
@@ -8889,6 +8890,8 @@ function cpOdds(sym: string): string | undefined {
 }
 /** Co-pilot trades closed today below their entry premium (discipline check: 2 losses = stop). */
 const cpLossesToday = () => (_cp.closed || []).filter((t: any) => t.entryPrem != null && t.exitPrem != null && (t.t1Prem != null ? 0.5 * (t.t1Prem - t.entryPrem) + 0.5 * (t.exitPrem - t.entryPrem) : t.exitPrem - t.entryPrem) < 0).length;
+/** Backtest record of break candles (backend/research/levelBreaks) quoted in each break alert. */
+const _lbStats: any = (() => { try { return JSON.parse(fs.readFileSync(path.join(process.cwd(), "backend", "research", "published", "levelBreaks.json"), "utf8")); } catch { return null; } })();
 let _cpBusy = false, _cpTick = 0;
 async function copilotTick() {
   if (_cpBusy) return; _cpBusy = true;
@@ -8974,6 +8977,31 @@ async function copilotTick() {
           _cp.sent[key] = nowSec; cpSave(); cpSend(SWP.sweepAlertMsg(liq, l), true);
         }
         if ((istMin === 570 || istMin === 720) && !_cp.sent[`sweepmap|${sym}|${istMin}`]) { _cp.sent[`sweepmap|${sym}|${istMin}`] = nowSec; cpSave(); cpSend(SWP.sweepMapMsg(liq, new Date((nowSec + 19800) * 1000).toISOString().slice(11, 16)), true); }
+      }
+    }
+    // 🚀/🔻 5-min and 15-min BREAK candles at the plan's support / resistance (information only — the plan's trigger is unchanged)
+    if (istMin >= 560 && istMin <= 916 && _cp._brkMin !== istMin) {
+      _cp._brkMin = istMin;
+      for (const sym of ["^NSEI", "^BSESN"]) {
+        const d: any = await pay(sym).catch(() => null); if (!d?.available || !d.trader || d.trader.error || d.dataStatus !== "LIVE") continue;
+        const levels = (d.trader.levels || []).filter((x: any) => x.kind !== "TODAY" && Number.isFinite(x.price));
+        const c5all: any[] = await getCandlesCached(sym, "5m").catch(() => []) as any[];
+        const tfs: [string, any[], number, number | null][] = [
+          ["5m", c5all, 5, ((atr(c5all as any, 14) as any[]).filter((x) => x != null).slice(-1)[0] as number) ?? null],
+          ["15m", d.chart?.candles || [], 15, d.trader.atr15 ?? null],
+        ];
+        for (const [tf, all, mins, a] of tfs) {
+          if (!a) continue;
+          const bars = all.filter((c: any) => new Date((c.time + 19800) * 1000).toISOString().slice(0, 10) === day && c.time + mins * 60 <= nowSec);
+          for (const e of LB.detectBreaks(bars, levels, a)) {
+            if (e.index !== bars.length - 1) continue;   // only the candle that just closed (never replays old breaks)
+            const key = `brk|${sym}|${tf}|${e.dir}|${Math.round(e.level.price)}`; if (_cp.sent[key]) continue;
+            _cp.sent[key] = nowSec; cpSave();
+            const rec = _lbStats?.rows?.[`${tf}|${e.dir}|${e.q.grade}`] ?? null;
+            const next = levels.filter((x: any) => (e.dir === "UP" ? x.price > e.bar.close : x.price < e.bar.close)).sort((x: any, y: any) => Math.abs(x.price - e.bar.close) - Math.abs(y.price - e.bar.close))[0] ?? null;
+            cpSend(LB.breakAlertMsg(d.name, tf as "5m" | "15m", e, mins, rec, next), true);
+          }
+        }
       }
     }
     // ⚠️ 12:00 lunch-window CAUTION (NIFTY + SENSEX) — a warning only; plans, reviews and trades are not changed by it
