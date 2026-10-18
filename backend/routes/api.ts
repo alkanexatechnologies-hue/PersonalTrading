@@ -8945,7 +8945,7 @@ async function copilotTick() {
       }
     }
     if (istMin >= 555 && istMin <= 930) await btsdTick(nowSec, istMin).catch(() => {});
-    // ⭐ every 15 min: BEST OPPORTUNITY for NIFTY + SENSEX together · 📊 every 30 min: the full read of each index
+    // every 15-min candle close (09:30–15:15), NIFTY then SENSEX: 🕯 candle message + ⭐ best opportunity
     if (istMin >= 570 && istMin <= 915 && istMin % 15 === 0 && sec >= 20 && !_cp.sent[`best|${istMin}`]) {
       _cp.sent[`best|${istMin}`] = true; cpSave();
       const items: any[] = [];
@@ -8955,8 +8955,8 @@ async function copilotTick() {
         const zh = await zeroHeroPayload({ symbol: sym }).catch(() => null);
         items.push({ d, trade: _cp.trades[sym] || null, eye, zh: zh?.available ? zh : null });
       }
-      if (items.length) cpSend(TG.bestOpportunityMsg(items), true);
-      if (istMin % 30 === 0) for (const it of items) cpSend(TG.fullReadMsg(it.d, it.trade, it.eye, it.zh, cpOdds(it.d.symbol)), true);
+      // per index, in order: 🕯 the 15-min candle that just closed, then ⭐ the best opportunity (senior trader's call)
+      for (const it of items) { cpSend(TG.candleMsg(it.d, it.eye), true); cpSend(TG.bestOpportunityMsg([it]), true); }
     }
     // 15:30 CLOSING STATEMENT: diary saved, every trade graded (points, success / failure + why), day-by-day scorecard
     if (istMin >= 930 && istMin <= 940 && (istMin > 930 || sec >= 20) && !_cp.sent.closing) {

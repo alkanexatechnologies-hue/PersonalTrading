@@ -35,7 +35,7 @@ export function bestFor(d: any, trade: any | null) {
   return c.length ? { kind: "PLAN" as const, ...c[0] } : { kind: "NONE" as const };
 }
 function bestBlock(d: any, trade: any | null, eye: any | null, zh: any | null): string {
-  const b = bestFor(d, trade), T = d?.trader, L: string[] = [`${d.symbol === "^BSESN" ? "🟣" : "🔵"} <b>${esc(short(d.name))}</b>  ${priceLine(d)}`];
+  const b = bestFor(d, trade), T = d?.trader, L: string[] = [priceLine(d)];
   if (!b) L.push("  data unavailable");
   else if (b.kind === "TRADE") {
     const t = b.trade, prem = (d.ranking || []).find((x: any) => x.side === t.side && x.strike === t.strike)?.ltp ?? null;
@@ -45,13 +45,19 @@ function bestBlock(d: any, trade: any | null, eye: any | null, zh: any | null): 
   } else if (b.kind === "PLAN") {
     const { o, side } = b;
     const tag = o.state === "TRIGGERED" ? "✅ TRIGGERED" : o.state === "ARMED" ? "⏳ ARMED — wait for the close" : o.state === "APPROACHING" ? "👀 APPROACHING" : "· watching";
-    L.push(`  Status: <b>${tag}</b>`);
-    L.push(...planBlock(d, side, { candle: true }));
-    const rv = T?.review?.[side];
-    if (rv) L.push(`  🧪 Review <b>${esc(rv.grade)}</b> (${esc(rv.score)}%) → ${esc(rv.verdict)}${rv.failed?.length ? ` · ✗ ${rv.failed.map((k: string) => esc(k)).join(", ")}` : ""}`);
-  } else L.push(`  ⏸ No setup near — ${esc(T?.coach?.action ?? "wait")}`);
-  if (d.oi) L.push(...oiHtml(d.oi, { compact: true }).map((x) => `  ${x}`));
-  if (eye) L.push(`  👁 Next 30m (history): ↑${eye.upPct}% ↔${eye.sidePct}% ↓${eye.downPct}% → <b>${esc(eye.lead)}</b>`);
+    L.push(`Status: <b>${tag}</b>`);
+    L.push(...planBlock(d, side));
+    const rv = T?.review?.[side], why: string[] = rv?.reasoning || [];
+    const dec = why[why.length - 1], wrong = why.find((x: string) => /^Wrong if/.test(x));
+    if (dec) L.push(`🧠 <b>Senior trader:</b> ${esc(dec.replace(/^Decision:\s*/, ""))}`);
+    if (wrong) L.push(`⚠️ ${esc(wrong)}`);
+  } else {
+    const P = T?.plans, nt = P?.noTrade;
+    L.push(`🧠 <b>Senior trader:</b> nothing to do right now — ${esc(T?.coach?.action ?? "wait")}.`);
+    if (P?.bull || P?.bear) L.push(`${P?.bull ? `🟢 Bull only on a 15-min close above <b>${n0(P.bull.entry)}</b>` : ""}${P?.bull && P?.bear ? " · " : ""}${P?.bear ? `🔴 Bear only below <b>${n0(P.bear.entry)}</b>` : ""}`);
+    if (nt && d.spot?.price >= nt.from && d.spot?.price <= nt.to) L.push(`<i>Price is in the no-trade zone ${n0(nt.from)}–${n0(nt.to)}: the middle pays nobody — wait for a side to break.</i>`);
+  }
+  void eye;
   if (zh?.isExpiry) {
     const open = (zh.zhTrades || []).find((t: any) => t.state !== "CLOSED"), trig = (zh.sides || []).find((x: any) => x.trigger?.state === "TRIGGERED");
     L.push(open ? `  🎲 Zero-hero #${open.n} ${open.strike} ${open.side} · entry ₹${n0(open.entryPrem)} · now ₹${n0(open.livePrem)} · T1 ₹${n0(open.t1Prem)}`
@@ -231,3 +237,37 @@ export function boardParts(d: any): string {
 export function planBoardMsg(d: any, title = "TRADE PLAN"): string {
   return `${icon(d)} <b>${esc(short(d?.name))} — ${esc(title)}</b> · ${n0(d?.spot?.price)} · ${hm(Math.floor(Date.now() / 1000))}\n` + boardParts(d);
 }
+
+/** 15-minute CANDLE message: the candle that just closed, where it closed, OI in the last 15 min, Market Eye — a senior trader's read. */
+export function candleMsg(d: any, eye: any | null, nowSec = Math.floor(Date.now() / 1000)): string {
+  const T = d?.trader, nm = esc(short(d?.name));
+  const cs = (d?.chart?.candles || []).filter((c: any) => c.time + 900 <= nowSec);
+  const c = cs[cs.length - 1], pc = cs[cs.length - 2];
+  if (!c || !T) return `🕯 <b>${nm} · 15-MIN CANDLE</b>\ncandle data unavailable`;
+  const chg = pc ? c.close - pc.close : c.close - c.open, rng = c.high - c.low || 1, loc = Math.round(((c.close - c.low) / rng) * 100);
+  const L = [`🕯 <b>${nm} · 15-MIN CANDLE ${hm(c.time)}–${hm(c.time + 900)}</b>`];
+  L.push(`O ${n0(c.open)} · H ${n0(c.high)} · L ${n0(c.low)} · C <b>${n0(c.close)}</b> (${chg >= 0 ? "+" : "−"}${n0(Math.abs(chg))} pts) ${c.close >= c.open ? "🟩" : "🟥"}`);
+  const m15 = T.candles?.m15, m5 = T.candles?.m5;
+  if (m15 && m15.time === c.time) L.push(`Type: ${esc(m15.pattern || String(m15.shape || "").replace(/\s*\(body \d+%\)/, ""))} · closed at ${loc}% of its range${m15.at ? ` · at ${esc(m15.at)}` : ""}`);
+  else L.push(`Closed at ${loc}% of its range (${loc >= 70 ? "buyers held the close" : loc <= 30 ? "sellers held the close" : "two-way"})`);
+  if (m5) L.push(`5-min: ${candleShort(m5).replace(/^5-min /, "")}`);
+  const vw = (d.chart?.vwap || []).filter((v: any) => Number.isFinite(v)).slice(-1)[0], px = d.spot?.price ?? c.close;
+  const lv = (T.levels || []).filter((x: any) => Number.isFinite(x.price) && x.kind !== "TODAY");
+  const up = lv.filter((x: any) => x.price > px).sort((a: any, b: any) => a.price - b.price)[0], dn = lv.filter((x: any) => x.price < px).sort((a: any, b: any) => b.price - a.price)[0];
+  L.push(`Index <b>${n0(px)}</b>${vw != null ? ` · VWAP ${n0(vw)} (${px >= vw ? "above" : "below"})` : ""}`);
+  if (up || dn) L.push(`${up ? `Resistance <b>${n0(up.price)}</b> <i>${esc(up.label)}</i>` : ""}${up && dn ? " · " : ""}${dn ? `Support <b>${n0(dn.price)}</b> <i>${esc(dn.label)}</i>` : ""}`);
+  L.push(`Trend: ${(T.trends || []).map((x: any) => `${esc(x.tf)} ${x.verdict === "UP" ? "▲" : x.verdict === "DOWN" ? "▼" : "▬"}`).join(" · ")}`);
+  const f = d.oi;
+  if (f) {
+    const l15 = f.last15;
+    L.push(`📊 OI ${l15 ? `last ${l15.ageMin} min: CE ${sgnOi(l15.ce)} · PE ${sgnOi(l15.pe)}${l15.top ? ` · most at <b>${l15.top.side} ${n0(l15.top.strike)} ${sgnOi(l15.top.chg)}</b>` : ""} · tilt ${l15.tilt == null ? "—" : `Bulls ${l15.tilt}%`}` : `today: tilt Bulls ${f.tiltToday ?? "—"}% (${esc(f.bias)})`} · PCR ${f.pcr ?? "—"}`);
+  }
+  if (eye) L.push(`👁 Next 30 min in similar moments: ↑${eye.upPct}% ↔${eye.sidePct}% ↓${eye.downPct}% → <b>${esc(eye.lead)}</b>`);
+  // the senior trader's one-line read of this candle
+  const atr = T.atr15 || rng, near = (x: any) => x && Math.abs(x.price - px) <= 0.5 * atr;
+  const who = loc >= 70 && c.close > c.open ? "Buyers won this candle" : loc <= 30 && c.close < c.open ? "Sellers won this candle" : "Neither side won this candle";
+  const where = near(up) ? `, now testing resistance ${n0(up.price)} — a 15-min close above it is the trigger, a rejection is a warning` : near(dn) ? `, now sitting on support ${n0(dn.price)} — hold = bounce idea, close below = breakdown` : vw != null ? `, ${px >= vw ? "holding above" : "trading below"} VWAP` : "";
+  L.push(`🧠 <b>Read:</b> ${esc(who + where)}.`);
+  return L.join("\n");
+}
+const sgnOi = (v: number) => `${v >= 0 ? "+" : "−"}${(Math.abs(v) / 1e5).toFixed(1)}L`;

@@ -10,7 +10,7 @@ test("escaping, best pick (trade > triggered > armed > approaching > idle), html
   if (m >= 570 && m <= 885) assert.equal((bestFor(d(), null) as any).side, "bull"); else assert.equal(bestFor(d(), null)!.kind, "NONE");   // late session: no new buy
   assert.equal(bestFor(d(), { state: "OPEN", strike: 1, side: "CE" })!.kind, "TRADE");
   const msg = bestOpportunityMsg([{ d: d(), trade: null, eye: { upPct: 20, sidePct: 50, downPct: 30, lead: "SIDEWAYS" }, zh: null }]);
-  assert.match(msg, /BEST OPPORTUNITY/); assert.match(msg, /SIDEWAYS/); assert.ok(!/<(?!\/?(b|i)>)/.test(msg.replace(/<\/?(b|i)>/g, "")));
+  assert.match(msg, /BEST OPPORTUNITY · NIFTY/); assert.match(msg, /Senior trader:/); assert.ok(!/</.test(msg.replace(/<\/?(b|i|pre)>/g, "")));
   assert.match(htmlify("🎯 TITLE\n  → do <this>"), /^<b>🎯 TITLE<\/b>\n<b>→ do &lt;this&gt;<\/b>$/);
 });
 test("next-day plan: date, both sides with SL/targets/risk, nearest levels, expired-premium fallback, expiry flag", () => {
@@ -78,4 +78,22 @@ test("messages are split into short sections: board = Bull · No-trade · Bear (
   const y = d({ symbol: "^BSESN", name: "SENSEX" });
   const b = splitParts(bestOpportunityMsg([{ d: x, trade: null, eye: null, zh: null }, { d: y, trade: null, eye: null, zh: null }]));
   assert.equal(b.length, 2); assert.match(b[0], /BEST OPPORTUNITY · NIFTY/); assert.match(b[1], /BEST OPPORTUNITY · SENSEX/);
+});
+test("15-min candle message: the closed candle, type, VWAP + nearest levels, OI last 15 min, and the senior trader's read", async () => {
+  const { candleMsg } = await import("./tgFormat");
+  const t0 = 1_792_036_800;   // 09:30 IST
+  const x: any = d();
+  x.chart = { candles: [{ time: t0 - 900, open: 22950, high: 22990, low: 22940, close: 22980 }, { time: t0, open: 22980, high: 23062, low: 22975, close: 23055 }], vwap: [22960, 22990] };
+  x.spot.price = 23055; x.trader.atr15 = 40;
+  x.trader.levels = [{ price: 23061, label: "PDH", kind: "PREV DAY" }, { price: 23000, label: "OI put wall", kind: "OI" }];
+  x.trader.trends = [{ tf: "Daily", verdict: "UP" }, { tf: "1H", verdict: "UP" }];
+  x.trader.candles = { m15: { tf: "15-min", time: t0, tone: "bull", shape: "bullish momentum candle (body 90%)", closeLoc: 92, at: "PDH 23,061" } };
+  x.oi = { pcr: 1.3, tiltToday: 70, bias: "BULLISH", last15: { ageMin: 15, ce: 1e5, pe: 4e5, tilt: 80, top: { side: "PE", strike: 23000, chg: 3e5 } } };
+  const m = candleMsg(x, { upPct: 50, sidePct: 30, downPct: 20, lead: "UP" }, t0 + 900 + 30);
+  assert.match(m, /NIFTY · 15-MIN CANDLE 09:30–09:45/);
+  assert.match(m, /O 22,980 · H 23,062 · L 22,975 · C <b>23,055<\/b> \(\+75 pts\) 🟩/);
+  assert.match(m, /Type: bullish momentum candle · closed at 92% of its range · at PDH 23,061/);
+  assert.match(m, /VWAP 22,990 \(above\)/); assert.match(m, /Resistance <b>23,061<\/b>/); assert.match(m, /Support <b>23,000<\/b>/);
+  assert.match(m, /OI last 15 min: CE \+1\.0L · PE \+4\.0L · most at <b>PE 23,000 \+3\.0L<\/b> · tilt Bulls 80%/);
+  assert.match(m, /Read:<\/b> Buyers won this candle, now testing resistance 23,061 — a 15-min close above it is the trigger/);
 });
