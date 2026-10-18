@@ -7792,3 +7792,9 @@ body.ppc-fullwidth .watchlist, body.ppc-fullwidth #watchlist { display: none !im
 .ppc-rv-why { margin-top: 4px; font-size: 13px; } .ppc-rv-why summary { cursor: pointer; color: #82a8ff; font-weight: 700; min-height: 28px; }
 .ppc-rv-why ul { margin: 4px 0 0; padding-left: 18px; } .ppc-rv-why li { margin: 2px 0; line-height: 1.35; } .ppc-rv-why li.dec { font-weight: 800; list-style: "➜ "; }
 .ppc-pp { font-size: 13px; margin: 2px 0 4px; color: #9fb3d9; } .ppc-pp.danger { color: #ff6b6b; font-weight: 800; }
+/* 🎖 ProTrader desk */
+.ppc-pt { border: 1px solid rgba(130,168,255,.35); border-radius: 10px; padding: 8px 10px; margin-bottom: 6px; background: rgba(130,168,255,.06); font-size: 13px; }
+.ppc-pt-head { margin-bottom: 4px; } .ppc-pt-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.ppc-pt-chip { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: rgba(255,255,255,.06); }
+.ppc-pt-chip.ok { color: #3ddc97; } .ppc-pt-chip.bad { color: #ff6b6b; font-weight: 700; } .ppc-pt-chip.exp { color: #c9a0ff; font-weight: 700; }
+.ppc-pt-row { padding: 3px 0; line-height: 1.4; } .ppc-pt-row.wait { color: #f2c94c; } .ppc-pt-row.quiet { color: #8a96b0; }

@@ -70,6 +70,7 @@ function ppcShell() {
   </div>
   <div id="ppc-quote" class="ppc-quote"></div>
   <div class="ppc-sec">① Decision now</div>
+  <div id="ppc-pt" class="ppc-pt"></div>
   <div id="ppc-coach" class="ppc-coach"></div>
   <div id="ppc-radar" class="ppc-radar"></div>
   <div class="ppc-sec">② Trade plan <span id="ppc-planfor" class="ppc-sub"></span></div>
@@ -163,7 +164,7 @@ function ppcRender() {
   ppcEl("ppc-quote").innerHTML = `<span class="ppc-qname">${ppcEsc(d.name)}</span><span class="ppc-qpx ${ppcCls(sp.change)}">${ppcNs(sp.price)}</span><span class="${ppcCls(sp.change)}">${ppcSg(sp.change)} (${ppcSg(sp.changePct, 2, "%")})</span>
     <span>O <b>${ppcNs(sp.open)}</b></span><span>H <b>${ppcNs(sp.high)}</b></span><span>L <b>${ppcNs(sp.low)}</b></span><span>Prev close <b>${ppcNs(sp.prevClose)}</b></span>
     <span>ATM <b>${d.atm ?? "—"}</b></span><span>Expiry <b>${ppcEsc(d.expiry || "—")}</b></span>${d.session !== "OPEN" ? `<span class="ppc-warnt">Session ${ppcEsc(sp.sessionDay || "")} — market ${ppcEsc(d.session)}</span>` : ""}`;
-  ppcRenderMaster(); ppcRenderRadar(); ppcLoadZH(); ppcLoadZHToday(); ppcLoadEye(); ppcRenderBTSD(); ppcRenderCoach(); ppcRenderTV(); ppcRenderLadder(); ppcRenderPlans(); ppcRenderHistory(); if (ppcEl("ppc-more")?.open) { ppcRenderCards(); ppcRenderCharts(); ppcRenderRank(); }
+  ppcRenderMaster(); ppcRenderProTrader(); ppcRenderRadar(); ppcLoadZH(); ppcLoadZHToday(); ppcLoadEye(); ppcRenderBTSD(); ppcRenderCoach(); ppcRenderTV(); ppcRenderLadder(); ppcRenderPlans(); ppcRenderHistory(); if (ppcEl("ppc-more")?.open) { ppcRenderCards(); ppcRenderCharts(); ppcRenderRank(); }
   ppcEl("ppc-foot").innerHTML = `${ppcEsc(d.note)} · ${ppcEsc(d.version)} · <span title="${ppcEsc(PPC_TIPS.PROB)}">${ppcEsc(d.validation?.status)}: ${ppcEsc(d.validation?.detail)}</span>`;
 }
 
@@ -670,6 +671,38 @@ async function ppcLoadEye() {
   } catch { el.innerHTML = ""; }
 }
 
+
+// ================================================================ 🎖 ProTrader desk — the same state that drives the Telegram co-pilot
+async function ppcRenderProTrader(force) {
+  const el = ppcEl("ppc-pt"); if (!el || !PPC.d) return;
+  if (force || !PPC._ptAt || Date.now() - PPC._ptAt > 14000) {
+    PPC._ptAt = Date.now();
+    try { PPC._pt = await fetch("/api/copilot/state").then((r) => r.json()); } catch { /* keep the last one */ }
+  }
+  const cp = PPC._pt || {}, sym = PPC.sym, d = PPC.d, T = d.trader || {}, P = T.plans || {};
+  const today = new Date(Date.now() + 19800000).toISOString().slice(0, 10), isToday = cp.day === today;
+  const n0 = (v) => (v == null ? "—" : Math.round(v).toLocaleString("en-IN")), hm = (t) => new Date((t + 19800) * 1000).toISOString().slice(11, 16);
+  const ltp = (side, k) => (d.ranking || []).find((x) => x.side === side && x.strike === k)?.ltp ?? null;
+  const pct = (a, b) => (a != null && b ? `${a >= b ? "+" : "−"}${Math.abs(Math.round((a / b - 1) * 100))}%` : "");
+  const chips = [];
+  if (P.anchor?.locked) chips.push(`<span class="ppc-pt-chip ok">🔒 Plan locked${P.anchor.rolls?.length ? ` · ${P.anchor.rolls.length} roll(s)` : ""}</span>`);
+  if (T.rangeDay) chips.push(`<span class="ppc-pt-chip bad" title="${ppcEsc(T.rangeDay.why)}">⚠️ Range day — no new trades after ${ppcEsc(T.rangeDay.at)}</span>`);
+  if (P.bull && P.bear && P.bear.entry >= P.bull.entry) chips.push(`<span class="ppc-pt-chip bad">⛔ Plan conflict — stand aside</span>`);
+  if (d.expiry && d.expiry === today) chips.push(`<span class="ppc-pt-chip exp">🎲 Expiry day — plan trades not given · EXPIRY MODE (paper / min size)</span>`);
+  const rows = [];
+  const pd = isToday ? cp.pending?.[sym] : null;
+  if (pd) rows.push(`<div class="ppc-pt-row wait">⏳ <b>Waiting for the retest</b> · ${pd.side === "bull" ? "CE" : "PE"} · level <b>${n0(pd.trigger)}</b> · until ${hm(pd.until)} · review ${ppcEsc(pd.review?.grade || "—")} — given only if a 5-min candle comes back within ${n0(0.25 * pd.atr)} pts and closes ${pd.side === "bull" ? "above" : "below"} it</div>`);
+  const tr = isToday ? cp.trades?.[sym] : null;
+  if (tr && tr.state !== "CLOSED") { const now = ltp(tr.side, tr.strike);
+    rows.push(`<div class="ppc-pt-row open">📌 <b>Open trade ${tr.strike} ${tr.side}</b>${tr.entryKind === "RETEST" ? " (on the retest)" : ""} · entry ₹${n0(tr.entryPrem)} → now <b>₹${n0(now)}</b> <span class="${now >= tr.entryPrem ? "ppc-up" : "ppc-dn"}">${pct(now, tr.entryPrem)}</span> · <b class="ppc-dn">SL ${tr.state === "T1" ? `${n0(tr.entrySpot)} (breakeven)` : n0(tr.stop)}</b> · <b class="ppc-up">T1 ${n0(tr.t1)}</b>${tr.t2 ? ` · <b class="ppc-up">T2 ${n0(tr.t2)}</b>` : ""} · ${tr.state === "T1" ? "T1 done, half booked" : "open"}</div>`); }
+  const ex = isToday ? cp.exp?.[sym]?.trades || [] : [];
+  for (const t of ex) { const now = t.state === "CLOSED" ? t.exitPrem : ltp(t.side, t.strike);
+    rows.push(`<div class="ppc-pt-row exp">🎲 <b>Expiry ${t.strike} ${t.side}</b> · ₹${t.entryPrem} → ${t.state === "CLOSED" ? `${ppcEsc(t.exitWhy)} ₹${n0(now)}` : `now <b>₹${n0(now)}</b>`} <span class="${(now ?? 0) >= t.entryPrem ? "ppc-up" : "ppc-dn"}">${pct(now, t.entryPrem)}</span>${t.state !== "CLOSED" ? ` · <b class="ppc-dn">SL ₹${t.state === "HALF" ? `${Math.round(t.entryPrem)} (breakeven)` : Math.round(t.entryPrem * 0.6)}</b> · <b class="ppc-up">T1 ₹${Math.round(t.entryPrem * 1.5)}</b> · <b class="ppc-up">T2 ₹${Math.round(t.entryPrem * 2.5)}</b>${t.state === "HALF" ? " · half booked" : ""}` : ""}</div>`); }
+  const done = isToday ? (cp.closed || []).filter((t) => t.index === sym) : [];
+  if (done.length) rows.push(`<div class="ppc-pt-row">Today: ${done.map((t) => { const p = t.exitPrem != null && t.entryPrem ? Math.round((t.exitPrem / t.entryPrem - 1) * 100) : null; return `${p != null && p > 0 ? "✅" : "❌"} ${t.strike} ${t.side} ${ppcEsc(t.exitWhy || "")} ${p != null ? (p >= 0 ? "+" : "") + p + "%" : ""}`; }).join(" · ")}</div>`);
+  if (!rows.length) rows.push(`<div class="ppc-pt-row quiet">${d.session === "OPEN" ? "Watching — no trade pending or open on this index." : "Market closed — the desk fills during market hours."}</div>`);
+  el.innerHTML = `<div class="ppc-pt-head"><b>🎖 ProTrader desk</b> <span class="ppc-sub">· ${ppcEsc((d.name || "").replace(" 50", ""))} · same state as Telegram</span></div>${chips.length ? `<div class="ppc-pt-chips">${chips.join("")}</div>` : ""}${rows.join("")}`;
+}
 
 // ================================================================ BTSD Trade — the user's own trades, followed with Telegram follow-ups
 setInterval(() => { try { if (PPC.d && !PPC._btsdSide && !!ppcEl("ppc-btsd")?.hidden === ppcBTSDWindow()) ppcBTSDPaint(); } catch { /* screen not open */ } }, 30000);
