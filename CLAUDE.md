@@ -133,3 +133,31 @@ Do not modify trading logic while doing UI/responsive work: Master Trade
 Selector, OI, EMA/MACD/VWAP indicators, backtesting, or the AI layer.
 `AI_MODE=ADVISORY_ONLY`, `MODEL_TRAINING_ENABLED=false` and
 `LIVE_ORDER_EXECUTION=false` stay enforced.
+
+## 11. Trading-logic changes: supervisor gate (owner's decision, 2026-10-18)
+
+Every change to the **main trading logic** goes through the **Logic Supervisor**, a 20+ year index option buyer
+defined in `.claude/agents/option-supervisor.md`. Main logic means:
+- plan levels and the ladder
+- entries, stops, targets
+- anchoring, rolls and the plan lock
+- trigger rules and the radar
+- the Trade Review grading and gating
+- co-pilot trade giving and following
+- zero-hero
+- exits and time rules
+
+1. Write the proposal: the exact rule.
+2. The supervisor reviews it through the option-buyer lens (premium after costs, time decay, IV / events, premium stop,
+   NIFTY + SENSEX exposure, entry type, regime, no look-ahead).
+3. The supervisor backtests it on **real Dhan data**:
+   - the last week, day by day
+   - ≥ 60 sessions split into development / validation
+   - NIFTY and SENSEX separately
+   - current vs proposed: win %, Target 1 / Target 2 / Stop Loss / time exits, MISSED, index points and premium P&L
+4. **The supervisor's verdict is final.** APPROVE → implement with tests, commit, report to the owner. REJECT or
+   NEED MORE DATA → do not implement; report why.
+5. Every verdict is logged in `backend/research/SUPERVISOR_LOG.md`.
+
+Messages, formatting, warnings and research do not need the gate. `AI_MODE=ADVISORY_ONLY` and
+`LIVE_ORDER_EXECUTION=false` stay enforced regardless.
