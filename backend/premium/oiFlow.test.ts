@@ -34,3 +34,17 @@ test("OI flow: three 5-minute windows from snapshots, each with where OI moved m
   assert.match(c, /^📊 OI: total CE 402L · PE 450L · PCR <b>1.12<\/b> · tilt <b>Bulls/); assert.match(c, /last 5 min CE \+0\.0L · PE \+4\.0L · most at <b>PE 23,100/);
   assert.equal(oiFlow({ strikes: [], spot: 1, step: 50 }), null);
 });
+test("OI wall review: same definition as the plan; strengthening / weakening / shifted vs 15 min ago", async () => {
+  const { wallReview, wallReviewHtml } = await import("./oiFlow");
+  const now = [s(23000, 60e5, 115e5, 0, 0), s(23100, 70e5, 50e5, 0, 0), s(23200, 97e5, 20e5, 0, 0), s(24000, 140e5, 5e5, 0, 0)];
+  const prev = [s(23000, 60e5, 120e5, 0, 0), s(23100, 70e5, 50e5, 0, 0), s(23200, 90e5, 20e5, 0, 0), s(24000, 140e5, 5e5, 0, 0)];
+  const w = wallReview({ now, prev, spot: 23146, ageMin: 15 })!;
+  assert.equal(w.call!.strike, 23200); assert.equal(w.call!.state, "STRENGTHENING"); assert.equal(w.majorCall, 24000);
+  assert.equal(w.put!.strike, 23000); assert.equal(w.put!.state, "WEAKENING");
+  const shifted = wallReview({ now, prev: prev.map((x) => (x.strike === 23200 ? { ...x, ceOi: 20e5 } : x)), spot: 23146, ageMin: 15 })!;
+  assert.equal(shifted.call!.state, "SHIFTED"); assert.equal(shifted.call!.shiftedFrom, 24000);
+  const h = wallReviewHtml(shifted).join("\n");
+  assert.match(h, /Call wall <b>23,200<\/b> · 97L · <b>SHIFTED<\/b> from 24,000 \(resistance came closer\) · 54 pts above/);
+  assert.match(wallReviewHtml(w).join("\n"), /Put wall <b>23,000<\/b> · 115L · −5\.0L in 15 min → <b>WEAKENING<\/b> · 146 pts below/);
+  assert.equal(wallReview({ now, prev: null, spot: 23146, ageMin: null })!.call!.state, "NEW READ");
+});

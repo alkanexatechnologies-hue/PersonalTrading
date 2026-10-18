@@ -5,6 +5,7 @@
 // the OI TILT — the share of fresh put writing (bull side) vs call writing (bear side) near the price. The tilt is a
 // description of who is writing more, NOT a validated win probability. Units: lakh contracts (L).
 
+import { rankOiWalls } from "../analysis/marketAnalysis";
 export interface Strike { strike: number; ceOi: number; peOi: number; ceChg: number; peChg: number }
 export interface Snap { ageMin: number; strikes: Strike[] }
 const L = (v: number) => Math.round((v / 1e5) * 10) / 10;
@@ -24,11 +25,10 @@ export function oiFlow(o: { strikes: Strike[]; spot: number; step: number; snaps
   const pcr = ceT > 0 ? Math.round((peT / ceT) * 100) / 100 : null;
   const k = (o.nearSteps ?? 6) * o.step, near = S.filter((s) => Math.abs(s.strike - o.spot) <= k);
   // nearest STRONG walls: the biggest OI within ±12 steps on the correct side of the price; the chain's biggest when different
-  const band = S.filter((s) => Math.abs(s.strike - o.spot) <= 12 * o.step);
-  const maxBy = (a: Strike[], f: (s: Strike) => number) => (a.length ? a.reduce((x, s) => (f(s) > f(x) ? s : x)) : null);
-  const cw = maxBy(band.filter((s) => s.strike >= o.spot), (s) => s.ceOi) ?? maxBy(S, (s) => s.ceOi)!;
-  const pw = maxBy(band.filter((s) => s.strike <= o.spot), (s) => s.peOi) ?? maxBy(S, (s) => s.peOi)!;
-  const cwAll = maxBy(S, (s) => s.ceOi)!, pwAll = maxBy(S, (s) => s.peOi)!;
+  // SAME definition as the plan ladder (rankOiWalls): the nearest strike holding ≥ 50% of the biggest OI on that side
+  const rw = rankOiWalls(S as any, o.spot), maxBy = (a: Strike[], f: (s: Strike) => number) => (a.length ? a.reduce((x, s) => (f(s) > f(x) ? s : x)) : null);
+  const cw = (rw.ceAbove[0] as Strike | undefined) ?? maxBy(S, (s) => s.ceOi)!, pw = (rw.peBelow[0] as Strike | undefined) ?? maxBy(S, (s) => s.peOi)!;
+  const cwAll = (rw.callMajor as Strike | null) ?? cw, pwAll = (rw.putMajor as Strike | null) ?? pw;
   const nCe = sum(near, (s) => s.ceChg), nPe = sum(near, (s) => s.peChg), tiltToday = tilt(nCe, nPe);
   const bias = tiltToday == null ? "NEUTRAL" : tiltToday >= 60 ? "BULLISH" : tiltToday <= 40 ? "BEARISH" : "NEUTRAL";
   const biasWhy = bias === "BULLISH" ? "put writers are adding more than call writers near the price (support building)"
@@ -85,4 +85,34 @@ export function oiHtml(f: OiFlow, o: { compact?: boolean; expiry?: string | null
   }
   out.push(`<i>"today" = vs the previous close (Dhan chain) · 5-min windows from the app's own chain snapshots · tilt = share of fresh writing, not a tested win probability</i>`);
   return out;
+}
+
+/**
+ * 15-minute OI WALL REVIEW: the call wall (resistance) and put wall (support) now vs ~15 minutes ago, with the same wall
+ * definition as the plan. STRENGTHENING / WEAKENING = the wall strike's OI changed by ≥ 3% in the window; SHIFTED = the
+ * wall moved to another strike. Reporting only — it does not move the plan.
+ */
+export function wallReview(o: { now: Strike[]; prev: Strike[] | null; spot: number; ageMin: number | null }) {
+  if (!o.now.length || !(o.spot > 0)) return null;
+  const wNow = rankOiWalls(o.now as any, o.spot), wPrev = o.prev?.length ? rankOiWalls(o.prev as any, o.spot) : null;
+  const one = (side: "call" | "put") => {
+    const cur = (side === "call" ? wNow.ceAbove[0] : wNow.peBelow[0]) as Strike | undefined; if (!cur) return null;
+    const oiOf = (x: Strike | undefined) => (x ? (side === "call" ? x.ceOi : x.peOi) : 0);
+    const before = o.prev?.find((x) => x.strike === cur.strike), was = (wPrev ? (side === "call" ? wPrev.ceAbove[0] : wPrev.peBelow[0]) : undefined) as Strike | undefined;
+    const chg = before ? oiOf(cur) - oiOf(before) : null, pct = before && oiOf(before) > 0 ? (chg! / oiOf(before)) * 100 : null;
+    const shiftedFrom = was && was.strike !== cur.strike ? was.strike : null;
+    const state = shiftedFrom != null ? "SHIFTED" : pct == null ? "NEW READ" : pct >= 3 ? "STRENGTHENING" : pct <= -3 ? "WEAKENING" : "STABLE";
+    return { strike: cur.strike, oiL: L(oiOf(cur)), chg15: chg, pct15: pct == null ? null : Math.round(pct * 10) / 10, state, shiftedFrom, distance: Math.round(Math.abs(cur.strike - o.spot)) };
+  };
+  return { ageMin: o.ageMin, call: one("call"), put: one("put"), majorCall: (wNow.callMajor as any)?.strike ?? null, majorPut: (wNow.putMajor as any)?.strike ?? null };
+}
+export type WallReview = NonNullable<ReturnType<typeof wallReview>>;
+export function wallReviewHtml(w: WallReview): string[] {
+  const row = (x: WallReview["call"], call: boolean) => {
+    if (!x) return `${call ? "🧱 Call wall" : "🛡 Put wall"}: none ${call ? "above" : "below"} the price`;
+    const what = x.state === "SHIFTED" ? `<b>SHIFTED</b> from ${n0(x.shiftedFrom!)} (${call ? (x.strike < x.shiftedFrom! ? "resistance came closer" : "resistance moved away") : (x.strike > x.shiftedFrom! ? "support came closer" : "support moved away")})`
+      : x.state === "NEW READ" ? "first read" : `${x.chg15 != null ? sgnL(x.chg15) : ""} in ${w.ageMin ?? 15} min → <b>${x.state}</b>`;
+    return `${call ? "🧱 Call wall" : "🛡 Put wall"} <b>${n0(x.strike)}</b> · ${x.oiL}L · ${what} · ${x.distance} pts ${call ? "above" : "below"}`;
+  };
+  return [`<b>OI wall review</b>${w.ageMin ? ` (vs ${w.ageMin} min ago)` : ""}`, row(w.call, true), row(w.put, false)];
 }

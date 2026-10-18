@@ -1,4 +1,4 @@
-import { oiHtml } from "./oiFlow";
+import { oiHtml, wallReviewHtml } from "./oiFlow";
 // ============================ Telegram message design (HTML; every dynamic value escaped) ============================
 // 15-minute "Best Opportunity" (NIFTY + SENSEX in one message) · 30-minute full read per index · event alerts.
 // Advisory only — the arbiter and risk gates decide trades.
@@ -262,6 +262,7 @@ export function candleMsg(d: any, eye: any | null, nowSec = Math.floor(Date.now(
     const l15 = f.last15;
     L.push(`📊 OI ${l15 ? `last ${l15.ageMin} min: CE ${sgnOi(l15.ce)} · PE ${sgnOi(l15.pe)}${l15.top ? ` · most at <b>${l15.top.side} ${n0(l15.top.strike)} ${sgnOi(l15.top.chg)}</b>` : ""} · tilt ${l15.tilt == null ? "—" : `Bulls ${l15.tilt}%`}` : `today: tilt Bulls ${f.tiltToday ?? "—"}% (${esc(f.bias)})`} · PCR ${f.pcr ?? "—"}`);
   }
+  if (d.oiWalls) L.push(...wallReviewHtml(d.oiWalls));
   if (eye) L.push(`👁 Next 30 min in similar moments: ↑${eye.upPct}% ↔${eye.sidePct}% ↓${eye.downPct}% → <b>${esc(eye.lead)}</b>`);
   // the senior trader's one-line read of this candle
   const atr = T.atr15 || rng, near = (x: any) => x && Math.abs(x.price - px) <= 0.5 * atr;

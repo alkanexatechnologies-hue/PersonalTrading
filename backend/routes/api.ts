@@ -7920,6 +7920,8 @@ async function premiumCenterPayload(query: Record<string, any>): Promise<any> {
         if (c) { used.add(c.t); snaps.push({ ageMin: (nowMs - c.t) / 60_000, strikes: c.strikes }); }
       }
       out.oi = OFL.oiFlow({ strikes, spot: out.spot.price, step: out.step || 50, snaps });
+      const p15 = snaps.find((x) => x.ageMin >= 12) || null;
+      out.oiWalls = OFL.wallReview({ now: strikes, prev: p15?.strikes ?? null, spot: out.spot.price, ageMin: p15 ? Math.round(p15.ageMin) : null });
     }
     // Premium position of each plan's strike against its own swing support / resistance (Dhan premium candles, 15-min)
     if (out.trader && !out.trader.error && out.expiry && getProvider().name === "dhan") {
