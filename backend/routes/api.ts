@@ -76,6 +76,7 @@ import * as CL from "../premium/closing";
 import * as TRV from "../premium/tradeReview";
 import * as OFL from "../premium/oiFlow";
 import * as PPOS from "../premium/premiumPosition";
+import * as SWP from "../premium/sweepMsg";
 import * as EYE from "../premium/marketEye";
 import * as TG from "../premium/tgFormat";
 import { Decision } from "../decision/types";
@@ -8957,6 +8958,20 @@ async function copilotTick() {
       }
       // per index, in order: 🕯 the 15-min candle that just closed, then ⭐ the best opportunity (senior trader's call)
       for (const it of items) { cpSend(TG.candleMsg(it.d, it.eye), true); cpSend(TG.bestOpportunityMsg([it]), true); }
+    }
+    // 💧 LIQUIDITY SWEEPS (NIFTY + SENSEX): map at 09:30 and 12:00 · instant alert when a level is swept (closed back inside)
+    if (istMin >= 560 && istMin <= 915 && _cp._liqMin !== istMin) {
+      _cp._liqMin = istMin;
+      for (const sym of ["^NSEI", "^BSESN"]) {
+        const liq: any = await cached(`liq-analysis:${sym}:5`, 30_000, () => buildLiquidityAnalysis(sym, 5)).catch(() => null);
+        if (!liq || liq.error || !liq.isToday) continue;
+        for (const l of (liq.levels || []).filter((x: any) => x.status === "REJECTED" && x.event?.time)) {
+          const key = `sweep|${sym}|${Math.round(l.price)}|${l.event.time}`;
+          if (_cp.sent[key]) continue;
+          _cp.sent[key] = nowSec; cpSave(); cpSend(SWP.sweepAlertMsg(liq, l), true);
+        }
+        if ((istMin === 570 || istMin === 720) && !_cp.sent[`sweepmap|${sym}|${istMin}`]) { _cp.sent[`sweepmap|${sym}|${istMin}`] = nowSec; cpSave(); cpSend(SWP.sweepMapMsg(liq, new Date((nowSec + 19800) * 1000).toISOString().slice(11, 16)), true); }
+      }
     }
     // 15:30 CLOSING STATEMENT: diary saved, every trade graded (points, success / failure + why), day-by-day scorecard
     if (istMin >= 930 && istMin <= 940 && (istMin > 930 || sec >= 20) && !_cp.sent.closing) {
