@@ -56,12 +56,15 @@ export function bsPrice(i: BsInput, type: "CE" | "PE"): number | null {
  *  premium (market LTP + model change), never below intrinsic value and monotonic in the index (a call never gains
  *  when the index falls, a put never gains when it rises). Falls back to delta-gamma — capped at its turning point —
  *  when IV / time are unavailable. */
-export function premiumAtLevel(o: { type: "CE" | "PE"; strike: number; spot: number; ltp: number | null; delta: number | null; gamma: number | null; iv: number | null; tYears: number | null; level: number | null }): number | null {
+export function premiumAtLevel(o: { type: "CE" | "PE"; strike: number; spot: number; ltp: number | null; delta: number | null; gamma: number | null; iv: number | null; tYears: number | null; level: number | null; tYearsAt?: number | null }): number | null {
   if (o.level == null || o.ltp == null || !(o.spot > 0)) return null;
   const intrinsic = o.type === "CE" ? Math.max(0, o.level - o.strike) : Math.max(0, o.strike - o.level);
   const ivF = o.iv != null ? (o.iv > 1 ? o.iv / 100 : o.iv) : null;
   if (ivF != null && ivF > 0 && o.tYears != null && o.tYears > 0) {
-    const a = bsPrice({ spot: o.spot, strike: o.strike, tYears: o.tYears, iv: ivF }, o.type), b = bsPrice({ spot: o.level, strike: o.strike, tYears: o.tYears, iv: ivF }, o.type);
+    // `tYearsAt` (optional) = time left WHEN the index is at `level` (time decay); default = now (no decay)
+    const tAt = o.tYearsAt ?? o.tYears;
+    if (tAt <= 0) return Math.round(intrinsic * 100) / 100;   // at / after expiry only intrinsic value is left
+    const a = bsPrice({ spot: o.spot, strike: o.strike, tYears: o.tYears, iv: ivF }, o.type), b = bsPrice({ spot: o.level, strike: o.strike, tYears: tAt, iv: ivF }, o.type);
     if (a != null && b != null) return Math.round(Math.max(intrinsic, o.ltp + (b - a), 0) * 100) / 100;
   }
   if (o.delta == null) return null;

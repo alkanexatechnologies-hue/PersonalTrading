@@ -7799,3 +7799,15 @@ body.ppc-fullwidth .watchlist, body.ppc-fullwidth #watchlist { display: none !im
 .ppc-pt-chip.ok { color: #3ddc97; } .ppc-pt-chip.bad { color: #ff6b6b; font-weight: 700; } .ppc-pt-chip.exp { color: #c9a0ff; font-weight: 700; }
 .ppc-pt-row { padding: 3px 0; line-height: 1.4; } .ppc-pt-row.wait { color: #f2c94c; } .ppc-pt-row.quiet { color: #8a96b0; }
 .ppc-pl-retest { font-size: 13px; color: #f2c94c; margin: 2px 0 4px; line-height: 1.35; }
+/* 🧮 Premium calculator (tool only) */
+.ppc-calc { border: 1px solid rgba(130,168,255,.3); border-radius: 10px; padding: 6px 10px; margin: 4px 0 8px; font-size: 13px; }
+.ppc-calc summary { cursor: pointer; min-height: 28px; line-height: 28px; }
+.ppc-calc-in { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+.ppc-calc-in label { display: flex; flex-direction: column; font-size: 12px; gap: 2px; }
+.ppc-calc-in input, .ppc-calc-in select { font-size: 16px; padding: 6px 8px; min-width: 120px; border-radius: 6px; border: 1px solid rgba(130,168,255,.35); background: rgba(255,255,255,.04); color: inherit; }
+.ppc-calc-q { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.ppc-calc-head { margin: 4px 0; }
+.ppc-calc-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ppc-calc-tbl th, .ppc-calc-tbl td { padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,.06); text-align: left; white-space: nowrap; }
+.ppc-calc-tbl tr.atm td { background: rgba(130,168,255,.08); } .ppc-calc-tbl tr.plan td:first-child { color: #f2c94c; }
+.ppc-calc-out { overflow-x: auto; }

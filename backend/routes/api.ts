@@ -80,6 +80,7 @@ import * as SWP from "../premium/sweepMsg";
 import * as LW from "../premium/lunchWindow";
 import * as LB from "../premium/levelBreak";
 import * as EXP from "../premium/expiryMode";
+import * as PCALC from "../premium/premiumCalc";
 import * as EYE from "../premium/marketEye";
 import * as TG from "../premium/tgFormat";
 import { Decision } from "../decision/types";
@@ -7975,6 +7976,23 @@ async function premiumCenterPayload(query: Record<string, any>): Promise<any> {
     return out;
   } catch (e: any) { return { available: false, version: PC_VERSION, error: e?.message || "premium center failed" }; }
 }
+// 🧮 Premium calculator: the premium of each strike if the index goes to `level` (optionally after `mins` minutes)
+router.get("/premium-calc", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  try {
+    const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
+    if (!def || def.type !== "index") return res.status(400).json({ error: "index symbol required" });
+    const off = Math.max(0, Math.min(3, Number(req.query.expiryOffset) || 0)), level = Number(req.query.level), mins = Math.max(0, Math.min(2000, Number(req.query.mins) || 0));
+    const strike = req.query.strike != null && req.query.strike !== "" && Number.isFinite(Number(req.query.strike)) ? Number(req.query.strike) : null;
+    let ch: any = await cached(`pc-chain:${def.symbol}:${off}`, 30_000, () => dhanChainForExpiry(def, off)).catch(() => null);
+    if (!ch?.available) ch = _pcLastChain.get(`${def.symbol}:${off}`)?.v ?? ch;
+    if (!ch?.available || !ch.strikes?.length) return res.json({ ok: false, error: ch?.message || "option chain not available" });
+    const q: any = await cached(`quote:${def.symbol}`, TTL_QUOTE, () => getProvider().getQuote(def.symbol)).catch(() => null);
+    const spot = q?.price ?? ch.spot;
+    if (!(spot > 0)) return res.json({ ok: false, error: "spot price not available" });
+    const ks = ch.strikes.map((x: any) => x.strike).sort((a: number, b: number) => a - b), step = def.strikeStep || Math.min(...ks.slice(1).map((k: number, i: number) => k - ks[i]).filter((v: number) => v > 0)) || 50;
+    res.json({ ok: true, symbol: def.symbol, name: def.name, step, ...PCALC.premiumCalc({ spot, level: Number.isFinite(level) && level > 0 ? level : spot, step, expiry: ch.expiry, mins, strikes: ch.strikes, strike }) });
+  } catch (e: any) { res.json({ ok: false, error: e?.message || "calculation failed" }); }
+});
 router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
   const out = await premiumCenterPayload(req.query as any);
   if (out?.status === 400) return res.status(400).json({ error: out.error });

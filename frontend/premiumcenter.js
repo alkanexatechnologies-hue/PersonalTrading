@@ -75,6 +75,7 @@ function ppcShell() {
   <div id="ppc-radar" class="ppc-radar"></div>
   <div class="ppc-sec">② Trade plan <span id="ppc-planfor" class="ppc-sub"></span></div>
   <div class="ppc-plans" id="ppc-plans"></div>
+  <details class="ppc-calc" id="ppc-calc"><summary>🧮 <b>Premium calculator</b> <span class="ppc-sub">— the premium at any index price</span></summary><div id="ppc-calc-body"></div></details>
   <div class="ppc-sec" id="ppc-sec3" hidden>③ Expiry zero-hero</div>
   <div id="ppc-btsd" class="ppc-btsd" hidden></div>
   <div id="ppc-zh-today" class="ppc-zht" hidden></div>
@@ -164,7 +165,7 @@ function ppcRender() {
   ppcEl("ppc-quote").innerHTML = `<span class="ppc-qname">${ppcEsc(d.name)}</span><span class="ppc-qpx ${ppcCls(sp.change)}">${ppcNs(sp.price)}</span><span class="${ppcCls(sp.change)}">${ppcSg(sp.change)} (${ppcSg(sp.changePct, 2, "%")})</span>
     <span>O <b>${ppcNs(sp.open)}</b></span><span>H <b>${ppcNs(sp.high)}</b></span><span>L <b>${ppcNs(sp.low)}</b></span><span>Prev close <b>${ppcNs(sp.prevClose)}</b></span>
     <span>ATM <b>${d.atm ?? "—"}</b></span><span>Expiry <b>${ppcEsc(d.expiry || "—")}</b></span>${d.session !== "OPEN" ? `<span class="ppc-warnt">Session ${ppcEsc(sp.sessionDay || "")} — market ${ppcEsc(d.session)}</span>` : ""}`;
-  ppcRenderMaster(); ppcRenderProTrader(); ppcRenderRadar(); ppcLoadZH(); ppcLoadZHToday(); ppcLoadEye(); ppcRenderBTSD(); ppcRenderCoach(); ppcRenderTV(); ppcRenderLadder(); ppcRenderPlans(); ppcRenderHistory(); if (ppcEl("ppc-more")?.open) { ppcRenderCards(); ppcRenderCharts(); ppcRenderRank(); }
+  ppcCalcInit(); ppcRenderMaster(); ppcRenderProTrader(); ppcRenderRadar(); ppcLoadZH(); ppcLoadZHToday(); ppcLoadEye(); ppcRenderBTSD(); ppcRenderCoach(); ppcRenderTV(); ppcRenderLadder(); ppcRenderPlans(); ppcRenderHistory(); if (ppcEl("ppc-more")?.open) { ppcRenderCards(); ppcRenderCharts(); ppcRenderRank(); }
   ppcEl("ppc-foot").innerHTML = `${ppcEsc(d.note)} · ${ppcEsc(d.version)} · <span title="${ppcEsc(PPC_TIPS.PROB)}">${ppcEsc(d.validation?.status)}: ${ppcEsc(d.validation?.detail)}</span>`;
 }
 
@@ -672,6 +673,45 @@ async function ppcLoadEye() {
   } catch { el.innerHTML = ""; }
 }
 
+
+// ================================================================ 🧮 Premium calculator (same model as the plan cards)
+function ppcCalcInit() {
+  const box = ppcEl("ppc-calc"), body = ppcEl("ppc-calc-body"); if (!box || !body || box._init) return; box._init = true;
+  box.addEventListener("toggle", () => { if (box.open) ppcCalcOpen(); });
+  body.addEventListener("click", (e) => { const b = e.target.closest("[data-lv]"); if (b) { ppcEl("ppc-calc-level").value = b.dataset.lv; ppcCalcRun(); } });
+  body.addEventListener("input", (e) => { if (e.target.matches("input,select")) { clearTimeout(PPC._calcT); PPC._calcT = setTimeout(ppcCalcRun, 350); } });
+}
+function ppcCalcOpen() {
+  const body = ppcEl("ppc-calc-body"), d = PPC.d; if (!body || !d) return;
+  const P = d.trader?.plans || {}, r0 = (v) => Math.round(v);
+  const quick = [["Spot", d.spot?.price], ["Bull start", P.bull?.entry], ["Bull T1", P.bull?.t1], ["Bull SL", P.bull?.stop], ["Bear start", P.bear?.entry], ["Bear T1", P.bear?.t1], ["Bear SL", P.bear?.stop]].filter(([, v]) => v != null);
+  body.innerHTML = `<div class="ppc-calc-in">
+      <label>Index price<input id="ppc-calc-level" type="number" inputmode="decimal" step="1" value="${r0(d.spot?.price || 0)}"></label>
+      <label>When<select id="ppc-calc-mins"><option value="0">now</option><option value="15">in 15 min</option><option value="30">in 30 min</option><option value="60">in 1 hour</option><option value="120">in 2 hours</option><option value="eod">at 15:15</option></select></label>
+      <label>Strike <span class="ppc-sub">(optional)</span><input id="ppc-calc-strike" type="number" inputmode="numeric" step="${d.step || 50}" placeholder="all near"></label>
+    </div>
+    <div class="ppc-calc-q">${quick.map(([l, v]) => `<button type="button" class="ppc-tvbtn" data-lv="${r0(v)}">${ppcEsc(l)} ${r0(v).toLocaleString("en-IN")}</button>`).join("")}</div>
+    <div id="ppc-calc-out" class="ppc-calc-out"></div>`;
+  ppcCalcRun();
+}
+async function ppcCalcRun() {
+  const out = ppcEl("ppc-calc-out"); if (!out) return;
+  const level = ppcEl("ppc-calc-level").value, strike = ppcEl("ppc-calc-strike").value; let mins = ppcEl("ppc-calc-mins").value;
+  if (mins === "eod") { const m = Math.floor(((Date.now() / 1000 + 19800) % 86400) / 60); mins = String(Math.max(0, 915 - m)); }
+  out.innerHTML = `<div class="ppc-sub">calculating…</div>`;
+  try {
+    const r = await fetch(`/api/premium-calc?symbol=${encodeURIComponent(PPC.sym)}&expiryOffset=${PPC.off || 0}&level=${encodeURIComponent(level)}&mins=${mins}${strike ? `&strike=${encodeURIComponent(strike)}` : ""}`).then((x) => x.json());
+    if (!r.ok) { out.innerHTML = `<div class="ppc-na">${ppcEsc(r.error || "not available")}</div>`; return; }
+    const by = {}; for (const x of r.rows) (by[x.strike] = by[x.strike] || {})[x.side] = x;
+    const P = PPC.d?.trader?.plans || {}, planK = new Set([P.bull?.strike, P.bear?.strike].filter((v) => v != null));
+    const cell = (x) => !x ? "<td>—</td>" : `<td>₹${x.ltp ?? "—"} → <b>₹${x.est ?? "—"}</b> <span class="${(x.chg ?? 0) >= 0 ? "ppc-up" : "ppc-dn"}">${x.chgPct != null ? (x.chgPct >= 0 ? "+" : "") + x.chgPct + "%" : ""}</span></td>`;
+    out.innerHTML = `<div class="ppc-calc-head">Index <b>${Math.round(r.spot).toLocaleString("en-IN")}</b> → <b>${Math.round(r.level).toLocaleString("en-IN")}</b> (<span class="${r.move >= 0 ? "ppc-up" : "ppc-dn"}">${r.move >= 0 ? "+" : ""}${Math.round(r.move)} pts</span>)${Number(r.mins) ? ` · after ${r.mins} min` : " · now"} · expiry ${ppcEsc(r.expiry || "—")} (${r.daysToExpiry ?? "—"} days)</div>
+      <table class="ppc-calc-tbl"><thead><tr><th>Strike</th><th>CE now → then</th><th>PE now → then</th></tr></thead><tbody>
+      ${Object.keys(by).map(Number).sort((a, b) => a - b).map((k) => `<tr class="${planK.has(k) ? "plan" : ""}${by[k].CE?.money === "ATM" ? " atm" : ""}"><td><b>${k}</b>${by[k].CE?.money === "ATM" ? " <span class='ppc-sub'>ATM</span>" : ""}${planK.has(k) ? " <span class='ppc-sub'>plan</span>" : ""}</td>${cell(by[k].CE)}${cell(by[k].PE)}</tr>`).join("")}
+      </tbody></table>
+      <div class="ppc-sub">Estimate from each strike's live IV (Black-Scholes), the same model as the plan cards; "after N min" includes time decay. Real premiums also move with IV and demand.</div>`;
+  } catch (e) { out.innerHTML = `<div class="ppc-na">calculator unavailable — ${ppcEsc(e.message || "")}</div>`; }
+}
 
 // ================================================================ 🎖 ProTrader desk — the same state that drives the Telegram co-pilot
 async function ppcRenderProTrader(force) {
