@@ -95,6 +95,7 @@ function ppcShell() {
   </div>
   <div class="ppc-sec">⑤ Context</div>
   <div class="ppc-ctx"><div id="ppc-eye" class="ppc-eye"></div><div id="ppc-trend" class="ppc-trendstrip"></div></div>
+  <div id="ppc-lm" class="ppc-lm"></div>
   <details class="ppc-more" id="ppc-more"><summary>More details — next-session map · past breaks · arbiter &amp; risk gates · CE/PE cards · premium charts · strike ranking · zero-hero detail</summary>
   <div class="ppc-row2"><div class="ppc-card" id="ppc-tomorrow"></div><div class="ppc-card" id="ppc-history"></div></div>
   <details class="ppc-card ppc-arb"><summary><b>Arbiter &amp; risk gates</b> <span class="ppc-sub">final authority — the screen never overrides it</span> <span id="ppc-arb-sum"></span></summary><div id="ppc-master" class="ppc-master"></div></details>
@@ -165,7 +166,7 @@ function ppcRender() {
   ppcEl("ppc-quote").innerHTML = `<span class="ppc-qname">${ppcEsc(d.name)}</span><span class="ppc-qpx ${ppcCls(sp.change)}">${ppcNs(sp.price)}</span><span class="${ppcCls(sp.change)}">${ppcSg(sp.change)} (${ppcSg(sp.changePct, 2, "%")})</span>
     <span>O <b>${ppcNs(sp.open)}</b></span><span>H <b>${ppcNs(sp.high)}</b></span><span>L <b>${ppcNs(sp.low)}</b></span><span>Prev close <b>${ppcNs(sp.prevClose)}</b></span>
     <span>ATM <b>${d.atm ?? "—"}</b></span><span>Expiry <b>${ppcEsc(d.expiry || "—")}</b></span>${d.session !== "OPEN" ? `<span class="ppc-warnt">Session ${ppcEsc(sp.sessionDay || "")} — market ${ppcEsc(d.session)}</span>` : ""}`;
-  ppcCalcInit(); ppcRenderMaster(); ppcRenderProTrader(); ppcRenderRadar(); ppcLoadZH(); ppcLoadZHToday(); ppcLoadEye(); ppcRenderBTSD(); ppcRenderCoach(); ppcRenderTV(); ppcRenderLadder(); ppcRenderPlans(); ppcRenderHistory(); if (ppcEl("ppc-more")?.open) { ppcRenderCards(); ppcRenderCharts(); ppcRenderRank(); }
+  ppcCalcInit(); ppcRenderMaster(); ppcRenderProTrader(); ppcRenderLevelMemory(); ppcRenderRadar(); ppcLoadZH(); ppcLoadZHToday(); ppcLoadEye(); ppcRenderBTSD(); ppcRenderCoach(); ppcRenderTV(); ppcRenderLadder(); ppcRenderPlans(); ppcRenderHistory(); if (ppcEl("ppc-more")?.open) { ppcRenderCards(); ppcRenderCharts(); ppcRenderRank(); }
   ppcEl("ppc-foot").innerHTML = `${ppcEsc(d.note)} · ${ppcEsc(d.version)} · <span title="${ppcEsc(PPC_TIPS.PROB)}">${ppcEsc(d.validation?.status)}: ${ppcEsc(d.validation?.detail)}</span>`;
 }
 
@@ -711,6 +712,27 @@ async function ppcCalcRun() {
       </tbody></table>
       <div class="ppc-sub">Estimate: live premium + Black-Scholes change at one IV for the expiry (average of the ATM call and put IV); "after N min" includes time decay; ⚠ stale = the quote was below intrinsic value, the model price is used. Real premiums also move with IV and demand.</div>`;
   } catch (e) { out.innerHTML = `<div class="ppc-na">calculator unavailable — ${ppcEsc(e.message || "")}</div>`; }
+}
+
+// ================================================================ 🧠 Level memory (support held / resistance rejected — history + today)
+async function ppcRenderLevelMemory(force) {
+  const el = ppcEl("ppc-lm"); if (!el) return;
+  if (!["^NSEI", "^BSESN"].includes(PPC.sym)) { el.innerHTML = ""; return; }
+  if (force || !PPC._lmAt || Date.now() - PPC._lmAt > 55000 || PPC._lmSym !== PPC.sym) {
+    PPC._lmAt = Date.now(); PPC._lmSym = PPC.sym;
+    try { PPC._lm = await fetch(`/api/level-memory?symbol=${encodeURIComponent(PPC.sym)}`).then((r) => r.json()); } catch { /* keep */ }
+  }
+  const m = PPC._lm; if (!m?.ok) { el.innerHTML = ""; return; }
+  const n0 = (v) => Math.round(v).toLocaleString("en-IN"), hm = (t) => new Date((t + 19800) * 1000).toISOString().slice(11, 16);
+  const zone = (z, side) => `<tr><td><b>${n0(z.price)}</b></td><td>${side === "above" ? `res held <b>${z.resistance.held}/${z.resistance.n}</b>` : `sup held <b>${z.support.held}/${z.support.n}</b>`}</td><td class="${(z.holdPct ?? 0) >= 60 ? "ppc-up" : (z.holdPct ?? 100) <= 40 ? "ppc-dn" : ""}">${z.holdPct ?? "—"}% held</td><td class="ppc-sub">${ppcEsc(z.labels.slice(0, 2).join(", "))}</td></tr>`;
+  const word = (e) => e.outcome === "RESPECTED" ? (e.role === "SUPPORT" ? "✅ support held" : "✅ resistance rejected") : e.outcome === "FAKE BREAK" ? "↩️ fake break (held)" : e.outcome === "BROKEN" ? `💥 ${e.role === "SUPPORT" ? "support" : "resistance"} broken` : "… deciding";
+  const today = (m.today || []).slice(-8).reverse();
+  el.innerHTML = `<details class="ppc-lm-box" ${PPC._lmOpen ? "open" : ""}><summary>🧠 <b>Level memory · ${ppcEsc(m.index)}</b> <span class="ppc-sub">— where support held and resistance rejected · ${m.sessions} sessions of history${today.length ? ` · ${today.length} test(s) today` : ""}</span></summary>
+    <div class="ppc-lm-grid"><div><b>Zones above (resistance)</b><table class="ppc-lm-t">${m.above.map((z) => zone(z, "above")).join("") || "<tr><td>—</td></tr>"}</table></div>
+    <div><b>Zones below (support)</b><table class="ppc-lm-t">${m.below.map((z) => zone(z, "below")).join("") || "<tr><td>—</td></tr>"}</table></div></div>
+    <div class="ppc-lm-today"><b>Today's tests</b>${today.length ? `<ul>${today.map((e) => `<li>${hm(e.time)} <b>${n0(e.price)}</b> ${ppcEsc(e.label)} — ${word(e)}${e.zone ? ` <span class="ppc-sub">· zone held ${e.zone.holdPct ?? "—"}% of ${e.zone.tests}</span>` : ""}</li>`).join("")}</ul>` : ` <span class="ppc-sub">none yet</span>`}</div>
+    <div class="ppc-sub">Last 60 sessions, 5-min candles: held = turned away 1 ATR (or a fake break); broken = closed beyond and ran 1 ATR. 2-year record by level type: ${(m.kinds || []).slice(0, 4).map((k) => `${ppcEsc(k.kind.toLowerCase())} ${k.role === "SUPPORT" ? "sup" : "res"} ${k.holdPct}%`).join(" · ")} — about a coin flip, so the ZONE record matters more than the level type.</div></details>`;
+  const box = el.querySelector("details"); box.addEventListener("toggle", () => { PPC._lmOpen = box.open; });
 }
 
 // ================================================================ 🎖 ProTrader desk — the same state that drives the Telegram co-pilot

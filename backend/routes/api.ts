@@ -82,6 +82,7 @@ import * as LB from "../premium/levelBreak";
 import * as EXP from "../premium/expiryMode";
 import * as PCALC from "../premium/premiumCalc";
 import * as RR from "../sentiment/resultsReview";
+import * as LM from "../premium/levelMemory";
 import * as EYE from "../premium/marketEye";
 import * as TG from "../premium/tgFormat";
 import { Decision } from "../decision/types";
@@ -7994,6 +7995,45 @@ router.get("/premium-calc", requirePermission("oiAnalysis"), async (req: Request
     res.json({ ok: true, symbol: def.symbol, name: def.name, step, ...PCALC.premiumCalc({ spot, level: Number.isFinite(level) && level > 0 ? level : spot, step, expiry: ch.expiry, mins, strikes: ch.strikes, strike }) });
   } catch (e: any) { res.json({ ok: false, error: e?.message || "calculation failed" }); }
 });
+// ===================== 🧠 LEVEL MEMORY: how price behaved at support / resistance (history + today, live) =====================
+const LM_DIR = path.join(process.cwd(), "data", "level-memory");
+const LM_IDX: Record<string, { name: "NIFTY" | "SENSEX"; step: number }> = { "^NSEI": { name: "NIFTY", step: 100 }, "^BSESN": { name: "SENSEX", step: 500 } };
+const _lmFile = new Map<string, { at: number; events: LM.MemEvent[] }>();
+function lmHistory(name: string): LM.MemEvent[] {
+  const c = _lmFile.get(name); if (c && Date.now() - c.at < 30 * 60_000) return c.events;
+  let ev: LM.MemEvent[] = []; try { ev = JSON.parse(fs.readFileSync(path.join(LM_DIR, `${name}.json`), "utf8")).events || []; } catch { /* none yet */ }
+  _lmFile.set(name, { at: Date.now(), events: ev }); return ev;
+}
+/** Today's level tests from the day's closed 5-min candles against the day's levels (plan ladder incl. OI walls + round numbers). */
+async function lmToday(sym: string): Promise<{ events: LM.MemEvent[]; spot: number | null }> {
+  const meta = LM_IDX[sym]; if (!meta) return { events: [], spot: null };
+  return cached(`lm-today:${sym}`, 60_000, async () => {
+    const d: any = await premiumCenterPayload({ symbol: sym, interval: "15m" });
+    const day = new Date(Date.now() + 19800000).toISOString().slice(0, 10), now = Math.floor(Date.now() / 1000);
+    const c5: any[] = ((await getCandlesCached(sym, "5m").catch(() => [])) as any[]);
+    const today = c5.filter((c) => new Date((c.time + 19800) * 1000).toISOString().slice(0, 10) === day && c.time + 300 <= now);
+    const a5 = (atr(c5.filter((c) => c.time + 300 <= now) as any, 14) as (number | null)[]).filter((x) => x != null).pop();
+    if (!today.length || !a5 || !d?.trader?.levels) return { events: [], spot: d?.spot?.price ?? null };
+    const lv = (d.trader.levels as any[]).filter((x) => x.kind !== "TODAY").map((x) => ({ price: x.price, label: x.label, kind: x.kind }));
+    return { events: LM.levelTests(today, [...lv, ...LM.roundLevels(today[0].open, meta.step)], a5), spot: d.spot?.price ?? null };
+  });
+}
+/** The zone record (last 60 sessions) for a price. */
+function lmZoneFor(name: string, price: number, width: number) {
+  const ev = lmHistory(name), days = [...new Set(ev.map((e) => e.day))].sort(), last = new Set(days.slice(-60));
+  return LM.zones(ev.filter((e) => last.has(e.day) && Math.abs(e.price - price) <= width), width)[0] ?? null;
+}
+router.get("/level-memory", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  try {
+    const sym = String(req.query.symbol || "^NSEI"), meta = LM_IDX[sym]; if (!meta) return res.json({ ok: false, error: "NIFTY / SENSEX only" });
+    const width = meta.name === "NIFTY" ? 35 : 120, ev = lmHistory(meta.name), days = [...new Set(ev.map((e) => e.day))].sort(), last60 = new Set(days.slice(-60));
+    const t = await lmToday(sym).catch(() => ({ events: [] as LM.MemEvent[], spot: null as number | null })), spot = t.spot;
+    const z = LM.zones(ev.filter((e) => last60.has(e.day)), width), near = spot ? z.filter((x) => Math.abs(x.price - spot) / spot < 0.02) : z.slice(0, 10);
+    res.json({ ok: true, index: meta.name, spot, sessions: days.length, from: days[0] ?? null, to: days[days.length - 1] ?? null,
+      above: spot ? near.filter((x) => x.price > spot).sort((a, b) => a.price - b.price).slice(0, 4) : [], below: spot ? near.filter((x) => x.price <= spot).sort((a, b) => b.price - a.price).slice(0, 4) : [],
+      kinds: LM.kindStats(ev), today: t.events.map((e) => ({ ...e, zone: lmZoneFor(meta.name, e.price, width) })) });
+  } catch (e: any) { res.json({ ok: false, error: e?.message || "level memory failed" }); }
+});
 router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
   const out = await premiumCenterPayload(req.query as any);
   if (out?.status === 400) return res.status(400).json({ error: out.error });
@@ -9079,7 +9119,17 @@ async function copilotTick() {
         items.push({ d, trade: _cp.trades[sym] || null, eye, zh: zh?.available ? zh : null });
       }
       // per index, in order: 🕯 the 15-min candle that just closed, then ⭐ the best opportunity (senior trader's call)
-      for (const it of items) { cpSend(TG.candleMsg(it.d, it.eye), true); cpSend(TG.bestOpportunityMsg([it]), true); }
+      for (const it of items) {
+        try {   // 🧠 level tests decided since the last candle message, with each zone's record
+          const meta = LM_IDX[it.d.symbol], lt = meta ? await lmToday(it.d.symbol) : null;
+          if (meta && lt) { _cp.lmSent = _cp.lmSent || {};
+            const fresh = lt.events.filter((e) => e.outcome !== "UNCLEAR" && !_cp.lmSent[`${it.d.symbol}|${e.time}|${e.price}`]);
+            for (const e of fresh) _cp.lmSent[`${it.d.symbol}|${e.time}|${e.price}`] = 1;
+            it.d.lmLines = fresh.slice(-4).map((e) => { const z = lmZoneFor(meta.name, e.price, meta.name === "NIFTY" ? 35 : 120); return { e, z }; });
+          }
+        } catch { /* informational */ }
+        cpSend(TG.candleMsg(it.d, it.eye), true); cpSend(TG.bestOpportunityMsg([it]), true);
+      }
     }
     // 💧 LIQUIDITY SWEEPS (NIFTY + SENSEX): map at 09:30 and 12:00 · instant alert when a level is swept (closed back inside)
     if (istMin >= 560 && istMin <= 915 && _cp._liqMin !== istMin) {
@@ -9119,6 +9169,19 @@ async function copilotTick() {
             cpSend(LB.breakAlertMsg(d.name, tf as "5m" | "15m", e, mins, rec, next), true);
           }
         }
+      }
+    }
+    // 🧠 15:40 — today's level tests (incl. today's OI walls) added to the permanent level memory (NIFTY + SENSEX)
+    if (istMin >= 940 && istMin <= 970 && !_cp.sent.lmSave) {
+      _cp.sent.lmSave = true; cpSave();
+      for (const sym of ["^NSEI", "^BSESN"]) {
+        try {
+          const meta = LM_IDX[sym], f = path.join(LM_DIR, `${meta.name}.json`); _cache.delete(`lm-today:${sym}`);
+          const t = await lmToday(sym); let j: any = { index: meta.name, events: [] }; try { j = JSON.parse(fs.readFileSync(f, "utf8")); } catch { /* new */ }
+          j.events = [...(j.events || []).filter((e: any) => e.day !== day), ...t.events]; j.lastDay = day; j.updatedAt = new Date().toISOString();
+          fs.mkdirSync(LM_DIR, { recursive: true }); fs.writeFileSync(f, JSON.stringify(j)); _lmFile.delete(meta.name);
+          console.log("[level-memory]", meta.name, "added", t.events.length, "tests for", day);
+        } catch (e: any) { console.log("[level-memory] save failed", e?.message); }
       }
     }
     // 🎖 ProTrader daily routine — 15:50 refresh of the research data (today's 1-minute premiums for NIFTY + SENSEX, silent)

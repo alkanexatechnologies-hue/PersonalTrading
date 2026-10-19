@@ -10,7 +10,8 @@ test("escaping, best pick (trade > triggered > armed > approaching > idle), html
   if (m >= 570 && m <= 885) assert.equal((bestFor(d(), null) as any).side, "bull"); else assert.equal(bestFor(d(), null)!.kind, "NONE");   // late session: no new buy
   assert.equal(bestFor(d(), { state: "OPEN", strike: 1, side: "CE" })!.kind, "TRADE");
   const msg = bestOpportunityMsg([{ d: d(), trade: null, eye: { upPct: 20, sidePct: 50, downPct: 30, lead: "SIDEWAYS" }, zh: null }]);
-  assert.match(msg, /BEST OPPORTUNITY · NIFTY/); assert.match(msg, /Senior trader:/); assert.ok(!/</.test(msg.replace(/<\/?(b|i|pre)>/g, "")));
+  assert.match(msg, /BEST OPPORTUNITY · NIFTY/); assert.ok(!/</.test(msg.replace(/<\/?(b|i|pre)>/g, "")));
+  if (!(m >= 570 && m <= 885)) assert.match(msg, /Senior trader:/);   // outside the entry window the "nothing to do" call is shown
   assert.match(htmlify("🎯 TITLE\n  → do <this>"), /^<b>🎯 TITLE<\/b>\n<b>→ do &lt;this&gt;<\/b>$/);
 });
 test("next-day plan: date, both sides with SL/targets/risk, nearest levels, expired-premium fallback, expiry flag", () => {
