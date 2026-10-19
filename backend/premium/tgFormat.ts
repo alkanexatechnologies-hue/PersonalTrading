@@ -274,3 +274,16 @@ export function candleMsg(d: any, eye: any | null, nowSec = Math.floor(Date.now(
   return L.join("\n");
 }
 const sgnOi = (v: number) => `${v >= 0 ? "+" : "−"}${(Math.abs(v) / 1e5).toFixed(1)}L`;
+
+/** 09:14 Telegram: the 09:13 opening heat of the top 15 major NIFTY stocks, picked by the market bias (same rule as the screen). */
+export function openingHeatMsg(rows: { s: string; weightPct: number; pct: number | null; points: number | null }[], bias: string, date: string): string {
+  const major = rows.filter((r) => r.pct != null && r.weightPct >= 1) as { s: string; weightPct: number; pct: number; points: number | null }[];
+  const up = [...major].sort((a, b) => b.pct - a.pct), dn = [...major].sort((a, b) => a.pct - b.pct);
+  const pick = bias === "BULLISH" ? up.slice(0, 15) : bias === "BEARISH" ? dn.slice(0, 15) : [...up.slice(0, 8), ...dn.slice(0, 7).reverse()];
+  const pts = major.reduce((a, r) => a + (r.points ?? 0), 0), upN = major.filter((r) => r.pct > 0).length;
+  const sq = (p: number) => (p >= 1 ? "🟩" : p > 0 ? "🟢" : p <= -1 ? "🟥" : p < 0 ? "🔴" : "⬜");
+  return [`🔥 <b>OPENING HEAT 09:13 · TOP 15 NIFTY</b> · ${esc(date)}`,
+    `Market bias <b>${esc(bias)}</b> · ${upN}/${major.length} major stocks up · ≈ <b>${pts >= 0 ? "+" : ""}${Math.round(pts)} NIFTY pts</b> from the open`,
+    ...pick.map((r) => `${sq(r.pct)} <b>${esc(r.s)}</b> ${r.pct >= 0 ? "+" : ""}${r.pct.toFixed(2)}% · wt ${r.weightPct}%${r.points != null ? ` · ${r.points >= 0 ? "+" : ""}${r.points} pts` : ""}`),
+    `<i>09:13 pre-open prices (Dhan) · ${bias === "BULLISH" ? "top gainers" : bias === "BEARISH" ? "top losers" : "8 gainers + 7 losers"} · weights = the app's NIFTY model</i>`].join("\n");
+}

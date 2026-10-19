@@ -97,3 +97,12 @@ test("15-min candle message: the closed candle, type, VWAP + nearest levels, OI 
   assert.match(m, /OI last 15 min: CE \+1\.0L · PE \+4\.0L · most at <b>PE 23,000 \+3\.0L<\/b> · tilt Bulls 80%/);
   assert.match(m, /Read:<\/b> Buyers won this candle, now testing resistance 23,061 — a 15-min close above it is the trigger/);
 });
+test("09:13 opening heat: top 15 by bias, major stocks only, points summed", async () => {
+  const { openingHeatMsg } = await import("./tgFormat");
+  const rows = Array.from({ length: 20 }, (_, i) => ({ s: "S" + i, weightPct: i < 18 ? 2 : 0.5, pct: i - 9, points: (i - 9) * 2 }));
+  const bull = openingHeatMsg(rows, "BULLISH", "2026-10-19");
+  assert.match(bull, /OPENING HEAT 09:13 · TOP 15 NIFTY/); assert.equal((bull.match(/<b>S\d+<\/b>/g) || []).length, 15);
+  assert.match(bull.split("\n")[2], /<b>S17<\/b> \+8\.00%/);   // biggest major gainer first (S18/S19 are not "major")
+  const neu = openingHeatMsg(rows, "NEUTRAL", "2026-10-19");
+  assert.match(neu, /8 gainers \+ 7 losers/);
+});

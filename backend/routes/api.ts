@@ -81,6 +81,7 @@ import * as LW from "../premium/lunchWindow";
 import * as LB from "../premium/levelBreak";
 import * as EXP from "../premium/expiryMode";
 import * as PCALC from "../premium/premiumCalc";
+import * as RR from "../sentiment/resultsReview";
 import * as EYE from "../premium/marketEye";
 import * as TG from "../premium/tgFormat";
 import { Decision } from "../decision/types";
@@ -9131,6 +9132,15 @@ async function copilotTick() {
       const outF = path.join(process.cwd(), "data", "protrader-weekly.json");
       ptScript("weekly.ts", [outF]).then(() => { try { cpSend(JSON.parse(fs.readFileSync(outF, "utf8")).html, true); } catch { /* best-effort */ } }).catch((e) => console.log("[protrader] weekly failed", e?.message));
     }
+    // 🔥 09:14 — the 09:13 opening heat of the top 15 major NIFTY stocks (once today's 09:13 snapshot exists)
+    if (istMin >= 554 && istMin <= 565 && !_cp.sent.open913) {
+      const snap: any = latestHeatSnapshot(day, true), coefs = readContribModel()?.coefs || null;
+      if (snap && snap.date === day && coefs) {
+        const dd: any[] = await getDailyCached("^NSEI", 15).catch(() => []), prev = dd.filter((c: any) => new Date((c.time + 19800) * 1000).toISOString().slice(0, 10) < day).pop();
+        const h = niftyConstituentHeat(snap, coefs, prev ? prev.close : null);
+        if (h) { _cp.sent.open913 = nowSec; cpSave(); cpSend(TG.openingHeatMsg(h.rows, (_cache.get("premarket:overview")?.v as any)?.overall?.bias || "NEUTRAL", day), true); }
+      }
+    }
     // ⚠️ 12:00 lunch-window CAUTION (NIFTY + SENSEX) — a warning only; plans, reviews and trades are not changed by it
     if (istMin >= 720 && istMin <= 725 && (istMin > 720 || sec >= 30)) {
       for (const sym of ["^NSEI", "^BSESN"]) {
@@ -9534,6 +9544,58 @@ async function gatherCommandAll(): Promise<CCInputs> {
   return base;
 }
 router.get("/premarket/command", commandRoute(gatherCommandAll, 30_000));
+// ===================== Market Sentiment · Results review (last 2 days) + Top-8 NIFTY heat map =====================
+// Prices / % moves = DHAN quotes (owner's rule: Dhan first). Company results numbers (EPS vs estimate, quarterly profit
+// and revenue) are not in Dhan's API → Yahoo Finance, refreshed every 2 hours in the background. Informational only.
+// last session's % move per stock from Dhan DAILY candles (after the close the quote shows 0%) — warmed in the background
+const _rhDaily: { day: string; map: Record<string, number | null>; busy: boolean } = { day: "", map: {}, busy: false };
+function rhWarmDaily(syms: string[], day: string) {
+  if (_rhDaily.busy || (_rhDaily.day === day && syms.every((s) => s in _rhDaily.map))) return;
+  _rhDaily.busy = true; if (_rhDaily.day !== day) { _rhDaily.day = day; _rhDaily.map = {}; }
+  (async () => {
+    const todo = syms.filter((s) => !(s in _rhDaily.map)); let i = 0;
+    await Promise.all(Array.from({ length: 3 }, async () => { while (i < todo.length) { const s = todo[i++];
+      try { const d: any[] = await getDailyCached(s + ".NS", 6); const a = d[d.length - 2], b = d[d.length - 1]; _rhDaily.map[s] = a && b && a.close > 0 ? Math.round(((b.close - a.close) / a.close) * 10000) / 100 : null; } catch { _rhDaily.map[s] = null; }
+      await new Promise((r) => setTimeout(r, 200)); } }));
+    _cache.delete("premarket:results-heat");
+  })().catch(() => {}).finally(() => { _rhDaily.busy = false; });
+}
+router.get("/premarket/results-heat", async (_req: Request, res: Response) => {
+  try {
+    const out = await cached("premarket:results-heat", 60_000, async () => {
+      const news: any = await cached("news-feed", 300_000, () => getMarketNews()).catch(() => null);
+      const review = RR.buildReview(Date.now(), news?.items || []);
+      const coefs: Record<string, number> = readContribModel()?.coefs || {};
+      const syms = [...new Set([...review.rows.map((r) => r.sym), ...Object.keys(coefs)])];
+      const prov: any = getProvider();
+      const q: Record<string, any> = typeof prov.getQuotes === "function" ? await prov.getQuotes(syms.map((s) => s + ".NS")).catch(() => ({})) : {};
+      const nq: any = await cached("quote:^NSEI", TTL_QUOTE, () => prov.getQuote("^NSEI")).catch(() => null);
+      // After the close Dhan's quote reports previous close = today's close (0% move) → use the last session's move from
+      // Dhan DAILY candles (fetched once, cached 6 h, paced for the rate limit)
+      const live = isTradingTimeIST(), today = new Date(Date.now() + 19800000).toISOString().slice(0, 10);
+      if (!live) rhWarmDaily(syms, today);   // background: never blocks this request
+      const daily: Record<string, number | null> = !live && _rhDaily.day === today ? _rhDaily.map : {};
+      const pctOf = (s: string) => { if (!live && daily[s] != null) return daily[s]; const x = q[s + ".NS"]; return x && x.previousClose > 0 && x.price !== x.previousClose ? Math.round(((x.price - x.previousClose) / x.previousClose) * 10000) / 100 : live && x ? 0 : null; };
+      const rows = review.rows.map((r) => { const d = pctOf(r.sym); return { ...r, dayChgPct: d ?? r.dayChgPct, priceSource: d != null ? (live ? "Dhan live" : "Dhan · last session") : "Yahoo" }; });
+      let ref = nq?.previousClose ?? null;
+      if (!live) { try { const d: any[] = await getDailyCached("^NSEI", 6); ref = d.length >= 2 ? d[d.length - 2].close : ref; } catch { /* keep */ } }
+      const nifty = Object.entries(coefs).map(([s, w]) => { const p = pctOf(s), x = q[s + ".NS"]; return { s, weightPct: Math.round(w * 10000) / 100, pct: p, price: x?.price ?? null, points: p != null && ref ? Math.round(w * (p / 100) * ref * 10) / 10 : null }; })
+        .filter((r) => r.pct != null).sort((a, b) => b.weightPct - a.weightPct);
+      // 🌅 the 09:13 opening view: today's (or the latest) 09:13 pre-open snapshot of the NIFTY 50 stocks
+      let open913: any = null;
+      try {
+        const snap: any = latestHeatSnapshot(today, true);
+        if (snap) {
+          const dd: any[] = await getDailyCached("^NSEI", 15), prev = dd.filter((c) => new Date((c.time + 19800) * 1000).toISOString().slice(0, 10) < snap.date).pop();
+          const h = niftyConstituentHeat(snap, coefs, prev ? prev.close : null);
+          if (h) open913 = { date: snap.date, takenAt: snap.takenAt, isToday: snap.date === today, rows: h.rows.filter((r: any) => r.pct != null) };
+        }
+      } catch { open913 = null; }
+      return { asOf: Math.floor(Date.now() / 1000), live, open913, warming: !live && _rhDaily.busy, results: { ...review, rows }, nifty: { ref, rows: nifty, live, source: `${live ? "Dhan live quotes" : "Dhan daily candles (last session)"} · weights = the app's NIFTY contribution model` } };
+    });
+    res.json(out);
+  } catch (e: any) { res.json({ error: e?.message || "results / heat unavailable" }); }
+});
 // What-if scenario: overrides { key: impact } on a COPY of the 09:25 inputs (or current ones before
 // 09:25). Marked SIMULATED; the stored snapshot is never changed.
 router.post("/premarket/scenario", async (req: Request, res: Response) => {
@@ -11289,6 +11351,10 @@ export function startHourlyScheduler() {
       console.log(`[sector-heatmap] ${date} ${snap.status} quoted ${snap.quoted}/${snap.listed}, at prev close ${snap.atPrevClose}`);
     } catch (e: any) { console.log("[sector-heatmap] failed:", e?.message || e); } finally { heatBusy = false; }
   }, 15 * 1000);
+
+  // RESULTS REVIEW refresh (Yahoo results numbers for the F&O universe): on start if older than 2 h, then every 2 h 07:00–21:00
+  const rrTick = () => { const m = Math.floor(((Date.now() / 1000 + 19800) % 86400) / 60); if (m < 420 || m > 1260) return; if (Date.now() / 1000 - RR.readCache().at < 7200) return; RR.refreshResults().then((r) => console.log("[results] refreshed", JSON.stringify(r))).catch(() => {}); };
+  setTimeout(rrTick, 60_000); setInterval(rrTick, 10 * 60_000);
 
   // 1-MINUTE OI LOG: every minute 09:15–15:30 record each index's chain summary + ATM ±10 strikes
   // (CSV under DATA_DIR/oi-minute/<date>/). Reuses the shared OI cache; refreshes it only when the

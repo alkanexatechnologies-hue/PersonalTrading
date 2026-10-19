@@ -8308,6 +8308,7 @@ function initPremarket() {
     <div class="pm-strip" id="pm-strip"></div>
     <div class="pmx-key" id="pmx-key" aria-label="Key points"></div>
     <section class="pmx-pcr" id="pmx-pcr" aria-label="PCR and India VIX"><div class="pm-na">Loading PCR and VIX…</div></section>
+    <div class="pmx-rh"><section class="pmx-pn" id="pmx-results"><div class="pm-na">Loading results review…</div></section><section class="pmx-pn" id="pmx-top8"><div class="pm-na">Loading top 15 NIFTY stocks…</div></section></div>
     <div class="pmx-grid">
       <div class="pmx-col c1">
         <section class="pmx-pn a-in" id="pmx-in"><div class="pm-na">Loading market inputs…</div></section>
@@ -8409,6 +8410,7 @@ function renderPremarket(d) {
   if (upd) upd.textContent = `Last Update: ${d.slot} · Next Sentiment Update: ${pmNextSlot(d.slot)}`;
   renderPMStrip(d.strip);
   renderPMSentiment(d.overall);
+  PM.overall = d.overall; pmLoadResultsHeat();
   renderPMProbability(d.probability);
   renderPMSector(d.sectors);
   renderPMFii(d.fii);
@@ -8927,6 +8929,49 @@ async function loadPMIntel(force) {
     if (!PM.intel) { const box = pmEl("pm-intel"); if (box) box.innerHTML = `<div class="pm-na">News sources unreachable. Retrying in a minute.</div>`; }
   }
 }
+// ---- 📋 Results review (last 2 days) + 🔥 Top 15 major NIFTY stocks per market sentiment (/api/premarket/results-heat) ----
+async function pmLoadResultsHeat(force) {
+  if (!force && PM._rhAt && Date.now() - PM._rhAt < 55000) { pmRenderResults(); pmRenderTop8(); return; }
+  PM._rhAt = Date.now();
+  try { PM.rh = await fetch("/api/premarket/results-heat").then((r) => r.json()); } catch { /* keep last */ }
+  pmRenderResults(); pmRenderTop8();
+}
+function pmRenderResults() {
+  const box = pmEl("pmx-results"), d = PM.rh?.results; if (!box) return;
+  if (!d) { box.innerHTML = pmxH(0, "📋 Company results — last 2 days") + `<div class="pm-na">${pmEsc(PM.rh?.error || "results not available")}</div>`; return; }
+  const since = new Date((d.since + 19800) * 1000).toISOString().slice(5, 10), refr = d.refreshedAt ? new Date((d.refreshedAt + 19800) * 1000).toISOString().slice(11, 16) : "—";
+  const g = d.rows.filter((r) => r.verdict === "GOOD").length, b = d.rows.filter((r) => r.verdict === "BAD").length, m = d.rows.length - g - b;
+  const icon = { GOOD: "🟢", BAD: "🔴", MIXED: "🟡" }, hm = (t) => new Date((t + 19800) * 1000).toISOString().slice(5, 16).replace("T", " ");
+  const rows = d.rows.map((r) => `<tr class="v-${r.verdict}"><td>${icon[r.verdict]} <b>${pmEsc(r.sym)}</b><div class="mut">${pmEsc(r.name)}</div></td><td><b class="${r.verdict === "GOOD" ? "up" : r.verdict === "BAD" ? "dn" : "neu"}">${r.verdict}</b><div class="mut">${pmEsc(hm(r.reportedAt))}</div></td>
+    <td>${r.surprisePct != null ? `EPS <b class="${pmCls(r.surprisePct)}">${r.surprisePct >= 0 ? "+" : ""}${r.surprisePct}%</b> vs est` : "—"}<div class="mut">profit ${r.profitQoQ != null ? (r.profitQoQ >= 0 ? "+" : "") + r.profitQoQ + "%" : "—"} · rev ${r.revenueQoQ != null ? (r.revenueQoQ >= 0 ? "+" : "") + r.revenueQoQ + "%" : "—"} QoQ</div></td>
+    <td class="${pmCls(r.dayChgPct)}">${r.dayChgPct != null ? (r.dayChgPct >= 0 ? "+" : "") + r.dayChgPct + "%" : "—"}<div class="mut">${pmEsc(r.priceSource || "")}</div></td></tr>`).join("");
+  const news = d.newsOnly.map((n) => `<li><span class="${n.tone === "positive" ? "up" : n.tone === "negative" ? "dn" : "neu"}">${n.tone === "positive" ? "▲" : n.tone === "negative" ? "▼" : "•"}</span> ${pmEsc(n.title)} <span class="mut">· ${pmEsc(n.source)} ${pmEsc(n.ago)}</span></li>`).join("");
+  box.innerHTML = pmxH(0, "📋 Company results — last 2 days", `since ${since} · <b class="up">${g} good</b> · <b class="dn">${b} bad</b> · ${m} mixed`)
+    + (d.rows.length ? `<div class="pmx-rr-wrap"><table class="pmx-rr"><thead><tr><th>Company</th><th>Verdict</th><th>vs estimate · QoQ</th><th>${PM.rh?.live ? "Today" : "Last session"}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="pm-na">No F&amp;O company reported since ${since}.</div>`)
+    + (news ? `<div class="pmx-rr-news"><b>Also reported (news only — numbers not checked)</b><ul>${news}</ul></div>` : "")
+    + `<div class="pmx-note">F&amp;O stocks · results numbers from Yahoo Finance (not in Dhan's API), refreshed ${refr}; ${PM.rh?.live ? "today's move from Dhan live quotes" : "last session's move from Dhan daily candles"}. GOOD = EPS beat ≥ 2% (or in line with profit ≥ +5% and revenue up QoQ) · BAD = miss ≥ 2% or profit ≤ −10% QoQ. Informational only.</div>`;
+}
+function pmRenderTop8() {
+  const box = pmEl("pmx-top8"), o9 = PM.rh?.open913; if (!box) return;
+  // view: the 09:13 opening snapshot or the live / last-session moves; 09:13–09:30 opens on the 09:13 view automatically
+  const m = Math.floor(((Date.now() / 1000 + 19800) % 86400) / 60);
+  const view = PM.t15View || (o9?.isToday && m >= 553 && m < 570 ? "open" : "live");
+  const n = view === "open" && o9 ? { rows: o9.rows, source: `09:13 pre-open snapshot${o9.isToday ? "" : " of " + o9.date} · weights = the app's NIFTY contribution model` } : PM.rh?.nifty;
+  const tog = `<span class="pmx-seg" role="group"><button type="button" data-t15="open" aria-pressed="${view === "open"}" ${o9 ? "" : "disabled"}>09:13 opening</button><button type="button" data-t15="live" aria-pressed="${view !== "open"}">${PM.rh?.live ? "Live" : "Last session"}</button></span>`;
+  if (!box._t15) { box._t15 = true; box.addEventListener("click", (e) => { const b = e.target.closest("[data-t15]"); if (b && !b.disabled) { PM.t15View = b.dataset.t15; pmRenderTop8(); } }); }
+  const bias = PM.overall?.bias || "NEUTRAL", rows = (n?.rows || []).filter((r) => r.weightPct >= 1);   // "major" = weight ≥ 1% of NIFTY
+  if (!rows.length) { box.innerHTML = pmxH(0, "🔥 Top 15 major NIFTY stocks " + tog) + `<div class="pm-na">${PM.rh?.warming ? "Loading the last session's moves from Dhan…" : "Quotes not available."}</div>`; if (PM.rh?.warming) setTimeout(() => pmLoadResultsHeat(true), 8000); return; }
+  const up = [...rows].sort((a, b) => b.pct - a.pct), dn = [...rows].sort((a, b) => a.pct - b.pct);
+  const pick = bias === "BULLISH" ? up.slice(0, 15) : bias === "BEARISH" ? dn.slice(0, 15) : [...up.slice(0, 8), ...dn.slice(0, 7).reverse()];
+  const mode = bias === "BULLISH" ? "top 15 gainers — leading the bullish view" : bias === "BEARISH" ? "top 15 losers — leading the bearish view" : "8 biggest gainers + 7 biggest losers — no clear bias";
+  const agree = pick.filter((r) => (bias === "BULLISH" ? r.pct > 0 : bias === "BEARISH" ? r.pct < 0 : false)).length;
+  const span = (w) => (w >= 7 ? "w4" : w >= 4 ? "w3" : w >= 2 ? "w2" : "w1");
+  box.innerHTML = pmxH(0, "🔥 Top 15 major NIFTY stocks " + tog, `Market bias <b class="${bias === "BULLISH" ? "up" : bias === "BEARISH" ? "dn" : "neu"}">${pmEsc(bias)}</b>`)
+    + `<div class="pmx-nsum">${pmEsc(mode)}${bias === "BULLISH" || bias === "BEARISH" ? ` · <b>${agree}/${pick.length}</b> move with the bias` : ""}</div>`
+    + `<div class="pmx-nh">${pick.map((r) => `<span class="pmx-nt ${span(r.weightPct)}" style="background:${pmHeatCol(r.pct)}" title="${pmAttr(`${r.s}: weight ≈ ${r.weightPct}% · ${pmHeatPct(r.pct)}${r.points != null ? ` · ≈ ${r.points >= 0 ? "+" : ""}${r.points} NIFTY pts` : ""}`)}"><b>${pmEsc(r.s)}</b><em>${pmHeatPct(r.pct)}</em><small>${r.weightPct}%${r.points != null ? ` · ${r.points >= 0 ? "+" : ""}${r.points} pts` : ""}</small></span>`).join("")}</div>`
+    + `<div class="pmx-note">${pmEsc(n.source)}. Tile size = weight; pts = estimated NIFTY points from the move.</div>`;
+}
+
 function pmAttr(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function pmAge(h) { if (h == null) return ""; if (h < 1) return `${Math.max(1, Math.round(h * 60))} min ago`; if (h < 24) return `${h.toFixed(1)} h ago`; return `${Math.floor(h / 24)} d ${Math.round(h % 24)} h ago`; }
 function pmIst(sec) { return new Date(sec * 1000).toLocaleString("en-IN", { weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }); }
