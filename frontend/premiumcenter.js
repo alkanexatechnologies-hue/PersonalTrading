@@ -765,23 +765,25 @@ function ppcHotRender(r) {
       <td data-l="Strike" class="ppc-ht-k"><b>${x.strike}</b> <i>${x.money}</i></td>
       <td data-l="Rating" class="ppc-ht-rt">${ppcStars(x.rating)}</td>
       <td data-l="LTP" class="ppc-ht-n"><b>₹${x.ltp}</b></td>
+      <td data-l="Support 1" class="ppc-ht-n ppc-up">${L ? zone(L.support[0]) : "—"}</td>
+      <td data-l="Support 2" class="ppc-ht-n ppc-up">${L ? zone(L.support[1]) : "—"}</td>
+      <td data-l="Resist. 1" class="ppc-ht-n ppc-dn">${L ? zone(L.resistance[0]) : "—"}</td>
+      <td data-l="Resist. 2" class="ppc-ht-n ppc-dn">${L ? zone(L.resistance[1]) : "—"}</td>
+      <td data-l="At target" class="ppc-ht-n">₹${x.atTarget} <b class="ppc-up">+${x.upPct}%</b></td>
+      <td data-l="Volume" class="ppc-ht-n">${lak(x.volume)}</td>
+      <td data-l="Risk" class="ppc-ht-n ppc-dn">−${x.riskPct}%</td>
+      <td data-l="Position">${L ? `<span class="ppc-hz-st ${stCls(L.state)}">${stTxt[L.state] || ppcEsc(L.state)}</span>` : "—"}</td>
       <td data-l="Δ Delta" class="ppc-ht-n">${x.delta ?? "—"}</td>
       <td data-l="Γ Gamma" class="ppc-ht-n">${x.gamma != null ? Number(x.gamma.toPrecision(2)) : "—"}${x.greeksModel ? "<sup title='Black-Scholes — not in the Dhan feed'>m</sup>" : ""}</td>
       <td data-l="OI" class="ppc-ht-n">${lak(x.oi)}</td>
-      <td data-l="Volume" class="ppc-ht-n">${lak(x.volume)}</td>
-      <td data-l="At target" class="ppc-ht-n">₹${x.atTarget} <b class="ppc-up">+${x.upPct}%</b></td>
       <td data-l="Half way" class="ppc-ht-n ${x.halfPct >= 0 ? "ppc-up" : "ppc-dn"}">${x.halfPct >= 0 ? "+" : ""}${x.halfPct}%</td>
-      <td data-l="Risk" class="ppc-ht-n ppc-dn">−${x.riskPct}%</td>
       <td data-l="R:R" class="ppc-ht-n"><b>${x.rr}</b></td>
-      <td data-l="Liquidity"><span class="ppc-ht-lq ${x.liq === "GOOD" ? "good" : "wide"}">${x.liq === "GOOD" ? "OK" : x.liq === "NO QUOTE" ? "no quote" : "wide"}${x.spreadPct != null ? " " + x.spreadPct + "%" : ""}</span></td>
-      <td data-l="Support" class="ppc-ht-n ppc-up">${L ? zone(L.support[0]) : "—"}</td>
-      <td data-l="Resist." class="ppc-ht-n ppc-dn">${L ? zone(L.resistance[0]) : "—"}</td>
-      <td data-l="Position">${L ? `<span class="ppc-hz-st ${stCls(L.state)}">${stTxt[L.state] || ppcEsc(L.state)}</span>` : "—"}</td></tr>
-      ${openK === k ? `<tr class="ppc-ht-d"><td colspan="16">${ppcRatingDetail(x)}${ppcHotLevels(x, H)}</td></tr>` : ""}`;
+      <td data-l="Liquidity"><span class="ppc-ht-lq ${x.liq === "GOOD" ? "good" : "wide"}">${x.liq === "GOOD" ? "OK" : x.liq === "NO QUOTE" ? "no quote" : "wide"}${x.spreadPct != null ? " " + x.spreadPct + "%" : ""}</span></td></tr>
+      ${openK === k ? `<tr class="ppc-ht-d"><td colspan="18">${ppcRatingDetail(x)}${ppcHotLevels(x, H)}</td></tr>` : ""}`;
   };
   const table = (side, rows, t, from) => `<div class="ppc-ht ${side === "CE" ? "ce" : "pe"}">
       <div class="ppc-hot-ch">${side === "CE" ? "📈 CALLS" : "📉 PUTS"} <span class="ppc-sub">if ${ppcEsc(PPC.d?.name || "index")} reaches <b>${n(t)}</b> (${ppcEsc(from)}) within 1 hour · strike order</span></div>
-      ${rows.length ? `<table class="ppc-ht-t"><thead><tr><th>#</th><th>Strike</th><th title="opportunity rating: is the premium moving up from support, and how often (2-year Dhan data) such a bounce closed through the resistance above">Rating</th><th>LTP</th><th title="premium change per 1 index point">Δ</th><th title="how fast delta grows per 1 index point">Γ</th><th>OI</th><th>Vol</th><th>At target</th><th title="if the move stops half way">Half</th><th title="if the index moves the same distance against">Risk</th><th>R:R</th><th>Liq</th><th title="premium's own support (times it turned there)">S</th><th title="premium's own resistance">R</th><th>Pos</th></tr></thead>
+      ${rows.length ? `<table class="ppc-ht-t"><thead><tr><th>#</th><th>Strike</th><th title="opportunity rating: is the premium moving up from support, and how often (2-year Dhan data) such a bounce closed through the resistance above">Rating</th><th>LTP</th><th title="premium's nearest support (times it turned there)">S1</th><th title="next support below">S2</th><th title="premium's nearest resistance">R1</th><th title="next resistance above">R2</th><th>At target</th><th>Vol</th><th title="if the index moves the same distance against">Risk</th><th>Pos</th><th title="premium change per 1 index point">Δ</th><th title="how fast delta grows per 1 index point">Γ</th><th>OI</th><th title="if the move stops half way">Half</th><th>R:R</th><th>Liq</th></tr></thead>
         <tbody>${rows.map(row).join("")}</tbody></table>` : '<div class="ppc-na">no liquid strike with upside right now</div>'}
       ${rows.length && !rows.some((x) => x.hot) ? '<div class="ppc-sub ppc-hot-none">No 🔥 on this side now — the best one fails a check (liquid quote, Δ 0.30–0.60, R:R ≥ 1.3, upside ≥ 20%, not losing if the move stops half way).</div>' : ""}</div>`;
   el.innerHTML = `<div class="ppc-hot-h"><b>🔥 Hot premiums</b> <span class="ppc-sub">best 5 each side for a buyer · ${ppcEsc(H.chainAt)} · tap a row for its levels</span>
