@@ -8006,6 +8006,21 @@ router.get("/premium-calc", requirePermission("oiAnalysis"), async (req: Request
       const mv = PC.typicalMove(c15 as any, 4) ?? step * 2, ceT = Number(req.query.ceT), peT = Number(req.query.peT);
       const ceTarget = ceT > spot + step / 2 ? ceT : spot + mv, peTarget = peT > 0 && peT < spot - step / 2 ? peT : spot - mv;
       hot = { ...PCALC.hotPremiums({ spot, step, expiry: ch.expiry, strikes: ch.strikes, ceTarget, peTarget, horizonMin: 60, noQuotesOk: (() => { const m = Math.floor(((Date.now() / 1000 + 19800) % 86400) / 60), wd = new Date(Date.now() + 19800000).getUTCDay(); return wd === 0 || wd === 6 || m < 555 || m > 930; })() }), ceFrom: ceTarget === ceT ? "plan T1" : "typical 1-hour move", peFrom: peTarget === peT ? "plan T1" : "typical 1-hour move", move1h: Math.round(mv), chainAt: ch.staleChain ? "stale chain" : "live chain" };
+      // each row's own premium support / resistance (Dhan 15-min premium candles, last 5 days) and its value at the INDEX's
+      // nearest support / resistance (iS / iR from the screen's level ladder)
+      const und = (def.nseSymbol || def.symbol).toUpperCase(), nowS = Math.floor(Date.now() / 1000), iS = Number(req.query.iS), iR = Number(req.query.iR);
+      await Promise.all([...hot.ce, ...hot.pe].map(async (row: any) => {
+        try {
+          const cs: any[] = await withTimeout(cached(`hotc:${und}:${row.side}:${row.strike}:${ch.expiry}`, 5 * 60_000, async () => {
+            const o = await lookupDhanOption(und, row.side, row.strike, ch.expiry); if (!o) return [];
+            return dhanOptionCandles(o.securityId, nowS - 6 * 86400, nowS, 15, o.exchangeSegment);
+          }), 15_000, "hot premium candles");
+          row.levels = PPOS.premiumZones({ candles: (cs || []).filter((c) => c.time + 900 <= nowS), current: row.ltp });
+        } catch { row.levels = null; }
+        const at = (lv: number) => (lv > 0 ? PCALC.premiumCalc({ spot, level: lv, step, expiry: ch.expiry, mins: 0, strikes: ch.strikes, strike: row.strike }).rows.find((x) => x.side === row.side)?.est ?? null : null);
+        row.atIndexSupport = at(iS); row.atIndexResistance = at(iR);
+      }));
+      Object.assign(hot, { indexSupport: iS > 0 ? iS : null, indexResistance: iR > 0 ? iR : null });
     }
     res.json({ ok: true, symbol: def.symbol, name: def.name, step, generatedAt: Math.floor(Date.now() / 1000), hot, ...PCALC.premiumCalc({ spot, level: Number.isFinite(level) && level > 0 ? level : spot, step, expiry: ch.expiry, mins, strikes: ch.strikes, strike }) });
   } catch (e: any) { res.json({ ok: false, error: e?.message || "calculation failed" }); }

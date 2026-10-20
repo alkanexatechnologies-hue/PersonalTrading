@@ -726,7 +726,10 @@ async function ppcCalcRun() {
   if (mins === "eod") { const m = Math.floor(((Date.now() / 1000 + 19800) % 86400) / 60); mins = String(Math.max(0, 915 - m)); }
   out.innerHTML = `<div class="ppc-sub">calculating…</div>`;
   try {
-    const Pl = PPC.d?.trader?.plans || {}, tq = `&hot=1${Pl.bull?.t1 ? `&ceT=${Pl.bull.t1}` : ""}${Pl.bear?.t1 ? `&peT=${Pl.bear.t1}` : ""}`;
+    const Pl = PPC.d?.trader?.plans || {}, sp = PPC.d?.spot?.price, lad = (PPC.d?.trader?.levels || []).filter((v) => v.kind !== "TODAY" && sp != null);
+    const iS = lad.filter((v) => v.price < sp).sort((a, b) => b.price - a.price)[0], iR = lad.filter((v) => v.price > sp).sort((a, b) => a.price - b.price)[0];
+    PPC._hotIdx = { s: iS || null, r: iR || null };
+    const tq = `&hot=1${Pl.bull?.t1 ? `&ceT=${Pl.bull.t1}` : ""}${Pl.bear?.t1 ? `&peT=${Pl.bear.t1}` : ""}${iS ? `&iS=${iS.price}` : ""}${iR ? `&iR=${iR.price}` : ""}`;
     const r = await fetch(`/api/premium-calc?symbol=${encodeURIComponent(PPC.sym)}&expiryOffset=${PPC.off || 0}&level=${encodeURIComponent(level)}&mins=${mins}${strike ? `&strike=${encodeURIComponent(strike)}` : ""}${tq}`).then((x) => x.json());
     if (!r.ok) { out.innerHTML = `<div class="ppc-na">${ppcEsc(r.error || "not available")}</div>`; const h = ppcEl("ppc-hot"); if (h) h.innerHTML = ""; return; }
     ppcHotRender(r);
@@ -756,6 +759,7 @@ function ppcHotRender(r) {
       <span class="ppc-hot-rs">risk <b class="ppc-dn">−${x.riskPct}%</b></span>
       <span class="ppc-hot-rr">R:R <b>${x.rr}</b></span>
       <span class="ppc-hot-lq ${x.liq === "GOOD" ? "good" : "wide"}">${x.liq === "GOOD" ? "LIQUID" : x.liq === "NO QUOTE" ? "NO QUOTE" : "WIDE"}${x.spreadPct != null ? " " + x.spreadPct + "%" : ""}</span>
+      ${ppcHotLevels(x, H)}
       <span class="ppc-hot-mt">half way ₹${x.atHalf} <b class="${x.halfPct >= 0 ? "ppc-up" : "ppc-dn"}">${x.halfPct >= 0 ? "+" : ""}${x.halfPct}%</b> · Δ ${x.delta ?? "—"} · vol ${lak(x.volume)} · OI ${lak(x.oi)}</span></div>`;
   const col = (side, rows, t, from) => `<div class="ppc-hot-col ${side === "CE" ? "ce" : "pe"}">
       <div class="ppc-hot-ch">${side === "CE" ? "📈 CALLS" : "📉 PUTS"} <span class="ppc-sub">if ${PPC.d?.name || "index"} reaches <b>${n(t)}</b> (${ppcEsc(from)}) within 1 hour</span></div>
@@ -764,7 +768,18 @@ function ppcHotRender(r) {
   el.innerHTML = `<div class="ppc-hot-h"><b>🔥 Hot premiums</b> <span class="ppc-sub">top 5 each side for a buyer · ${ppcEsc(H.chainAt)}</span>
       <span class="ppc-hot-upd">updated ${hm(r.generatedAt)}${open ? ` · next ${next}` : " · market closed"}</span></div>
     <div class="ppc-hot-grid">${col("CE", H.ce, H.ceTarget, H.ceFrom)}${col("PE", H.pe, H.peTarget, H.peFrom)}</div>
-    <div class="ppc-sub">Upside = premium at the target after 1 hour of time decay, minus the spread you pay. Risk = premium lost if the index moves the same ${n(Math.abs(H.ceTarget - r.spot))}/${n(Math.abs(r.spot - H.peTarget))} pts the other way. Half way = the premium if the move stops half way. Ranked by reward ÷ risk, preferring delta 0.30–0.60; wide spreads are marked down, poor-liquidity strikes left out. 🔥 = passes every check. A model to pick the strike — the plan decides the trade.</div>`;
+    <div class="ppc-sub">Upside = premium at the target after 1 hour of time decay, minus the spread you pay. Risk = premium lost if the index moves the same ${n(Math.abs(H.ceTarget - r.spot))}/${n(Math.abs(r.spot - H.peTarget))} pts the other way. Half way = the premium if the move stops half way. S / R = the premium's own support / resistance zones from its Dhan 15-min candles (last 5 sessions: swing lows / highs + each day's low / high; 3× = turned there 3 times); hover a zone for its source. Ranked by reward ÷ risk, preferring delta 0.30–0.60; wide spreads are marked down, poor-liquidity strikes left out. 🔥 = passes every check. A model to pick the strike — the plan decides the trade.</div>`;
+}
+/** A hot row's premium support / resistance (its own 15-min candles) and its value at the index's nearest support / resistance. */
+function ppcHotLevels(x, H) {
+  const L = x.levels, n = (v) => Math.round(v).toLocaleString("en-IN"), I0 = PPC._hotIdx || {}, nm = (v) => (v ? { ...v, label: v.label.replace(/\s*\(.*\)$/, "") } : null), I = { s: nm(I0.s), r: nm(I0.r) };
+  const z = (q, cls) => `<span class="ppc-hz ${cls}" title="${ppcEsc(q.from.join(" · "))} · last ${ppcEsc(q.lastDay)} · zone ₹${q.lo}–₹${q.hi}">₹${q.price} <i>${q.strength === "STRONG" ? "strong" : q.strength === "MEDIUM" ? "med" : "weak"} ${q.touches}×</i></span>`;
+  const chip = !L ? "" : `<span class="ppc-hz-st ${L.state === "NEAR SUPPORT" ? "sup" : L.state === "MID-RANGE" || L.state === "NO LEVELS" ? "mid" : "bad"}">${ppcEsc(L.state)}</span>`;
+  const idx = [x.atIndexSupport != null && H.indexSupport ? `${ppcEsc(PPC.d?.name || "index")} at support ${n(H.indexSupport)}${I.s ? ` <i>(${ppcEsc(I.s.label)})</i>` : ""} → <b>₹${x.atIndexSupport}</b>` : "",
+    x.atIndexResistance != null && H.indexResistance ? `at resistance ${n(H.indexResistance)}${I.r ? ` <i>(${ppcEsc(I.r.label)})</i>` : ""} → <b>₹${x.atIndexResistance}</b>` : ""].filter(Boolean).join(" · ");
+  return `<span class="ppc-hot-lv">${!L ? '<span class="ppc-sub">premium levels not available (no Dhan premium candles)</span>'
+    : `<span class="ppc-hz-row"><b class="ppc-up">S</b> ${L.support.length ? L.support.map((q) => z(q, "s")).join(" ") : "—"} <b class="ppc-dn">R</b> ${L.resistance.length ? L.resistance.map((q) => z(q, "r")).join(" ") : "—"} ${chip}</span>
+       <span class="ppc-hz-read">${ppcEsc(L.read)}</span>`}${idx ? `<span class="ppc-hz-idx">${idx}</span>` : ""}</span>`;
 }
 /** The next refresh: 15 s after the next 15-min candle close (09:30, 09:45 … 15:30), IST "HH:MM". */
 function ppcCalcNextAt() { const m = Math.floor(((Date.now() / 1000 + 19800) % 86400) / 60), nx = (Math.floor(m / 15) + 1) * 15; return `${String(Math.floor(nx / 60)).padStart(2, "0")}:${String(nx % 60).padStart(2, "0")}`; }
