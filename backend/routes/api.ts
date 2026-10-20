@@ -306,7 +306,9 @@ if (AUDIT_ENABLED) {
 // context makes the gate in dhanClient.ts dispatch their option-chain/quote/
 // candle calls before the LOW-priority scanner backlog, so the terminal stays
 // live even while scanners churn. Everything else stays LOW (the default).
-const HIGH_PRIORITY_API = /^\/(market-command|market-analysis|option-candles|option-structure|mc-summary)\b/;
+// The Option Premium Prediction Center (and its zero-hero / Market Eye / calculator / level-memory sections) is a focus
+// screen too: at LOW priority its quote + option-chain calls queued behind the background scans in market hours.
+const HIGH_PRIORITY_API = /^\/(market-command|market-analysis|option-candles|option-structure|mc-summary|premium-center|premium-calc|zero-hero-live|market-eye|level-memory)\b/;
 router.use((req: Request, _res: Response, next: NextFunction) => {
   if (HIGH_PRIORITY_API.test(req.path)) withDhanPriority("high", async () => next());
   else next();
@@ -7816,7 +7818,7 @@ async function premiumCenterPayload(query: Record<string, any>): Promise<any> {
         const first = quoteDay ? candles.find((c: any) => dayOf(c.time) === quoteDay) : null;   // today's open only once today has a candle
         if (session !== "OPEN" && quoteDay) {
           try {
-            const d: any[] = await getDailyCached(def.symbol, 10), prev = [...d].reverse().find((x) => dayOf(x.time) < quoteDay);
+            const d: any[] = (dailyAll as any[])?.length ? (dailyAll as any[]) : await getDailyCached(def.symbol, 10), prev = [...d].reverse().find((x) => dayOf(x.time) < quoteDay);
             if (prev) prevClose = prev.close;
           } catch { /* keep the quote's value */ }
         }
@@ -7970,7 +7972,11 @@ async function premiumCenterPayload(query: Record<string, any>): Promise<any> {
       const und = ((def as any).nseSymbol || def.symbol.replace(/\.NS$/i, "")).toUpperCase();
       await Promise.all((["bull", "bear"] as const).map(async (sd) => {
         const p = out.trader.plans?.[sd]; if (!p || p.strike == null) return;
-        const lv: any = await cached(`prempos:${def.symbol}:${p.strike}:${sd}:${out.expiry}`, 90_000, () => premiumPositionFor(und, sd === "bull" ? "CE" : "PE", p.strike, out.expiry)).catch(() => null);
+        const key = `prempos:${def.symbol}:${p.strike}:${sd}:${out.expiry}`, load = () => cached(key, 90_000, () => premiumPositionFor(und, sd === "bull" ? "CE" : "PE", p.strike, out.expiry)).catch(() => null);
+        // the screen does not wait for a cold premium-position fetch (display only): it loads in the background and shows on
+        // the next refresh; the co-pilot (Telegram) path still waits for it
+        if (query._screen && !peekFresh(key, 90_000)) { void load(); return; }
+        const lv: any = await load();
         if (lv) p.premPos = PPOS.premiumPosition({ current: p.premNow ?? lv.lastClose, swings: lv.swings, typicalBar: lv.typicalBar });
       }));
     }
@@ -8035,7 +8041,7 @@ router.get("/level-memory", requirePermission("oiAnalysis"), async (req: Request
   } catch (e: any) { res.json({ ok: false, error: e?.message || "level memory failed" }); }
 });
 router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
-  const out = await premiumCenterPayload(req.query as any);
+  const out = await premiumCenterPayload({ ...(req.query as any), _screen: true });
   if (out?.status === 400) return res.status(400).json({ error: out.error });
   res.json(out);
 });
