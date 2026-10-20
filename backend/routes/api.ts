@@ -84,6 +84,7 @@ import * as PCALC from "../premium/premiumCalc";
 import * as RR from "../sentiment/resultsReview";
 import * as LM from "../premium/levelMemory";
 import * as NDM from "../premium/nextDayMap";
+import * as PBNC from "../premium/premiumBounce";
 import * as EYE from "../premium/marketEye";
 import * as TG from "../premium/tgFormat";
 import { Decision } from "../decision/types";
@@ -7985,6 +7986,14 @@ async function premiumCenterPayload(query: Record<string, any>): Promise<any> {
     return out;
   } catch (e: any) { return { available: false, version: PC_VERSION, error: e?.message || "premium center failed" }; }
 }
+// 🎯 premium bounce → resistance odds (research/protrader/premiumBounceStudy.ts), re-read every 30 min
+const _pbStudy = new Map<string, { at: number; v: PBNC.BounceStudy | null }>();
+function bounceStudyFor(sym: string): PBNC.BounceStudy | null {
+  const name = ({ "^NSEI": "NIFTY", "^BSESN": "SENSEX" } as Record<string, string>)[sym]; if (!name) return null;
+  const c = _pbStudy.get(name); if (c && Date.now() - c.at < 30 * 60_000) return c.v;
+  let v: PBNC.BounceStudy | null = null; try { v = JSON.parse(fs.readFileSync(path.join(process.cwd(), "data", "research-premium-bounce", `${name}.json`), "utf8")); } catch { /* not built yet */ }
+  _pbStudy.set(name, { at: Date.now(), v }); return v;
+}
 // 🧮 Premium calculator: the premium of each strike if the index goes to `level` (optionally after `mins` minutes)
 router.get("/premium-calc", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
   try {
@@ -8016,7 +8025,9 @@ router.get("/premium-calc", requirePermission("oiAnalysis"), async (req: Request
             const o = await lookupDhanOption(und, row.side, row.strike, ch.expiry); if (!o) return [];
             return dhanOptionCandles(o.securityId, nowS - 6 * 86400, nowS, 15, o.exchangeSegment);
           }), 15_000, "hot premium candles");
-          row.levels = PPOS.premiumZones({ candles: (cs || []).filter((c) => c.time + 900 <= nowS), current: row.ltp });
+          const closedCs = (cs || []).filter((c) => c.time + 900 <= nowS);
+          row.levels = PPOS.premiumZones({ candles: closedCs, current: row.ltp });
+          row.rating = PBNC.rateOpportunity({ candles: closedCs, ltp: row.ltp, liq: row.liq, rr: row.rr, expiryDay: ch.expiry === new Date(Date.now() + 19800000).toISOString().slice(0, 10), study: bounceStudyFor(def.symbol) });
         } catch { row.levels = null; }
         const at = (lv: number) => (lv > 0 ? PCALC.premiumCalc({ spot, level: lv, step, expiry: ch.expiry, mins: 0, strikes: ch.strikes, strike: row.strike }).rows.find((x) => x.side === row.side)?.est ?? null : null);
         row.atIndexSupport = at(iS); row.atIndexResistance = at(iR);
@@ -9252,6 +9263,7 @@ async function copilotTick() {
       _cp.sent.ptRefresh = true; cpSave();
       ptScript("refreshData.ts", [day]).then((o) => console.log("[protrader] data refresh", o.trim().slice(-200)))
         .then(() => ptScript("openingStudy.ts", [])).then((o) => console.log("[protrader] opening study", o.trim().slice(-160)))   // next-day map odds incl. today
+        .then(() => ptScript("premiumBounceStudy.ts", [])).then((o) => console.log("[protrader] premium bounce study", o.split("\n").filter((l) => /bounces/.test(l)).join(" | ").slice(0, 300)))   // hot-premium rating odds
         .catch((e) => console.log("[protrader] data refresh failed", e?.message));
     }
     // 🎖 Friday 16:05 weekly re-check of the live logic on the refreshed data (reports drift; proposes, never changes logic)

@@ -763,6 +763,7 @@ function ppcHotRender(r) {
     return `<tr class="ppc-ht-r${x.hot ? " hot" : ""}${openK === k ? " open" : ""}" data-hot="${k}" title="${ppcEsc(x.why)} — tap for support / resistance detail">
       <td data-l="#" class="ppc-ht-rk">${x.hot ? "🔥" : x.rank}</td>
       <td data-l="Strike" class="ppc-ht-k"><b>${x.strike}</b> <i>${x.money}</i></td>
+      <td data-l="Rating" class="ppc-ht-rt">${ppcStars(x.rating)}</td>
       <td data-l="LTP" class="ppc-ht-n"><b>₹${x.ltp}</b></td>
       <td data-l="Δ Delta" class="ppc-ht-n">${x.delta ?? "—"}</td>
       <td data-l="Γ Gamma" class="ppc-ht-n">${x.gamma != null ? Number(x.gamma.toPrecision(2)) : "—"}${x.greeksModel ? "<sup title='Black-Scholes — not in the Dhan feed'>m</sup>" : ""}</td>
@@ -776,18 +777,29 @@ function ppcHotRender(r) {
       <td data-l="Support" class="ppc-ht-n ppc-up">${L ? zone(L.support[0]) : "—"}</td>
       <td data-l="Resist." class="ppc-ht-n ppc-dn">${L ? zone(L.resistance[0]) : "—"}</td>
       <td data-l="Position">${L ? `<span class="ppc-hz-st ${stCls(L.state)}">${stTxt[L.state] || ppcEsc(L.state)}</span>` : "—"}</td></tr>
-      ${openK === k ? `<tr class="ppc-ht-d"><td colspan="15">${ppcHotLevels(x, H)}</td></tr>` : ""}`;
+      ${openK === k ? `<tr class="ppc-ht-d"><td colspan="16">${ppcRatingDetail(x)}${ppcHotLevels(x, H)}</td></tr>` : ""}`;
   };
   const table = (side, rows, t, from) => `<div class="ppc-ht ${side === "CE" ? "ce" : "pe"}">
       <div class="ppc-hot-ch">${side === "CE" ? "📈 CALLS" : "📉 PUTS"} <span class="ppc-sub">if ${ppcEsc(PPC.d?.name || "index")} reaches <b>${n(t)}</b> (${ppcEsc(from)}) within 1 hour · strike order</span></div>
-      ${rows.length ? `<table class="ppc-ht-t"><thead><tr><th>#</th><th>Strike</th><th>LTP</th><th title="premium change per 1 index point">Δ</th><th title="how fast delta grows per 1 index point">Γ</th><th>OI</th><th>Vol</th><th>At target</th><th title="if the move stops half way">Half</th><th title="if the index moves the same distance against">Risk</th><th>R:R</th><th>Liq</th><th title="premium's own support (times it turned there)">S</th><th title="premium's own resistance">R</th><th>Pos</th></tr></thead>
+      ${rows.length ? `<table class="ppc-ht-t"><thead><tr><th>#</th><th>Strike</th><th title="opportunity rating: is the premium moving up from support, and how often (2-year Dhan data) such a bounce closed through the resistance above">Rating</th><th>LTP</th><th title="premium change per 1 index point">Δ</th><th title="how fast delta grows per 1 index point">Γ</th><th>OI</th><th>Vol</th><th>At target</th><th title="if the move stops half way">Half</th><th title="if the index moves the same distance against">Risk</th><th>R:R</th><th>Liq</th><th title="premium's own support (times it turned there)">S</th><th title="premium's own resistance">R</th><th>Pos</th></tr></thead>
         <tbody>${rows.map(row).join("")}</tbody></table>` : '<div class="ppc-na">no liquid strike with upside right now</div>'}
       ${rows.length && !rows.some((x) => x.hot) ? '<div class="ppc-sub ppc-hot-none">No 🔥 on this side now — the best one fails a check (liquid quote, Δ 0.30–0.60, R:R ≥ 1.3, upside ≥ 20%, not losing if the move stops half way).</div>' : ""}</div>`;
   el.innerHTML = `<div class="ppc-hot-h"><b>🔥 Hot premiums</b> <span class="ppc-sub">best 5 each side for a buyer · ${ppcEsc(H.chainAt)} · tap a row for its levels</span>
       <span class="ppc-hot-upd">updated ${hm(r.generatedAt)}${open ? ` · next ${ppcCalcNextAt()}` : " · market closed"}</span></div>
     ${table("CE", H.ce, H.ceTarget, H.ceFrom)}${table("PE", H.pe, H.peTarget, H.peFrom)}
-    <div class="ppc-sub">At target = premium if the index reaches the target within 1 hour (time decay and the spread included). Half = if the move stops half way. Risk = if the index moves the same ${n(Math.abs(H.ceTarget - r.spot))} / ${n(Math.abs(r.spot - H.peTarget))} pts against. # = rank by reward ÷ risk (Δ 0.30–0.60 preferred). S / R = the premium's own support / resistance from its Dhan 15-min candles (× = times it turned there). Γ<sup>m</sup> = Black-Scholes when Dhan does not send it. A model to pick the strike — the plan decides the trade.</div>`;
+    <div class="ppc-sub">At target = premium if the index reaches the target within 1 hour (time decay and the spread included). Half = if the move stops half way. Risk = if the index moves the same ${n(Math.abs(H.ceTarget - r.spot))} / ${n(Math.abs(r.spot - H.peTarget))} pts against. # = rank by reward ÷ risk (Δ 0.30–0.60 preferred). S / R = the premium's own support / resistance from its Dhan 15-min candles (× = times it turned there). Rating ★ = moving up from support (a green 15-min close off it) and the tested % of such bounces that closed through the resistance above within 2 hours — overall ~29%, the best set-ups ~40%+; ★★★★★ needs a live bounce with ≥ 40%. Γ<sup>m</sup> = Black-Scholes when Dhan does not send it. A model to pick the strike — the plan decides the trade.</div>`;
   PPC._hotLast = r;
+}
+/** ★ rating cell: stars + the tested chance that a bounce from support closes through the resistance above. */
+function ppcStars(R) {
+  if (!R) return '<span class="ppc-sub">—</span>';
+  return `<span class="ppc-star s${R.stars}" title="${ppcEsc(R.label)}">${"★".repeat(R.stars)}<i>${"★".repeat(5 - R.stars)}</i></span>${R.passPct != null ? ` <b class="ppc-star-p">${R.passPct}%</b>` : ""}`;
+}
+function ppcRatingDetail(x) {
+  const R = x.rating; if (!R) return "";
+  const st = { BOUNCING: "🟢 moving up from support now", "AT SUPPORT": "🟡 sitting on support", "MID-RANGE": "⚪ mid-range", "AT RESISTANCE": "🟠 at resistance", "BELOW SUPPORT": "🔴 below support" }[R.state] || R.state;
+  return `<div class="ppc-star-d"><div><span class="ppc-star s${R.stars}">${"★".repeat(R.stars)}<i>${"★".repeat(5 - R.stars)}</i></span> <b>${ppcEsc(R.label)}</b> · ${st}</div>
+    ${R.passPct != null ? `<div>Tested (${R.n.toLocaleString("en-IN")} bounces like this, 2 years of Dhan premiums): a bounce from <b>₹${R.support}</b> closed through resistance <b>₹${R.resistance}</b> within 2 hours in <b class="ppc-up">${R.passPct}%</b> · support broke first in <b class="ppc-dn">${R.failPct}%</b> · touched resistance ${R.touchRPct}% · typical best gain +${R.medGainPct}%${R.devPass != null && R.valPass != null ? ` <span class="ppc-sub">(earlier ${R.devPass}% / recent ${R.valPass}%)</span>` : ""}</div>` : '<div class="ppc-sub">no tested odds for this set-up (no support or resistance zone)</div>'}</div>`;
 }
 /** A hot row's premium support / resistance (its own 15-min candles) and its value at the index's nearest support / resistance. */
 function ppcHotLevels(x, H) {
