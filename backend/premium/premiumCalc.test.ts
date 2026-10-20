@@ -54,10 +54,15 @@ test("hot premiums: 5 per side, ranked by reward ÷ risk, every row has upside t
   const h = hotPremiums({ spot, step: 50, expiry: "2026-10-27", strikes: hChain, ceTarget: 23094, peTarget: 22800, horizonMin: 60, nowMs: hNow });
   assert.equal(h.ce.length, 5); assert.equal(h.pe.length, 5);
   for (const r of [...h.ce, ...h.pe]) { assert.ok(r.upPct > 0 && r.riskPct >= 1 && r.atTarget > r.ltp && r.atAgainst < r.ltp, JSON.stringify(r)); assert.equal(r.liq, "GOOD"); }
-  for (const side of [h.ce, h.pe]) for (let i = 1; i < side.length; i++) assert.ok(side[i - 1].score >= side[i].score);
+  for (const side of [h.ce, h.pe]) {
+    for (let i = 1; i < side.length; i++) assert.ok(side[i - 1].strike < side[i].strike, "rows in strike order");
+    const byRank = [...side].sort((a, b) => a.rank - b.rank); assert.deepEqual(byRank.map((x) => x.rank), [1, 2, 3, 4, 5]);
+    for (let i = 1; i < byRank.length; i++) assert.ok(byRank[i - 1].score >= byRank[i].score, "rank follows the score");
+    for (const x of side) assert.ok(x.gamma != null && x.gamma > 0 && x.delta != null, "gamma and delta on every row");
+  }
   assert.ok(h.ce.every((r) => r.side === "CE") && h.pe.every((r) => r.side === "PE"));
   // a +205 pt target is a big move: the best call is hot (liquid, delta in band, R:R ≥ 1.3, upside ≥ 20 %)
-  assert.equal(h.ce[0].hot, true, JSON.stringify(h.ce[0])); assert.ok(h.ce.slice(1).every((r) => !r.hot));
+  const top = h.ce.find((r) => r.rank === 1)!; assert.equal(top.hot, true, JSON.stringify(top)); assert.ok(h.ce.filter((r) => r.rank !== 1).every((r) => !r.hot));
 });
 test("hot premiums: no two-sided quote / zero volume is left out; a wide spread ranks lower; nothing is hot when the target is tiny", () => {
   const ch = hChain.map((r) => (r.strike === 22950 ? { ...r, ceBid: null, ceAsk: null } : r.strike === 23000 ? { ...r, ceVol: 0 } : r));

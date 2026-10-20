@@ -6,7 +6,7 @@
 // the valid IVs. Dhan's in-the-money IVs are often 0 or stale (e.g. 23050 CE 6.4%), so they are never used per strike.
 // STALE LTP: a premium below its intrinsic value is impossible (e.g. 22900 CE ₹221.85 with spot 23,146 → intrinsic ₹246); for
 // those rows the model's own price is used and the row is flagged. Results are then made arbitrage-free across strikes.
-import { premiumAtLevel, yearsToExpiry, bsPrice } from "../analysis/greeks";
+import { premiumAtLevel, yearsToExpiry, bsPrice, bsGamma, bsDelta } from "../analysis/greeks";
 import { liquidity } from "./premiumCenter";
 
 export interface CalcRow { strike: number; side: "CE" | "PE"; ltp: number | null; iv: number | null; delta: number | null; est: number | null; chg: number | null; chgPct: number | null; money: "ITM" | "ATM" | "OTM"; stale: boolean }
@@ -76,7 +76,7 @@ export function premiumCalc(o: { spot: number; level: number; step: number; expi
 // 🔥 HOT = the top row of a side only when ALL hold: GOOD liquidity, delta 0.30–0.60, R:R ≥ 1.3, upside ≥ 20 % after the spread,
 //          and it is not losing money even if the move stops half way.
 // A model estimate for choosing a strike — it never gives or blocks a trade (the plan and its checks do that).
-export interface HotRow { strike: number; side: "CE" | "PE"; money: "ITM" | "ATM" | "OTM"; ltp: number; delta: number | null; atTarget: number; upPct: number; atAgainst: number; riskPct: number; rr: number; score: number;
+export interface HotRow { strike: number; side: "CE" | "PE"; money: "ITM" | "ATM" | "OTM"; rank: number; ltp: number; delta: number | null; gamma: number | null; greeksModel: boolean; atTarget: number; upPct: number; atAgainst: number; riskPct: number; rr: number; score: number;
   atHalf: number; halfPct: number; liq: string; spread: number | null; spreadPct: number | null; volume: number | null; oi: number | null; hot: boolean; why: string }
 export function hotPremiums(o: { spot: number; step: number; expiry: string | null; strikes: any[]; ceTarget: number; peTarget: number; horizonMin: number; nowMs?: number; noQuotesOk?: boolean }) {
   const atm = Math.round(o.spot / o.step) * o.step, r2 = (v: number) => Math.round(v * 100) / 100;
@@ -97,16 +97,20 @@ export function hotPremiums(o: { spot: number; step: number; expiry: string | nu
       if (!up || !dn || !hf || up.stale || up.est == null || dn.est == null || hf.est == null) continue;
       const upPct = ((up.est - ltp - (L.spread ?? 0)) / ltp) * 100, riskPct = Math.max(1, ((ltp - dn.est) / ltp) * 100), rr = upPct / riskPct;
       if (upPct <= 0) continue;
-      const d = r[`${p}Delta`] != null ? Math.abs(r[`${p}Delta`]) : null, inBand = d != null && d >= 0.3 && d <= 0.6, nearBand = d != null && d >= 0.2 && d < 0.3;
+      // delta / gamma: the feed's; when Dhan leaves them out, Black-Scholes at the expiry IV (flagged greeksModel)
+      const tY = yearsToExpiry(o.expiry, o.nowMs), ivE = expiryIv(o.strikes, o.spot), bs = tY != null && tY > 0 && ivE != null ? { spot: o.spot, strike: r.strike, tYears: tY, iv: ivE / 100 } : null;
+      const dRaw = r[`${p}Delta`] || (bs ? bsDelta(bs, S) : null), gRaw = r[`${p}Gamma`] || (bs ? bsGamma(bs) : null), greeksModel = !r[`${p}Delta`] || !r[`${p}Gamma`];
+      const d = dRaw != null ? Math.abs(dRaw) : null, inBand = d != null && d >= 0.3 && d <= 0.6, nearBand = d != null && d >= 0.2 && d < 0.3;
       const score = rr * (L.status === "GOOD" ? 1 : 0.7) * (inBand ? 1 : nearBand ? 0.85 : 0.7), halfPct = ((hf.est - ltp - (L.spread ?? 0)) / ltp) * 100;
-      rows.push({ strike: r.strike, side: S, money: r.strike === atm ? "ATM" : (S === "CE") === (r.strike < o.spot) ? "ITM" : "OTM", ltp, delta: d != null ? r2(d) : null,
+      rows.push({ strike: r.strike, side: S, rank: 0, gamma: gRaw != null ? Math.round(gRaw * 1e5) / 1e5 : null, greeksModel, money: r.strike === atm ? "ATM" : (S === "CE") === (r.strike < o.spot) ? "ITM" : "OTM", ltp, delta: d != null ? r2(d) : null,
         atTarget: r2(up.est), atHalf: r2(hf.est), halfPct: Math.round(halfPct), upPct: Math.round(upPct), atAgainst: r2(dn.est), riskPct: Math.round(riskPct), rr: r2(rr), score: r2(score),
         liq: L.status, spread: L.spread, spreadPct: L.spreadPct, volume: r[`${p}Vol`] ?? null, oi: r[`${p}Oi`] ?? null, hot: false,
         why: [L.status === "GOOD" ? "tight spread" : L.status === "NO QUOTE" ? "no live quote — liquidity not checked" : "spread wide", d == null ? "no delta in the feed" : inBand ? `delta ${r2(d)}` : d < 0.3 ? `delta ${r2(d)} — out of the money, needs the full move fast` : `delta ${r2(d)} — deep ITM, little leverage`].join(" · ") });
     }
     rows.sort((a, b) => b.score - a.score || b.upPct - a.upPct);
     const t = rows[0]; if (t && t.liq === "GOOD" && t.delta != null && t.delta >= 0.3 && t.delta <= 0.6 && t.rr >= 1.3 && t.upPct >= 20 && t.halfPct >= 0) t.hot = true;
-    return rows.slice(0, 5);
+    // top 5 by score, shown in STRIKE order (rank kept on each row)
+    return rows.slice(0, 5).map((x, i) => ({ ...x, rank: i + 1 })).sort((a, b) => a.strike - b.strike);
   };
   return { ce: side("CE"), pe: side("PE"), ceTarget: r2(o.ceTarget), peTarget: r2(o.peTarget), horizonMin: o.horizonMin, chainMedianSpreadPct: medPct != null ? r2(medPct) : null };
 }

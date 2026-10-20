@@ -700,6 +700,7 @@ function ppcCalcInit() {
   box.addEventListener("toggle", () => { if (box.open) ppcCalcOpen(); });
   body.addEventListener("click", (e) => {
     if (e.target.closest("[data-act='calc-live']")) { PPC._calcEdited = false; ppcEl("ppc-calc-level").value = Math.round(PPC.d?.spot?.price || 0); ppcCalcRun(); return; }
+    const hr = e.target.closest("[data-hot]"); if (hr) { PPC._hotOpen = PPC._hotOpen === hr.dataset.hot ? "" : hr.dataset.hot; if (PPC._hotLast) ppcHotRender(PPC._hotLast); return; }
     const b = e.target.closest("[data-lv]"); if (b) { PPC._calcEdited = true; ppcEl("ppc-calc-level").value = b.dataset.lv; ppcCalcRun(); }
   });
   body.addEventListener("input", (e) => { if (e.target.id === "ppc-calc-level") PPC._calcEdited = true; if (e.target.matches("input,select")) { clearTimeout(PPC._calcT); PPC._calcT = setTimeout(ppcCalcRun, 350); } });
@@ -744,31 +745,47 @@ async function ppcCalcRun() {
   } catch (e) { out.innerHTML = `<div class="ppc-na">calculator unavailable — ${ppcEsc(e.message || "")}</div>`; }
 }
 
-/** 🔥 Hot premiums: top 5 calls and top 5 puts by reward ÷ risk after the spread, liquid quotes only (server: hotPremiums). */
+/** 🔥 Hot premiums: top 5 calls and top 5 puts by reward ÷ risk after the spread, liquid quotes only (server: hotPremiums).
+ *  Compact table in STRIKE order (rank shown); tap a row for its premium support / resistance detail. */
 function ppcHotRender(r) {
   const el = ppcEl("ppc-hot"), H = r.hot; if (!el) return;
   if (!H) { el.innerHTML = ""; return; }
   const hm = (t) => new Date((t + 19800) * 1000).toISOString().slice(11, 16), n = (v) => Math.round(v).toLocaleString("en-IN");
-  const lak = (v) => (v == null ? "—" : v >= 1e5 ? (v / 1e5).toFixed(1) + "L" : v >= 1e3 ? (v / 1e3).toFixed(1) + "K" : String(v));
-  const next = ppcCalcNextAt(), open = PPC.d?.session === "OPEN";
-  const row = (x, i) => `<div class="ppc-hot-r${x.hot ? " hot" : ""}" title="${ppcEsc(x.why)}">
-      <span class="ppc-hot-rk">${x.hot ? "🔥" : i + 1}</span>
-      <span class="ppc-hot-k"><b>${x.strike}</b> <i>${x.money}</i></span>
-      <span class="ppc-hot-ltp">₹${x.ltp}</span>
-      <span class="ppc-hot-up">→ ₹${x.atTarget} <b class="ppc-up">+${x.upPct}%</b></span>
-      <span class="ppc-hot-rs">risk <b class="ppc-dn">−${x.riskPct}%</b></span>
-      <span class="ppc-hot-rr">R:R <b>${x.rr}</b></span>
-      <span class="ppc-hot-lq ${x.liq === "GOOD" ? "good" : "wide"}">${x.liq === "GOOD" ? "LIQUID" : x.liq === "NO QUOTE" ? "NO QUOTE" : "WIDE"}${x.spreadPct != null ? " " + x.spreadPct + "%" : ""}</span>
-      ${ppcHotLevels(x, H)}
-      <span class="ppc-hot-mt">half way ₹${x.atHalf} <b class="${x.halfPct >= 0 ? "ppc-up" : "ppc-dn"}">${x.halfPct >= 0 ? "+" : ""}${x.halfPct}%</b> · Δ ${x.delta ?? "—"} · vol ${lak(x.volume)} · OI ${lak(x.oi)}</span></div>`;
-  const col = (side, rows, t, from) => `<div class="ppc-hot-col ${side === "CE" ? "ce" : "pe"}">
-      <div class="ppc-hot-ch">${side === "CE" ? "📈 CALLS" : "📉 PUTS"} <span class="ppc-sub">if ${PPC.d?.name || "index"} reaches <b>${n(t)}</b> (${ppcEsc(from)}) within 1 hour</span></div>
-      ${rows.length ? rows.map(row).join("") : '<div class="ppc-na">no liquid strike with upside right now</div>'}
-      ${rows.length && !rows[0].hot ? '<div class="ppc-sub ppc-hot-none">No 🔥 hot premium on this side now — the best one fails a check (liquid quote, delta 0.30–0.60, R:R ≥ 1.3, upside ≥ 20%, not losing if the move stops half way).</div>' : ""}</div>`;
-  el.innerHTML = `<div class="ppc-hot-h"><b>🔥 Hot premiums</b> <span class="ppc-sub">top 5 each side for a buyer · ${ppcEsc(H.chainAt)}</span>
-      <span class="ppc-hot-upd">updated ${hm(r.generatedAt)}${open ? ` · next ${next}` : " · market closed"}</span></div>
-    <div class="ppc-hot-grid">${col("CE", H.ce, H.ceTarget, H.ceFrom)}${col("PE", H.pe, H.peTarget, H.peFrom)}</div>
-    <div class="ppc-sub">Upside = premium at the target after 1 hour of time decay, minus the spread you pay. Risk = premium lost if the index moves the same ${n(Math.abs(H.ceTarget - r.spot))}/${n(Math.abs(r.spot - H.peTarget))} pts the other way. Half way = the premium if the move stops half way. S / R = the premium's own support / resistance zones from its Dhan 15-min candles (last 5 sessions: swing lows / highs + each day's low / high; 3× = turned there 3 times); hover a zone for its source. Ranked by reward ÷ risk, preferring delta 0.30–0.60; wide spreads are marked down, poor-liquidity strikes left out. 🔥 = passes every check. A model to pick the strike — the plan decides the trade.</div>`;
+  const lak = (v) => (v == null ? "—" : v >= 1e7 ? (v / 1e7).toFixed(2) + "Cr" : v >= 1e5 ? (v / 1e5).toFixed(1) + "L" : v >= 1e3 ? (v / 1e3).toFixed(1) + "K" : String(v));
+  const open = PPC.d?.session === "OPEN", openK = PPC._hotOpen || "";
+  const zone = (q) => (q ? `₹${q.price} <i>${q.touches}×</i>` : "—");
+  const stCls = (st) => (st === "NEAR SUPPORT" ? "sup" : st === "NEAR RESISTANCE" || st === "BELOW SUPPORT" ? "bad" : "mid");
+  const stTxt = { "NEAR SUPPORT": "Near S", "NEAR RESISTANCE": "Near R", "BELOW SUPPORT": "Below S", "MID-RANGE": "Mid", "NO LEVELS": "—" };
+  const row = (x) => {
+    const k = x.side + x.strike, L = x.levels;
+    return `<tr class="ppc-ht-r${x.hot ? " hot" : ""}${openK === k ? " open" : ""}" data-hot="${k}" title="${ppcEsc(x.why)} — tap for support / resistance detail">
+      <td data-l="#" class="ppc-ht-rk">${x.hot ? "🔥" : x.rank}</td>
+      <td data-l="Strike" class="ppc-ht-k"><b>${x.strike}</b> <i>${x.money}</i></td>
+      <td data-l="LTP" class="ppc-ht-n"><b>₹${x.ltp}</b></td>
+      <td data-l="Δ Delta" class="ppc-ht-n">${x.delta ?? "—"}</td>
+      <td data-l="Γ Gamma" class="ppc-ht-n">${x.gamma != null ? x.gamma.toFixed(4) : "—"}${x.greeksModel ? "<sup title='Black-Scholes — not in the Dhan feed'>m</sup>" : ""}</td>
+      <td data-l="OI" class="ppc-ht-n">${lak(x.oi)}</td>
+      <td data-l="Volume" class="ppc-ht-n">${lak(x.volume)}</td>
+      <td data-l="At target" class="ppc-ht-n">₹${x.atTarget} <b class="ppc-up">+${x.upPct}%</b></td>
+      <td data-l="Half way" class="ppc-ht-n ${x.halfPct >= 0 ? "ppc-up" : "ppc-dn"}">${x.halfPct >= 0 ? "+" : ""}${x.halfPct}%</td>
+      <td data-l="Risk" class="ppc-ht-n ppc-dn">−${x.riskPct}%</td>
+      <td data-l="R:R" class="ppc-ht-n"><b>${x.rr}</b></td>
+      <td data-l="Liquidity"><span class="ppc-ht-lq ${x.liq === "GOOD" ? "good" : "wide"}">${x.liq === "GOOD" ? "OK" : x.liq === "NO QUOTE" ? "no quote" : "wide"}${x.spreadPct != null ? " " + x.spreadPct + "%" : ""}</span></td>
+      <td data-l="Support" class="ppc-ht-n ppc-up">${L ? zone(L.support[0]) : "—"}</td>
+      <td data-l="Resist." class="ppc-ht-n ppc-dn">${L ? zone(L.resistance[0]) : "—"}</td>
+      <td data-l="Position">${L ? `<span class="ppc-hz-st ${stCls(L.state)}">${stTxt[L.state] || ppcEsc(L.state)}</span>` : "—"}</td></tr>
+      ${openK === k ? `<tr class="ppc-ht-d"><td colspan="15">${ppcHotLevels(x, H)}</td></tr>` : ""}`;
+  };
+  const table = (side, rows, t, from) => `<div class="ppc-ht ${side === "CE" ? "ce" : "pe"}">
+      <div class="ppc-hot-ch">${side === "CE" ? "📈 CALLS" : "📉 PUTS"} <span class="ppc-sub">if ${ppcEsc(PPC.d?.name || "index")} reaches <b>${n(t)}</b> (${ppcEsc(from)}) within 1 hour · strike order</span></div>
+      ${rows.length ? `<table class="ppc-ht-t"><thead><tr><th>#</th><th>Strike</th><th>LTP</th><th title="premium change per 1 index point">Δ</th><th title="how fast delta grows per 1 index point">Γ</th><th>OI</th><th>Vol</th><th>At target</th><th title="if the move stops half way">Half</th><th title="if the index moves the same distance against">Risk</th><th>R:R</th><th>Liq</th><th title="premium's own support (times it turned there)">S</th><th title="premium's own resistance">R</th><th>Pos</th></tr></thead>
+        <tbody>${rows.map(row).join("")}</tbody></table>` : '<div class="ppc-na">no liquid strike with upside right now</div>'}
+      ${rows.length && !rows.some((x) => x.hot) ? '<div class="ppc-sub ppc-hot-none">No 🔥 on this side now — the best one fails a check (liquid quote, Δ 0.30–0.60, R:R ≥ 1.3, upside ≥ 20%, not losing if the move stops half way).</div>' : ""}</div>`;
+  el.innerHTML = `<div class="ppc-hot-h"><b>🔥 Hot premiums</b> <span class="ppc-sub">best 5 each side for a buyer · ${ppcEsc(H.chainAt)} · tap a row for its levels</span>
+      <span class="ppc-hot-upd">updated ${hm(r.generatedAt)}${open ? ` · next ${ppcCalcNextAt()}` : " · market closed"}</span></div>
+    ${table("CE", H.ce, H.ceTarget, H.ceFrom)}${table("PE", H.pe, H.peTarget, H.peFrom)}
+    <div class="ppc-sub">At target = premium if the index reaches the target within 1 hour (time decay and the spread included). Half = if the move stops half way. Risk = if the index moves the same ${n(Math.abs(H.ceTarget - r.spot))} / ${n(Math.abs(r.spot - H.peTarget))} pts against. # = rank by reward ÷ risk (Δ 0.30–0.60 preferred). S / R = the premium's own support / resistance from its Dhan 15-min candles (× = times it turned there). Γ<sup>m</sup> = Black-Scholes when Dhan does not send it. A model to pick the strike — the plan decides the trade.</div>`;
+  PPC._hotLast = r;
 }
 /** A hot row's premium support / resistance (its own 15-min candles) and its value at the index's nearest support / resistance. */
 function ppcHotLevels(x, H) {
