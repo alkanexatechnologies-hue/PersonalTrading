@@ -698,15 +698,21 @@ async function ppcLoadEye() {
 function ppcCalcInit() {
   const box = ppcEl("ppc-calc"), body = ppcEl("ppc-calc-body"); if (!box || !body || box._init) return; box._init = true;
   box.addEventListener("toggle", () => { if (box.open) ppcCalcOpen(); });
-  body.addEventListener("click", (e) => { const b = e.target.closest("[data-lv]"); if (b) { ppcEl("ppc-calc-level").value = b.dataset.lv; ppcCalcRun(); } });
-  body.addEventListener("input", (e) => { if (e.target.matches("input,select")) { clearTimeout(PPC._calcT); PPC._calcT = setTimeout(ppcCalcRun, 350); } });
+  body.addEventListener("click", (e) => {
+    if (e.target.closest("[data-act='calc-live']")) { PPC._calcEdited = false; ppcEl("ppc-calc-level").value = Math.round(PPC.d?.spot?.price || 0); ppcCalcRun(); return; }
+    const b = e.target.closest("[data-lv]"); if (b) { PPC._calcEdited = true; ppcEl("ppc-calc-level").value = b.dataset.lv; ppcCalcRun(); }
+  });
+  body.addEventListener("input", (e) => { if (e.target.id === "ppc-calc-level") PPC._calcEdited = true; if (e.target.matches("input,select")) { clearTimeout(PPC._calcT); PPC._calcT = setTimeout(ppcCalcRun, 350); } });
+  ppcCalcSchedule();
 }
 function ppcCalcOpen() {
   const body = ppcEl("ppc-calc-body"), d = PPC.d; if (!body || !d) return;
   const P = d.trader?.plans || {}, r0 = (v) => Math.round(v);
   const quick = [["Spot", d.spot?.price], ["Bull start", P.bull?.entry], ["Bull T1", P.bull?.t1], ["Bull SL", P.bull?.stop], ["Bear start", P.bear?.entry], ["Bear T1", P.bear?.t1], ["Bear SL", P.bear?.stop]].filter(([, v]) => v != null);
-  body.innerHTML = `<div class="ppc-calc-in">
-      <label>Index price<input id="ppc-calc-level" type="number" inputmode="decimal" step="1" value="${r0(d.spot?.price || 0)}"></label>
+  PPC._calcEdited = false;
+  body.innerHTML = `<div id="ppc-hot" class="ppc-hot"><div class="ppc-sub">finding the hot premiums…</div></div>
+    <div class="ppc-calc-in">
+      <label>Index price <button type="button" class="ppc-tvbtn ppc-calc-live" data-act="calc-live" title="follow the live index price again">↺ live</button><input id="ppc-calc-level" type="number" inputmode="decimal" step="1" value="${r0(d.spot?.price || 0)}"></label>
       <label>When<select id="ppc-calc-mins"><option value="0">now</option><option value="15">in 15 min</option><option value="30">in 30 min</option><option value="60">in 1 hour</option><option value="120">in 2 hours</option><option value="eod">at 15:15</option></select></label>
       <label>Strike <span class="ppc-sub">(optional)</span><input id="ppc-calc-strike" type="number" inputmode="numeric" step="${d.step || 50}" placeholder="all near"></label>
     </div>
@@ -720,8 +726,10 @@ async function ppcCalcRun() {
   if (mins === "eod") { const m = Math.floor(((Date.now() / 1000 + 19800) % 86400) / 60); mins = String(Math.max(0, 915 - m)); }
   out.innerHTML = `<div class="ppc-sub">calculating…</div>`;
   try {
-    const r = await fetch(`/api/premium-calc?symbol=${encodeURIComponent(PPC.sym)}&expiryOffset=${PPC.off || 0}&level=${encodeURIComponent(level)}&mins=${mins}${strike ? `&strike=${encodeURIComponent(strike)}` : ""}`).then((x) => x.json());
-    if (!r.ok) { out.innerHTML = `<div class="ppc-na">${ppcEsc(r.error || "not available")}</div>`; return; }
+    const Pl = PPC.d?.trader?.plans || {}, tq = `&hot=1${Pl.bull?.t1 ? `&ceT=${Pl.bull.t1}` : ""}${Pl.bear?.t1 ? `&peT=${Pl.bear.t1}` : ""}`;
+    const r = await fetch(`/api/premium-calc?symbol=${encodeURIComponent(PPC.sym)}&expiryOffset=${PPC.off || 0}&level=${encodeURIComponent(level)}&mins=${mins}${strike ? `&strike=${encodeURIComponent(strike)}` : ""}${tq}`).then((x) => x.json());
+    if (!r.ok) { out.innerHTML = `<div class="ppc-na">${ppcEsc(r.error || "not available")}</div>`; const h = ppcEl("ppc-hot"); if (h) h.innerHTML = ""; return; }
+    ppcHotRender(r);
     const by = {}; for (const x of r.rows) (by[x.strike] = by[x.strike] || {})[x.side] = x;
     const P = PPC.d?.trader?.plans || {}, planK = new Set([P.bull?.strike, P.bear?.strike].filter((v) => v != null));
     const cell = (x) => !x ? "<td>—</td>" : `<td>₹${x.ltp ?? "—"}${x.stale ? ' <span class="ppc-dn" title="quoted premium is below its intrinsic value — stale quote; the model price is used">⚠ stale</span>' : ""} → <b>₹${x.est ?? "—"}</b> <span class="${(x.chg ?? 0) >= 0 ? "ppc-up" : "ppc-dn"}">${x.chgPct != null ? (x.chgPct >= 0 ? "+" : "") + x.chgPct + "%" : ""}</span></td>`;
@@ -731,6 +739,48 @@ async function ppcCalcRun() {
       </tbody></table>
       <div class="ppc-sub">Estimate: live premium + Black-Scholes change at one IV for the expiry (average of the ATM call and put IV); "after N min" includes time decay; ⚠ stale = the quote was below intrinsic value, the model price is used. Real premiums also move with IV and demand.</div>`;
   } catch (e) { out.innerHTML = `<div class="ppc-na">calculator unavailable — ${ppcEsc(e.message || "")}</div>`; }
+}
+
+/** 🔥 Hot premiums: top 5 calls and top 5 puts by reward ÷ risk after the spread, liquid quotes only (server: hotPremiums). */
+function ppcHotRender(r) {
+  const el = ppcEl("ppc-hot"), H = r.hot; if (!el) return;
+  if (!H) { el.innerHTML = ""; return; }
+  const hm = (t) => new Date((t + 19800) * 1000).toISOString().slice(11, 16), n = (v) => Math.round(v).toLocaleString("en-IN");
+  const lak = (v) => (v == null ? "—" : v >= 1e5 ? (v / 1e5).toFixed(1) + "L" : v >= 1e3 ? (v / 1e3).toFixed(1) + "K" : String(v));
+  const next = ppcCalcNextAt(), open = PPC.d?.session === "OPEN";
+  const row = (x, i) => `<div class="ppc-hot-r${x.hot ? " hot" : ""}" title="${ppcEsc(x.why)}">
+      <span class="ppc-hot-rk">${x.hot ? "🔥" : i + 1}</span>
+      <span class="ppc-hot-k"><b>${x.strike}</b> <i>${x.money}</i></span>
+      <span class="ppc-hot-ltp">₹${x.ltp}</span>
+      <span class="ppc-hot-up">→ ₹${x.atTarget} <b class="ppc-up">+${x.upPct}%</b></span>
+      <span class="ppc-hot-rs">risk <b class="ppc-dn">−${x.riskPct}%</b></span>
+      <span class="ppc-hot-rr">R:R <b>${x.rr}</b></span>
+      <span class="ppc-hot-lq ${x.liq === "GOOD" ? "good" : "wide"}">${x.liq === "GOOD" ? "LIQUID" : x.liq === "NO QUOTE" ? "NO QUOTE" : "WIDE"}${x.spreadPct != null ? " " + x.spreadPct + "%" : ""}</span>
+      <span class="ppc-hot-mt">half way ₹${x.atHalf} <b class="${x.halfPct >= 0 ? "ppc-up" : "ppc-dn"}">${x.halfPct >= 0 ? "+" : ""}${x.halfPct}%</b> · Δ ${x.delta ?? "—"} · vol ${lak(x.volume)} · OI ${lak(x.oi)}</span></div>`;
+  const col = (side, rows, t, from) => `<div class="ppc-hot-col ${side === "CE" ? "ce" : "pe"}">
+      <div class="ppc-hot-ch">${side === "CE" ? "📈 CALLS" : "📉 PUTS"} <span class="ppc-sub">if ${PPC.d?.name || "index"} reaches <b>${n(t)}</b> (${ppcEsc(from)}) within 1 hour</span></div>
+      ${rows.length ? rows.map(row).join("") : '<div class="ppc-na">no liquid strike with upside right now</div>'}
+      ${rows.length && !rows[0].hot ? '<div class="ppc-sub ppc-hot-none">No 🔥 hot premium on this side now — the best one fails a check (liquid quote, delta 0.30–0.60, R:R ≥ 1.3, upside ≥ 20%, not losing if the move stops half way).</div>' : ""}</div>`;
+  el.innerHTML = `<div class="ppc-hot-h"><b>🔥 Hot premiums</b> <span class="ppc-sub">top 5 each side for a buyer · ${ppcEsc(H.chainAt)}</span>
+      <span class="ppc-hot-upd">updated ${hm(r.generatedAt)}${open ? ` · next ${next}` : " · market closed"}</span></div>
+    <div class="ppc-hot-grid">${col("CE", H.ce, H.ceTarget, H.ceFrom)}${col("PE", H.pe, H.peTarget, H.peFrom)}</div>
+    <div class="ppc-sub">Upside = premium at the target after 1 hour of time decay, minus the spread you pay. Risk = premium lost if the index moves the same ${n(Math.abs(H.ceTarget - r.spot))}/${n(Math.abs(r.spot - H.peTarget))} pts the other way. Half way = the premium if the move stops half way. Ranked by reward ÷ risk, preferring delta 0.30–0.60; wide spreads are marked down, poor-liquidity strikes left out. 🔥 = passes every check. A model to pick the strike — the plan decides the trade.</div>`;
+}
+/** The next refresh: 15 s after the next 15-min candle close (09:30, 09:45 … 15:30), IST "HH:MM". */
+function ppcCalcNextAt() { const m = Math.floor(((Date.now() / 1000 + 19800) % 86400) / 60), nx = (Math.floor(m / 15) + 1) * 15; return `${String(Math.floor(nx / 60)).padStart(2, "0")}:${String(nx % 60).padStart(2, "0")}`; }
+function ppcCalcSchedule() {
+  clearTimeout(PPC._calcSch);
+  const s = (Date.now() / 1000 + 19800) % 86400, wait = ((Math.floor(s / 900) + 1) * 900 + 15 - s) * 1000;
+  PPC._calcSch = setTimeout(() => {
+    try {
+      const box = ppcEl("ppc-calc"), m = Math.floor(((Date.now() / 1000 + 19800) % 86400) / 60);
+      if (box?.open && !document.hidden && m >= 555 && m <= 931) {
+        if (!PPC._calcEdited && PPC.d?.spot?.price) ppcEl("ppc-calc-level").value = Math.round(PPC.d.spot.price);   // follow the live price unless the user typed one
+        ppcCalcRun();
+      }
+    } catch { /* screen not open */ }
+    ppcCalcSchedule();
+  }, wait);
 }
 
 // ================================================================ 🧠 Level memory (support held / resistance rejected — history + today)

@@ -7,6 +7,7 @@
 // STALE LTP: a premium below its intrinsic value is impossible (e.g. 22900 CE ₹221.85 with spot 23,146 → intrinsic ₹246); for
 // those rows the model's own price is used and the row is flagged. Results are then made arbitrage-free across strikes.
 import { premiumAtLevel, yearsToExpiry, bsPrice } from "../analysis/greeks";
+import { liquidity } from "./premiumCenter";
 
 export interface CalcRow { strike: number; side: "CE" | "PE"; ltp: number | null; iv: number | null; delta: number | null; est: number | null; chg: number | null; chgPct: number | null; money: "ITM" | "ATM" | "OTM"; stale: boolean }
 const okIv = (v: any) => (typeof v === "number" && v > 1 && v < 200 ? v : null);   // percent; 0 / garbage → missing
@@ -62,4 +63,50 @@ export function premiumCalc(o: { spot: number; level: number; step: number; expi
     rows.push({ strike: k, side, ltp: m.ltp, iv: m.iv != null ? Math.round(m.iv * 10) / 10 : null, delta: m.delta, est: ev, chg, chgPct: chg != null && m.ltp ? Math.round((chg / m.ltp) * 1000) / 10 : null, money: k === atmS ? "ATM" : (side === "CE") === (k < o.spot) ? "ITM" : "OTM", stale: !!m.stale });
   }
   return { spot: o.spot, level: o.level, move: Math.round((o.level - o.spot) * 100) / 100, mins: o.mins, expiry: o.expiry, daysToExpiry: t == null ? null : Math.round(t * 365 * 10) / 10, iv: ivAll != null ? Math.round(ivAll * 10) / 10 : null, rows };
+}
+
+// ============================ 🔥 HOT PREMIUMS — the 5 best calls and 5 best puts for a buyer right now ============================
+// Every strike within ATM ± 8 with a live, two-sided, non-stale quote is priced with the calculator's own model:
+//   UPSIDE = premium if the index reaches the side's target within the horizon (time decay included), minus the spread paid
+//   RISK   = premium lost if the index moves the SAME distance the other way in the same time
+//   HALF   = premium if the index gets only HALF way in that time (how the strike holds up when the move stalls)
+//   R:R    = upside ÷ risk. Ranked by R:R, scaled for the delta an experienced buyer wants: 0.30–0.60 full, 0.20–0.30 ×0.85,
+//            outside ×0.7 (a far out-of-the-money lottery ticket loses most when the move stalls; deep ITM gives little leverage);
+//            a WIDE spread ×0.7. POOR liquidity is left out. After the close (no quotes, e.g. BSE) rows show NO QUOTE, never hot.
+// 🔥 HOT = the top row of a side only when ALL hold: GOOD liquidity, delta 0.30–0.60, R:R ≥ 1.3, upside ≥ 20 % after the spread,
+//          and it is not losing money even if the move stops half way.
+// A model estimate for choosing a strike — it never gives or blocks a trade (the plan and its checks do that).
+export interface HotRow { strike: number; side: "CE" | "PE"; money: "ITM" | "ATM" | "OTM"; ltp: number; delta: number | null; atTarget: number; upPct: number; atAgainst: number; riskPct: number; rr: number; score: number;
+  atHalf: number; halfPct: number; liq: string; spread: number | null; spreadPct: number | null; volume: number | null; oi: number | null; hot: boolean; why: string }
+export function hotPremiums(o: { spot: number; step: number; expiry: string | null; strikes: any[]; ceTarget: number; peTarget: number; horizonMin: number; nowMs?: number; noQuotesOk?: boolean }) {
+  const atm = Math.round(o.spot / o.step) * o.step, r2 = (v: number) => Math.round(v * 100) / 100;
+  const near = o.strikes.filter((s) => Math.abs(s.strike - atm) <= 5 * o.step), sp: number[] = [];
+  for (const s of near) for (const [b, a] of [[s.ceBid, s.ceAsk], [s.peBid, s.peAsk]]) if (b > 0 && a >= b) sp.push(((a - b) / ((a + b) / 2)) * 100);
+  sp.sort((x, y) => x - y); const medPct = sp.length ? sp[Math.floor(sp.length / 2)] : null;
+  const side = (S: "CE" | "PE"): HotRow[] => {
+    const target = S === "CE" ? o.ceTarget : o.peTarget, dist = Math.abs(target - o.spot), against = S === "CE" ? o.spot - dist : o.spot + dist, p = S === "CE" ? "ce" : "pe";
+    const rows: HotRow[] = [];
+    for (const r of o.strikes.filter((x) => Math.abs(x.strike - atm) <= 8 * o.step)) {
+      const ltp = r[`${p}Ltp`]; if (!(ltp > 0)) continue;
+      const L0 = liquidity(r[`${p}Bid`], r[`${p}Ask`], ltp, medPct, r[`${p}Vol`]);
+      if (L0.status === "POOR" || (L0.status === "NOT AVAILABLE" && !o.noQuotesOk)) continue;
+      const L = L0.status === "NOT AVAILABLE" ? { ...L0, status: "NO QUOTE" } : L0;
+      const up = premiumCalc({ spot: o.spot, level: target, step: o.step, expiry: o.expiry, mins: o.horizonMin, strikes: o.strikes, strike: r.strike, nowMs: o.nowMs }).rows.find((x) => x.side === S);
+      const dn = premiumCalc({ spot: o.spot, level: against, step: o.step, expiry: o.expiry, mins: o.horizonMin, strikes: o.strikes, strike: r.strike, nowMs: o.nowMs }).rows.find((x) => x.side === S);
+      const hf = premiumCalc({ spot: o.spot, level: (o.spot + target) / 2, step: o.step, expiry: o.expiry, mins: o.horizonMin, strikes: o.strikes, strike: r.strike, nowMs: o.nowMs }).rows.find((x) => x.side === S);
+      if (!up || !dn || !hf || up.stale || up.est == null || dn.est == null || hf.est == null) continue;
+      const upPct = ((up.est - ltp - (L.spread ?? 0)) / ltp) * 100, riskPct = Math.max(1, ((ltp - dn.est) / ltp) * 100), rr = upPct / riskPct;
+      if (upPct <= 0) continue;
+      const d = r[`${p}Delta`] != null ? Math.abs(r[`${p}Delta`]) : null, inBand = d != null && d >= 0.3 && d <= 0.6, nearBand = d != null && d >= 0.2 && d < 0.3;
+      const score = rr * (L.status === "GOOD" ? 1 : 0.7) * (inBand ? 1 : nearBand ? 0.85 : 0.7), halfPct = ((hf.est - ltp - (L.spread ?? 0)) / ltp) * 100;
+      rows.push({ strike: r.strike, side: S, money: r.strike === atm ? "ATM" : (S === "CE") === (r.strike < o.spot) ? "ITM" : "OTM", ltp, delta: d != null ? r2(d) : null,
+        atTarget: r2(up.est), atHalf: r2(hf.est), halfPct: Math.round(halfPct), upPct: Math.round(upPct), atAgainst: r2(dn.est), riskPct: Math.round(riskPct), rr: r2(rr), score: r2(score),
+        liq: L.status, spread: L.spread, spreadPct: L.spreadPct, volume: r[`${p}Vol`] ?? null, oi: r[`${p}Oi`] ?? null, hot: false,
+        why: [L.status === "GOOD" ? "tight spread" : L.status === "NO QUOTE" ? "no live quote — liquidity not checked" : "spread wide", d == null ? "no delta in the feed" : inBand ? `delta ${r2(d)}` : d < 0.3 ? `delta ${r2(d)} — out of the money, needs the full move fast` : `delta ${r2(d)} — deep ITM, little leverage`].join(" · ") });
+    }
+    rows.sort((a, b) => b.score - a.score || b.upPct - a.upPct);
+    const t = rows[0]; if (t && t.liq === "GOOD" && t.delta != null && t.delta >= 0.3 && t.delta <= 0.6 && t.rr >= 1.3 && t.upPct >= 20 && t.halfPct >= 0) t.hot = true;
+    return rows.slice(0, 5);
+  };
+  return { ce: side("CE"), pe: side("PE"), ceTarget: r2(o.ceTarget), peTarget: r2(o.peTarget), horizonMin: o.horizonMin, chainMedianSpreadPct: medPct != null ? r2(medPct) : null };
 }

@@ -7999,7 +7999,15 @@ router.get("/premium-calc", requirePermission("oiAnalysis"), async (req: Request
     const spot = q?.price ?? ch.spot;
     if (!(spot > 0)) return res.json({ ok: false, error: "spot price not available" });
     const ks = ch.strikes.map((x: any) => x.strike).sort((a: number, b: number) => a - b), step = def.strikeStep || Math.min(...ks.slice(1).map((k: number, i: number) => k - ks[i]).filter((v: number) => v > 0)) || 50;
-    res.json({ ok: true, symbol: def.symbol, name: def.name, step, ...PCALC.premiumCalc({ spot, level: Number.isFinite(level) && level > 0 ? level : spot, step, expiry: ch.expiry, mins, strikes: ch.strikes, strike }) });
+    // 🔥 hot premiums (?hot=1): targets = the plan's T1 per side (ceT / peT from the screen), else the typical 1-hour move
+    let hot: any = null;
+    if (req.query.hot) {
+      const c15: any[] = ((await getCandlesCached(def.symbol, "15m" as Interval).catch(() => [])) as any[]).filter((c) => c.time + 900 <= Date.now() / 1000);
+      const mv = PC.typicalMove(c15 as any, 4) ?? step * 2, ceT = Number(req.query.ceT), peT = Number(req.query.peT);
+      const ceTarget = ceT > spot + step / 2 ? ceT : spot + mv, peTarget = peT > 0 && peT < spot - step / 2 ? peT : spot - mv;
+      hot = { ...PCALC.hotPremiums({ spot, step, expiry: ch.expiry, strikes: ch.strikes, ceTarget, peTarget, horizonMin: 60, noQuotesOk: (() => { const m = Math.floor(((Date.now() / 1000 + 19800) % 86400) / 60), wd = new Date(Date.now() + 19800000).getUTCDay(); return wd === 0 || wd === 6 || m < 555 || m > 930; })() }), ceFrom: ceTarget === ceT ? "plan T1" : "typical 1-hour move", peFrom: peTarget === peT ? "plan T1" : "typical 1-hour move", move1h: Math.round(mv), chainAt: ch.staleChain ? "stale chain" : "live chain" };
+    }
+    res.json({ ok: true, symbol: def.symbol, name: def.name, step, generatedAt: Math.floor(Date.now() / 1000), hot, ...PCALC.premiumCalc({ spot, level: Number.isFinite(level) && level > 0 ? level : spot, step, expiry: ch.expiry, mins, strikes: ch.strikes, strike }) });
   } catch (e: any) { res.json({ ok: false, error: e?.message || "calculation failed" }); }
 });
 // ===================== 🧠 LEVEL MEMORY: how price behaved at support / resistance (history + today, live) =====================

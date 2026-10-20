@@ -38,3 +38,38 @@ test("real Friday chain (Dhan ITM CE IV = 0 / stale): consistent OTM IV, calls f
   // no flat run of identical call estimates (the earlier jump between put-side and call-side IV)
   assert.ok(ce(23150).est! > ce(23200).est! && ce(23200).est! > ce(23250).est!);
 });
+
+// ---- 🔥 hot premiums: a fair Black-Scholes chain (IV 13 %, Tue 10:30, expiry Tue next week), tight two-sided quotes
+import { hotPremiums } from "./premiumCalc";
+import { bsPrice, bsDelta, yearsToExpiry } from "../analysis/greeks";
+const hNow = Date.UTC(2026, 9, 20, 5, 0), spot = 22889, T = yearsToExpiry("2026-10-27", hNow)!;
+const fair = (k: number, s: "CE" | "PE") => Math.round(bsPrice({ spot, strike: k, tYears: T, iv: 0.13 }, s)! * 20) / 20;
+const hChain = Array.from({ length: 21 }, (_, i) => 22400 + i * 50).map((k) => {
+  const ce = fair(k, "CE"), pe = fair(k, "PE");
+  return { strike: k, ceLtp: ce, peLtp: pe, ceBid: ce - 0.1, ceAsk: ce + 0.1, peBid: pe - 0.1, peAsk: pe + 0.1, ceVol: 900000, peVol: 900000, ceOi: 5e6, peOi: 5e6, ceIv: 13, peIv: 13,
+    ceDelta: bsDelta({ spot, strike: k, tYears: T, iv: 0.13 }, "CE"), peDelta: bsDelta({ spot, strike: k, tYears: T, iv: 0.13 }, "PE"), ceGamma: null, peGamma: null };
+});
+
+test("hot premiums: 5 per side, ranked by reward ÷ risk, every row has upside to the target and a liquid quote", () => {
+  const h = hotPremiums({ spot, step: 50, expiry: "2026-10-27", strikes: hChain, ceTarget: 23094, peTarget: 22800, horizonMin: 60, nowMs: hNow });
+  assert.equal(h.ce.length, 5); assert.equal(h.pe.length, 5);
+  for (const r of [...h.ce, ...h.pe]) { assert.ok(r.upPct > 0 && r.riskPct >= 1 && r.atTarget > r.ltp && r.atAgainst < r.ltp, JSON.stringify(r)); assert.equal(r.liq, "GOOD"); }
+  for (const side of [h.ce, h.pe]) for (let i = 1; i < side.length; i++) assert.ok(side[i - 1].score >= side[i].score);
+  assert.ok(h.ce.every((r) => r.side === "CE") && h.pe.every((r) => r.side === "PE"));
+  // a +205 pt target is a big move: the best call is hot (liquid, delta in band, R:R ≥ 1.3, upside ≥ 20 %)
+  assert.equal(h.ce[0].hot, true, JSON.stringify(h.ce[0])); assert.ok(h.ce.slice(1).every((r) => !r.hot));
+});
+test("hot premiums: no two-sided quote / zero volume is left out; a wide spread ranks lower; nothing is hot when the target is tiny", () => {
+  const ch = hChain.map((r) => (r.strike === 22950 ? { ...r, ceBid: null, ceAsk: null } : r.strike === 23000 ? { ...r, ceVol: 0 } : r));
+  const h = hotPremiums({ spot, step: 50, expiry: "2026-10-27", strikes: ch, ceTarget: 23094, peTarget: 22800, horizonMin: 60, nowMs: hNow });
+  assert.ok(!h.ce.some((r) => r.strike === 22950 || r.strike === 23000), "no-quote and zero-volume strikes are left out");
+  const tiny = hotPremiums({ spot, step: 50, expiry: "2026-10-27", strikes: hChain, ceTarget: spot + 10, peTarget: spot - 10, horizonMin: 60, nowMs: hNow });
+  assert.ok([...tiny.ce, ...tiny.pe].every((r) => !r.hot), "a 10-pt target cannot beat an hour of decay plus the spread by 20 %");
+});
+test("hot premiums: after the close with no quotes (BSE) rows show NO QUOTE and are never hot; half-way value sits between", () => {
+  const ch = hChain.map((r) => ({ ...r, ceBid: null, ceAsk: null, peBid: null, peAsk: null, ceVol: 0, peVol: 0 }));
+  assert.equal(hotPremiums({ spot, step: 50, expiry: "2026-10-27", strikes: ch, ceTarget: 23094, peTarget: 22800, horizonMin: 60, nowMs: hNow }).ce.length, 0, "live: no quote → left out");
+  const h = hotPremiums({ spot, step: 50, expiry: "2026-10-27", strikes: ch, ceTarget: 23094, peTarget: 22800, horizonMin: 60, nowMs: hNow, noQuotesOk: true });
+  assert.equal(h.ce.length, 5); assert.ok([...h.ce, ...h.pe].every((r) => r.liq === "NO QUOTE" && !r.hot));
+  for (const r of h.ce) assert.ok(r.atHalf > r.atAgainst && r.atHalf < r.atTarget);
+});
