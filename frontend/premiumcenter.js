@@ -489,7 +489,9 @@ function ppcRenderPlans() {
 function ppcRenderHistory() {
   const T = PPC.d.trader; if (!T || T.error) return;
   const tm = T.tomorrow || { levels: [], scenarios: [] };
-  ppcEl("ppc-tomorrow").innerHTML = `<h4>Next session map <span class="ppc-sub">levels and scenarios — not a direction call</span></h4>
+  ppcLoadNDM();
+  ppcEl("ppc-tomorrow").innerHTML = `<div id="ppc-ndm">${PPC._ndmSym === PPC.sym ? PPC._ndmHtml || "" : ""}</div>
+    <h4>Next session map <span class="ppc-sub">levels and scenarios — not a direction call</span></h4>
     <div class="ppc-tm-lv">${tm.levels.map((l) => `<div><span>${ppcEsc(l.label)}</span><b>${ppcNs(l.value)}</b></div>`).join("")}</div>
     <ul class="ppc-tm-sc">${tm.scenarios.map((x) => `<li>${ppcEsc(x)}</li>`).join("")}</ul>`;
   const ev = (T.events || []).slice(-10).reverse(), dt = (t) => new Date((t + 19800) * 1000).toISOString().slice(5, 16).replace("T", " ");
@@ -497,6 +499,23 @@ function ppcRenderHistory() {
     <table class="ppc-hist"><thead><tr><th>Time</th><th>Break</th><th>Level</th><th>Result</th><th>Max for</th><th>Max against</th></tr></thead><tbody>
     ${ev.map((e) => `<tr><td>${dt(e.time)}</td><td class="${e.dir === "UP" ? "ppc-up" : "ppc-dn"}">${e.dir === "UP" ? "▲ breakout" : "▼ breakdown"}<span class="ppc-sub"> · ${e.source === "TRENDLINE" ? "trendline" : "swing"}</span></td><td>${ppcR(e.level)}</td><td class="${e.outcome === "FOLLOWED THROUGH" ? "ppc-up" : e.outcome === "FAILED" ? "ppc-dn" : "ppc-wait"}">${ppcEsc(e.outcome.toLowerCase())}${e.bars != null ? ` (${e.bars} bars)` : ""}</td><td class="ppc-up">+${ppcR(e.mfe)}</td><td class="ppc-dn">−${ppcR(e.mae)}</td></tr>`).join("") || '<tr><td colspan="6" class="ppc-na">no breaks in the loaded history</td></tr>'}</tbody></table>
     <div class="ppc-sub">All breaks: ▲ ${T.eventStats.up.n} (${T.eventStats.up.pct ?? "—"}% followed through) · ▼ ${T.eventStats.down.n} (${T.eventStats.down.pct ?? "—"}%). Index points; premium P&L not simulated.</div>`;
+}
+
+/** 🎖 ProTrader Next-Day Map (NIFTY / SENSEX): opening odds, first 5 min, 09:30 stand, direction, rejection / bounce — every
+ *  probability from the 2-year Dhan opening study; points marked LIVE once the session has shown them. Refreshed each minute. */
+async function ppcLoadNDM() {
+  if (!["^NSEI", "^BSESN"].includes(PPC.sym)) { PPC._ndmHtml = ""; PPC._ndmSym = PPC.sym; return; }
+  if (PPC._ndmSym === PPC.sym && Date.now() - (PPC._ndmAt || 0) < 60000) return;
+  PPC._ndmAt = Date.now();
+  let r = null; try { r = await fetch(`/api/next-day-map?symbol=${encodeURIComponent(PPC.sym)}`).then((x) => x.json()); } catch { return; }
+  const b = (s) => ppcEsc(s).replace(/&lt;(\/?)b&gt;/g, "<$1b>");   // the server marks key numbers in bold — nothing else is let through
+  const dd = (s) => (s ? new Date(s + "T00:00:00Z").toUTCString().slice(0, 11) : "");
+  PPC._ndmSym = PPC.sym;
+  PPC._ndmHtml = !r || !r.ok ? `<div class="ppc-ndm"><h4>🎖 ProTrader next-day map</h4><div class="ppc-sub">${ppcEsc(r?.error || "not available")}</div></div>`
+    : `<div class="ppc-ndm"><h4>🎖 ProTrader next-day map <span class="ppc-sub">${ppcEsc(r.index)} · for ${ppcEsc(/^\d{4}-/.test(r.planLabel || "") ? dd(r.planLabel) : r.planLabel || dd(r.planFor))}</span></h4>
+      <ol class="ppc-ndm-pts">${r.points.map((p) => `<li${p.live ? ' class="live"' : ""}><div class="ppc-ndm-t">${ppcEsc(p.title)}${p.live ? ' <span class="ppc-badge ppc-ok">LIVE</span>' : ""}</div>${p.lines.map((l) => `<div class="ppc-ndm-l">${b(l)}</div>`).join("")}</li>`).join("")}</ol>
+      <div class="ppc-sub">${ppcEsc(r.basis)}. Information only — trades still come from the plan and its checks.</div></div>`;
+  const el = ppcEl("ppc-ndm"); if (el) el.innerHTML = PPC._ndmHtml;
 }
 
 /** Lowest-risk ideas: the nearest strong level on each side where a bounce / rejection trade has the trend behind it, and any LOW-risk break. */

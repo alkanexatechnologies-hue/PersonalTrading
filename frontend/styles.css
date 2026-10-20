@@ -7650,6 +7650,15 @@ body.ppc-fullwidth .watchlist, body.ppc-fullwidth #watchlist { display: none !im
 .ppc-tm-lv { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 4px 10px; margin-bottom: 6px; }
 .ppc-tm-lv div { display: flex; flex-direction: column; } .ppc-tm-lv span { color: #787b86; font-size: 10.5px; } .ppc-tm-lv b { font-size: 13px; }
 .ppc-tm-sc { margin: 0; padding-left: 18px; font-size: 12px; }
+/* 🎖 ProTrader next-day map */
+.ppc-ndm { margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid rgba(120,123,134,.25); }
+.ppc-ndm-pts { margin: 4px 0 6px; padding-left: 20px; font-size: 12.5px; line-height: 1.45; }
+.ppc-ndm-pts > li { margin-bottom: 6px; }
+.ppc-ndm-pts > li.live::marker { color: #26a69a; font-weight: 700; }
+.ppc-ndm-t { font-weight: 700; color: #d1d4dc; }
+.ppc-ndm-l { color: #b2b5be; overflow-wrap: anywhere; }
+.ppc-ndm-l b { color: #fff; }
+:root[data-theme="light"] .ppc-ndm-t { color: #131722; } :root[data-theme="light"] .ppc-ndm-l { color: #434651; } :root[data-theme="light"] .ppc-ndm-l b { color: #000; }
 .ppc-hist { width: 100%; border-collapse: collapse; font-size: 11.5px; } .ppc-hist th, .ppc-hist td { padding: 3px 5px; border-bottom: 1px solid #2a2e39; text-align: left; }
 .ppc-arb summary, details.ppc-card > summary { cursor: pointer; list-style: revert; }
 .ppc-arb .ppc-master { margin: 8px 0 0; }

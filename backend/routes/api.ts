@@ -83,6 +83,7 @@ import * as EXP from "../premium/expiryMode";
 import * as PCALC from "../premium/premiumCalc";
 import * as RR from "../sentiment/resultsReview";
 import * as LM from "../premium/levelMemory";
+import * as NDM from "../premium/nextDayMap";
 import * as EYE from "../premium/marketEye";
 import * as TG from "../premium/tgFormat";
 import { Decision } from "../decision/types";
@@ -308,7 +309,7 @@ if (AUDIT_ENABLED) {
 // live even while scanners churn. Everything else stays LOW (the default).
 // The Option Premium Prediction Center (and its zero-hero / Market Eye / calculator / level-memory sections) is a focus
 // screen too: at LOW priority its quote + option-chain calls queued behind the background scans in market hours.
-const HIGH_PRIORITY_API = /^\/(market-command|market-analysis|option-candles|option-structure|mc-summary|premium-center|premium-calc|zero-hero-live|market-eye|level-memory)\b/;
+const HIGH_PRIORITY_API = /^\/(market-command|market-analysis|option-candles|option-structure|mc-summary|premium-center|premium-calc|zero-hero-live|market-eye|level-memory|next-day-map)\b/;
 router.use((req: Request, _res: Response, next: NextFunction) => {
   if (HIGH_PRIORITY_API.test(req.path)) withDhanPriority("high", async () => next());
   else next();
@@ -8040,6 +8041,38 @@ router.get("/level-memory", requirePermission("oiAnalysis"), async (req: Request
       kinds: LM.kindStats(ev), today: t.events.map((e) => ({ ...e, zone: lmZoneFor(meta.name, e.price, width) })) });
   } catch (e: any) { res.json({ ok: false, error: e?.message || "level memory failed" }); }
 });
+// ===================== 🎖 ProTrader NEXT-DAY MAP: opening odds, first 5 min, 09:30 stand, rejection / bounce (informational) =====================
+const NDM_DIR = path.join(process.cwd(), "data", "research-nextday");
+async function nextDayMapFor(sym: string) {
+  const meta = LM_IDX[sym]; if (!meta) return { ok: false, error: "NIFTY / SENSEX only" };
+  let st: NDM.Study; try { st = JSON.parse(fs.readFileSync(path.join(NDM_DIR, `${meta.name}.json`), "utf8")); } catch { return { ok: false, error: "opening study not built yet (runs after the 15:50 data refresh)" }; }
+  const d: any = await cached(`ndm-pc:${sym}`, 60_000, () => premiumCenterPayload({ symbol: sym, interval: "15m" }));
+  if (!d?.available || !d.trader || d.trader.error) return { ok: false, error: d?.error || d?.trader?.error || "market data unavailable" };
+  const lv: any[] = (d.trader.levels || []).filter((x: any) => x.kind !== "TODAY"), find = (re: RegExp) => lv.find((x) => re.test(x.label))?.price ?? null;
+  const pdh = find(/^Prev day high/), pdl = find(/^Prev day low/), pdc = find(/^Prev close/), planFor: string = d.trader.planFor;
+  if (pdh == null || pdl == null || pdc == null) return { ok: false, error: "previous-day levels not available" };
+  const dayOf = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(0, 10);
+  const daily: any[] = ((await getDailyCached(sym, 120).catch(() => [])) as any[]).filter((x) => dayOf(x.time) < planFor);
+  const ranges = daily.slice(-14).map((x) => x.high - x.low);
+  if (!daily.length || Math.abs(daily[daily.length - 1].high - pdh) > 1) ranges.push(pdh - pdl);   // the session that just ended, when the daily feed lacks it
+  const atr = ranges.slice(-14).reduce((a, x) => a + x, 0) / Math.max(1, ranges.slice(-14).length);
+  const width = meta.name === "NIFTY" ? 35 : 120;
+  const levels: NDM.MapLevel[] = lv.map((x) => { const z = lmZoneFor(meta.name, x.price, width); return { price: x.price, label: x.label.replace(/\s*\(.*\)$/, ""), kind: x.kind, holdPct: z?.holdPct ?? null, tests: z?.tests ?? 0 }; });
+  // what the session has already shown (live): the 09:15 open, 09:20 and 09:30 prices, the first 15-minute range (closed 5-min bars only)
+  const nowSec = Math.floor(Date.now() / 1000), hm = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(11, 16);
+  const c5 = ((await getCandlesCached(sym, "5m" as Interval).catch(() => [])) as any[]).filter((c) => dayOf(c.time) === planFor && c.time + 300 <= nowSec);
+  const bar = (t: string) => c5.find((c) => hm(c.time) === t), or = c5.filter((c) => ["09:15", "09:20", "09:25"].includes(hm(c.time)));
+  const seen = c5.length ? { open: c5[0].open, p920: bar("09:15")?.close ?? null, p930: bar("09:25")?.close ?? null, or15h: or.length === 3 ? Math.max(...or.map((c) => c.high)) : null, or15l: or.length === 3 ? Math.min(...or.map((c) => c.low)) : null } : null;
+  const istMin = Math.floor(((nowSec + 19800) % 86400) / 60);
+  const g: any = meta.name === "NIFTY" && !seen && dayOf(nowSec) === planFor && istMin >= 360 && istMin < 555 ? await cachedGift().catch(() => null) : null;
+  const gift = g?.nightPct != null ? { implied: pdc * (1 + g.nightPct / 100), at: `${g.nightPct >= 0 ? "+" : ""}${g.nightPct}% overnight` } : null;
+  // no holiday calendar: after the close the "next session" may not be the next weekday, so it is not given a date then
+  const planLabel = dayOf(nowSec) >= planFor && istMin > 930 ? "the next session" : planFor;
+  return { ok: true, index: meta.name, planFor, planLabel, spot: d.spot?.price ?? null, ...NDM.nextDayMap({ index: meta.name, planFor, study: st, pdh, pdl, pdc, atr, levels, seen, gift }) };
+}
+router.get("/next-day-map", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  try { res.json(await nextDayMapFor(String(req.query.symbol || "^NSEI"))); } catch (e: any) { res.json({ ok: false, error: e?.message || "next-day map failed" }); }
+});
 router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
   const out = await premiumCenterPayload({ ...(req.query as any), _screen: true });
   if (out?.status === 400) return res.status(400).json({ error: out.error });
@@ -9193,7 +9226,9 @@ async function copilotTick() {
     // 🎖 ProTrader daily routine — 15:50 refresh of the research data (today's 1-minute premiums for NIFTY + SENSEX, silent)
     if (istMin >= 950 && istMin <= 970 && !_cp.sent.ptRefresh) {
       _cp.sent.ptRefresh = true; cpSave();
-      ptScript("refreshData.ts", [day]).then((o) => console.log("[protrader] data refresh", o.trim().slice(-200))).catch((e) => console.log("[protrader] data refresh failed", e?.message));
+      ptScript("refreshData.ts", [day]).then((o) => console.log("[protrader] data refresh", o.trim().slice(-200)))
+        .then(() => ptScript("openingStudy.ts", [])).then((o) => console.log("[protrader] opening study", o.trim().slice(-160)))   // next-day map odds incl. today
+        .catch((e) => console.log("[protrader] data refresh failed", e?.message));
     }
     // 🎖 Friday 16:05 weekly re-check of the live logic on the refreshed data (reports drift; proposes, never changes logic)
     if (wd === 5 && istMin >= 965 && istMin <= 990 && !_cp.sent.ptWeekly) {
