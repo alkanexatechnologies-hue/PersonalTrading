@@ -166,7 +166,7 @@ function ppcRender() {
   ppcEl("ppc-quote").innerHTML = `<span class="ppc-qname">${ppcEsc(d.name)}</span><span class="ppc-qpx ${ppcCls(sp.change)}">${ppcNs(sp.price)}</span><span class="${ppcCls(sp.change)}">${ppcSg(sp.change)} (${ppcSg(sp.changePct, 2, "%")})</span>
     <span>O <b>${ppcNs(sp.open)}</b></span><span>H <b>${ppcNs(sp.high)}</b></span><span>L <b>${ppcNs(sp.low)}</b></span><span>Prev close <b>${ppcNs(sp.prevClose)}</b></span>
     <span>ATM <b>${d.atm ?? "—"}</b></span><span>Expiry <b>${ppcEsc(d.expiry || "—")}</b></span>${d.session !== "OPEN" ? `<span class="ppc-warnt">Session ${ppcEsc(sp.sessionDay || "")} — market ${ppcEsc(d.session)}</span>` : ""}`;
-  ppcCalcInit(); ppcRenderMaster(); ppcRenderProTrader(); ppcRenderLevelMemory(); ppcRenderRadar(); ppcLoadZH(); ppcLoadZHToday(); ppcLoadEye(); ppcRenderBTSD(); ppcRenderCoach(); ppcRenderTV(); ppcRenderLadder(); ppcRenderPlans(); ppcRenderHistory(); if (ppcEl("ppc-more")?.open) { ppcRenderCards(); ppcRenderCharts(); ppcRenderRank(); }
+  ppcCalcInit(); if (ppcEl("ppc-calc")?.open && PPC._calcKey !== `${PPC.sym}:${PPC.off || 0}`) ppcCalcOpen(); ppcRenderMaster(); ppcRenderProTrader(); ppcRenderLevelMemory(); ppcRenderRadar(); ppcLoadZH(); ppcLoadZHToday(); ppcLoadEye(); ppcRenderBTSD(); ppcRenderCoach(); ppcRenderTV(); ppcRenderLadder(); ppcRenderPlans(); ppcRenderHistory(); if (ppcEl("ppc-more")?.open) { ppcRenderCards(); ppcRenderCharts(); ppcRenderRank(); }
   ppcEl("ppc-foot").innerHTML = `${ppcEsc(d.note)} · ${ppcEsc(d.version)} · <span title="${ppcEsc(PPC_TIPS.PROB)}">${ppcEsc(d.validation?.status)}: ${ppcEsc(d.validation?.detail)}</span>`;
 }
 
@@ -710,7 +710,7 @@ function ppcCalcOpen() {
   const body = ppcEl("ppc-calc-body"), d = PPC.d; if (!body || !d) return;
   const P = d.trader?.plans || {}, r0 = (v) => Math.round(v);
   const quick = [["Spot", d.spot?.price], ["Bull start", P.bull?.entry], ["Bull T1", P.bull?.t1], ["Bull SL", P.bull?.stop], ["Bear start", P.bear?.entry], ["Bear T1", P.bear?.t1], ["Bear SL", P.bear?.stop]].filter(([, v]) => v != null);
-  PPC._calcEdited = false;
+  PPC._calcEdited = false; PPC._calcKey = `${PPC.sym}:${PPC.off || 0}`; PPC._hotOpen = "";
   body.innerHTML = `<div id="ppc-hot" class="ppc-hot"><div class="ppc-sub">finding the hot premiums…</div></div>
     <div class="ppc-calc-in">
       <label>Index price <button type="button" class="ppc-tvbtn ppc-calc-live" data-act="calc-live" title="follow the live index price again">↺ live</button><input id="ppc-calc-level" type="number" inputmode="decimal" step="1" value="${r0(d.spot?.price || 0)}"></label>
@@ -726,12 +726,14 @@ async function ppcCalcRun() {
   const level = ppcEl("ppc-calc-level").value, strike = ppcEl("ppc-calc-strike").value; let mins = ppcEl("ppc-calc-mins").value;
   if (mins === "eod") { const m = Math.floor(((Date.now() / 1000 + 19800) % 86400) / 60); mins = String(Math.max(0, 915 - m)); }
   out.innerHTML = `<div class="ppc-sub">calculating…</div>`;
+  const key = `${PPC.sym}:${PPC.off || 0}`;
   try {
     const Pl = PPC.d?.trader?.plans || {}, sp = PPC.d?.spot?.price, lad = (PPC.d?.trader?.levels || []).filter((v) => v.kind !== "TODAY" && sp != null);
     const iS = lad.filter((v) => v.price < sp).sort((a, b) => b.price - a.price)[0], iR = lad.filter((v) => v.price > sp).sort((a, b) => a.price - b.price)[0];
     PPC._hotIdx = { s: iS || null, r: iR || null };
     const tq = `&hot=1${Pl.bull?.t1 ? `&ceT=${Pl.bull.t1}` : ""}${Pl.bear?.t1 ? `&peT=${Pl.bear.t1}` : ""}${iS ? `&iS=${iS.price}` : ""}${iR ? `&iR=${iR.price}` : ""}`;
     const r = await fetch(`/api/premium-calc?symbol=${encodeURIComponent(PPC.sym)}&expiryOffset=${PPC.off || 0}&level=${encodeURIComponent(level)}&mins=${mins}${strike ? `&strike=${encodeURIComponent(strike)}` : ""}${tq}`).then((x) => x.json());
+    if (key !== `${PPC.sym}:${PPC.off || 0}`) return;   // the index / expiry changed while this was loading — a newer run follows
     if (!r.ok) { out.innerHTML = `<div class="ppc-na">${ppcEsc(r.error || "not available")}</div>`; const h = ppcEl("ppc-hot"); if (h) h.innerHTML = ""; return; }
     ppcHotRender(r);
     const by = {}; for (const x of r.rows) (by[x.strike] = by[x.strike] || {})[x.side] = x;
@@ -763,7 +765,7 @@ function ppcHotRender(r) {
       <td data-l="Strike" class="ppc-ht-k"><b>${x.strike}</b> <i>${x.money}</i></td>
       <td data-l="LTP" class="ppc-ht-n"><b>₹${x.ltp}</b></td>
       <td data-l="Δ Delta" class="ppc-ht-n">${x.delta ?? "—"}</td>
-      <td data-l="Γ Gamma" class="ppc-ht-n">${x.gamma != null ? x.gamma.toFixed(4) : "—"}${x.greeksModel ? "<sup title='Black-Scholes — not in the Dhan feed'>m</sup>" : ""}</td>
+      <td data-l="Γ Gamma" class="ppc-ht-n">${x.gamma != null ? Number(x.gamma.toPrecision(2)) : "—"}${x.greeksModel ? "<sup title='Black-Scholes — not in the Dhan feed'>m</sup>" : ""}</td>
       <td data-l="OI" class="ppc-ht-n">${lak(x.oi)}</td>
       <td data-l="Volume" class="ppc-ht-n">${lak(x.volume)}</td>
       <td data-l="At target" class="ppc-ht-n">₹${x.atTarget} <b class="ppc-up">+${x.upPct}%</b></td>

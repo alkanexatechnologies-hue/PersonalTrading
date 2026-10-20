@@ -7998,6 +7998,7 @@ router.get("/premium-calc", requirePermission("oiAnalysis"), async (req: Request
     const q: any = await cached(`quote:${def.symbol}`, TTL_QUOTE, () => getProvider().getQuote(def.symbol)).catch(() => null);
     const spot = q?.price ?? ch.spot;
     if (!(spot > 0)) return res.json({ ok: false, error: "spot price not available" });
+    if (Number.isFinite(level) && level > 0 && Math.abs(level - spot) / spot > 0.1) return res.json({ ok: false, error: `index price ${Math.round(level).toLocaleString("en-IN")} is more than 10% away from ${def.name} (${Math.round(spot).toLocaleString("en-IN")}) — enter a ${def.name} level` });
     const ks = ch.strikes.map((x: any) => x.strike).sort((a: number, b: number) => a - b), step = def.strikeStep || Math.min(...ks.slice(1).map((k: number, i: number) => k - ks[i]).filter((v: number) => v > 0)) || 50;
     // 🔥 hot premiums (?hot=1): targets = the plan's T1 per side (ceT / peT from the screen), else the typical 1-hour move
     let hot: any = null;
