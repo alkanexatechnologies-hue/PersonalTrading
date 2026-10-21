@@ -72,3 +72,23 @@ export function summaryMessage(rows: { name: string; price: number | null; high:
   lines.push("\nOI walls: nearest strike holding ≥ half of the biggest OI on that side. Levels: the plan ladder (pivots, previous day / week, OI walls, trendlines); held % = how often price turned there in the last 60 sessions (level memory); ★ = two kinds of level together. Context only.");
   return lines.join("\n");
 }
+
+// 🔥 Hourly HOT PREMIUMS — best 5 calls + 5 puts of one index (the Premium Calculator's engine), each with the premium's own
+// support → resistance range (its Dhan 15-min candles), rating and value at the plan target. Plain text, one message per index.
+export interface HotMsgRow { strike: number; side: "CE" | "PE"; money: string; rank: number; hot: boolean; ltp: number; atTarget: number; upPct: number; riskPct: number; rr: number;
+  liq: string; spreadPct: number | null; delta: number | null; levels: { support: { price: number; touches: number }[]; resistance: { price: number; touches: number }[]; state: string } | null;
+  rating: { stars: number; passPct: number | null } | null }
+export function hotMessage(o: { name: string; spot: number; ceTarget: number; peTarget: number; ceFrom: string; peFrom: string; ce: HotMsgRow[]; pe: HotMsgRow[]; label: string }): string {
+  const r1 = (v: number) => (Math.round(v * 10) / 10).toLocaleString("en-IN");
+  const st = { "NEAR SUPPORT": "near S", "NEAR RESISTANCE": "near R", "BELOW SUPPORT": "below S", "MID-RANGE": "mid", "NO LEVELS": "—" } as Record<string, string>;
+  const row = (x: HotMsgRow) => {
+    const S = x.levels?.support?.[0], R = x.levels?.resistance?.[0], stars = x.rating ? "★".repeat(x.rating.stars) + "☆".repeat(5 - x.rating.stars) : "";
+    return `${x.hot ? "🔥" : " " + x.rank + "."} ${x.strike} ${x.side} ₹${r1(x.ltp)} ${stars}${x.rating?.passPct != null ? ` ${x.rating.passPct}%` : ""}\n` +
+      `    S ${S ? "₹" + r1(S.price) + ` (${S.touches}×)` : "—"} → R ${R ? "₹" + r1(R.price) + ` (${R.touches}×)` : "—"} · ${st[x.levels?.state || ""] ?? "—"}\n` +
+      `    target ₹${r1(x.atTarget)} (+${x.upPct}%) · risk −${x.riskPct}% · R:R ${x.rr} · Δ ${x.delta ?? "—"} · ${x.liq === "GOOD" ? "liquid" : x.liq === "NO QUOTE" ? "no quote" : "wide"}${x.spreadPct != null ? " " + x.spreadPct + "%" : ""}`;
+  };
+  return [`🔥 Hot premiums — ${o.name} ${n0(o.spot)} · ${o.label}`,
+    `\n📈 CALLS — if ${o.name} reaches ${n0(o.ceTarget)} (${o.ceFrom}) within 1 hour`, ...(o.ce.length ? o.ce.map(row) : ["  no liquid call with upside"]),
+    `\n📉 PUTS — if ${o.name} reaches ${n0(o.peTarget)} (${o.peFrom}) within 1 hour`, ...(o.pe.length ? o.pe.map(row) : ["  no liquid put with upside"]),
+    "\nS → R = the premium's own support → resistance (Dhan 15-min candles, × = times it turned there). ★ = moving up from support + tested chance of passing R. 🔥 = passes every check. A model to pick the strike — the plan decides the trade."].join("\n");
+}

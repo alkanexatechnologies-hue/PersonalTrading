@@ -127,7 +127,7 @@ import { recordOiBaseline, computeOiChange, oiBaselineStrike } from "../oi/oiCha
 import { recordOiSample, computeOiMovement, OiMoveResult } from "../oi/oiMovement";
 import { getBaseline } from "../oi/baselineStore";
 import { buildMarketAnalysis, rankOiWalls } from "../analysis/marketAnalysis";
-import { newState as newRangeState, onTick as rangeTick, breakMessage as rangeBreakMessage, summaryMessage as rangeSummaryMessage, RangeState, Levels as RangeLevels } from "../alerts/dayRangeAlerts";
+import { newState as newRangeState, onTick as rangeTick, breakMessage as rangeBreakMessage, summaryMessage as rangeSummaryMessage, hotMessage as rangeHotMessage, RangeState, Levels as RangeLevels } from "../alerts/dayRangeAlerts";
 // OI Analysis module (additive, read-only, feature-flagged via CONFIG.oiAnalysis)
 import { buildOiMovement } from "../oi/analysisModule/movement";
 import { buildOiSummary } from "../oi/analysisModule/summary";
@@ -8000,6 +8000,32 @@ function bounceStudyFor(sym: string): PBNC.BounceStudy | null {
   _pbStudy.set(name, { at: Date.now(), v }); return v;
 }
 // 🧮 Premium calculator: the premium of each strike if the index goes to `level` (optionally after `mins` minutes)
+/** 🔥 Hot premiums for one index (top 5 calls / puts with their premium S/R zones, rating and value at the index levels) —
+ *  shared by the Premium Calculator screen and the hourly Telegram update so both always show the same thing. */
+async function hotFor(def: SymbolDef, ch: any, spot: number, step: number, o: { ceT?: any; peT?: any; iS?: any; iR?: any }) {
+      const c15: any[] = ((await getCandlesCached(def.symbol, "15m" as Interval).catch(() => [])) as any[]).filter((c) => c.time + 900 <= Date.now() / 1000);
+      const mv = PC.typicalMove(c15 as any, 4) ?? step * 2, ceT = Number(o.ceT), peT = Number(o.peT);
+      const ceTarget = ceT > spot + step / 2 ? ceT : spot + mv, peTarget = peT > 0 && peT < spot - step / 2 ? peT : spot - mv;
+      const hot: any = { ...PCALC.hotPremiums({ spot, step, expiry: ch.expiry, strikes: ch.strikes, ceTarget, peTarget, horizonMin: 60, noQuotesOk: (() => { const m = Math.floor(((Date.now() / 1000 + 19800) % 86400) / 60), wd = new Date(Date.now() + 19800000).getUTCDay(); return wd === 0 || wd === 6 || m < 555 || m > 930; })() }), ceFrom: ceTarget === ceT ? "plan T1" : "typical 1-hour move", peFrom: peTarget === peT ? "plan T1" : "typical 1-hour move", move1h: Math.round(mv), chainAt: ch.staleChain ? "stale chain" : "live chain" };
+      // each row's own premium support / resistance (Dhan 15-min premium candles, last 5 days) and its value at the INDEX's
+      // nearest support / resistance (iS / iR from the screen's level ladder)
+      const und = (def.nseSymbol || def.symbol).toUpperCase(), nowS = Math.floor(Date.now() / 1000), iS = Number(o.iS), iR = Number(o.iR);
+      await Promise.all([...hot.ce, ...hot.pe].map(async (row: any) => {
+        try {
+          const cs: any[] = await withTimeout(cached(`hotc:${und}:${row.side}:${row.strike}:${ch.expiry}`, 5 * 60_000, async () => {
+            const o = await lookupDhanOption(und, row.side, row.strike, ch.expiry); if (!o) return [];
+            return dhanOptionCandles(o.securityId, nowS - 6 * 86400, nowS, 15, o.exchangeSegment);
+          }), 15_000, "hot premium candles");
+          const closedCs = (cs || []).filter((c) => c.time + 900 <= nowS);
+          row.levels = PPOS.premiumZones({ candles: closedCs, current: row.ltp });
+          row.rating = PBNC.rateOpportunity({ candles: closedCs, ltp: row.ltp, liq: row.liq, rr: row.rr, expiryDay: ch.expiry === new Date(Date.now() + 19800000).toISOString().slice(0, 10), study: bounceStudyFor(def.symbol) });
+        } catch { row.levels = null; }
+        const at = (lv: number) => (lv > 0 ? PCALC.premiumCalc({ spot, level: lv, step, expiry: ch.expiry, mins: 0, strikes: ch.strikes, strike: row.strike }).rows.find((x) => x.side === row.side)?.est ?? null : null);
+        row.atIndexSupport = at(iS); row.atIndexResistance = at(iR);
+      }));
+      Object.assign(hot, { indexSupport: iS > 0 ? iS : null, indexResistance: iR > 0 ? iR : null });
+  return hot;
+}
 router.get("/premium-calc", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
   try {
     const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
@@ -8016,29 +8042,7 @@ router.get("/premium-calc", requirePermission("oiAnalysis"), async (req: Request
     const ks = ch.strikes.map((x: any) => x.strike).sort((a: number, b: number) => a - b), step = def.strikeStep || Math.min(...ks.slice(1).map((k: number, i: number) => k - ks[i]).filter((v: number) => v > 0)) || 50;
     // 🔥 hot premiums (?hot=1): targets = the plan's T1 per side (ceT / peT from the screen), else the typical 1-hour move
     let hot: any = null;
-    if (req.query.hot) {
-      const c15: any[] = ((await getCandlesCached(def.symbol, "15m" as Interval).catch(() => [])) as any[]).filter((c) => c.time + 900 <= Date.now() / 1000);
-      const mv = PC.typicalMove(c15 as any, 4) ?? step * 2, ceT = Number(req.query.ceT), peT = Number(req.query.peT);
-      const ceTarget = ceT > spot + step / 2 ? ceT : spot + mv, peTarget = peT > 0 && peT < spot - step / 2 ? peT : spot - mv;
-      hot = { ...PCALC.hotPremiums({ spot, step, expiry: ch.expiry, strikes: ch.strikes, ceTarget, peTarget, horizonMin: 60, noQuotesOk: (() => { const m = Math.floor(((Date.now() / 1000 + 19800) % 86400) / 60), wd = new Date(Date.now() + 19800000).getUTCDay(); return wd === 0 || wd === 6 || m < 555 || m > 930; })() }), ceFrom: ceTarget === ceT ? "plan T1" : "typical 1-hour move", peFrom: peTarget === peT ? "plan T1" : "typical 1-hour move", move1h: Math.round(mv), chainAt: ch.staleChain ? "stale chain" : "live chain" };
-      // each row's own premium support / resistance (Dhan 15-min premium candles, last 5 days) and its value at the INDEX's
-      // nearest support / resistance (iS / iR from the screen's level ladder)
-      const und = (def.nseSymbol || def.symbol).toUpperCase(), nowS = Math.floor(Date.now() / 1000), iS = Number(req.query.iS), iR = Number(req.query.iR);
-      await Promise.all([...hot.ce, ...hot.pe].map(async (row: any) => {
-        try {
-          const cs: any[] = await withTimeout(cached(`hotc:${und}:${row.side}:${row.strike}:${ch.expiry}`, 5 * 60_000, async () => {
-            const o = await lookupDhanOption(und, row.side, row.strike, ch.expiry); if (!o) return [];
-            return dhanOptionCandles(o.securityId, nowS - 6 * 86400, nowS, 15, o.exchangeSegment);
-          }), 15_000, "hot premium candles");
-          const closedCs = (cs || []).filter((c) => c.time + 900 <= nowS);
-          row.levels = PPOS.premiumZones({ candles: closedCs, current: row.ltp });
-          row.rating = PBNC.rateOpportunity({ candles: closedCs, ltp: row.ltp, liq: row.liq, rr: row.rr, expiryDay: ch.expiry === new Date(Date.now() + 19800000).toISOString().slice(0, 10), study: bounceStudyFor(def.symbol) });
-        } catch { row.levels = null; }
-        const at = (lv: number) => (lv > 0 ? PCALC.premiumCalc({ spot, level: lv, step, expiry: ch.expiry, mins: 0, strikes: ch.strikes, strike: row.strike }).rows.find((x) => x.side === row.side)?.est ?? null : null);
-        row.atIndexSupport = at(iS); row.atIndexResistance = at(iR);
-      }));
-      Object.assign(hot, { indexSupport: iS > 0 ? iS : null, indexResistance: iR > 0 ? iR : null });
-    }
+    if (req.query.hot) hot = await hotFor(def, ch, spot, step, { ceT: req.query.ceT, peT: req.query.peT, iS: req.query.iS, iR: req.query.iR });
     res.json({ ok: true, symbol: def.symbol, name: def.name, step, generatedAt: Math.floor(Date.now() / 1000), hot, ...PCALC.premiumCalc({ spot, level: Number.isFinite(level) && level > 0 ? level : spot, step, expiry: ch.expiry, mins, strikes: ch.strikes, strike }) });
   } catch (e: any) { res.json({ ok: false, error: e?.message || "calculation failed" }); }
 });
@@ -8984,6 +8988,20 @@ async function summaryRows() {
   }
   return rows;
 }
+/** Hot premiums of one index for the hourly Telegram update: targets = the plan's T1, index S/R = the nearest ladder levels. */
+async function hotMessageFor(sym: string, label: string): Promise<string | null> {
+  const def = findSymbolDef(sym); if (!def) return null;
+  const d: any = await cached(`pos-pc15:${sym}`, 60_000, () => premiumCenterPayload({ symbol: sym, interval: "15m" })).catch(() => null);
+  let ch: any = await cached(`pc-chain:${sym}:0`, 30_000, () => dhanChainForExpiry(def, 0)).catch(() => null);
+  if (!ch?.available) ch = _pcLastChain.get(`${sym}:0`)?.v ?? ch;
+  if (!d?.available || !ch?.available || !ch.strikes?.length) return null;
+  const spot = d.spot?.price ?? ch.spot, ks = ch.strikes.map((x: any) => x.strike).sort((a: number, b: number) => a - b);
+  const step = def.strikeStep || Math.min(...ks.slice(1).map((k: number, i: number) => k - ks[i]).filter((v: number) => v > 0)) || 50;
+  const P = d.trader?.plans || {}, lad = (d.trader?.levels || []).filter((x: any) => x.kind !== "TODAY");
+  const iS = lad.filter((x: any) => x.price < spot).sort((a: any, b: any) => b.price - a.price)[0], iR = lad.filter((x: any) => x.price > spot).sort((a: any, b: any) => a.price - b.price)[0];
+  const h: any = await hotFor(def, ch, spot, step, { ceT: P.bull?.t1, peT: P.bear?.t1, iS: iS?.price, iR: iR?.price });
+  return rangeHotMessage({ name: d.name, spot, ceTarget: h.ceTarget, peTarget: h.peTarget, ceFrom: h.ceFrom, peFrom: h.peFrom, ce: h.ce, pe: h.pe, label });
+}
 async function sendRangeSummary(label: string) {
   const rows = await rangeRows();
   return notify("INDEX_ALERT", rangeSummaryMessage(rows, label));
@@ -8999,7 +9017,10 @@ async function dayRangeTick() {
     void ev;   // owner 2026-10-21: day high / low break alerts are not sent (the hourly summary carries the levels)
   }
   const slot = RANGE_SUMMARY_SLOTS.find((s) => hm >= s && hm < addMinutesHm(s, 3));
-  if (slot && !_rangeSummariesSent.has(slot)) { _rangeSummariesSent.add(slot); summaryRows().then((sr) => notifyDetached("INDEX_ALERT", rangeSummaryMessage(sr, `${slot} IST`))).catch(() => {}); }
+  if (slot && !_rangeSummariesSent.has(slot)) { _rangeSummariesSent.add(slot); (async () => {   // in order: the level summary, then 🔥 hot premiums NIFTY, then SENSEX (separate messages)
+    await notify("INDEX_ALERT", rangeSummaryMessage(await summaryRows(), `${slot} IST`)).catch(() => null);
+    for (const sym of TG_SUMMARY_SYMS) { const m = await hotMessageFor(sym, `${slot} IST`).catch(() => null); if (m) await notify("INDEX_ALERT", m).catch(() => null); }
+  })().catch(() => {}); }
 }
 function addMinutesHm(hm: string, m: number) { const t = +hm.slice(0, 2) * 60 + +hm.slice(3) + m; return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; }
 // ===================== Market Eye: next-30-minute tendency from 2 years of NIFTY / SENSEX history =====================
@@ -9537,7 +9558,8 @@ router.get("/telegram/preview", requirePermission("oiAnalysis"), async (_req: Re
       const it = { d, trade: (_cp.trades || {})[d.symbol] || null, eye: await eyeFor(d.symbol, { price: d.spot.price, changePct: d.spot.changePct, high: d.spot.high, low: d.spot.low }).catch(() => null), zh: null };
       best.push({ symbol: d.symbol, wouldSend: TG.hasOpportunity(d, it.trade), candle: TG.candleMsg(d, it.eye), best: TG.bestOpportunityMsg([it]) });
     }
-    res.json({ ok: true, allow: [...TG_ALLOW, "hourly index summary"], dropped: _tgDropped, plan, open913, summary, best });
+    const hot: string[] = []; for (const sym of TG_SUMMARY_SYMS) { const m = await hotMessageFor(sym, "preview").catch(() => null); if (m) hot.push(m); }
+    res.json({ ok: true, allow: [...TG_ALLOW, "hourly index summary + hot premiums"], dropped: _tgDropped, plan, open913, summary, hot, best });
   } catch (e: any) { res.json({ ok: false, error: e?.message || "preview failed" }); }
 });
 // The next-day plan on demand (same message as the 15:40 job); ?send=1 also posts it to Telegram
