@@ -8974,6 +8974,13 @@ async function summaryRows() {
     if (lv.pcr == null && d.oi?.pcr != null) lv.pcr = d.oi.pcr;
     if (lv.pdh == null) { lv.pdh = find(/^Prev day high/); lv.pdl = find(/^Prev day low/); }
     r.lv = lv;
+    // 📏 nearest 4 levels each side from the plan ladder (today's own H/L excluded — they are printed above), with hold %
+    const meta = LM_IDX[r.def.symbol], px = r.price ?? d.spot?.price, width = meta?.name === "NIFTY" ? 35 : 120;
+    if (px != null) {
+      const rowOf = (x: any) => { const z = meta ? lmZoneFor(meta.name, x.price, width) : null; return { price: x.price, label: String(x.label).replace(/\s*\(.*\)$/, ""), dist: Math.round(x.price - px), hold: z?.holdPct ?? null, tests: z?.tests ?? 0, confluence: !!x.confluence }; };
+      const lv2 = lad.filter((x) => x.kind !== "TODAY");
+      (r as any).ladder = { above: lv2.filter((x) => x.price > px).sort((a, b) => a.price - b.price).slice(0, 4).map(rowOf), below: lv2.filter((x) => x.price <= px).sort((a, b) => b.price - a.price).slice(0, 4).map(rowOf) };
+    }
   }
   return rows;
 }

@@ -50,6 +50,7 @@ export function breakMessage(name: string, ev: NonNullable<ReturnType<typeof onT
   ].filter(Boolean).join("\n");
 }
 
+export interface LadderRow { price: number; label: string; dist: number; hold: number | null; tests: number; confluence?: boolean }
 export function summaryMessage(rows: { name: string; price: number | null; high: number | null; low: number | null; changePct?: number | null; lv: Levels }[], label: string): string {
   const lines = [`📊 Index levels — ${label}`];
   for (const r of rows) {
@@ -57,7 +58,17 @@ export function summaryMessage(rows: { name: string; price: number | null; high:
     lines.push(`  Day H ${n0(r.high)} · L ${n0(r.low)}`);
     lines.push(`  Resistance ${n0(r.lv.resistance)}${r.lv.nextResistance ? ` / ${n0(r.lv.nextResistance)}` : ""} · Support ${n0(r.lv.support)}${r.lv.nextSupport ? ` / ${n0(r.lv.nextSupport)}` : ""}`);
     if (r.lv.pcr != null) lines.push(`  PCR ${r.lv.pcr.toFixed(2)} ${r.lv.pcrLabel || ""}${r.lv.pdh != null ? ` · Prev day H ${n0(r.lv.pdh)} / L ${n0(r.lv.pdl)}` : ""}`);
+    // 📏 level ladder: nearest levels above (resistance) and below (support), distance from the price, tested hold %
+    const lad = (r as any).ladder as { above: LadderRow[]; below: LadderRow[] } | undefined;
+    if (lad && (lad.above.length || lad.below.length)) {
+      const row = (x: LadderRow, up: boolean) => `   ${up ? "🔺" : "🔻"} ${n0(x.price)}  ${x.label}  (${Math.round(x.dist) === 0 ? "at price" : `${up ? "+" : "−"}${n0(Math.abs(x.dist))} pts`})${x.hold != null ? ` · held ${x.hold}% of ${x.tests}` : ""}${x.confluence ? " ★" : ""}`;
+      lines.push("  Levels above (resistance):");
+      lines.push(...(lad.above.length ? [...lad.above].reverse().map((x) => row(x, true)) : ["   —"]));
+      lines.push(`   ▶ price ${n0(r.price)}`);
+      lines.push("  Levels below (support):");
+      lines.push(...(lad.below.length ? lad.below.map((x) => row(x, false)) : ["   —"]));
+    }
   }
-  lines.push("\nOI walls: nearest strike holding ≥ half of the biggest OI on that side. Context only.");
+  lines.push("\nOI walls: nearest strike holding ≥ half of the biggest OI on that side. Levels: the plan ladder (pivots, previous day / week, OI walls, trendlines); held % = how often price turned there in the last 60 sessions (level memory); ★ = two kinds of level together. Context only.");
   return lines.join("\n");
 }
