@@ -11281,7 +11281,9 @@ export function startHourlyScheduler() {
   // Day high / low break alerts + index level summaries → Telegram (context only, uses cached chains; 5 quote calls/min).
   setInterval(() => { if (isTradingTimeIST() && jobOn("dayRangeAlerts")) dayRangeTick().catch(() => {}); }, 60_000);
   // Daily trading co-pilot (09:13–15:30: plan, 15-min updates, tracked trades with follow-ups, 15:30 closing statement; next-day plan 15:31)
-  setInterval(() => { if (jobOn("coPilot")) copilotTick().catch(() => {}); }, 30_000);
+  // the Telegram co-pilot runs at HIGH Dhan priority (like the screens being watched): at LOW it queued behind the background
+  // scans in market hours and one tick took ~9 minutes, so 15-min messages arrived late or were skipped
+  setInterval(() => { if (jobOn("coPilot")) { const t0 = Date.now(); withDhanPriority("high", () => copilotTick()).then(() => { const ms = Date.now() - t0; if (ms > 60_000) console.log(`[copilot] slow tick ${Math.round(ms / 1000)}s`); }).catch(() => {}); } }, 30_000);
   // Zero-hero ledger (expiry afternoons; frozen trades, one at a time per index)
   setInterval(() => { if (jobOn("coPilot")) zeroHeroLedgerTick().catch(() => {}); }, 30_000);
   // OI accuracy check vs NSE official bhavcopy: trading days 18:15–23:30 IST, once per day (retries every 10 min until published).
