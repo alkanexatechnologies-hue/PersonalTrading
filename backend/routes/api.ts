@@ -86,6 +86,7 @@ import * as LM from "../premium/levelMemory";
 import * as NDM from "../premium/nextDayMap";
 import * as PBNC from "../premium/premiumBounce";
 import * as POS from "../sentiment/positioning";
+import * as TRIPLE from "../premium/triple";
 import * as PHIST from "../sentiment/participantHistory";
 import * as IFUT from "../sentiment/indexFutures";
 import { candidateDates } from "../sentiment/nseParticipantOi";
@@ -315,7 +316,7 @@ if (AUDIT_ENABLED) {
 // live even while scanners churn. Everything else stays LOW (the default).
 // The Option Premium Prediction Center (and its zero-hero / Market Eye / calculator / level-memory sections) is a focus
 // screen too: at LOW priority its quote + option-chain calls queued behind the background scans in market hours.
-const HIGH_PRIORITY_API = /^\/(market-command|market-analysis|option-candles|option-structure|mc-summary|premium-center|premium-calc|zero-hero-live|market-eye|level-memory|next-day-map|positioning)\b/;
+const HIGH_PRIORITY_API = /^\/(market-command|market-analysis|option-candles|option-structure|mc-summary|premium-center|premium-calc|zero-hero-live|market-eye|level-memory|next-day-map|positioning|triple-potential)\b/;
 router.use((req: Request, _res: Response, next: NextFunction) => {
   if (HIGH_PRIORITY_API.test(req.path)) withDhanPriority("high", async () => next());
   else next();
@@ -8000,6 +8001,57 @@ function bounceStudyFor(sym: string): PBNC.BounceStudy | null {
   _pbStudy.set(name, { at: Date.now(), v }); return v;
 }
 // 🧮 Premium calculator: the premium of each strike if the index goes to `level` (optionally after `mins` minutes)
+// ===================== 🎯 3× POTENTIAL (Premium Prediction, top): two strikes per index with the best TESTED chance of tripling =====================
+const _tripleTab = new Map<string, { at: number; v: TRIPLE.TripleTable | null }>();
+function tripleTable(name: string): TRIPLE.TripleTable | null {
+  const c = _tripleTab.get(name); if (c && Date.now() - c.at < 30 * 60_000) return c.v;
+  let v: TRIPLE.TripleTable | null = null; try { v = JSON.parse(fs.readFileSync(path.join(process.cwd(), "data", "research-triple", `${name}.json`), "utf8")); } catch { /* not built */ }
+  _tripleTab.set(name, { at: Date.now(), v }); return v;
+}
+async function triplePotentialFor(sym: string) {
+  const def = findSymbolDef(sym), name = ({ "^NSEI": "NIFTY", "^BSESN": "SENSEX" } as Record<string, string>)[sym];
+  const t = name ? tripleTable(name) : null; if (!def || !t) return { symbol: sym, ok: false, error: "3× study not built yet (runs after the 15:50 data refresh)" };
+  let ch: any = await cached(`pc-chain:${sym}:0`, 30_000, () => dhanChainForExpiry(def, 0)).catch(() => null);
+  if (!ch?.available) ch = _pcLastChain.get(`${sym}:0`)?.v ?? ch;
+  if (!ch?.available || !ch.strikes?.length) return { symbol: sym, ok: false, error: ch?.message || "option chain not available" };
+  const q: any = await cached(`quote:${sym}`, TTL_QUOTE, () => getProvider().getQuote(sym)).catch(() => null), spot = q?.price > 0 ? q.price : ch.spot;
+  const ks = ch.strikes.map((x: any) => x.strike).sort((a: number, b: number) => a - b), step = def.strikeStep || Math.min(...ks.slice(1).map((k: number, i: number) => k - ks[i]).filter((v: number) => v > 0)) || 50;
+  // the session being read: today in / before market hours; after the close (or a weekend) the next weekday, from 09:30
+  const nowSec = Math.floor(Date.now() / 1000), ist = new Date((nowSec + 19800) * 1000), istMin = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  let sd = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate())); const after = istMin > 930 || [0, 6].includes(sd.getUTCDay());
+  if (after) do { sd = new Date(sd.getTime() + 86400_000); } while ([0, 6].includes(sd.getUTCDay()));
+  const session = sd.toISOString().slice(0, 10), slot = after || istMin < 570 ? 570 : TRIPLE.slotOf(t, istMin), expiryDay = ch.expiry === session;
+  let dte = 0; for (let d = new Date(sd.getTime() + 86400_000); d.toISOString().slice(0, 10) <= ch.expiry; d = new Date(d.getTime() + 86400_000)) if (![0, 6].includes(d.getUTCDay())) dte++;
+  const atm = Math.round(spot / step) * step, med = PC.chainMedianSpreadPct(ch.strikes, atm, step), open = !after && istMin >= 555;
+  const cands: TRIPLE.Cand[] = [];
+  for (const side of ["CE", "PE"] as const) for (let rel = -3; rel <= 3; rel++) {
+    const k = atm + rel * step, r = ch.strikes.find((x: any) => x.strike === k); if (!r) continue;
+    const p = side === "CE" ? "ce" : "pe", ltp = r[`${p}Ltp`]; if (!(ltp > 0)) continue;
+    const L = PC.liquidity(r[`${p}Bid`], r[`${p}Ask`], ltp, med, r[`${p}Vol`]), otm = side === "CE" ? rel : -rel;
+    cands.push({ side, strike: k, otm, ltp, liq: !open && L.status === "NOT AVAILABLE" ? "NO QUOTE" : L.status, spreadPct: L.spreadPct, delta: r[`${p}Delta`] != null ? Math.round(Math.abs(r[`${p}Delta`]) * 100) / 100 : null,
+      today: TRIPLE.sameDayOdds(t, side, otm, slot, expiryDay), toExpiry: TRIPLE.byExpiryOdds(t, side, otm, dte, slot) });
+  }
+  const picks = TRIPLE.topTwo(cands.filter((c) => c.liq !== "NOT AVAILABLE"), expiryDay);
+  const und = (def.nseSymbol || def.symbol).toUpperCase();
+  const out = await Promise.all(picks.map(async (x) => {
+    // the index level the calculator model needs for 3× within the next hour (time decay included)
+    const est = (lv: number) => PCALC.premiumCalc({ spot, level: lv, step, expiry: ch.expiry, mins: 60, strikes: ch.strikes, strike: x.strike }).rows.find((r) => r.side === x.side)?.est ?? 0;
+    let need: number | null = null; { let lo = spot, hi = x.side === "CE" ? spot * 1.06 : spot * 0.94; if (est(hi) >= 3 * x.ltp) { for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (est(m) >= 3 * x.ltp) hi = m; else lo = m; } need = Math.round(hi); } }
+    let zones: any = null;
+    try {
+      const cs: any[] = await withTimeout(cached(`hotc:${und}:${x.side}:${x.strike}:${ch.expiry}`, 5 * 60_000, async () => { const o = await lookupDhanOption(und, x.side, x.strike, ch.expiry); if (!o) return []; return dhanOptionCandles(o.securityId, nowSec - 6 * 86400, nowSec, 15, o.exchangeSegment); }), 15_000, "3x candles");
+      zones = PPOS.premiumZones({ candles: (cs || []).filter((c) => c.time + 900 <= nowSec), current: x.ltp });
+    } catch { zones = null; }
+    return { ...x, target3: Math.round(x.ltp * 3 * 100) / 100, needIndex: need, needMove: need != null ? Math.round(need - spot) : null, support: zones?.support?.[0] ?? null, resistance: zones?.resistance?.[0] ?? null, state: zones?.state ?? null };
+  }));
+  const hm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+  return { symbol: sym, ok: true, name: def.name, spot, expiry: ch.expiry, session, expiryDay, dte, slot: hm(slot), picks: out, sessions: t.sessions, from: t.from, to: t.to,
+    note: expiryDay ? "expiry day: odds = same-day 3× (before 15:20)" : `${dte} trading day(s) to expiry: odds = 3× by expiry (held to ${ch.expiry} 15:20)` };
+}
+router.get("/triple-potential", requirePermission("oiAnalysis"), async (_req: Request, res: Response) => {
+  try { res.json({ ok: true, generatedAt: Math.floor(Date.now() / 1000), items: await Promise.all(["^NSEI", "^BSESN"].map((s) => cached(`triple:${s}`, 60_000, () => triplePotentialFor(s)).catch((e: any) => ({ symbol: s, ok: false, error: e?.message })))) }); }
+  catch (e: any) { res.json({ ok: false, error: e?.message || "3× potential failed" }); }
+});
 /** 🔥 Hot premiums for one index (top 5 calls / puts with their premium S/R zones, rating and value at the index levels) —
  *  shared by the Premium Calculator screen and the hourly Telegram update so both always show the same thing. */
 async function hotFor(def: SymbolDef, ch: any, spot: number, step: number, o: { ceT?: any; peT?: any; iS?: any; iR?: any }) {
@@ -9386,6 +9438,7 @@ async function copilotTick() {
       _cp.sent.ptRefresh = true; cpSave();
       ptScript("refreshData.ts", [day]).then((o) => console.log("[protrader] data refresh", o.trim().slice(-200)))
         .then(() => ptScript("openingStudy.ts", [])).then((o) => console.log("[protrader] opening study", o.trim().slice(-160)))   // next-day map odds incl. today
+        .then(() => ptScript("tripleStudy.ts", [])).then((o) => console.log("[protrader] 3x study", o.split("\n").filter((l) => /sessions\)/.test(l)).join(" | ").slice(0, 200)))   // 3x potential odds
         .then(() => ptScript("premiumBounceStudy.ts", [])).then((o) => console.log("[protrader] premium bounce study", o.split("\n").filter((l) => /bounces/.test(l)).join(" | ").slice(0, 300)))   // hot-premium rating odds
         .catch((e) => console.log("[protrader] data refresh failed", e?.message));
     }

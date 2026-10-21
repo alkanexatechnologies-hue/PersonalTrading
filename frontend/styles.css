@@ -7935,3 +7935,15 @@ body.ppc-fullwidth .watchlist, body.ppc-fullwidth #watchlist { display: none !im
 @media (max-width: 1100px) { .ipos-a { grid-template-columns: repeat(3, minmax(0, 1fr)); } .ipos-cg { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ipos-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .ipos-a, .ipos-cg, .ipos-cards, .ipos-scs { grid-template-columns: 1fr; } .ipos-sc { grid-template-columns: 1fr 34px; } .ipos-sc .ipos-bar { grid-column: 1 / -1; } }
 :root[data-theme="light"] .ipos-bar i { background: #131722; }
+
+/* 🎯 3× potential (top of Premium Prediction) */
+.ppc-3x { margin: 8px 0 10px; border: 1px solid rgba(255,152,0,.45); border-radius: 8px; padding: 8px 10px; background: rgba(255,152,0,.05); }
+.ppc-3x:empty { display: none; }
+.p3x-h { font-size: 13px; margin-bottom: 6px; } .p3x-h .mut, .ppc-3x .mut { color: #787b86; font-size: 11px; }
+.p3x-g { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.p3x-i { min-width: 0; } .p3x-ih { font-size: 12.5px; margin-bottom: 4px; }
+.p3x-r { border-radius: 6px; padding: 5px 8px; margin-bottom: 4px; background: rgba(120,123,134,.08); font-size: 12.5px; }
+.p3x-r.ce { box-shadow: inset 3px 0 0 #26a69a; } .p3x-r.pe { box-shadow: inset 3px 0 0 #ef5350; }
+.p3x-k b { font-size: 14px; } .p3x-k i { font-style: normal; font-size: 11px; color: #787b86; }
+.p3x-c b { font-size: 15px; color: #ff9800; } .p3x-m { overflow-wrap: anywhere; } .p3x-n { margin-top: 2px; }
+@media (max-width: 900px) { .p3x-g { grid-template-columns: 1fr; } }

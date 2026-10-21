@@ -69,6 +69,7 @@ function ppcShell() {
     <div class="ppc-status" id="ppc-status">loading…</div>
   </div>
   <div id="ppc-quote" class="ppc-quote"></div>
+  <div id="ppc-3x" class="ppc-3x"></div>
   <div class="ppc-sec">① Decision now</div>
   <div id="ppc-pt" class="ppc-pt"></div>
   <div id="ppc-coach" class="ppc-coach"></div>
@@ -166,7 +167,7 @@ function ppcRender() {
   ppcEl("ppc-quote").innerHTML = `<span class="ppc-qname">${ppcEsc(d.name)}</span><span class="ppc-qpx ${ppcCls(sp.change)}">${ppcNs(sp.price)}</span><span class="${ppcCls(sp.change)}">${ppcSg(sp.change)} (${ppcSg(sp.changePct, 2, "%")})</span>
     <span>O <b>${ppcNs(sp.open)}</b></span><span>H <b>${ppcNs(sp.high)}</b></span><span>L <b>${ppcNs(sp.low)}</b></span><span>Prev close <b>${ppcNs(sp.prevClose)}</b></span>
     <span>ATM <b>${d.atm ?? "—"}</b></span><span>Expiry <b>${ppcEsc(d.expiry || "—")}</b></span>${d.session !== "OPEN" ? `<span class="ppc-warnt">Session ${ppcEsc(sp.sessionDay || "")} — market ${ppcEsc(d.session)}</span>` : ""}`;
-  ppcCalcInit(); if (ppcEl("ppc-calc")?.open && PPC._calcKey !== `${PPC.sym}:${PPC.off || 0}`) ppcCalcOpen(); ppcRenderMaster(); ppcRenderProTrader(); ppcRenderLevelMemory(); ppcRenderRadar(); ppcLoadZH(); ppcLoadZHToday(); ppcLoadEye(); ppcRenderBTSD(); ppcRenderCoach(); ppcRenderTV(); ppcRenderLadder(); ppcRenderPlans(); ppcRenderHistory(); if (ppcEl("ppc-more")?.open) { ppcRenderCards(); ppcRenderCharts(); ppcRenderRank(); }
+  ppcLoad3x(); ppcCalcInit(); if (ppcEl("ppc-calc")?.open && PPC._calcKey !== `${PPC.sym}:${PPC.off || 0}`) ppcCalcOpen(); ppcRenderMaster(); ppcRenderProTrader(); ppcRenderLevelMemory(); ppcRenderRadar(); ppcLoadZH(); ppcLoadZHToday(); ppcLoadEye(); ppcRenderBTSD(); ppcRenderCoach(); ppcRenderTV(); ppcRenderLadder(); ppcRenderPlans(); ppcRenderHistory(); if (ppcEl("ppc-more")?.open) { ppcRenderCards(); ppcRenderCharts(); ppcRenderRank(); }
   ppcEl("ppc-foot").innerHTML = `${ppcEsc(d.note)} · ${ppcEsc(d.version)} · <span title="${ppcEsc(PPC_TIPS.PROB)}">${ppcEsc(d.validation?.status)}: ${ppcEsc(d.validation?.detail)}</span>`;
 }
 
@@ -745,6 +746,27 @@ async function ppcCalcRun() {
       </tbody></table>
       <div class="ppc-sub">Estimate: live premium + Black-Scholes change at one IV for the expiry (average of the ATM call and put IV); "after N min" includes time decay; ⚠ stale = the quote was below intrinsic value, the model price is used. Real premiums also move with IV and demand.</div>`;
   } catch (e) { out.innerHTML = `<div class="ppc-na">calculator unavailable — ${ppcEsc(e.message || "")}</div>`; }
+}
+
+/** 🎯 3× potential (top of the screen): NIFTY + SENSEX, two strikes each with the best TESTED chance of tripling (2 years of
+ *  Dhan option premiums) — on expiry day the same-day chance, otherwise the chance by expiry. Refreshed each minute. */
+async function ppcLoad3x() {
+  if (PPC._3xAt && Date.now() - PPC._3xAt < 60000) return; PPC._3xAt = Date.now();
+  let r = null; try { r = await fetch("/api/triple-potential").then((x) => x.json()); } catch { return; }
+  const el = ppcEl("ppc-3x"); if (!el || !r?.ok) return;
+  const n = (v) => (v == null ? "—" : Math.round(v).toLocaleString("en-IN")), rs = (v) => (v == null ? "—" : "₹" + (Math.round(v * 10) / 10).toLocaleString("en-IN"));
+  const st = { "NEAR SUPPORT": "on support", "NEAR RESISTANCE": "near resistance", "BELOW SUPPORT": "below support", "MID-RANGE": "mid-range" };
+  const pick = (x) => `<div class="p3x-r ${x.side === "CE" ? "ce" : "pe"}">
+      <div class="p3x-k"><b>${x.strike} ${x.side}</b> <i>${x.otm > 0 ? x.otm + " OTM" : x.otm < 0 ? -x.otm + " ITM" : "ATM"}</i></div>
+      <div class="p3x-p"><span class="mut">LTP</span> <b>${rs(x.ltp)}</b> → <span class="mut">3×</span> <b class="ppc-up">${rs(x.target3)}</b></div>
+      <div class="p3x-c"><b>${x.p3}%</b> <span class="mut">chance of 3× ${x.horizon === "today" ? "today" : "by expiry"}</span> · <span class="mut">2×</span> ${x.p2 ?? "—"}% <span class="mut">(${x.n} cases)</span></div>
+      <div class="p3x-m mut">${x.needIndex != null ? `needs ${n(x.needIndex)} (${x.needMove >= 0 ? "+" : ""}${n(x.needMove)} pts) within 1 hour · ` : ""}S ${x.support ? rs(x.support.price) : "—"} · R ${x.resistance ? rs(x.resistance.price) : "—"}${x.state ? " · " + (st[x.state] || x.state.toLowerCase()) : ""} · ${x.liq === "GOOD" ? "liquid" : x.liq === "NO QUOTE" ? "no live quote" : "wide spread"}${x.delta != null ? " · Δ " + x.delta : ""}</div></div>`;
+  el.innerHTML = `<div class="p3x-h"><b>🎯 3× potential</b> <span class="mut">two strikes per index with the best TESTED chance of tripling — real Dhan option data, ~2 years</span></div>
+    <div class="p3x-g">${r.items.map((it) => !it.ok ? `<div class="p3x-i"><div class="p3x-ih">${ppcEsc(it.symbol)}</div><div class="ppc-na">${ppcEsc(it.error || "not available")}</div></div>` : `<div class="p3x-i">
+      <div class="p3x-ih"><b>${ppcEsc(it.name)}</b> ${n(it.spot)} <span class="mut">· expiry ${ppcEsc(it.expiry)}${it.expiryDay ? " · <b class='ppc-wait'>EXPIRY DAY</b>" : ` · ${it.dte} day(s) left`} · odds at ${ppcEsc(it.slot)}</span></div>
+      ${it.picks.length ? it.picks.map(pick).join("") : '<div class="ppc-na">no liquid strike with tested odds now</div>'}
+      <div class="mut p3x-n">${ppcEsc(it.note)}</div></div>`).join("")}</div>
+    <div class="mut p3x-n">Most strikes almost never triple: on a normal day 1–3 OTM reach 3× the same day only ~1–3% of the time; on expiry day ~17–22%. These are history, not a promise — a lottery-size position only; the plan and its checks decide the trade.</div>`;
 }
 
 /** 🔥 Hot premiums: top 5 calls and top 5 puts by reward ÷ risk after the spread, liquid quotes only (server: hotPremiums).
