@@ -107,3 +107,16 @@ test("09:13 opening heat: top 15 by bias, major stocks only, points summed", asy
   const neu = openingHeatMsg(rows, "NEUTRAL", "2026-10-19");
   assert.match(neu, /8 gainers \+ 7 losers/);
 });
+
+// ---- owner 2026-10-21: a 15-min message only when there is an opportunity
+import { hasOpportunity } from "./tgFormat";
+test("hasOpportunity: open trade yes; ARMED/TRIGGERED/APPROACHING plan yes; IDLE plan or range day no", () => {
+  const mk = (state: string, rangeDay = false) => ({ spot: { price: 100 }, trader: { rangeDay: rangeDay ? { why: "x", at: "10:15" } : null, plans: { bull: { strike: 100, entry: 101 }, bear: null }, radar: { bull: { state, distAtr: 0.2 }, bear: null } } });
+  const inHours = Date.UTC(2026, 9, 21, 5, 0);   // 10:30 IST
+  const real = Date.now; Date.now = () => inHours;
+  try {
+    assert.equal(hasOpportunity(mk("ARMED"), null), true); assert.equal(hasOpportunity(mk("TRIGGERED"), null), true); assert.equal(hasOpportunity(mk("APPROACHING"), null), true);
+    assert.equal(hasOpportunity(mk("IDLE"), null), false); assert.equal(hasOpportunity(mk("ARMED", true), null), false, "range day → no new trade → no message");
+    assert.equal(hasOpportunity(mk("IDLE", true), { state: "OPEN" }), true, "an open trade is always followed");
+  } finally { Date.now = real; }
+});

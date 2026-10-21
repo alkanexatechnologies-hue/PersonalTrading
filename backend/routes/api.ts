@@ -8937,7 +8937,8 @@ router.get("/sector-heatmap", async (_req: Request, res: Response) => {
 // ===================== Day high / low break alerts (Telegram, context only) =====================
 const _rangeState = new Map<string, RangeState>();
 let _rangeDay = "", _rangeSummariesSent = new Set<string>();
-const RANGE_SUMMARY_SLOTS = ["09:30", "11:00", "13:00", "14:45"];
+const TG_SUMMARY_SYMS = ["^NSEI", "^BSESN"];   // owner 2026-10-21: NIFTY + SENSEX only
+const RANGE_SUMMARY_SLOTS = ["10:00", "11:00", "12:00", "13:00", "14:00", "15:00"];   // owner 2026-10-21: every hour
 async function rangeLevels(def: SymbolDef, price: number): Promise<RangeLevels> {
   // Cached chain only (the 1-min OI collector keeps it fresh) — no extra option-chain calls.
   const oi: any = peekFresh<any>(`oi:${def.symbol}`, 5 * 60_000) || (_lastGoodOi.get(`oi:${def.symbol}`)?.v ?? null);
@@ -8959,6 +8960,23 @@ async function rangeRows() {
   }
   return rows;
 }
+/** Hourly summary rows (NIFTY + SENSEX) made accurate from the Premium Prediction payload: change vs the real previous close
+ *  (daily candles, not Dhan's after-close quote field), OI walls when the cached chain is empty, previous-day high / low. */
+async function summaryRows() {
+  const rows = (await rangeRows()).filter((r) => TG_SUMMARY_SYMS.includes(r.def.symbol));
+  for (const r of rows) {
+    const d: any = await cached(`pos-pc15:${r.def.symbol}`, 60_000, () => premiumCenterPayload({ symbol: r.def.symbol, interval: "15m" })).catch(() => null);
+    if (!d?.available) continue;
+    if (d.spot?.price != null) { r.price = d.spot.price; r.changePct = d.spot.changePct ?? r.changePct; r.high = d.spot.high ?? r.high; r.low = d.spot.low ?? r.low; }
+    const lv: any = r.lv || {}, lad: any[] = d.trader?.levels || [], find = (re: RegExp) => lad.find((x) => re.test(x.label))?.price ?? null;
+    if (lv.resistance == null && d.oi?.callWall?.strike != null) lv.resistance = d.oi.callWall.strike;
+    if (lv.support == null && d.oi?.putWall?.strike != null) lv.support = d.oi.putWall.strike;
+    if (lv.pcr == null && d.oi?.pcr != null) lv.pcr = d.oi.pcr;
+    if (lv.pdh == null) { lv.pdh = find(/^Prev day high/); lv.pdl = find(/^Prev day low/); }
+    r.lv = lv;
+  }
+  return rows;
+}
 async function sendRangeSummary(label: string) {
   const rows = await rangeRows();
   return notify("INDEX_ALERT", rangeSummaryMessage(rows, label));
@@ -8971,10 +8989,10 @@ async function dayRangeTick() {
     if (r.price == null) continue;
     const st = _rangeState.get(r.def.symbol) || newRangeState(); _rangeState.set(r.def.symbol, st);
     const ev = rangeTick(st, nowS, r.price, r.high, r.low);
-    if (ev) notifyDetached("INDEX_ALERT", rangeBreakMessage(r.name, ev, r.lv));
+    void ev;   // owner 2026-10-21: day high / low break alerts are not sent (the hourly summary carries the levels)
   }
   const slot = RANGE_SUMMARY_SLOTS.find((s) => hm >= s && hm < addMinutesHm(s, 3));
-  if (slot && !_rangeSummariesSent.has(slot)) { _rangeSummariesSent.add(slot); notifyDetached("INDEX_ALERT", rangeSummaryMessage(rows, `${slot} IST`)); }
+  if (slot && !_rangeSummariesSent.has(slot)) { _rangeSummariesSent.add(slot); summaryRows().then((sr) => notifyDetached("INDEX_ALERT", rangeSummaryMessage(sr, `${slot} IST`))).catch(() => {}); }
 }
 function addMinutesHm(hm: string, m: number) { const t = +hm.slice(0, 2) * 60 + +hm.slice(3) + m; return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; }
 // ===================== Market Eye: next-30-minute tendency from 2 years of NIFTY / SENSEX history =====================
@@ -9085,7 +9103,12 @@ async function cpDrain() {
   } finally { _cpSending = false; }
 }
 // plain builder text → HTML alert (bold title / action lines, escaped); pre-built HTML messages pass `html: true`
-const cpSend = (text: string, htmlReady = false) => { for (const part of TG.splitParts(text)) _cpQueue.push({ text: "🎖 <b>ProTrader</b>\n" + TG.emphasize(htmlReady ? part : TG.htmlify(CP.stripTags(part))), html: true }); cpDrain().catch(() => {}); try { fs.appendFileSync(path.join(process.cwd(), "data", "copilot-log.txt"), `\n[${new Date(Date.now() + 19800000).toISOString().slice(0, 19)}]\n${String(text).replace(/<[^>]+>/g, "")}\n`); } catch { /* best-effort */ } };
+// 📵 Owner's Telegram list (2026-10-21): ONLY the 09:13 morning plan, the 09:14 opening heat, the hourly index summary and the
+// 15-min candle + best opportunity (NIFTY + SENSEX, only when there is one). Everything else is computed and shown on the
+// screens but not sent. Add a kind here to send it again.
+const TG_ALLOW = new Set<string>(["plan", "open913", "best"]);
+let _tgDropped = 0;
+const cpSend = (text: string, htmlReady = false, kind = "other") => { if (!TG_ALLOW.has(kind)) { _tgDropped++; return; } for (const part of TG.splitParts(text)) _cpQueue.push({ text: "🎖 <b>ProTrader</b>\n" + TG.emphasize(htmlReady ? part : TG.htmlify(CP.stripTags(part))), html: true }); cpDrain().catch(() => {}); try { fs.appendFileSync(path.join(process.cwd(), "data", "copilot-log.txt"), `\n[${new Date(Date.now() + 19800000).toISOString().slice(0, 19)}]\n${String(text).replace(/<[^>]+>/g, "")}\n`); } catch { /* best-effort */ } };
 const _published = (() => { try { return JSON.parse(fs.readFileSync(path.join(process.cwd(), "backend", "research", "published", "odds.json"), "utf8")); } catch { return null; } })();
 function cpOdds(sym: string): string | undefined {
   const ix = ({ "^NSEI": "NIFTY", "^NSEBANK": "BANKNIFTY", "^BSESN": "SENSEX", "^CNXFIN": "FINNIFTY", "^NSEMDCP50": "MIDCPNIFTY" } as Record<string, string>)[sym];
@@ -9120,8 +9143,8 @@ async function copilotTick() {
     const pay = (sym: string) => premiumCenterPayload({ symbol: sym, interval: "15m" });
     // 09:13 plan (every co-pilot message stays inside market hours 09:13–15:30; the next-day plan follows at 15:31)
     if (istMin >= 553 && istMin <= 560 && !_cp.sent.plan) {
-      const list = (await Promise.all(["^NSEI", "^NSEBANK", "^BSESN"].map((x) => pay(x).catch(() => null)))).filter((x: any) => x?.available);
-      if (list.length) { _cp.sent.plan = true; cpSave(); cpSend(CP.morningPlan(list, Object.fromEntries(list.map((d: any) => [d.symbol, cpOdds(d.symbol) || ""])))); }
+      const list = (await Promise.all(["^NSEI", "^BSESN"].map((x) => pay(x).catch(() => null)))).filter((x: any) => x?.available);
+      if (list.length) { _cp.sent.plan = true; cpSave(); cpSend(CP.morningPlan(list, Object.fromEntries(list.map((d: any) => [d.symbol, cpOdds(d.symbol) || ""]))), false, "plan"); }
     }
     if (istMin >= 555 && istMin <= 916) {
       _cpTick++;
@@ -9243,7 +9266,8 @@ async function copilotTick() {
             it.d.lmLines = fresh.slice(-4).map((e) => { const z = lmZoneFor(meta.name, e.price, meta.name === "NIFTY" ? 35 : 120); return { e, z }; });
           }
         } catch { /* informational */ }
-        cpSend(TG.candleMsg(it.d, it.eye), true); cpSend(TG.bestOpportunityMsg([it]), true);
+        if (!TG.hasOpportunity(it.d, it.trade)) continue;   // nothing for this index → no message
+        cpSend(TG.candleMsg(it.d, it.eye), true, "best"); cpSend(TG.bestOpportunityMsg([it]), true, "best");
       }
     }
     // 💧 LIQUIDITY SWEEPS (NIFTY + SENSEX): map at 09:30 and 12:00 · instant alert when a level is swept (closed back inside)
@@ -9319,7 +9343,7 @@ async function copilotTick() {
       if (snap && snap.date === day && coefs) {
         const dd: any[] = await getDailyCached("^NSEI", 15).catch(() => []), prev = dd.filter((c: any) => new Date((c.time + 19800) * 1000).toISOString().slice(0, 10) < day).pop();
         const h = niftyConstituentHeat(snap, coefs, prev ? prev.close : null);
-        if (h) { _cp.sent.open913 = nowSec; cpSave(); cpSend(TG.openingHeatMsg(h.rows, (_cache.get("premarket:overview")?.v as any)?.overall?.bias || "NEUTRAL", day), true); }
+        if (h) { _cp.sent.open913 = nowSec; cpSave(); cpSend(TG.openingHeatMsg(h.rows, (_cache.get("premarket:overview")?.v as any)?.overall?.bias || "NEUTRAL", day), true, "open913"); }
       }
     }
     // ⚠️ 12:00 lunch-window CAUTION (NIFTY + SENSEX) — a warning only; plans, reviews and trades are not changed by it
@@ -9492,6 +9516,23 @@ router.post("/market-diary/save", requirePermission("oiAnalysis"), async (req: R
   res.json(rec ? { ok: true, ...rec } : { ok: false, error: `no intraday data for ${day} in the chart window` });
 });
 router.get("/copilot/state", requirePermission("oiAnalysis"), (_req: Request, res: Response) => { res.json(_cp); });
+// 👁 Telegram PREVIEW: every message on the owner's list built from live data, NOT sent (demo / checking accuracy)
+router.get("/telegram/preview", requirePermission("oiAnalysis"), async (_req: Request, res: Response) => {
+  try {
+    const pays = (await Promise.all(["^NSEI", "^BSESN"].map((x) => premiumCenterPayload({ symbol: x, interval: "15m" }).catch(() => null)))).filter((x: any) => x?.available);
+    const plan = CP.morningPlan(pays, Object.fromEntries(pays.map((d: any) => [d.symbol, cpOdds(d.symbol) || ""])));
+    const rh: any = await cached("premarket:results-heat:preview", 60_000, async () => (await fetch(`http://127.0.0.1:${process.env.PORT || 5173}/api/premarket/results-heat`).then((r) => r.json()).catch(() => null))).catch(() => null);
+    const h = rh?.open913 || null;
+    const open913 = h?.rows?.length ? TG.openingHeatMsg(h.rows, (_cache.get("premarket:overview")?.v as any)?.overall?.bias || "NEUTRAL", new Date(Date.now() + 19800000).toISOString().slice(0, 10)) : "(no 09:13 snapshot yet today)";
+    const summary = rangeSummaryMessage(await summaryRows(), `${new Date(Date.now() + 19800000).toISOString().slice(11, 16)} IST (preview)`);
+    const best = [] as any[];
+    for (const d of pays as any[]) {
+      const it = { d, trade: (_cp.trades || {})[d.symbol] || null, eye: await eyeFor(d.symbol, { price: d.spot.price, changePct: d.spot.changePct, high: d.spot.high, low: d.spot.low }).catch(() => null), zh: null };
+      best.push({ symbol: d.symbol, wouldSend: TG.hasOpportunity(d, it.trade), candle: TG.candleMsg(d, it.eye), best: TG.bestOpportunityMsg([it]) });
+    }
+    res.json({ ok: true, allow: [...TG_ALLOW, "hourly index summary"], dropped: _tgDropped, plan, open913, summary, best });
+  } catch (e: any) { res.json({ ok: false, error: e?.message || "preview failed" }); }
+});
 // The next-day plan on demand (same message as the 15:40 job); ?send=1 also posts it to Telegram
 router.get("/copilot/next-day-plan", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
   try {

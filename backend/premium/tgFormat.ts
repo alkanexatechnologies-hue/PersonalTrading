@@ -34,6 +34,13 @@ export function bestFor(d: any, trade: any | null) {
   c.sort((a, b) => RANK[a.o.state] - RANK[b.o.state] || Math.abs(a.o.distAtr ?? 9) - Math.abs(b.o.distAtr ?? 9));
   return c.length ? { kind: "PLAN" as const, ...c[0] } : { kind: "NONE" as const };
 }
+/** Is there something worth a Telegram message for this index now? An open trade, or a plan APPROACHING / ARMED / TRIGGERED
+ *  on a day that is not a range day (owner, 2026-10-21: "nothing → no message"). */
+export function hasOpportunity(d: any, trade: any | null): boolean {
+  const b = bestFor(d, trade); if (!b) return false;
+  if (b.kind === "TRADE") return true;
+  return b.kind === "PLAN" && b.o.state !== "IDLE" && !d?.trader?.rangeDay;
+}
 function bestBlock(d: any, trade: any | null, eye: any | null, zh: any | null): string {
   const b = bestFor(d, trade), T = d?.trader, L: string[] = [priceLine(d)];
   if (!b) L.push("  data unavailable");
