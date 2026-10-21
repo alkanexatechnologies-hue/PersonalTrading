@@ -18,6 +18,9 @@ export interface ParticipantDay {
   date: string;                                        // yyyy-mm-dd
   fut: Record<ParticipantFut["type"], { long: number; short: number }>;
   opt: Record<ParticipantFut["type"], FiiOptions>;
+  /** stock futures / stock options (same file; optional for days cached before they were read) */
+  stockFut?: Record<ParticipantFut["type"], { long: number; short: number }>;
+  stockOpt?: Record<ParticipantFut["type"], FiiOptions>;
 }
 
 const TYPES: ParticipantFut["type"][] = ["Client", "DII", "FII", "Pro"];
@@ -38,19 +41,21 @@ function splitCsvLine(line: string): string[] {
 export function parseParticipantCsv(text: string, expectDate: string): { day: ParticipantDay | null; reason?: string } {
   const lines = text.replace(/\r/g, "").split("\n").filter((l) => l.trim());
   if (lines.length < 6) return { day: null, reason: "too few lines" };
-  const m = lines[0].match(/as on\s+([A-Za-z]{3})[a-z]*\s+(\d{1,2}),?\s+(\d{4})/i);
+  const m = lines[0].match(/as on\s+([A-Za-z]{3})[a-z]*\s+(\d{1,2}),?\s*(\d{4})/i);   // older files: "Nov 04,2024" (no space)
   if (!m) return { day: null, reason: "no date in title" };
   const mon = MONTHS.indexOf(m[1].toLowerCase());
   const titleDate = `${m[3]}-${String(mon + 1).padStart(2, "0")}-${m[2].padStart(2, "0")}`;
   if (mon < 0 || titleDate !== expectDate) return { day: null, reason: `title date ${titleDate} ≠ ${expectDate}` };
   const hi = lines.findIndex((l) => /client type/i.test(l));
   if (hi < 0) return { day: null, reason: "no header" };
-  const head = splitCsvLine(lines[hi]).map((h) => h.toLowerCase().replace(/\s+/g, " "));
+  const head = splitCsvLine(lines[hi]).map((h) => h.toLowerCase().replace(/\s+/g, " ").trim());   // some headers carry trailing tabs
   const col = (name: string) => head.indexOf(name);
   const C = {
     fl: col("future index long"), fs: col("future index short"),
     cl: col("option index call long"), pl: col("option index put long"), cs: col("option index call short"), ps: col("option index put short"),
   };
+  const S = { fl: col("future stock long"), fs: col("future stock short"), cl: col("option stock call long"), pl: col("option stock put long"), cs: col("option stock call short"), ps: col("option stock put short") };
+  const hasStock = Object.values(S).every((i) => i >= 0);
   if (Object.values(C).some((i) => i < 0)) return { day: null, reason: "missing index columns" };
   const rows = new Map<string, number[]>();
   for (const l of lines.slice(hi + 1)) {
@@ -58,7 +63,7 @@ export function parseParticipantCsv(text: string, expectDate: string): { day: Pa
     const nums = cells.map((c) => Number(c.replace(/,/g, "")));
     rows.set(cells[0].toLowerCase(), nums);
   }
-  const fut = {} as ParticipantDay["fut"], opt = {} as ParticipantDay["opt"];
+  const fut = {} as ParticipantDay["fut"], opt = {} as ParticipantDay["opt"], stockFut = {} as NonNullable<ParticipantDay["stockFut"]>, stockOpt = {} as NonNullable<ParticipantDay["stockOpt"]>;
   for (const t of TYPES) {
     const r = rows.get(t.toLowerCase());
     if (!r) return { day: null, reason: `missing ${t} row` };
@@ -66,12 +71,21 @@ export function parseParticipantCsv(text: string, expectDate: string): { day: Pa
     if ([C.fl, C.fs, C.cl, C.cs, C.pl, C.ps].some((i) => !Number.isFinite(v(i)) || v(i) < 0)) return { day: null, reason: `bad number in ${t} row` };
     fut[t] = { long: v(C.fl), short: v(C.fs) };
     opt[t] = { callLong: v(C.cl), callShort: v(C.cs), putLong: v(C.pl), putShort: v(C.ps) };
+    if (hasStock) {
+      if ([S.fl, S.fs, S.cl, S.cs, S.pl, S.ps].some((i) => !Number.isFinite(v(i)) || v(i) < 0)) return { day: null, reason: `bad stock number in ${t} row` };
+      stockFut[t] = { long: v(S.fl), short: v(S.fs) };
+      stockOpt[t] = { callLong: v(S.cl), callShort: v(S.cs), putLong: v(S.pl), putShort: v(S.ps) };
+    }
   }
   const tot = rows.get("total");
   if (!tot) return { day: null, reason: "missing TOTAL row" };
   if (tot[C.fl] !== tot[C.fs]) return { day: null, reason: "TOTAL index futures long ≠ short" };
   const sumL = TYPES.reduce((s, t) => s + fut[t].long, 0), sumS = TYPES.reduce((s, t) => s + fut[t].short, 0);
   if (sumL !== tot[C.fl] || sumS !== tot[C.fs]) return { day: null, reason: "participants do not add up to TOTAL" };
+  if (hasStock) {   // stock futures must balance the same way; otherwise the stock part is left out (index part stays valid)
+    const sl = TYPES.reduce((a, t) => a + stockFut[t].long, 0), ss = TYPES.reduce((a, t) => a + stockFut[t].short, 0);
+    if (tot[S.fl] === tot[S.fs] && sl === tot[S.fl] && ss === tot[S.fs]) return { day: { date: expectDate, fut, opt, stockFut, stockOpt } };
+  }
   return { day: { date: expectDate, fut, opt } };
 }
 

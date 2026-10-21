@@ -85,6 +85,11 @@ import * as RR from "../sentiment/resultsReview";
 import * as LM from "../premium/levelMemory";
 import * as NDM from "../premium/nextDayMap";
 import * as PBNC from "../premium/premiumBounce";
+import * as POS from "../sentiment/positioning";
+import * as PHIST from "../sentiment/participantHistory";
+import * as IFUT from "../sentiment/indexFutures";
+import { candidateDates } from "../sentiment/nseParticipantOi";
+import { loadFiiStats, indexFlows } from "../sentiment/nseFiiStats";
 import * as EYE from "../premium/marketEye";
 import * as TG from "../premium/tgFormat";
 import { Decision } from "../decision/types";
@@ -310,7 +315,7 @@ if (AUDIT_ENABLED) {
 // live even while scanners churn. Everything else stays LOW (the default).
 // The Option Premium Prediction Center (and its zero-hero / Market Eye / calculator / level-memory sections) is a focus
 // screen too: at LOW priority its quote + option-chain calls queued behind the background scans in market hours.
-const HIGH_PRIORITY_API = /^\/(market-command|market-analysis|option-candles|option-structure|mc-summary|premium-center|premium-calc|zero-hero-live|market-eye|level-memory|next-day-map)\b/;
+const HIGH_PRIORITY_API = /^\/(market-command|market-analysis|option-candles|option-structure|mc-summary|premium-center|premium-calc|zero-hero-live|market-eye|level-memory|next-day-map|positioning)\b/;
 router.use((req: Request, _res: Response, next: NextFunction) => {
   if (HIGH_PRIORITY_API.test(req.path)) withDhanPriority("high", async () => next());
   else next();
@@ -8075,6 +8080,40 @@ router.get("/level-memory", requirePermission("oiAnalysis"), async (req: Request
       above: spot ? near.filter((x) => x.price > spot).sort((a, b) => a.price - b.price).slice(0, 4) : [], below: spot ? near.filter((x) => x.price <= spot).sort((a, b) => b.price - a.price).slice(0, 4) : [],
       kinds: LM.kindStats(ev), today: t.events.map((e) => ({ ...e, zone: lmZoneFor(meta.name, e.price, width) })) });
   } catch (e: any) { res.json({ ok: false, error: e?.message || "level memory failed" }); }
+});
+// ===================== 🏛 INSTITUTIONAL POSITIONING (Sentiment screen): NSE participant OI + Dhan futures + live structure =====================
+const POS_UNDERLYING: Record<string, string> = { "^NSEI": "NIFTY", "^NSEBANK": "BANKNIFTY", "^CNXFIN": "FINNIFTY", "^NSEMDCP50": "MIDCPNIFTY", "^BSESN": "SENSEX" };
+let _posIngestAt = 0;
+async function positioningFor(sym: string) {
+  const und = POS_UNDERLYING[sym]; if (!und) return { ok: false, error: "NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY or SENSEX only" };
+  // new NSE reports (evening) — checked at most every 15 min, only dates not stored yet
+  if (Date.now() - _posIngestAt > 15 * 60_000) { _posIngestAt = Date.now(); await PHIST.ingestDates(candidateDates(Math.floor(Date.now() / 1000), 6), { pauseMs: 300 }).catch(() => null); }
+  const nowSec = Math.floor(Date.now() / 1000), today = new Date((nowSec + 19800) * 1000).toISOString().slice(0, 10), istMin = Math.floor(((nowSec + 19800) % 86400) / 60);
+  const [d, fut, fs0] = await Promise.all([
+    cached(`pos-pc:${sym}`, 30_000, () => premiumCenterPayload({ symbol: sym, interval: "5m" })).catch(() => null),
+    cached(`pos-fut:${und}`, 60_000, () => IFUT.indexFuturesSnapshot(und)).catch(() => null),
+    cached("pos-fiistats", 30 * 60_000, () => loadFiiStats(6)).catch(() => null),
+  ]);
+  const dayOf = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(0, 10);
+  const pc: any = d && (d as any).available ? d : null, forming = pc?.chart?.formingTime ?? null;
+  const closed5 = pc ? (pc.chart.candles as any[]).filter((c) => c.time !== forming && c.time + 300 <= nowSec && dayOf(c.time) === today) : [];
+  const vwArr: any[] = pc?.chart?.vwap || [], vwIdx = pc ? (pc.chart.candles as any[]).findIndex((c) => c.time === closed5[closed5.length - 1]?.time) : -1;
+  const structure: POS.Structure | null = pc ? { session: pc.session, asOf: pc.exchangeTs ?? null, spot: pc.spot?.price ?? null, vwap: vwIdx >= 0 ? vwArr[vwIdx] ?? null : null, closed5,
+    trend15: ((pc.trader?.trends || []).find((t: any) => t.tf === "15m")?.verdict ?? null) as any,
+    breakout: pc.breakout ? { state: pc.breakout.state, barTime: pc.breakout.barTime ?? null } : null, breakdown: pc.breakdown ? { state: pc.breakdown.state, barTime: pc.breakdown.barTime ?? null } : null,
+    bos: (pc.structure?.bos || []).map((b: any) => ({ time: b.time, direction: b.direction, kind: b.kind })), chainOiBias: pc.oi?.bias ?? null } : null;
+  // the report expected now: the last completed session (today's only after 19:00 IST, once NSE has posted it)
+  const sessions = ((fut as any)?.sessions || []).map((x: any) => x.date).filter((x: string) => x < today).sort();
+  const todayTraded = closed5.length > 0 || (pc && pc.session === "OPEN");
+  const expectedReportDate = istMin >= 19 * 60 && todayTraded ? today : sessions[sessions.length - 1] ?? null;
+  const days = PHIST.historyDays() as unknown as POS.PDay[];
+  const out = POS.evaluate({ underlying: und, nseCovered: und !== "SENSEX", days, expectedReportDate, structure, futures: fut as any, now: nowSec });
+  const fsDays = (fs0 as any)?.days || [], flows = fsDays.length ? indexFlows(fsDays) : [];
+  return { ok: true, symbol: sym, name: pc?.name ?? und, spot: pc?.spot ?? null, generatedAt: nowSec, ...out,
+    perIndexFii: und === "SENSEX" ? null : flows.find((f: any) => f.index === und) ? { asOf: fsDays[fsDays.length - 1]?.date ?? null, ...flows.find((f: any) => f.index === und) } : null };
+}
+router.get("/positioning", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  try { const sym = String(req.query.symbol || "^NSEI"); res.json(await cached(`positioning:${sym}`, 60_000, () => positioningFor(sym))); } catch (e: any) { res.json({ ok: false, error: e?.message || "positioning failed" }); }
 });
 // ===================== 🎖 ProTrader NEXT-DAY MAP: opening odds, first 5 min, 09:30 stand, rejection / bounce (informational) =====================
 const NDM_DIR = path.join(process.cwd(), "data", "research-nextday");

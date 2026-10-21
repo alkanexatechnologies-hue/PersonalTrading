@@ -33,6 +33,9 @@ export interface DhanOptionSecurity {
 }
 
 let index: Map<string, DhanSecurity> | null = null;
+/** Index futures (FUTIDX) per underlying: every listed expiry. */
+export interface DhanFutureSecurity { securityId: string; exchangeSegment: "NSE_FNO" | "BSE_FNO"; instrument: "FUTIDX"; expiry: string; lotSize: number | null }
+let futIndex: Map<string, DhanFutureSecurity[]> | null = null;
 let optionIndex: Map<string, DhanOptionSecurity> | null = null;
 let loadingPromise: Promise<void> | null = null;
 
@@ -61,6 +64,7 @@ function csvFresh(): boolean {
 function parseCsv(): void {
   const map = new Map<string, DhanSecurity>();
   const opts = new Map<string, DhanOptionSecurity>();
+  const futs = new Map<string, DhanFutureSecurity[]>();
   const raw = fs.readFileSync(CSV_PATH, "utf8");
   const lines = raw.split(/\r?\n/);
   // Header: EXCH_ID,SEGMENT,SECURITY_ID,ISIN,INSTRUMENT,UNDERLYING_SECURITY_ID,
@@ -81,6 +85,9 @@ function parseCsv(): void {
       if (!map.has(underlying)) map.set(underlying, { securityId, exchangeSegment: "IDX_I", instrument: "INDEX" });
     } else if (!isBse && segment === "E" && instrument === "EQUITY") {
       if (!map.has(underlying)) map.set(underlying, { securityId, exchangeSegment: "NSE_EQ", instrument: "EQUITY" });
+    } else if (instrument === "FUTIDX" && c.length >= 13) {
+      const expiry = (c[12] || "").trim(), lot = Number(c[11]);
+      if (expiry) { const arr = futs.get(underlying) || []; if (!arr.some((x) => x.expiry === expiry)) arr.push({ securityId, exchangeSegment: isBse ? "BSE_FNO" : "NSE_FNO", instrument: "FUTIDX", expiry, lotSize: Number.isFinite(lot) ? lot : null }); futs.set(underlying, arr); }
     } else if ((instrument === "OPTIDX" || (!isBse && instrument === "OPTSTK")) && c.length >= 15) {
       // Option contract row → index by underlying|expiry|strike|type for the
       // charts API (needs the option's own securityId, not a trading symbol).
@@ -94,6 +101,8 @@ function parseCsv(): void {
   }
   index = map;
   optionIndex = opts;
+  for (const arr of futs.values()) arr.sort((a, b) => a.expiry.localeCompare(b.expiry));
+  futIndex = futs;
 }
 
 // Stale-while-revalidate, same pattern as growwInstruments.ts: a stale-but-
@@ -150,4 +159,10 @@ export async function lookupDhanOption(
 ): Promise<DhanOptionSecurity | null> {
   await ensureLoaded();
   return optionIndex?.get(optionKey(underlying, expiry, strike, type)) || null;
+}
+
+/** The near-month index future (first expiry on or after `today`), for futures price / OI. Null when not in the scrip master. */
+export async function lookupDhanIndexFuture(underlying: string, today = new Date(Date.now() + 19800000).toISOString().slice(0, 10)): Promise<DhanFutureSecurity | null> {
+  await ensureLoaded();
+  return (futIndex?.get(underlying.toUpperCase()) || []).find((f) => f.expiry >= today) || null;
 }
