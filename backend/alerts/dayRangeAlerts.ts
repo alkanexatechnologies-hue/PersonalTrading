@@ -118,7 +118,7 @@ export function oi15Message(items: OiMsgIn[], label: string): string {
   const sec = (o: OiMsgIn) => {
     const w = (x: OiMsgIn["callWall"]) => (x ? `${n0(x.strike)} · ${x.oiL}L · ${x.state}${x.pct != null && x.shiftedFrom == null ? ` (${x.pct >= 0 ? "+" : ""}${x.pct}%)` : x.shiftedFrom != null ? ` from ${n0(x.shiftedFrom)}` : ""}` : "—");
     return [`━━ ${o.name} ${n0(o.spot)} ━━`,
-      `Total OI: Calls ${o.totalCeL}L · Puts ${o.totalPeL}L · PCR ${o.pcr ?? "—"}${o.pcrBefore != null ? ` (${o.hourMin} min ago ${o.pcrBefore})` : ""}`,
+      `Total OI (lakh qty): Calls ${o.totalCeL}L · Puts ${o.totalPeL}L · PCR ${o.pcr ?? "—"}${o.pcrBefore != null ? ` (${o.hourMin} min ago ${o.pcrBefore})` : ""}`,
       o.hour ? `Last ${o.hourMin} min: Calls ${lk(o.hour.ce)} · Puts ${lk(o.hour.pe)} → ${tl(o.hour.tilt)}` : "Last 15 min: — (first read)",
       `Today: Calls ${lk(o.today.ce)} · Puts ${lk(o.today.pe)} → ${tl(o.today.tilt)}`,
       `🧱 ${w(o.callWall)}  🛡 ${w(o.putWall)}`,

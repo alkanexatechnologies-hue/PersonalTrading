@@ -57,7 +57,7 @@ test("15-min OI update: NIFTY and SENSEX in one message, total call / put OI, PC
     totalCeL: 1457.3, totalPeL: 1276.9, bias: "BEARISH", biasWhy: "call writers are adding more", callWall: { strike: spot + 50, oiL: 96.8, state: "STRENGTHENING", pct: 5.2, shiftedFrom: null }, putWall: { strike: spot - 150, oiL: 42.9, state: "WEAKENING", pct: -3.4, shiftedFrom: null },
     majorCall: null, majorPut: null, movers: [] });
   const m = oi15Message([it("NIFTY 50", 22950), it("SENSEX", 73900)], "11:15 IST");
-  assert.match(m, /📊 OI UPDATE · 11:15 IST/); assert.match(m, /━━ NIFTY 50 22,950 ━━\nTotal OI: Calls 1457\.3L · Puts 1276\.9L · PCR 0\.88 \(15 min ago 0\.86\)/);
+  assert.match(m, /📊 OI UPDATE · 11:15 IST/); assert.match(m, /━━ NIFTY 50 22,950 ━━\nTotal OI \(lakh qty\): Calls 1457\.3L · Puts 1276\.9L · PCR 0\.88 \(15 min ago 0\.86\)/);
   assert.match(m, /Last 15 min: Calls \+2\.1L · Puts \+4\.5L → Bulls 68% · Bears 32%/); assert.match(m, /Today: Calls \+65\.0L · Puts \+40\.0L/);
   assert.match(m, /🧱 23,000 · 96\.8L · STRENGTHENING \(\+5\.2%\)  🛡 22,800 · 42\.9L · WEAKENING \(−3\.4%\)|🧱 23,000 · 96\.8L · STRENGTHENING \(\+5\.2%\)  🛡 22,800 · 42\.9L · WEAKENING \(-3\.4%\)/);
   assert.match(m, /👉 🔴 BEARISH — call writing heavier/); assert.match(m, /━━ SENSEX 73,900 ━━/); assert.ok(m.indexOf("NIFTY") < m.indexOf("SENSEX"));

@@ -3,7 +3,8 @@
 // and put wall (support, below), where writers are adding / covering near the price TODAY (Dhan's change vs the previous
 // close), a 5-minute timeline built from the app's own chain snapshots (where OI moved most in each 5-minute window), and
 // the OI TILT — the share of fresh put writing (bull side) vs call writing (bear side) near the price. The tilt is a
-// description of who is writing more, NOT a validated win probability. Units: lakh contracts (L).
+// description of who is writing more, NOT a validated win probability. Units: L = lakh of Dhan OI QUANTITY (contracts × lot
+// size — cross-checked 2026-10-22: every Dhan OI divides exactly by the lot; NSE's option chain shows contracts instead).
 
 import { rankOiWalls } from "../analysis/marketAnalysis";
 export interface Strike { strike: number; ceOi: number; peOi: number; ceChg: number; peChg: number }
