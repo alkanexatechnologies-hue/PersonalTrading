@@ -127,7 +127,7 @@ import { recordOiBaseline, computeOiChange, oiBaselineStrike } from "../oi/oiCha
 import { recordOiSample, computeOiMovement, OiMoveResult } from "../oi/oiMovement";
 import { getBaseline } from "../oi/baselineStore";
 import { buildMarketAnalysis, rankOiWalls } from "../analysis/marketAnalysis";
-import { newState as newRangeState, onTick as rangeTick, breakMessage as rangeBreakMessage, summaryMessage as rangeSummaryMessage, hotMessage as rangeHotMessage, RangeState, Levels as RangeLevels } from "../alerts/dayRangeAlerts";
+import { newState as newRangeState, onTick as rangeTick, breakMessage as rangeBreakMessage, summaryMessage as rangeSummaryMessage, hotMessage as rangeHotMessage, oi15Message as rangeOi15Message, OiMsgIn as RangeOiIn, RangeState, Levels as RangeLevels } from "../alerts/dayRangeAlerts";
 // OI Analysis module (additive, read-only, feature-flagged via CONFIG.oiAnalysis)
 import { buildOiMovement } from "../oi/analysisModule/movement";
 import { buildOiSummary } from "../oi/analysisModule/summary";
@@ -7744,7 +7744,7 @@ async function premiumCenterPayload(query: Record<string, any>): Promise<any> {
     if (strikes.length && ch?.expiry && !ch.staleChain) {
       const arr = _oiSnaps.get(wk) || [], nowMs = Date.now();
       if (!arr.length || nowMs - arr[arr.length - 1].t >= 60_000) arr.push({ t: nowMs, expiry: ch.expiry, strikes: strikes.map((x: any) => ({ strike: x.strike, ceOi: x.ceOi, peOi: x.peOi, ceChg: x.ceChg, peChg: x.peChg })) });
-      _oiSnaps.set(wk, arr.filter((x) => nowMs - x.t <= 40 * 60_000));
+      _oiSnaps.set(wk, arr.filter((x) => nowMs - x.t <= 75 * 60_000));   // 75 min: the hourly Telegram OI analysis compares with ~60 min ago
     }
     const planChain: any[] = strikes.length ? strikes : wl && wl.expiry >= today0 && Date.now() - wl.at < 60 * 60_000 ? wl.strikes : strikes;
     const spot = (quote as any)?.price > 0 ? (quote as any).price : closed.length ? closed[closed.length - 1].close : null;
@@ -9002,6 +9002,34 @@ async function hotMessageFor(sym: string, label: string): Promise<string | null>
   const h: any = await hotFor(def, ch, spot, step, { ceT: P.bull?.t1, peT: P.bear?.t1, iS: iS?.price, iR: iR?.price });
   return rangeHotMessage({ name: d.name, spot, ceTarget: h.ceTarget, peTarget: h.peTarget, ceFrom: h.ceFrom, peFrom: h.peFrom, ce: h.ce, pe: h.pe, label });
 }
+/** OI analysis data of one index: the live chain now vs the app's own snapshot ~`windowMin` ago (nearest one at least ½ that old). */
+async function oiDataFor(sym: string, label: string, windowMin = 15): Promise<RangeOiIn | null> {
+  const def = findSymbolDef(sym); if (!def) return null;
+  const d: any = await cached(`pos-pc15:${sym}`, 60_000, () => premiumCenterPayload({ symbol: sym, interval: "15m" })).catch(() => null);
+  let ch: any = await cached(`pc-chain:${sym}:0`, 30_000, () => dhanChainForExpiry(def, 0)).catch(() => null);
+  if (!ch?.available) ch = _pcLastChain.get(`${sym}:0`)?.v ?? ch;
+  if (!d?.available || !ch?.available || !ch.strikes?.length) return null;
+  const spot = d.spot?.price ?? ch.spot, ks = ch.strikes.map((x: any) => x.strike).sort((a: number, b: number) => a - b);
+  const step = def.strikeStep || Math.min(...ks.slice(1).map((k: number, i: number) => k - ks[i]).filter((v: number) => v > 0)) || 50;
+  const now = ch.strikes.map((x: any) => ({ strike: x.strike, ceOi: x.ceOi, peOi: x.peOi, ceChg: x.ceChg, peChg: x.peChg }));
+  const nowMs = Date.now(), snaps = (_oiSnaps.get(`${sym}:0`) || []).filter((x) => x.expiry === ch.expiry);
+  const pick = snaps.filter((x) => nowMs - x.t >= (windowMin / 2) * 60_000).sort((a, b) => Math.abs(nowMs - a.t - windowMin * 60_000) - Math.abs(nowMs - b.t - windowMin * 60_000))[0] ?? null;
+  const ageMin = pick ? Math.round((nowMs - pick.t) / 60_000) : null;
+  const f: any = OFL.oiFlow({ strikes: now, spot, step, snaps: pick ? [{ ageMin: ageMin!, strikes: pick.strikes }] : [] });
+  if (!f) return null;
+  const w: any = OFL.wallReview({ now, prev: pick?.strikes ?? null, spot, ageMin });
+  const pcrOf = (a: any[]) => { const c = a.reduce((x, s) => x + (s.ceOi || 0), 0), p = a.reduce((x, s) => x + (s.peOi || 0), 0); return c > 0 ? Math.round((p / c) * 100) / 100 : null; };
+  const wl = (x: any) => (x ? { strike: x.strike, oiL: x.oiL, state: x.state, pct: x.pct15, shiftedFrom: x.shiftedFrom } : null);
+  return ({ name: d.name, spot, label, pcr: f.pcr, pcrBefore: pick ? pcrOf(pick.strikes) : null, hourMin: ageMin,
+    hour: pick && f.last15 ? { ce: f.last15.ce, pe: f.last15.pe, tilt: f.last15.tilt, top: f.last15.top } : null,
+    today: { ce: f.near.ce, pe: f.near.pe, tilt: f.tiltToday }, totalCeL: f.totalCeL, totalPeL: f.totalPeL, bias: f.bias, biasWhy: f.biasWhy,
+    callWall: wl(w?.call), putWall: wl(w?.put), majorCall: w?.majorCall ?? null, majorPut: w?.majorPut ?? null, movers: f.movers });
+}
+/** 📊 the 15-min OI update: NIFTY + SENSEX in one message. */
+async function oi15MessageNow(label: string): Promise<string | null> {
+  const items = (await Promise.all(TG_SUMMARY_SYMS.map((sym) => oiDataFor(sym, label, 15).catch(() => null)))).filter(Boolean) as RangeOiIn[];
+  return items.length ? rangeOi15Message(items, label) : null;
+}
 async function sendRangeSummary(label: string) {
   const rows = await rangeRows();
   return notify("INDEX_ALERT", rangeSummaryMessage(rows, label));
@@ -9134,7 +9162,7 @@ async function cpDrain() {
 // 📵 Owner's Telegram list (2026-10-21): ONLY the 09:13 morning plan, the 09:14 opening heat, the hourly index summary and the
 // 15-min candle + best opportunity (NIFTY + SENSEX, only when there is one). Everything else is computed and shown on the
 // screens but not sent. Add a kind here to send it again.
-const TG_ALLOW = new Set<string>(["plan", "open913", "best"]);
+const TG_ALLOW = new Set<string>(["plan", "open913", "best", "oi15"]);
 let _tgDropped = 0;
 const cpSend = (text: string, htmlReady = false, kind = "other") => { if (!TG_ALLOW.has(kind)) { _tgDropped++; return; } for (const part of TG.splitParts(text)) _cpQueue.push({ text: "🎖 <b>ProTrader</b>\n" + TG.emphasize(htmlReady ? part : TG.htmlify(CP.stripTags(part))), html: true }); cpDrain().catch(() => {}); try { fs.appendFileSync(path.join(process.cwd(), "data", "copilot-log.txt"), `\n[${new Date(Date.now() + 19800000).toISOString().slice(0, 19)}]\n${String(text).replace(/<[^>]+>/g, "")}\n`); } catch { /* best-effort */ } };
 const _published = (() => { try { return JSON.parse(fs.readFileSync(path.join(process.cwd(), "backend", "research", "published", "odds.json"), "utf8")); } catch { return null; } })();
@@ -9277,6 +9305,8 @@ async function copilotTick() {
     const bestSlot = istMin - (istMin % 15);
     if (bestSlot >= 570 && bestSlot <= 915 && istMin % 15 <= 2 && (istMin % 15 > 0 || sec >= 20) && !_cp.sent[`best|${bestSlot}`]) {
       _cp.sent[`best|${bestSlot}`] = true; cpSave();
+      // 📊 every 15-min close: total call / put OI for NIFTY + SENSEX in one message (always sent — owner 2026-10-21)
+      { const lbl = `${String(Math.floor(bestSlot / 60)).padStart(2, "0")}:${String(bestSlot % 60).padStart(2, "0")} IST`; const m = await oi15MessageNow(lbl).catch(() => null); if (m) cpSend(m, false, "oi15"); }
       const items: any[] = [];
       for (const sym of ["^NSEI", "^BSESN"]) {
         const d: any = await pay(sym).catch(() => null); if (!d?.available) continue;
@@ -9558,8 +9588,10 @@ router.get("/telegram/preview", requirePermission("oiAnalysis"), async (_req: Re
       const it = { d, trade: (_cp.trades || {})[d.symbol] || null, eye: await eyeFor(d.symbol, { price: d.spot.price, changePct: d.spot.changePct, high: d.spot.high, low: d.spot.low }).catch(() => null), zh: null };
       best.push({ symbol: d.symbol, wouldSend: TG.hasOpportunity(d, it.trade), candle: TG.candleMsg(d, it.eye), best: TG.bestOpportunityMsg([it]) });
     }
-    const hot: string[] = []; for (const sym of TG_SUMMARY_SYMS) { const m = await hotMessageFor(sym, "preview").catch(() => null); if (m) hot.push(m); }
-    res.json({ ok: true, allow: [...TG_ALLOW, "hourly index summary + hot premiums"], dropped: _tgDropped, plan, open913, summary, hot, best });
+    const hot: string[] = [], oi: string[] = [];
+    { const o2 = await oi15MessageNow("preview").catch(() => null); if (o2) oi.push(o2); }
+    for (const sym of TG_SUMMARY_SYMS) { const m = await hotMessageFor(sym, "preview").catch(() => null); if (m) hot.push(m); }
+    res.json({ ok: true, allow: [...TG_ALLOW, "hourly index summary + hot premiums", "15-min OI update"], dropped: _tgDropped, plan, open913, summary, oi, hot, best });
   } catch (e: any) { res.json({ ok: false, error: e?.message || "preview failed" }); }
 });
 // The next-day plan on demand (same message as the 15:40 job); ?send=1 also posts it to Telegram

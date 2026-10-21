@@ -50,3 +50,14 @@ test("hourly hot-premium message: verdict first, best call / put with buy zone, 
   const w = hotMessage({ name: "SENSEX", spot: 73710, ceTarget: 74518, peTarget: 73229, ceFrom: "plan T1", peFrom: "plan T1", ce: [row(74000, "CE", 2, 33, "MID-RANGE")], pe: [], label: "11:00 IST" });
   assert.match(w, /👉 WAIT/); assert.match(w, /BEST PUT: none/); assert.ok(m.length < 3800);
 });
+
+import { oi15Message } from "./dayRangeAlerts";
+test("15-min OI update: NIFTY and SENSEX in one message, total call / put OI, PCR, last 15 min, today, walls and the read", () => {
+  const it = (name: string, spot: number) => ({ name, spot, label: "11:15 IST", pcr: 0.88, pcrBefore: 0.86, hourMin: 15, hour: { ce: 210000, pe: 450000, tilt: 68, top: null }, today: { ce: 6500000, pe: 4000000, tilt: 38 },
+    totalCeL: 1457.3, totalPeL: 1276.9, bias: "BEARISH", biasWhy: "call writers are adding more", callWall: { strike: spot + 50, oiL: 96.8, state: "STRENGTHENING", pct: 5.2, shiftedFrom: null }, putWall: { strike: spot - 150, oiL: 42.9, state: "WEAKENING", pct: -3.4, shiftedFrom: null },
+    majorCall: null, majorPut: null, movers: [] });
+  const m = oi15Message([it("NIFTY 50", 22950), it("SENSEX", 73900)], "11:15 IST");
+  assert.match(m, /📊 OI UPDATE · 11:15 IST/); assert.match(m, /━━ NIFTY 50 22,950 ━━\nTotal OI: Calls 1457\.3L · Puts 1276\.9L · PCR 0\.88 \(15 min ago 0\.86\)/);
+  assert.match(m, /Last 15 min: Calls \+2\.1L · Puts \+4\.5L → Bulls 68% · Bears 32%/); assert.match(m, /Today: Calls \+65\.0L · Puts \+40\.0L/);
+  assert.match(m, /🧱 Call wall 23,000 · 96\.8L · STRENGTHENING \(\+5\.2%\)/); assert.match(m, /━━ SENSEX 73,900 ━━/); assert.ok(m.indexOf("NIFTY") < m.indexOf("SENSEX"));
+});

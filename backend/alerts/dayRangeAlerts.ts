@@ -110,3 +110,27 @@ export function hotMessage(o: { name: string; spot: number; ceTarget: number; pe
     `Other calls (strike · price · chance): ${others(o.ce, bc)}`, `Other puts: ${others(o.pe, bp)}`, "",
     "Chance % = how often, in 2 years of real Dhan option data, a premium that started up from a support like this closed above its resistance within 2 hours. Information only — the plan decides the trade."].join("\n");
 }
+
+// 📊 OI ANALYSIS data (Dhan option chain + the app's own minute snapshots) for the 15-min OI update below.
+export interface OiMsgIn { name: string; spot: number; label: string; pcr: number | null; pcrBefore: number | null; hourMin: number | null;
+  hour: { ce: number; pe: number; tilt: number | null; top: { side: string; strike: number; chg: number; meaning: string } | null } | null;
+  today: { ce: number; pe: number; tilt: number | null }; totalCeL: number; totalPeL: number; bias: string; biasWhy: string;
+  callWall: { strike: number; oiL: number; state: string; pct: number | null; shiftedFrom: number | null } | null; putWall: { strike: number; oiL: number; state: string; pct: number | null; shiftedFrom: number | null } | null;
+  majorCall: number | null; majorPut: number | null; movers: { side: string; strike: number; chgL: number; meaning: string }[] }
+const lk = (v: number) => `${v >= 0 ? "+" : "−"}${Math.abs(Math.round((v / 1e5) * 10) / 10).toFixed(1)}L`;
+/** 📊 15-min OI UPDATE — NIFTY and SENSEX in ONE message (a gap between them): total call / put OI, PCR (and 15 min ago), the last
+ *  15 minutes' writing, today's writing, the two walls and the read. */
+export function oi15Message(items: OiMsgIn[], label: string): string {
+  const tl = (t: number | null) => (t == null ? "—" : `Bulls ${t}% · Bears ${100 - t}%`);
+  const sec = (o: OiMsgIn) => {
+    const w = (x: OiMsgIn["callWall"]) => (x ? `${n0(x.strike)} · ${x.oiL}L · ${x.state}${x.pct != null && x.shiftedFrom == null ? ` (${x.pct >= 0 ? "+" : ""}${x.pct}%)` : x.shiftedFrom != null ? ` from ${n0(x.shiftedFrom)}` : ""}` : "—");
+    return [`━━ ${o.name} ${n0(o.spot)} ━━`,
+      `Total OI: Calls ${o.totalCeL}L · Puts ${o.totalPeL}L · PCR ${o.pcr ?? "—"}${o.pcrBefore != null ? ` (${o.hourMin} min ago ${o.pcrBefore})` : ""}`,
+      o.hour ? `Last ${o.hourMin} min: Calls ${lk(o.hour.ce)} · Puts ${lk(o.hour.pe)} → ${tl(o.hour.tilt)}` : "Last 15 min: building (needs the app's chain snapshots)",
+      `Today: Calls ${lk(o.today.ce)} · Puts ${lk(o.today.pe)} → ${tl(o.today.tilt)}`,
+      `🧱 Call wall ${w(o.callWall)}`, `🛡 Put wall ${w(o.putWall)}`,
+      `👉 ${o.bias === "BULLISH" ? "🟢 BULLISH" : o.bias === "BEARISH" ? "🔴 BEARISH" : "⚪ NEUTRAL"} — ${o.biasWhy}`].join("\n");
+  };
+  return [`📊 OI UPDATE · ${label}`, "", ...items.flatMap((o, i) => [...(i ? ["", "⁣", ""] : []), sec(o)]), "",
+    "OI in lakh contracts (Dhan option chain). Last 15 min / Today = writing near the price. Tilt = who writes more — a description, not a win probability."].join("\n");
+}
