@@ -7950,3 +7950,6 @@ body.ppc-fullwidth .watchlist, body.ppc-fullwidth #watchlist { display: none !im
 .p3x-sr, .p3x-lv { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 12px; margin: 2px 0; }
 .p3x-lv { padding: 4px 8px; border-radius: 6px; background: rgba(41,98,255,.07); margin-bottom: 5px; }
 .p3x-s { color: #26a69a; } .p3x-rr { color: #ef5350; } .p3x-sr i, .p3x-lv i { font-style: normal; font-size: 10.5px; color: #787b86; }
+.p3x-turn { display: flex; flex-direction: column; gap: 1px; padding: 5px 8px; border-radius: 6px; margin-bottom: 4px; background: rgba(255,152,0,.08); font-size: 12.5px; }
+.p3x-turn i { font-style: normal; font-size: 10.5px; color: #787b86; } .p3x-turn .mut { font-size: 10.5px; }
+.p3x-plan { font-size: 12px; margin: 2px 0; padding: 3px 6px; border-radius: 4px; background: rgba(41,98,255,.08); }

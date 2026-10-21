@@ -8050,8 +8050,26 @@ async function triplePotentialFor(sym: string) {
   const meta = LM_IDX[sym], lw = meta?.name === "NIFTY" ? 35 : 120, lad: any[] = (pd?.trader?.levels || []).filter((x: any) => x.kind !== "TODAY");
   const lvRow = (x: any) => { const z = meta ? lmZoneFor(meta.name, x.price, lw) : null; return { price: x.price, label: String(x.label).replace(/\s*\(.*\)$/, ""), hold: z?.holdPct ?? null, tests: z?.tests ?? 0 }; };
   const indexLevels = { supports: lad.filter((x) => x.price < spot).sort((a, b) => b.price - a.price).slice(0, 2).map(lvRow), resistances: lad.filter((x) => x.price > spot).sort((a, b) => a.price - b.price).slice(0, 2).map(lvRow) };
+  // 🎯 where the index most likely TURNS today: within one normal day's reach (daily ATR), the level with the best tested hold %
+  // (≥ 5 past tests); a weaker level met first is named, because it usually breaks
+  const dly: any[] = ((await getDailyCached(sym, 30).catch(() => [])) as any[]).slice(-14), atrD = dly.length ? dly.reduce((a, c) => a + (c.high - c.low), 0) / dly.length : step * 6;
+  const turn = (up: boolean) => {
+    const reach = 1.25 * atrD;   // a normal-to-strong day's reach (the next-day map's 75th-percentile move is about this)
+    const pool = lad.filter((x) => (up ? x.price > spot && x.price <= spot + reach : x.price < spot && x.price >= spot - reach)).map(lvRow).sort((a, b) => (up ? a.price - b.price : b.price - a.price));
+    const best = pool.filter((x) => x.tests >= 5 && x.hold != null).sort((a, b) => (b.hold ?? 0) - (a.hold ?? 0) || (up ? a.price - b.price : b.price - a.price))[0] ?? null;
+    const first = pool[0] ?? null;
+    return { level: best ?? first, firstWeak: first && best && first.price !== best.price && (first.hold ?? 100) < 50 && first.tests >= 5 ? first : null, reach: Math.round(reach) };
+  };
+  const rejection = turn(true), bounce = turn(false);
+  // each pick: the plan in index terms with the premium at those levels (calculator, at the price now)
+  const at = (strike: number, side: "CE" | "PE", lv: number | null | undefined) => (lv ? Math.round((PCALC.premiumCalc({ spot, level: lv, step, expiry: ch.expiry, mins: 0, strikes: ch.strikes, strike }).rows.find((r) => r.side === side)?.est ?? 0) * 10) / 10 : null);
+  for (const x of out as any[]) {
+    const entry = x.side === "CE" ? bounce.level : rejection.level, exit = x.side === "CE" ? rejection.level : bounce.level;
+    x.plan = entry && exit ? { entryIndex: entry.price, entryLabel: entry.label, entryPrem: at(x.strike, x.side, entry.price), exitIndex: exit.price, exitLabel: exit.label, exitPrem: at(x.strike, x.side, exit.price),
+      how: x.side === "CE" ? `buy when ${def.name} holds ${Math.round(entry.price)} (a 15-min candle closes back above it) → sell near ${Math.round(exit.price)}` : `buy when ${def.name} is rejected at ${Math.round(entry.price)} (a 15-min candle closes back below it) → sell near ${Math.round(exit.price)}` } : null;
+  }
   const hm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
-  return { symbol: sym, ok: true, name: def.name, spot, expiry: ch.expiry, session, expiryDay, dte, slot: hm(slot), picks: out, indexLevels, sessions: t.sessions, from: t.from, to: t.to,
+  return { symbol: sym, ok: true, name: def.name, spot, expiry: ch.expiry, session, expiryDay, dte, slot: hm(slot), picks: out, indexLevels, rejection, bounce, sessions: t.sessions, from: t.from, to: t.to,
     note: expiryDay ? "expiry day: odds = same-day 3× (before 15:20)" : `${dte} trading day(s) to expiry: odds = 3× by expiry (held to ${ch.expiry} 15:20)` };
 }
 router.get("/triple-potential", requirePermission("oiAnalysis"), async (_req: Request, res: Response) => {

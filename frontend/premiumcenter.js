@@ -762,13 +762,18 @@ async function ppcLoad3x() {
       <div class="p3x-c"><b>${x.p3}%</b> <span class="mut">chance of 3× ${x.horizon === "today" ? "today" : "by expiry"}</span> · <span class="mut">2×</span> ${x.p2 ?? "—"}% <span class="mut">(${x.n} cases)</span></div>
       <div class="p3x-sr"><span class="p3x-s">Support ${(x.supports || []).length ? x.supports.map((z, i) => `S${i + 1} <b>${rs(z.price)}</b> <i>${z.touches}×</i>`).join(" · ") : "—"}</span>
         <span class="p3x-rr">Resistance ${(x.resistances || []).length ? x.resistances.map((z, i) => `R${i + 1} <b>${rs(z.price)}</b> <i>${z.touches}×</i>`).join(" · ") : "—"}</span>${x.state ? ` <span class="mut">· now ${st[x.state] || x.state.toLowerCase()}</span>` : ""}</div>
+      ${x.plan ? `<div class="p3x-plan">📍 <b>Plan:</b> ${ppcEsc(x.plan.how)} · premium there ≈ <b>${rs(x.plan.entryPrem)}</b> → <b class="ppc-up">${rs(x.plan.exitPrem)}</b></div>` : ""}
       <div class="p3x-m mut">${x.needIndex != null ? `needs ${n(x.needIndex)} (${x.needMove >= 0 ? "+" : ""}${n(x.needMove)} pts) within 1 hour · ` : ""}${x.liq === "GOOD" ? "liquid" : x.liq === "NO QUOTE" ? "no live quote" : "wide spread"}${x.delta != null ? " · Δ " + x.delta : ""}</div></div>`;
+  const turnRow = (it) => { const R = it.rejection, B = it.bounce, nm = (z) => (z ? `<b>${n(z.price)}</b> <i>${ppcEsc(z.label)}${z.hold != null && z.tests ? ` · held ${z.hold}% of ${z.tests}` : ""}</i>` : "—");
+    return `<div class="p3x-turn"><span class="p3x-rr">🔴 Rejection likely at ${nm(R?.level)}${R?.firstWeak ? ` <span class="mut">(first ${n(R.firstWeak.price)} is weak — held ${R.firstWeak.hold}%)</span>` : ""}</span>
+      <span class="p3x-s">🟢 Bounce likely at ${nm(B?.level)}${B?.firstWeak ? ` <span class="mut">(first ${n(B.firstWeak.price)} is weak — held ${B.firstWeak.hold}%)</span>` : ""}</span>
+      <span class="mut">within a normal day's reach (±${n(R?.reach)} pts) · held % = how often price turned there in the last 60 sessions</span></div>`; };
   const lv = (L) => !L ? "" : `<div class="p3x-lv"><span class="p3x-s">▼ Index support ${L.supports.length ? L.supports.map((z) => `<b>${n(z.price)}</b> <i>${ppcEsc(z.label)}${z.hold != null && z.tests ? ` · held ${z.hold}%` : ""}</i>`).join(" · ") : "—"}</span>
       <span class="p3x-rr">▲ Index resistance ${L.resistances.length ? L.resistances.map((z) => `<b>${n(z.price)}</b> <i>${ppcEsc(z.label)}${z.hold != null && z.tests ? ` · held ${z.hold}%` : ""}</i>`).join(" · ") : "—"}</span></div>`;
   el.innerHTML = `<div class="p3x-h"><b>🎯 3× potential</b> <span class="mut">two strikes per index with the best TESTED chance of tripling — real Dhan option data, ~2 years</span></div>
     <div class="p3x-g">${r.items.map((it) => !it.ok ? `<div class="p3x-i"><div class="p3x-ih">${ppcEsc(it.symbol)}</div><div class="ppc-na">${ppcEsc(it.error || "not available")}</div></div>` : `<div class="p3x-i">
       <div class="p3x-ih"><b>${ppcEsc(it.name)}</b> ${n(it.spot)} <span class="mut">· expiry ${ppcEsc(it.expiry)}${it.expiryDay ? " · <b class='ppc-wait'>EXPIRY DAY</b>" : ` · ${it.dte} day(s) left`} · odds at ${ppcEsc(it.slot)}</span></div>
-      ${lv(it.indexLevels)}
+      ${turnRow(it)}${lv(it.indexLevels)}
       ${it.picks.length ? it.picks.map(pick).join("") : '<div class="ppc-na">no liquid strike with tested odds now</div>'}
       <div class="mut p3x-n">${ppcEsc(it.note)}</div></div>`).join("")}</div>
     <div class="mut p3x-n">Most strikes almost never triple: on a normal day 1–3 OTM reach 3× the same day only ~1–3% of the time; on expiry day ~17–22%. These are history, not a promise — a lottery-size position only; the plan and its checks decide the trade.</div>`;
