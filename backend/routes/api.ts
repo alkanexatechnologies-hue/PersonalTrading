@@ -8042,10 +8042,16 @@ async function triplePotentialFor(sym: string) {
       const cs: any[] = await withTimeout(cached(`hotc:${und}:${x.side}:${x.strike}:${ch.expiry}`, 5 * 60_000, async () => { const o = await lookupDhanOption(und, x.side, x.strike, ch.expiry); if (!o) return []; return dhanOptionCandles(o.securityId, nowSec - 6 * 86400, nowSec, 15, o.exchangeSegment); }), 15_000, "3x candles");
       zones = PPOS.premiumZones({ candles: (cs || []).filter((c) => c.time + 900 <= nowSec), current: x.ltp });
     } catch { zones = null; }
-    return { ...x, target3: Math.round(x.ltp * 3 * 100) / 100, needIndex: need, needMove: need != null ? Math.round(need - spot) : null, support: zones?.support?.[0] ?? null, resistance: zones?.resistance?.[0] ?? null, state: zones?.state ?? null };
+    return { ...x, target3: Math.round(x.ltp * 3 * 100) / 100, needIndex: need, needMove: need != null ? Math.round(need - spot) : null, support: zones?.support?.[0] ?? null, resistance: zones?.resistance?.[0] ?? null,
+      supports: (zones?.support || []).slice(0, 2), resistances: (zones?.resistance || []).slice(0, 2), state: zones?.state ?? null };
   }));
+  // the index's own nearest levels (plan ladder; today's H / L excluded) with the level-memory hold %
+  const pd: any = await cached(`pos-pc15:${sym}`, 60_000, () => premiumCenterPayload({ symbol: sym, interval: "15m" })).catch(() => null);
+  const meta = LM_IDX[sym], lw = meta?.name === "NIFTY" ? 35 : 120, lad: any[] = (pd?.trader?.levels || []).filter((x: any) => x.kind !== "TODAY");
+  const lvRow = (x: any) => { const z = meta ? lmZoneFor(meta.name, x.price, lw) : null; return { price: x.price, label: String(x.label).replace(/\s*\(.*\)$/, ""), hold: z?.holdPct ?? null, tests: z?.tests ?? 0 }; };
+  const indexLevels = { supports: lad.filter((x) => x.price < spot).sort((a, b) => b.price - a.price).slice(0, 2).map(lvRow), resistances: lad.filter((x) => x.price > spot).sort((a, b) => a.price - b.price).slice(0, 2).map(lvRow) };
   const hm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
-  return { symbol: sym, ok: true, name: def.name, spot, expiry: ch.expiry, session, expiryDay, dte, slot: hm(slot), picks: out, sessions: t.sessions, from: t.from, to: t.to,
+  return { symbol: sym, ok: true, name: def.name, spot, expiry: ch.expiry, session, expiryDay, dte, slot: hm(slot), picks: out, indexLevels, sessions: t.sessions, from: t.from, to: t.to,
     note: expiryDay ? "expiry day: odds = same-day 3× (before 15:20)" : `${dte} trading day(s) to expiry: odds = 3× by expiry (held to ${ch.expiry} 15:20)` };
 }
 router.get("/triple-potential", requirePermission("oiAnalysis"), async (_req: Request, res: Response) => {

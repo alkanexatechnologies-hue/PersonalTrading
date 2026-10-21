@@ -7947,3 +7947,6 @@ body.ppc-fullwidth .watchlist, body.ppc-fullwidth #watchlist { display: none !im
 .p3x-k b { font-size: 14px; } .p3x-k i { font-style: normal; font-size: 11px; color: #787b86; }
 .p3x-c b { font-size: 15px; color: #ff9800; } .p3x-m { overflow-wrap: anywhere; } .p3x-n { margin-top: 2px; }
 @media (max-width: 900px) { .p3x-g { grid-template-columns: 1fr; } }
+.p3x-sr, .p3x-lv { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 12px; margin: 2px 0; }
+.p3x-lv { padding: 4px 8px; border-radius: 6px; background: rgba(41,98,255,.07); margin-bottom: 5px; }
+.p3x-s { color: #26a69a; } .p3x-rr { color: #ef5350; } .p3x-sr i, .p3x-lv i { font-style: normal; font-size: 10.5px; color: #787b86; }
