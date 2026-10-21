@@ -8309,6 +8309,7 @@ function initPremarket() {
     <div class="pmx-key" id="pmx-key" aria-label="Key points"></div>
     <section class="pmx-pcr" id="pmx-pcr" aria-label="PCR and India VIX"><div class="pm-na">Loading PCR and VIX…</div></section>
     <div class="pmx-rh"><section class="pmx-pn" id="pmx-results"><div class="pm-na">Loading results review…</div></section><section class="pmx-pn" id="pmx-top8"><div class="pm-na">Loading top 15 NIFTY stocks…</div></section></div>
+    <section class="pmx-pn pmx-ipos" id="pmx-ipos" aria-label="Institutional positioning"><div class="pm-na">Loading institutional positioning…</div></section>
     <div class="pmx-grid">
       <div class="pmx-col c1">
         <section class="pmx-pn a-in" id="pmx-in"><div class="pm-na">Loading market inputs…</div></section>
@@ -8410,7 +8411,7 @@ function renderPremarket(d) {
   if (upd) upd.textContent = `Last Update: ${d.slot} · Next Sentiment Update: ${pmNextSlot(d.slot)}`;
   renderPMStrip(d.strip);
   renderPMSentiment(d.overall);
-  PM.overall = d.overall; pmLoadResultsHeat();
+  PM.overall = d.overall; pmLoadResultsHeat(); pmLoadPositioning();
   renderPMProbability(d.probability);
   renderPMSector(d.sectors);
   renderPMFii(d.fii);
@@ -8928,6 +8929,71 @@ async function loadPMIntel(force) {
   } catch (e) {
     if (!PM.intel) { const box = pmEl("pm-intel"); if (box) box.innerHTML = `<div class="pm-na">News sources unreachable. Retrying in a minute.</div>`; }
   }
+}
+// ---- 🏛 Institutional positioning (/api/positioning): NSE participant-wise OI (FII / DII / Client / Pro) + Dhan index futures +
+// the live structure the Premium Prediction screen already computes. Rule cards only activate when their rules pass. Information
+// only — the Arbiter and risk gates decide trades. Polled about once a minute (server cache 60 s).
+const POS_SYMS = [["^NSEI", "NIFTY"], ["^NSEBANK", "BANKNIFTY"], ["^CNXFIN", "FINNIFTY"], ["^NSEMDCP50", "MIDCPNIFTY"], ["^BSESN", "SENSEX"]];
+async function pmLoadPositioning(force) {
+  PM.posSym = PM.posSym || "^NSEI"; PM.posTab = PM.posTab || "INDEX_FUT";
+  if (!force && PM._posAt && Date.now() - PM._posAt < 55000 && PM.pos?.symbol === PM.posSym) { pmRenderPositioning(); return; }
+  PM._posAt = Date.now();
+  const box = pmEl("pmx-ipos"); if (box && force) box.classList.add("pmx-busy");
+  try { PM.pos = await fetch(`/api/positioning?symbol=${encodeURIComponent(PM.posSym)}`).then((r) => r.json()); } catch (e) { PM.pos = { ok: false, error: e.message || "request failed" }; }
+  if (box) box.classList.remove("pmx-busy");
+  pmRenderPositioning();
+}
+function pmRenderPositioning() {
+  const box = pmEl("pmx-ipos"), d = PM.pos; if (!box) return;
+  if (!box._wired) { box._wired = true; box.addEventListener("click", (e) => { const b = e.target.closest("[data-pos-sym],[data-pos-tab]"); if (!b) return;
+    if (b.dataset.posSym) { PM.posSym = b.dataset.posSym; pmLoadPositioning(true); } else { PM.posTab = b.dataset.posTab; pmRenderPositioning(); } }); }
+  const pills = `<span class="ipos-syms">${POS_SYMS.map(([s, n]) => `<button type="button" data-pos-sym="${s}" class="${s === PM.posSym ? "on" : ""}">${n}</button>`).join("")}</span>`;
+  if (!d || !d.ok) { box.innerHTML = pmxH(0, "🏛 Institutional positioning " + pills) + `<div class="pm-na">${pmEsc(d?.error || "UNKNOWN — positioning data not available")}</div>`; return; }
+  const sg = (v) => (v == null ? "—" : (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(Math.round(v)).toLocaleString("en-IN"));
+  const cls = (v) => (v == null || v === 0 ? "" : v > 0 ? "up" : "dn"), hm = (t) => (t ? new Date((t + 19800) * 1000).toISOString().slice(11, 16) : "—");
+  const fresh = !d.nseCovered ? '<span class="ipos-b warn">NSE DATA DOES NOT COVER SENSEX</span>' : d.freshness === "FRESH" ? `<span class="ipos-b ok">FRESH</span>` : d.freshness === "STALE" ? `<span class="ipos-b bad">STALE DATA</span>` : `<span class="ipos-b bad">UNKNOWN</span>`;
+  const interp = { BEARISH_CONTINUATION_CANDIDATE: ["dn", "BEARISH CONTINUATION CANDIDATE"], BULLISH_CONTINUATION_CANDIDATE: ["up", "BULLISH CONTINUATION CANDIDATE"], SHORT_SQUEEZE_RISK: ["warn", "SHORT-SQUEEZE RISK"], MIXED: ["mid", "MIXED"], NO_EDGE: ["mid", "NO EDGE"] }[d.interpretation] || ["mid", d.interpretation];
+  const L = d.live || {}, sp = d.spot || {};
+  // A. header
+  const A = `<div class="ipos-a">
+      <div><span class="k">${pmEsc(d.name)}</span><b>${sp.price != null ? pmNum(sp.price, 2) : "—"}</b> <span class="${cls(sp.change)}">${sp.change != null ? sg(sp.change) + " (" + (sp.changePct >= 0 ? "+" : "") + sp.changePct + "%)" : ""}</span></div>
+      <div><span class="k">15-min regime</span><b>${pmEsc(L.trend15 || "—")}</b></div>
+      <div><span class="k">5-min structure</span><b>${L.lastClose == null ? "no closed candle today" : `${L.aboveVwap ? "above" : "below"} VWAP${L.bullBreak ? " · breakout/bull BOS" : L.bearBreak ? " · breakdown/bear BOS" : ""}`}</b></div>
+      <div><span class="k">Participant report</span><b>${pmEsc(d.reportDate || "—")}</b> ${fresh}</div>
+      <div class="ipos-int ${interp[0]}"><span class="k">Positioning interpretation</span><b>${pmEsc(interp[1])}</b></div></div>`;
+  // B. participant table (one instrument at a time — never mixed)
+  const tabs = [["INDEX_FUT", "Index futures"], ["STOCK_FUT", "Stock futures"], ["INDEX_CALL", "Index calls"], ["INDEX_PUT", "Index puts"]];
+  const rows = (d.metrics || []).filter((m) => m.instrument === PM.posTab);
+  const B = `<div class="ipos-sub">Participant positions <span class="mut">NSE participant-wise OI · contracts · end of day ${pmEsc(d.reportDate || "")}</span><span class="ipos-tabs">${tabs.map(([k, n]) => `<button type="button" data-pos-tab="${k}" class="${k === PM.posTab ? "on" : ""}">${n}</button>`).join("")}</span></div>
+    <div class="pm-scroll"><table class="pmx-ct ipos-t"><thead><tr><th>Participant</th><th class="num">Long</th><th class="num">Short</th><th class="num">Net</th><th class="num">Prev net</th><th class="num">Net change</th><th>3-session trend</th><th>Last session</th></tr></thead><tbody>
+    ${rows.length ? rows.map((m) => `<tr${m.participant === "FII" ? ' class="fii"' : ""}><td><b>${m.participant === "FII" ? "FII / FPI" : pmEsc(m.participant)}</b></td><td class="num">${sg(m.grossLong).replace("+", "")}</td><td class="num">${sg(m.grossShort).replace("+", "")}</td><td class="num ${cls(m.net)}"><b>${sg(m.net)}</b></td><td class="num">${sg(m.previousNet)}</td><td class="num ${cls(m.netChange)}">${sg(m.netChange)}</td><td>${pmEsc(m.trend3)}</td><td>${pmEsc(m.change1)}</td></tr>`).join("") : `<tr><td colspan="8" class="pm-na">no ${pmEsc(PM.posTab)} figures in this report</td></tr>`}
+    </tbody></table></div><div class="mut ipos-note">Client is not "retail" and Pro is not "HNI" — NSE's own categories. Index figures are all NSE indices together, not ${pmEsc(d.underlying)} alone. Source: ${pmEsc(d.sourceReportId || "NSE")}.</div>`;
+  // C. FII short intelligence
+  const F = d.fii, sq = (d.cards || []).find((c) => c.key === "SHORT_SQUEEZE_RISK"), pf = d.perIndexFii, fu = d.futures;
+  const C = !F ? "" : `<div class="ipos-c"><div class="ipos-sub">FII short position intelligence <span class="mut">${pmEsc(F.basis)}</span></div><div class="ipos-cg">
+      <div><span class="k">Net position</span><b class="${cls(F.net)}">${sg(F.net)}</b><i>long ${sg(F.grossLong).replace("+", "")} · short ${sg(F.grossShort).replace("+", "")}</i></div>
+      <div><span class="k">Long / short</span><b>${F.longShortRatio ?? "—"}</b><i>${F.grossShort ? Math.round((F.grossLong / (F.grossLong + F.grossShort)) * 100) + "% long" : ""}</i></div>
+      <div><span class="k">Change 1 / 3 / 5 sessions</span><b><span class="${cls(F.ch1)}">${sg(F.ch1)}</span> / <span class="${cls(F.ch3)}">${sg(F.ch3)}</span> / <span class="${cls(F.ch5)}">${sg(F.ch5)}</span></b></div>
+      <div><span class="k">Net-short percentile</span><b>${F.shortPercentile == null ? "—" : F.shortPercentile + "%"}</b><i>${F.shortPercentile == null ? "needs ≥ 120 sessions" : `more short than ${F.shortPercentile}% of the last ${F.window} sessions${F.elevated ? " · ELEVATED" : ""}`}</i></div>
+      <div><span class="k">Position trend</span><b>${pmEsc(F.trend)}</b></div>
+      <div><span class="k">Short-squeeze risk</span><b class="${sq?.status === "ACTIVE" ? "warn" : ""}">${pmEsc(sq?.status || "—")}</b><i>${sq ? `price confirmations ${sq.conditions.slice(1, 4).filter((c) => c.pass === true).length}/3` : ""}</i></div>
+      ${pf ? `<div><span class="k">FII ${pmEsc(d.underlying)} futures today (NSE fii_stats ${pmEsc(pf.asOf || "")})</span><b class="${cls(pf.netC)}">${sg(pf.netC)}</b><i>bought − sold contracts${pf.type ? " · " + pmEsc(pf.type) : ""}</i></div>` : ""}
+      <div><span class="k">${pmEsc(d.underlying)} futures (Dhan, live)</span><b>${fu?.available ? pmEsc(fu.reading || "—") : "n/a"}</b><i>${fu?.available ? `OI ${sg(fu.oiChg)} (${fu.oiChgPct ?? "—"}%) · price ${sg(fu.priceChg)}` : pmEsc(fu?.reason || "not available")}</i></div></div></div>`;
+  // D. market impact matrix
+  const st = (s) => (s === "ACTIVE" ? "on" : s === "WATCH" ? "watch" : s === "INSUFFICIENT DATA" ? "na" : "off");
+  const D = `<div class="ipos-sub">Market impact <span class="mut">a card is ACTIVE only when all its rules pass · evaluated ${hm(d.generatedAt)} IST</span></div><div class="ipos-cards">${(d.cards || []).map((c) => `<div class="ipos-card ${st(c.status)}">
+      <div class="ipos-ch"><b>${pmEsc(c.title)}</b><span class="ipos-st ${st(c.status)}">${pmEsc(c.status)}</span></div>
+      ${c.supporting.length ? `<div class="ipos-ev up">✔ ${c.supporting.map(pmEsc).join("<br>✔ ")}</div>` : ""}
+      ${c.contradicting.length ? `<div class="ipos-ev dn">✘ ${c.contradicting.map(pmEsc).join("<br>✘ ")}</div>` : ""}
+      ${c.missing.length ? `<div class="ipos-ev mut">… ${c.missing.map(pmEsc).join("<br>… ")}</div>` : ""}
+      ${c.note ? `<div class="ipos-ev note">${pmEsc(c.note)}</div>` : ""}</div>`).join("")}</div>`;
+  // E. explanation + scores
+  const S = d.scores || {}, bar = (k, label, help, isRisk) => { const x = S[k] || {}; return `<div class="ipos-sc"><span class="k">${label}</span><div class="ipos-bar ${isRisk ? "risk" : ""}"><i style="left:${x.score ?? 50}%"></i></div><b>${x.score ?? "—"}</b><span class="mut">confidence ${Math.round((x.confidence ?? 0) * 100)}%</span><div class="mut ipos-why">${pmEsc((x.parts || []).join(" · ") || "no data")} — ${help}</div></div>`; };
+  const E = `<div class="ipos-sub">Explanation</div><div class="ipos-ex">${pmEsc(d.explanation)}</div>
+    <div class="ipos-sub">Scores <span class="mut">0–100 · 50 = neutral · above 50 = bullish evidence, below 50 = bearish · not probabilities</span></div><div class="ipos-scs">
+      ${bar("institutional", "Institutional positioning", "FII net-change rank vs history")}${bar("structure", "Price structure", "VWAP · 15-min · 5-min break")}${bar("derivatives", "Derivatives confirmation", "futures price × OI · option writers")}${bar("squeeze", "Short-squeeze risk", "risk measure (0 = none), not a direction", true)}</div>
+    <div class="mut ipos-note">${(d.missing || []).length ? "Missing: " + d.missing.map(pmEsc).join(" · ") + ". " : ""}Passed to the Master Trade Selector as information only — the Arbiter and its hard risk gates decide; this never places or blocks a trade.</div>`;
+  box.innerHTML = pmxH(0, "🏛 Institutional positioning " + pills, `updated ${hm(d.generatedAt)}`) + A + B + C + D + E;
 }
 // ---- 📋 Results review (last 2 days) + 🔥 Top 15 major NIFTY stocks per market sentiment (/api/premarket/results-heat) ----
 async function pmLoadResultsHeat(force) {

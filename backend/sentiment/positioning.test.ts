@@ -96,6 +96,8 @@ test("stale or missing participant data and no live candles → visible STALE / 
   assert.equal(o.fii!.shortPercentile, null, "30 sessions is not enough history for a percentile");
   const bse = evaluate({ underlying: "SENSEX", nseCovered: false, days, expectedReportDate: null, structure: null, futures: null, now: T0 });
   assert.equal(bse.interpretation, "NO_EDGE"); assert.equal(bse.sentiment.freshness_status, "NOT COVERED");
+  const bseLive = evaluate({ underlying: "SENSEX", nseCovered: false, days: hist(200, [-100, -50, 0, 50]), expectedReportDate: null, structure: struct({ vwap: 120, closed5: bars([110, 100]) }), futures: null, now: T0 + 3600 });
+  assert.equal(bseLive.conflicts.length, 0, "no participant conflicts for an index NSE data does not cover"); assert.equal(bseLive.sentiment.institutional_bias, "UNKNOWN");
 });
 test("contradictory participants: FII adds shorts on a day the futures price rose → listed as a conflict", () => {
   const days = hist(200, [-200, -300]);

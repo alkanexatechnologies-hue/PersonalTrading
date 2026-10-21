@@ -50,7 +50,8 @@ function bestBlock(d: any, trade: any | null, eye: any | null, zh: any | null): 
     L.push(...planBlock(d, side));
     const rv = T?.review?.[side], why: string[] = rv?.reasoning || [];
     const dec = why[why.length - 1], wrong = why.find((x: string) => /^Wrong if/.test(x));
-    if (dec) L.push(`🧠 <b>Senior trader:</b> ${esc(dec.replace(/^Decision:\s*/, ""))}`);
+    if (T?.rangeDay) L.push(`🧠 <b>Senior trader:</b> NO NEW TRADE — the range-day rule decides today (both sides of the first-hour range broke). Watch only; trade again tomorrow.`);
+    else if (dec) L.push(`🧠 <b>Senior trader:</b> ${esc(dec.replace(/^Decision:\s*/, ""))}`);
     if (wrong) L.push(`⚠️ ${esc(wrong)}`);
   } else {
     const P = T?.plans, nt = P?.noTrade;
@@ -201,7 +202,7 @@ export function planBlock(d: any, side: "bull" | "bear", o: { candle?: boolean }
   L.push(`Buy <b>${p.strike ?? "—"} ${leg}</b> ${expired ? "(premium at the open)" : p.premNow != null ? `(now ₹${n0(p.premNow)})` : ""}`);
   if (p.premPos && !expired) L.push(p.premPos.danger ? `<b>${esc(p.premPos.text)}</b>` : `Premium ${esc(p.premPos.text)}`);
   const rv = T?.review?.[side];
-  if (rv) L.push(...reviewShort(rv));
+  if (rv) { const rs = reviewShort(rv); if (T?.rangeDay) rs[0] = rs[0].replace(/→ <b>[^<]*<\/b>/, "→ <b>WATCH ONLY — range day</b>"); L.push(...rs); }   // the approved range-day rule outranks the review grade
   const pr = (v: number | null | undefined) => (expired || v == null || !Number.isFinite(v) ? "—" : `₹${n0(v)}`);
   const row = (lbl: string, lvl: number, pv: number | null | undefined, pts: string) => `${pad(lbl, 9)}${pad(n0(lvl), 7, true)}${pad(pr(pv), 7, true)}${pad(pts, 7, true)}`;
   const d1 = (lvl: number) => `${(ce ? lvl - p.entry : p.entry - lvl) >= 0 ? "+" : "−"}${n0(Math.abs(lvl - p.entry))}`;

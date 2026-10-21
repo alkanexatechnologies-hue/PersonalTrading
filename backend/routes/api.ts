@@ -9222,8 +9222,10 @@ async function copilotTick() {
     }
     if (istMin >= 555 && istMin <= 930) await btsdTick(nowSec, istMin).catch(() => {});
     // every 15-min candle close (09:30–15:15), NIFTY then SENSEX: 🕯 candle message + ⭐ best opportunity
-    if (istMin >= 570 && istMin <= 915 && istMin % 15 === 0 && sec >= 20 && !_cp.sent[`best|${istMin}`]) {
-      _cp.sent[`best|${istMin}`] = true; cpSave();
+    // the slot is the 15-min close (09:30 … 15:15); a tick still busy at that minute catches up within the next 2 minutes
+    const bestSlot = istMin - (istMin % 15);
+    if (bestSlot >= 570 && bestSlot <= 915 && istMin % 15 <= 2 && (istMin % 15 > 0 || sec >= 20) && !_cp.sent[`best|${bestSlot}`]) {
+      _cp.sent[`best|${bestSlot}`] = true; cpSave();
       const items: any[] = [];
       for (const sym of ["^NSEI", "^BSESN"]) {
         const d: any = await pay(sym).catch(() => null); if (!d?.available) continue;

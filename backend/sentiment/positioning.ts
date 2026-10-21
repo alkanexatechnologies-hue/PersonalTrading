@@ -100,9 +100,10 @@ export function evaluate(o: EngineIn) {
   const fiiNets = days.map((d) => d.fut.FII.long - d.fut.FII.short);
   const freshness = !last ? "UNKNOWN" : o.expectedReportDate && last.date < o.expectedReportDate ? "STALE" : "FRESH";
   const pct = shortPercentile(fiiNets), trend = fii ? posTrend(fii.net, fii.ch3, fii.grossLong + fii.grossShort) : "INSUFFICIENT DATA";
-  const fiiBear = trend === "INCREASING BEARISH" || trend === "DECREASING BULLISH" ? true : trend === "INSUFFICIENT DATA" ? null : false;
-  const fiiBull = trend === "INCREASING BULLISH" || trend === "DECREASING BEARISH" ? true : trend === "INSUFFICIENT DATA" ? null : false;
   const posOk = o.nseCovered && freshness !== "UNKNOWN";
+  // participant direction only where NSE data covers the index (never for SENSEX) — null = not known, never "neutral"
+  const fiiBear: Tri = !posOk || trend === "INSUFFICIENT DATA" ? null : trend === "INCREASING BEARISH" || trend === "DECREASING BULLISH";
+  const fiiBull: Tri = !posOk || trend === "INSUFFICIENT DATA" ? null : trend === "INCREASING BULLISH" || trend === "DECREASING BEARISH";
   // ---- live structure
   const S = o.structure, live = !!S && S.session === "OPEN" && S.closed5.length > 0, c5 = live ? S!.closed5[S!.closed5.length - 1] : null;
   const vw = live && S!.vwap != null ? S!.vwap : null;

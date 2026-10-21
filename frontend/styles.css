@@ -7902,3 +7902,36 @@ body.ppc-fullwidth .watchlist, body.ppc-fullwidth #watchlist { display: none !im
 .ppc-star-p { font-size: 11.5px; } .ppc-ht-rt { text-align: left !important; }
 .ppc-star-d { display: flex; flex-direction: column; gap: 2px; margin: 2px 0 4px; font-size: 12px; color: #b2b5be; white-space: normal; }
 :root[data-theme="light"] .ppc-star-d { color: #434651; } :root[data-theme="light"] .ppc-star.s2 { color: #555; }
+
+/* 🏛 Institutional positioning (Sentiment screen) */
+.pmx-ipos { margin: 10px 0; } .pmx-ipos.pmx-busy { opacity: .6; }
+.ipos-syms, .ipos-tabs { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 8px; vertical-align: middle; }
+.ipos-syms button, .ipos-tabs button { font-size: 11px; padding: 2px 8px; border-radius: 12px; border: 1px solid #2a2e39; background: transparent; color: #9598a1; cursor: pointer; min-height: 26px; }
+.ipos-syms button.on, .ipos-tabs button.on { background: #2962ff; border-color: #2962ff; color: #fff; }
+.ipos-a { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 6px 0 10px; }
+.ipos-a > div, .ipos-cg > div { background: rgba(120,123,134,.08); border-radius: 6px; padding: 6px 8px; min-width: 0; }
+.ipos-a .k, .ipos-cg .k, .ipos-sc .k { display: block; font-size: 10.5px; color: #787b86; }
+.ipos-a b, .ipos-cg b { font-size: 13.5px; } .ipos-cg i { display: block; font-style: normal; font-size: 11px; color: #787b86; }
+.ipos-int.dn { box-shadow: inset 3px 0 0 #ef5350; } .ipos-int.up { box-shadow: inset 3px 0 0 #26a69a; } .ipos-int.warn { box-shadow: inset 3px 0 0 #ff9800; } .ipos-int.mid { box-shadow: inset 3px 0 0 #787b86; }
+.ipos-b { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 10px; margin-left: 4px; }
+.ipos-b.ok { color: #26a69a; background: rgba(38,166,154,.15); } .ipos-b.bad { color: #ef5350; background: rgba(239,83,80,.15); } .ipos-b.warn { color: #ff9800; background: rgba(255,152,0,.15); }
+.ipos-sub { font-weight: 700; font-size: 12.5px; margin: 10px 0 4px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; } .ipos-sub .mut { font-weight: 400; font-size: 11px; }
+.ipos-t td, .ipos-t th { white-space: nowrap; } .ipos-t tr.fii td { background: rgba(41,98,255,.07); }
+.ipos-note { font-size: 11px; margin-top: 4px; }
+.ipos-cg { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.ipos-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.ipos-card { border: 1px solid rgba(120,123,134,.25); border-radius: 8px; padding: 6px 8px; font-size: 11.5px; min-width: 0; }
+.ipos-card.on { border-color: #26a69a; } .ipos-card.watch { border-color: #ff9800; } .ipos-card.off { opacity: .72; }
+.ipos-ch { display: flex; justify-content: space-between; gap: 6px; margin-bottom: 3px; }
+.ipos-st { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 10px; white-space: nowrap; }
+.ipos-st.on { color: #26a69a; background: rgba(38,166,154,.16); } .ipos-st.watch { color: #ff9800; background: rgba(255,152,0,.16); } .ipos-st.na { color: #9598a1; background: rgba(120,123,134,.16); } .ipos-st.off { color: #787b86; }
+.ipos-ev { margin-top: 2px; overflow-wrap: anywhere; } .ipos-ev.up { color: #26a69a; } .ipos-ev.dn { color: #ef5350; } .ipos-ev.note { color: #9598a1; font-style: italic; }
+.ipos-ex { font-size: 12.5px; line-height: 1.5; padding: 6px 8px; border-left: 3px solid #2962ff; background: rgba(41,98,255,.06); border-radius: 4px; }
+.ipos-scs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
+.ipos-sc { display: grid; grid-template-columns: 150px 1fr 34px auto; align-items: center; gap: 2px 8px; font-size: 12px; } .ipos-why { grid-column: 1 / -1; font-size: 10.5px; }
+.ipos-bar { position: relative; height: 6px; border-radius: 3px; background: linear-gradient(90deg, #ef5350, #787b86 50%, #26a69a); }
+.ipos-bar.risk { background: linear-gradient(90deg, #787b86, #ff9800); }
+.ipos-bar i { position: absolute; top: -3px; width: 4px; height: 12px; margin-left: -2px; border-radius: 2px; background: #fff; }
+@media (max-width: 1100px) { .ipos-a { grid-template-columns: repeat(3, minmax(0, 1fr)); } .ipos-cg { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ipos-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .ipos-a, .ipos-cg, .ipos-cards, .ipos-scs { grid-template-columns: 1fr; } .ipos-sc { grid-template-columns: 1fr 34px; } .ipos-sc .ipos-bar { grid-column: 1 / -1; } }
+:root[data-theme="light"] .ipos-bar i { background: #131722; }
