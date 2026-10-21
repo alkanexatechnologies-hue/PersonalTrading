@@ -8958,7 +8958,7 @@ function pmRenderPositioning() {
   const A = `<div class="ipos-a">
       <div><span class="k">${pmEsc(d.name)}</span><b>${sp.price != null ? pmNum(sp.price, 2) : "—"}</b> <span class="${cls(sp.change)}">${sp.change != null ? sg(sp.change) + " (" + (sp.changePct >= 0 ? "+" : "") + sp.changePct + "%)" : ""}</span></div>
       <div><span class="k">15-min regime</span><b>${pmEsc(L.trend15 || "—")}</b></div>
-      <div><span class="k">5-min structure</span><b>${L.lastClose == null ? "no closed candle today" : `${L.aboveVwap ? "above" : "below"} VWAP${L.bullBreak ? " · breakout/bull BOS" : L.bearBreak ? " · breakdown/bear BOS" : ""}`}</b></div>
+      <div><span class="k">5-min structure</span><b>${L.lastClose == null ? (L.session && L.session !== "OPEN" ? "market " + pmEsc(String(L.session).toLowerCase()) : "no closed candle yet") : `${L.aboveVwap ? "above" : "below"} VWAP${L.bullBreak ? " · breakout/bull BOS" : L.bearBreak ? " · breakdown/bear BOS" : ""}`}</b></div>
       <div><span class="k">Participant report</span><b>${pmEsc(d.reportDate || "—")}</b> ${fresh}</div>
       <div class="ipos-int ${interp[0]}"><span class="k">Positioning interpretation</span><b>${pmEsc(interp[1])}</b></div></div>`;
   // B. participant table (one instrument at a time — never mixed)

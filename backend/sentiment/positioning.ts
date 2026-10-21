@@ -152,13 +152,13 @@ export function evaluate(o: EngineIn) {
   const fiiShortDown = fii && days.length >= 2 ? fii.grossShort < (legOf(days[days.length - 2], "FII", "INDEX_FUT")?.short ?? fii.grossShort) : null;
   const D = cardOf("SHORT_COVERING", "Short covering", [
     { name: "futures: price ↑ with OI ↓", pass: fr == null ? null : fr === "SHORT COVERING", detail: futDetail, required: true },
-    { name: "FII gross shorts fell on the last report", pass: posOk ? fiiShortDown : null, detail: posDetail(fii ? `FII index-futures shorts ${fmt(fii.grossShort)} (${fiiShortDown ? "down" : "not down"} vs the previous report)` : "no FII metric"), required: false },
+    { name: "FII gross shorts fell on the last report", pass: posOk ? fiiShortDown : null, detail: posDetail(fii ? `FII index-futures shorts ${cnt(fii.grossShort)} (${fiiShortDown ? "down" : "not down"} vs the previous report)` : "no FII metric"), required: false },
   ], now, "Short covering is not fresh long buildup.");
   // E. long buildup (futures OI ↑ with price ↑)
   const fiiLongUp = fii && days.length >= 2 ? fii.grossLong > (legOf(days[days.length - 2], "FII", "INDEX_FUT")?.long ?? fii.grossLong) : null;
   const E = cardOf("LONG_BUILDUP", "Long buildup", [
     { name: "futures: price ↑ with OI ↑", pass: fr == null ? null : fr === "LONG BUILDUP", detail: futDetail, required: true },
-    { name: "FII gross longs rose on the last report", pass: posOk ? fiiLongUp : null, detail: posDetail(fii ? `FII index-futures longs ${fmt(fii.grossLong)} (${fiiLongUp ? "up" : "not up"} vs the previous report)` : "no FII metric"), required: false },
+    { name: "FII gross longs rose on the last report", pass: posOk ? fiiLongUp : null, detail: posDetail(fii ? `FII index-futures longs ${cnt(fii.grossLong)} (${fiiLongUp ? "up" : "not up"} vs the previous report)` : "no FII metric"), required: false },
   ], now, "Needs compatible futures data; the end-of-day participant change is context, not a live position.");
   // F. mixed / no edge — the default whenever evidence conflicts or is missing
   const conflicts: string[] = [];
@@ -224,4 +224,5 @@ export function evaluate(o: EngineIn) {
     cards, scores, interpretation: interp, conflicts, missing, explanation, sentiment, live: { session: S?.session ?? null, asOf: S?.asOf ?? null, aboveVwap, trend15: S?.trend15 ?? null, bullBreak, bearBreak, vwap: vw, lastClose: c5?.close ?? null }, futures: F };
 }
 const fmt = (v: number | null | undefined) => (v == null ? "n/a" : (v > 0 ? "+" : "") + Math.round(v).toLocaleString("en-IN"));
+const cnt = (v: number | null | undefined) => (v == null ? "n/a" : Math.round(v).toLocaleString("en-IN"));   // gross counts carry no sign
 const r = (v: number | null) => (v == null ? "n/a" : Math.round(v * 100) / 100);
