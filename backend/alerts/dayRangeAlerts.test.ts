@@ -44,11 +44,11 @@ test("hourly hot-premium message: verdict first, best call / put with buy zone, 
     levels: { support: [{ price: 80.1, touches: 2 }], resistance: [{ price: 98, touches: 1 }], state: "MID-RANGE" }, rating: { stars, passPct: pass, failPct: 44, state, support: 80.1, resistance: 98 } });
   const m = hotMessage({ name: "NIFTY 50", spot: 22811, ceTarget: 23094, peTarget: 22800, ceFrom: "plan T1", peFrom: "plan T1",
     ce: [row(23000, "CE", 2, 12, "MID-RANGE"), row(23050, "CE", 5, 42, "BOUNCING")], pe: [row(22600, "PE", 3, 37, "AT SUPPORT")], label: "11:00 IST" });
-  assert.match(m, /👉 OPPORTUNITY: 23050 CE is moving up from its support ₹80\.1 — 42% chance to break ₹98/);
-  assert.match(m, /📈 BEST CALL: 23050 CE @ ₹87  ★★★★★/); assert.match(m, /Buy zone \(support\): ₹80\.1  ·  Sell zone \(resistance\): ₹98/);
-  assert.match(m, /✅ Chance to break resistance: 42%   ❌ Support breaks first: 44%/); assert.match(m, /Other calls \(strike · price · chance\): 23000 ₹87 12%/);
+  assert.match(m, /👉 BUY 23050 CE — rising from ₹80\.1, 42% chance to break ₹98/);
+  assert.match(m, /📈 CALL 23050 CE ₹87 ★★★★★ · 🟢 rising from S/); assert.match(m, /Buy ₹80\.1 · Sell ₹98 · Break R 42% · S fails 44%/);
+  assert.match(m, /At 23,094: ₹173\.9 \(\+99%\) · other way −58% · liquid/); assert.match(m, /Calls: 23000 ₹87 12%/);
   const w = hotMessage({ name: "SENSEX", spot: 73710, ceTarget: 74518, peTarget: 73229, ceFrom: "plan T1", peFrom: "plan T1", ce: [row(74000, "CE", 2, 33, "MID-RANGE")], pe: [], label: "11:00 IST" });
-  assert.match(w, /👉 WAIT/); assert.match(w, /BEST PUT: none/); assert.ok(m.length < 3800);
+  assert.match(w, /👉 WAIT/); assert.match(w, /📉 PUT: none liquid/); assert.ok(m.length < 1500);
 });
 
 import { oi15Message } from "./dayRangeAlerts";
@@ -59,5 +59,6 @@ test("15-min OI update: NIFTY and SENSEX in one message, total call / put OI, PC
   const m = oi15Message([it("NIFTY 50", 22950), it("SENSEX", 73900)], "11:15 IST");
   assert.match(m, /📊 OI UPDATE · 11:15 IST/); assert.match(m, /━━ NIFTY 50 22,950 ━━\nTotal OI: Calls 1457\.3L · Puts 1276\.9L · PCR 0\.88 \(15 min ago 0\.86\)/);
   assert.match(m, /Last 15 min: Calls \+2\.1L · Puts \+4\.5L → Bulls 68% · Bears 32%/); assert.match(m, /Today: Calls \+65\.0L · Puts \+40\.0L/);
-  assert.match(m, /🧱 Call wall 23,000 · 96\.8L · STRENGTHENING \(\+5\.2%\)/); assert.match(m, /━━ SENSEX 73,900 ━━/); assert.ok(m.indexOf("NIFTY") < m.indexOf("SENSEX"));
+  assert.match(m, /🧱 23,000 · 96\.8L · STRENGTHENING \(\+5\.2%\)  🛡 22,800 · 42\.9L · WEAKENING \(−3\.4%\)|🧱 23,000 · 96\.8L · STRENGTHENING \(\+5\.2%\)  🛡 22,800 · 42\.9L · WEAKENING \(-3\.4%\)/);
+  assert.match(m, /👉 🔴 BEARISH — call writing heavier/); assert.match(m, /━━ SENSEX 73,900 ━━/); assert.ok(m.indexOf("NIFTY") < m.indexOf("SENSEX"));
 });

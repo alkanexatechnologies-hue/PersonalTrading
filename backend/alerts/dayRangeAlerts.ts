@@ -50,26 +50,23 @@ export function breakMessage(name: string, ev: NonNullable<ReturnType<typeof onT
   ].filter(Boolean).join("\n");
 }
 
+const SHORT: [RegExp, string][] = [[/^Prev week high/, "PWH"], [/^Prev week low/, "PWL"], [/^Prev day high/, "PDH"], [/^Prev day low/, "PDL"], [/^Prev close/, "PDC"],
+  [/^R(\d) pivot/, "R$1"], [/^S(\d) pivot/, "S$1"], [/^OI call wall/, "CallWall"], [/^OI put wall/, "PutWall"], [/^Major call OI/, "MaxCall"], [/^Major put OI/, "MaxPut"], [/^Daily (buyer|seller) trendline/, "D-TL"], [/^15m (buyer|seller) trendline/, "15m-TL"]];
+export const shortLabel = (l: string) => { for (const [re, t] of SHORT) if (re.test(l)) return l.replace(re, t); return l; };
 export interface LadderRow { price: number; label: string; dist: number; hold: number | null; tests: number; confluence?: boolean }
 export function summaryMessage(rows: { name: string; price: number | null; high: number | null; low: number | null; changePct?: number | null; lv: Levels }[], label: string): string {
   const lines = [`📊 Index levels — ${label}`];
   for (const r of rows) {
     lines.push(`\n${r.name}: ${n0(r.price)}${r.changePct != null ? ` (${r.changePct > 0 ? "+" : ""}${r.changePct.toFixed(2)}%)` : ""}`);
-    lines.push(`  Day H ${n0(r.high)} · L ${n0(r.low)}`);
-    lines.push(`  Resistance ${n0(r.lv.resistance)}${r.lv.nextResistance ? ` / ${n0(r.lv.nextResistance)}` : ""} · Support ${n0(r.lv.support)}${r.lv.nextSupport ? ` / ${n0(r.lv.nextSupport)}` : ""}`);
-    if (r.lv.pcr != null) lines.push(`  PCR ${r.lv.pcr.toFixed(2)} ${r.lv.pcrLabel || ""}${r.lv.pdh != null ? ` · Prev day H ${n0(r.lv.pdh)} / L ${n0(r.lv.pdl)}` : ""}`);
-    // 📏 level ladder: nearest levels above (resistance) and below (support), distance from the price, tested hold %
+    lines.push(`  Day H ${n0(r.high)} · L ${n0(r.low)} · R ${n0(r.lv.resistance)} · S ${n0(r.lv.support)}${r.lv.pcr != null ? ` · PCR ${r.lv.pcr.toFixed(2)}` : ""}`);
+    // 📏 level ladder: nearest levels above / below, short names, tested hold % — one line each side
     const lad = (r as any).ladder as { above: LadderRow[]; below: LadderRow[] } | undefined;
     if (lad && (lad.above.length || lad.below.length)) {
-      const row = (x: LadderRow, up: boolean) => `   ${up ? "🔺" : "🔻"} ${n0(x.price)}  ${x.label}  (${Math.round(x.dist) === 0 ? "at price" : `${up ? "+" : "−"}${n0(Math.abs(x.dist))} pts`})${x.hold != null ? ` · held ${x.hold}% of ${x.tests}` : ""}${x.confluence ? " ★" : ""}`;
-      lines.push("  Levels above (resistance):");
-      lines.push(...(lad.above.length ? [...lad.above].reverse().map((x) => row(x, true)) : ["   —"]));
-      lines.push(`   ▶ price ${n0(r.price)}`);
-      lines.push("  Levels below (support):");
-      lines.push(...(lad.below.length ? lad.below.map((x) => row(x, false)) : ["   —"]));
+      const it = (x: LadderRow) => `${n0(x.price)} ${shortLabel(x.label)}${x.hold != null ? ` ${x.hold}%` : ""}${x.confluence ? "★" : ""}`;
+      lines.push(`  🔺 ${lad.above.length ? lad.above.map(it).join(" · ") : "—"}`);
+      lines.push(`  🔻 ${lad.below.length ? lad.below.map(it).join(" · ") : "—"}`);
     }
   }
-  lines.push("\nOI walls: nearest strike holding ≥ half of the biggest OI on that side. Levels: the plan ladder (pivots, previous day / week, OI walls, trendlines); held % = how often price turned there in the last 60 sessions (level memory); ★ = two kinds of level together. Context only.");
   return lines.join("\n");
 }
 
@@ -90,25 +87,21 @@ export function hotMessage(o: { name: string; spot: number; ceTarget: number; pe
   const bc = bestRow(o.ce), bp = bestRow(o.pe), all = [bc, bp].filter(Boolean) as HotMsgRow[];
   const top = [...all].sort((a, b) => (b.rating?.stars ?? 0) - (a.rating?.stars ?? 0) || (b.rating?.passPct ?? -1) - (a.rating?.passPct ?? -1))[0];
   const st = top?.rating?.state, verdict = !top ? "👉 NO DATA — no liquid premium right now."
-    : (top.rating?.stars ?? 0) >= 4 ? `👉 OPPORTUNITY: ${top.strike} ${top.side} is moving up from its support ${rs(top.rating?.support)} — ${top.rating?.passPct}% chance to break ${rs(top.rating?.resistance)}.`
-    : st === "AT SUPPORT" ? `👉 WATCH: ${top.strike} ${top.side} is on support ${rs(top.rating?.support)} — buy only after a green 15-min close above it (${top.rating?.passPct}% chance to break ${rs(top.rating?.resistance)}).`
-    : "👉 WAIT — no premium is starting up from support right now (mid-range / near resistance). Next check in 1 hour.";
-  const where: Record<string, string> = { BOUNCING: "🟢 moving up from support", "AT SUPPORT": "🟡 sitting on support", "MID-RANGE": "⚪ mid-range", "AT RESISTANCE": "🟠 near resistance", "BELOW SUPPORT": "🔴 below support (avoid)" };
-  const block = (x: HotMsgRow | null, side: "CE" | "PE", target: number, from: string) => {
-    if (!x) return [`${side === "CE" ? "📈 BEST CALL" : "📉 BEST PUT"}: none (no liquid ${side === "CE" ? "call" : "put"} with upside)`];
+    : (top.rating?.stars ?? 0) >= 4 ? `👉 BUY ${top.strike} ${top.side} — rising from ${rs(top.rating?.support)}, ${top.rating?.passPct}% chance to break ${rs(top.rating?.resistance)}`
+    : st === "AT SUPPORT" ? `👉 WATCH ${top.strike} ${top.side} on support ${rs(top.rating?.support)} — buy on a green 15-min close (${top.rating?.passPct}% chance to break ${rs(top.rating?.resistance)})`
+    : "👉 WAIT — no premium rising from support.";
+  const where: Record<string, string> = { BOUNCING: "🟢 rising from S", "AT SUPPORT": "🟡 on S", "MID-RANGE": "⚪ mid", "AT RESISTANCE": "🟠 near R", "BELOW SUPPORT": "🔴 below S" };
+  const block = (x: HotMsgRow | null, side: "CE" | "PE", target: number) => {
+    if (!x) return [`${side === "CE" ? "📈 CALL" : "📉 PUT"}: none liquid`];
     const R = x.rating;
-    return [`${side === "CE" ? "📈 BEST CALL" : "📉 BEST PUT"}: ${x.strike} ${side} @ ${rs(x.ltp)}  ${R ? "★".repeat(R.stars) + "☆".repeat(5 - R.stars) : ""}${x.hot ? " 🔥" : ""}`,
-      `   Now: ${where[R?.state || ""] ?? "—"}`,
-      `   Buy zone (support): ${rs(R?.support ?? x.levels?.support?.[0]?.price)}  ·  Sell zone (resistance): ${rs(R?.resistance ?? x.levels?.resistance?.[0]?.price)}`,
-      `   ✅ Chance to break resistance: ${R?.passPct != null ? R.passPct + "%" : "n/a"}   ❌ Support breaks first: ${R?.failPct != null ? R.failPct + "%" : "n/a"}`,
-      `   🎯 If ${o.name} reaches ${n0(target)} (${from}) in 1 hour: ${rs(x.atTarget)} (+${x.upPct}%) · if it goes the other way: −${x.riskPct}%`,
-      `   Liquidity: ${x.liq === "GOOD" ? "good" : x.liq === "NO QUOTE" ? "no live quote" : "wide"}${x.spreadPct != null ? ` (spread ${x.spreadPct}%)` : ""} · Δ ${x.delta ?? "—"}`];
+    return [`${side === "CE" ? "📈 CALL" : "📉 PUT"} ${x.strike} ${side} ${rs(x.ltp)} ${R ? "★".repeat(R.stars) + "☆".repeat(5 - R.stars) : ""}${x.hot ? "🔥" : ""} · ${where[R?.state || ""] ?? "—"}`,
+      `   Buy ${rs(R?.support ?? x.levels?.support?.[0]?.price)} · Sell ${rs(R?.resistance ?? x.levels?.resistance?.[0]?.price)} · Break R ${R?.passPct != null ? R.passPct + "%" : "—"} · S fails ${R?.failPct != null ? R.failPct + "%" : "—"}`,
+      `   At ${n0(target)}: ${rs(x.atTarget)} (+${x.upPct}%) · other way −${x.riskPct}% · ${x.liq === "GOOD" ? "liquid" : x.liq === "NO QUOTE" ? "no quote" : "wide"}`];
   };
   const others = (rows: HotMsgRow[], best: HotMsgRow | null) => rows.filter((x) => x !== best).map((x) => `${x.strike} ${rs(x.ltp)} ${x.rating?.passPct != null ? x.rating.passPct + "%" : "—"}`).join(" · ") || "—";
-  return [`🔥 ${o.name} — HOT PREMIUMS · ${o.label}`, `${o.name} ${n0(o.spot)}`, "", verdict, "",
-    ...block(bc, "CE", o.ceTarget, o.ceFrom), "", ...block(bp, "PE", o.peTarget, o.peFrom), "",
-    `Other calls (strike · price · chance): ${others(o.ce, bc)}`, `Other puts: ${others(o.pe, bp)}`, "",
-    "Chance % = how often, in 2 years of real Dhan option data, a premium that started up from a support like this closed above its resistance within 2 hours. Information only — the plan decides the trade."].join("\n");
+  return [`🔥 ${o.name} ${n0(o.spot)} — HOT PREMIUMS · ${o.label}`, verdict, "",
+    ...block(bc, "CE", o.ceTarget), ...block(bp, "PE", o.peTarget), "",
+    `Calls: ${others(o.ce, bc)}`, `Puts: ${others(o.pe, bp)}`].join("\n");
 }
 
 // 📊 OI ANALYSIS data (Dhan option chain + the app's own minute snapshots) for the 15-min OI update below.
@@ -126,11 +119,10 @@ export function oi15Message(items: OiMsgIn[], label: string): string {
     const w = (x: OiMsgIn["callWall"]) => (x ? `${n0(x.strike)} · ${x.oiL}L · ${x.state}${x.pct != null && x.shiftedFrom == null ? ` (${x.pct >= 0 ? "+" : ""}${x.pct}%)` : x.shiftedFrom != null ? ` from ${n0(x.shiftedFrom)}` : ""}` : "—");
     return [`━━ ${o.name} ${n0(o.spot)} ━━`,
       `Total OI: Calls ${o.totalCeL}L · Puts ${o.totalPeL}L · PCR ${o.pcr ?? "—"}${o.pcrBefore != null ? ` (${o.hourMin} min ago ${o.pcrBefore})` : ""}`,
-      o.hour ? `Last ${o.hourMin} min: Calls ${lk(o.hour.ce)} · Puts ${lk(o.hour.pe)} → ${tl(o.hour.tilt)}` : "Last 15 min: building (needs the app's chain snapshots)",
+      o.hour ? `Last ${o.hourMin} min: Calls ${lk(o.hour.ce)} · Puts ${lk(o.hour.pe)} → ${tl(o.hour.tilt)}` : "Last 15 min: — (first read)",
       `Today: Calls ${lk(o.today.ce)} · Puts ${lk(o.today.pe)} → ${tl(o.today.tilt)}`,
-      `🧱 Call wall ${w(o.callWall)}`, `🛡 Put wall ${w(o.putWall)}`,
-      `👉 ${o.bias === "BULLISH" ? "🟢 BULLISH" : o.bias === "BEARISH" ? "🔴 BEARISH" : "⚪ NEUTRAL"} — ${o.biasWhy}`].join("\n");
+      `🧱 ${w(o.callWall)}  🛡 ${w(o.putWall)}`,
+      `👉 ${o.bias === "BULLISH" ? "🟢 BULLISH — put writing heavier" : o.bias === "BEARISH" ? "🔴 BEARISH — call writing heavier" : "⚪ NEUTRAL — balanced writing"}`].join("\n");
   };
-  return [`📊 OI UPDATE · ${label}`, "", ...items.flatMap((o, i) => [...(i ? ["", "⁣", ""] : []), sec(o)]), "",
-    "OI in lakh contracts (Dhan option chain). Last 15 min / Today = writing near the price. Tilt = who writes more — a description, not a win probability."].join("\n");
+  return [`📊 OI UPDATE · ${label}`, "", ...items.flatMap((o, i) => [...(i ? ["", "⁣", ""] : []), sec(o)])].join("\n");
 }

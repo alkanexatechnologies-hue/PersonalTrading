@@ -9579,9 +9579,14 @@ router.get("/telegram/preview", requirePermission("oiAnalysis"), async (_req: Re
   try {
     const pays = (await Promise.all(["^NSEI", "^BSESN"].map((x) => premiumCenterPayload({ symbol: x, interval: "15m" }).catch(() => null)))).filter((x: any) => x?.available);
     const plan = CP.morningPlan(pays, Object.fromEntries(pays.map((d: any) => [d.symbol, cpOdds(d.symbol) || ""])));
-    const rh: any = await cached("premarket:results-heat:preview", 60_000, async () => (await fetch(`http://127.0.0.1:${process.env.PORT || 5173}/api/premarket/results-heat`).then((r) => r.json()).catch(() => null))).catch(() => null);
-    const h = rh?.open913 || null;
-    const open913 = h?.rows?.length ? TG.openingHeatMsg(h.rows, (_cache.get("premarket:overview")?.v as any)?.overall?.bias || "NEUTRAL", new Date(Date.now() + 19800000).toISOString().slice(0, 10)) : "(no 09:13 snapshot yet today)";
+    // the 09:14 opening heat exactly as the job builds it (today's 09:13 snapshot)
+    const day0 = new Date(Date.now() + 19800000).toISOString().slice(0, 10), snap0: any = latestHeatSnapshot(day0, true), coefs0 = readContribModel()?.coefs || null;
+    let open913 = "(no 09:13 snapshot today)";
+    if (snap0 && snap0.date === day0 && coefs0) {
+      const dd: any[] = await getDailyCached("^NSEI", 15).catch(() => []), prev = dd.filter((c: any) => new Date((c.time + 19800) * 1000).toISOString().slice(0, 10) < day0).pop();
+      const h = niftyConstituentHeat(snap0, coefs0, prev ? prev.close : null);
+      if (h) open913 = TG.openingHeatMsg(h.rows, (_cache.get("premarket:overview")?.v as any)?.overall?.bias || "NEUTRAL", day0);
+    }
     const summary = rangeSummaryMessage(await summaryRows(), `${new Date(Date.now() + 19800000).toISOString().slice(11, 16)} IST (preview)`);
     const best = [] as any[];
     for (const d of pays as any[]) {

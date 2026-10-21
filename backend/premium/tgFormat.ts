@@ -79,7 +79,7 @@ function bestBlock(d: any, trade: any | null, eye: any | null, zh: any | null): 
 /** 15-minute message: the best opportunity on NIFTY and SENSEX, together. */
 export function bestOpportunityMsg(items: { d: any; trade: any | null; eye: any | null; zh: any | null }[]): string {
   const t = hm(Math.floor(Date.now() / 1000));
-  return items.filter((x) => x.d?.available).map((x) => [`⭐ <b>BEST OPPORTUNITY · ${esc(short(x.d.name))}</b> · ${t}`, bestBlock(x.d, x.trade, x.eye, x.zh), "<i>Start = a 15-min candle CLOSE beyond the level · advisory only</i>"].join("\n")).join(SPLIT);
+  return items.filter((x) => x.d?.available).map((x) => [`⭐ <b>BEST OPPORTUNITY · ${esc(short(x.d.name))}</b> · ${t}`, bestBlock(x.d, x.trade, x.eye, x.zh)].join("\n")).join(SPLIT);
 }
 /** 30-minute message: the full read of one index. */
 export function fullReadMsg(d: any, trade: any | null, eye: any | null, zh: any | null, odds?: string): string {
