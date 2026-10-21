@@ -38,6 +38,26 @@ export function dayFeatures(day: string, mins: [number, number][], prev: { high:
     hiAfter, loAfter, pullAfterHi: hiAfter - Math.min(...tailAfterHi), bounceAfterLo: Math.max(...tailAfterLo) - loAfter };
 }
 
+/** Features of one session from Dhan's 5-MIN candles (true OHLC: the 09:15 candle's open is NSE's official open, highs / lows
+ *  include every tick) and the OFFICIAL previous day (Dhan daily: high / low / close; the close is NSE's closing price). The
+ *  1-minute research series stores one price per minute, so its "open" was ~27 pts off the official open (median, 2 years) —
+ *  this is the source the opening study uses. */
+export function dayFeatures5m(day: string, bars: { time: number; open: number; high: number; low: number; close: number }[], prev: { high: number; low: number; close: number }, prevRanges: number[], officialClose?: number | null): DayFeat | null {
+  const b = bars.filter((x) => mn(x.time) >= 555 && mn(x.time) < 930).sort((p, q) => p.time - q.time);
+  if (b.length < 60 || mn(b[0].time) !== 555 || prevRanges.length < 5) return null;
+  const atr = prevRanges.slice(-14).reduce((a, x) => a + x, 0) / Math.min(14, prevRanges.length);
+  const at = (m: number) => b.find((x) => mn(x.time) === m) ?? null, win = (a: number, z: number) => b.filter((x) => mn(x.time) >= a && mn(x.time) <= z);
+  const c915 = at(555), c925 = at(565), or = win(555, 565), w2045 = win(560, 580), w1015 = win(555, 610), after = b.filter((x) => mn(x.time) >= 570);
+  if (!c915 || !c925 || or.length < 3 || !w2045.length || !after.length) return null;
+  let hiAfter = -Infinity, hiAt = 0, loAfter = Infinity, loAt = 0;
+  after.forEach((x, i) => { if (x.high > hiAfter) { hiAfter = x.high; hiAt = i; } if (x.low < loAfter) { loAfter = x.low; loAt = i; } });
+  const tailLo = after.slice(hiAt + 1).map((x) => x.low), tailHi = after.slice(loAt + 1).map((x) => x.high);
+  return { day, pdc: prev.close, pdh: prev.high, pdl: prev.low, atr, open: c915.open, p920: c915.close, p930: c925.close, close: officialClose ?? b[b.length - 1].close,
+    or15h: Math.max(...or.map((x) => x.high)), or15l: Math.min(...or.map((x) => x.low)), lo2045: Math.min(...w2045.map((x) => x.low)), hi2045: Math.max(...w2045.map((x) => x.high)),
+    lo1015: Math.min(...w1015.map((x) => x.low)), hi1015: Math.max(...w1015.map((x) => x.high)), hiAfter, loAfter,
+    pullAfterHi: tailLo.length ? hiAfter - Math.min(...tailLo) : 0, bounceAfterLo: tailHi.length ? Math.max(...tailHi) - loAfter : 0 };
+}
+
 // ---------------------------------------------------------------- buckets
 export const GAP_BUCKETS = [
   { key: "BIG GAP DOWN", lo: -Infinity, hi: -0.5 }, { key: "GAP DOWN", lo: -0.5, hi: -0.15 }, { key: "FLAT", lo: -0.15, hi: 0.15 },
@@ -124,7 +144,13 @@ function turnLevel(levels: MapLevel[], a: number, b: number) {
   const lo = Math.min(a, b), hi = Math.max(a, b);
   return levels.filter((l) => l.price >= lo && l.price <= hi).sort((x, y) => (y.holdPct ?? -1) - (x.holdPct ?? -1) || (y.tests ?? 0) - (x.tests ?? 0) || Math.abs(x.price - a) - Math.abs(y.price - a))[0] ?? null;
 }
-const held = (l: MapLevel) => (l.holdPct != null && l.tests ? ` — held ${l.holdPct}% of ${l.tests} past tests` : "");
+const held = (l: MapLevel) => (l.holdPct != null && l.tests ? ` — held ${l.holdPct}% of ${l.tests} past tests${l.tests < 8 ? " (small sample)" : ""}` : "");
+/** A weak first level (held < 50 %) is named as such, with the strongest level just beyond it (the next 3 in that direction). */
+const weakNote = (l: MapLevel, beyond: MapLevel[], up: boolean) => {
+  if (l.holdPct == null || l.holdPct >= 50 || (l.tests ?? 0) < 5) return [];
+  const strong = beyond.filter((x) => (x.holdPct ?? 0) >= 50 && (x.tests ?? 0) >= 8).sort((a, b) => (b.holdPct ?? 0) - (a.holdPct ?? 0))[0];
+  return [`⚠️ ${l.label} ${nf(l.price)} is a WEAK level (usually breaks)${strong ? ` — the stronger ${up ? "rejection" : "support"} is ${strong.label} ${nf(strong.price)} (held ${strong.holdPct}% of ${strong.tests})` : ""}`];
+};
 
 export function nextDayMap(o: MapIn): { points: MapPoint[]; basis: string; reference: number } {
   const S = o.study, A = o.atr, P: MapPoint[] = [], seen = o.seen || {};
@@ -182,15 +208,17 @@ export function nextDayMap(o: MapIn): { points: MapPoint[]; basis: string; refer
   const rej = turnLevel(above, upA, upB) ?? above.sort((a, b) => a.price - b.price)[0] ?? null, bnc = turnLevel(below, dnA, dnB) ?? below.sort((a, b) => b.price - a.price)[0] ?? null;
   P.push({ n: 5, title: "If it goes UP — where rejection is most likely", lines: rej ? [
     `<b>Rejection zone: ${rej.label} ${nf(rej.price)}</b>${held(rej)}`,
+    ...weakNote(rej, above.filter((l) => l.price > rej.price).sort((a, b) => a.price - b.price).slice(0, 3), true),
     `Typical rise after 09:30 from this stand: +${nf((sz?.upExtMed ?? 0) * A)} pts (strong day +${nf((sz?.upExtP75 ?? 0) * A)}) → ${nameAt(o.levels, base + (sz?.upExtMed ?? 0) * A, A)}`,
     `<b>If rejected there: falls ${nf((tz.pullMed ?? 0) * A)} pts typical → ${nameAt(o.levels, rej.price - (tz.pullMed ?? 0) * A, A)}</b> (deep: ${nf((tz.pullP75 ?? 0) * A)} → ${nameAt(o.levels, rej.price - (tz.pullP75 ?? 0) * A, A)})`,
     `Above it: ${above.filter((l) => l !== rej).sort((a, b) => a.price - b.price).slice(0, 3).map((l) => `${l.label} ${nf(l.price)}`).join(" · ") || "—"}`,
   ] : ["No level above in the ladder."] });
   P.push({ n: 6, title: "If it goes DOWN — where the bounce is most likely", lines: bnc ? [
     `<b>Support zone: ${bnc.label} ${nf(bnc.price)}</b>${held(bnc)}`,
+    ...weakNote(bnc, below.filter((l) => l.price < bnc.price).sort((a, b) => b.price - a.price).slice(0, 3), false),
     `Typical fall after 09:30 from this stand: −${nf((sz?.dnExtMed ?? 0) * A)} pts (weak day −${nf((sz?.dnExtP75 ?? 0) * A)}) → ${nameAt(o.levels, base - (sz?.dnExtMed ?? 0) * A, A)}`,
     `<b>If it bounces there: rises ${nf((tz.bounceMed ?? 0) * A)} pts typical → ${nameAt(o.levels, bnc.price + (tz.bounceMed ?? 0) * A, A)}</b> (strong: ${nf((tz.bounceP75 ?? 0) * A)} → ${nameAt(o.levels, bnc.price + (tz.bounceP75 ?? 0) * A, A)})`,
     `Below it: ${below.filter((l) => l !== bnc).sort((a, b) => b.price - a.price).slice(0, 3).map((l) => `${l.label} ${nf(l.price)}`).join(" · ") || "—"}`,
   ] : ["No level below in the ladder."] });
-  return { points: P, reference: r1(base), basis: `${S.index} · ${S.days} sessions of Dhan 1-minute data (${S.from} → ${S.to}) · daily ATR ${nf(A)} pts · probabilities are history, not a promise; most are close to a coin flip` };
+  return { points: P, reference: r1(base), basis: `${S.index} · ${S.days} sessions of ${(S as any).source || "Dhan data"} (${S.from} → ${S.to}) · daily ATR ${nf(A)} pts · probabilities are history, not a promise; most are close to a coin flip` };
 }

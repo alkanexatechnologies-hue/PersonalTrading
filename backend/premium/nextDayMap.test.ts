@@ -51,3 +51,13 @@ test("nextDayMap: six points; before the open it gives the likely open range, af
   assert.match(live.points[4].lines[0], /Rejection zone: (R1 pivot 1,040|Prev week high 1,030|Prev day high 1,020)/);
   assert.match(live.points[5].lines[0], /Support zone: Prev day low 980<\/b> — held 55% of 9 past tests/);
 });
+
+import { dayFeatures5m } from "./nextDayMap";
+test("dayFeatures5m: the 09:15 candle's OPEN is the open, real highs / lows, official close; 09:20 / 09:30 from candle closes", () => {
+  const T = Date.parse("2026-10-21T03:45:00Z") / 1000;
+  const bars = Array.from({ length: 75 }, (_, i) => ({ time: T + i * 300, open: 100 + i, high: 103 + i, low: 98 + i, close: 101 + i }));
+  const f = dayFeatures5m("2026-10-21", bars, { high: 120, low: 90, close: 99 }, [30, 30, 30, 30, 30], 175)!;
+  assert.equal(f.open, 100); assert.equal(f.p920, 101); assert.equal(f.p930, 103); assert.equal(f.or15h, 105); assert.equal(f.or15l, 98);
+  assert.equal(f.close, 175, "official close"); assert.equal(f.hiAfter, 103 + 74); assert.equal(f.lo2045, 99); assert.equal(f.atr, 30);
+  assert.equal(dayFeatures5m("x", bars.slice(1), { high: 1, low: 1, close: 1 }, [1, 1, 1, 1, 1]), null, "must start with the 09:15 candle");
+});
