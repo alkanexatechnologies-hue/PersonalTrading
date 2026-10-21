@@ -39,11 +39,14 @@ test("messages carry levels", () => {
 });
 
 import { hotMessage } from "./dayRangeAlerts";
-test("hourly hot-premium message: calls and puts with the premium S → R range, rating, target and liquidity; under Telegram's size limit", () => {
-  const row = (strike: number, side: "CE" | "PE", hot = false) => ({ strike, side, money: "OTM", rank: 1, hot, ltp: 87, atTarget: 173.9, upPct: 99, riskPct: 58, rr: 1.7, liq: "GOOD", spreadPct: 1.1, delta: 0.34,
-    levels: { support: [{ price: 80.1, touches: 2 }], resistance: [{ price: 98, touches: 1 }], state: "MID-RANGE" }, rating: { stars: 4, passPct: 34 } });
-  const m = hotMessage({ name: "NIFTY 50", spot: 22811, ceTarget: 23094, peTarget: 22800, ceFrom: "plan T1", peFrom: "plan T1", ce: [1, 2, 3, 4, 5].map((i) => row(23000 + i * 50, "CE", i === 2)), pe: [1, 2, 3, 4, 5].map((i) => row(22800 - i * 50, "PE")), label: "11:00 IST" });
-  assert.match(m, /📈 CALLS — if NIFTY 50 reaches 23,094 \(plan T1\)/); assert.match(m, /📉 PUTS/);
-  assert.match(m, /🔥 23100 CE ₹87 ★★★★☆ 34%/); assert.match(m, /S ₹80\.1 \(2×\) → R ₹98 \(1×\) · mid/); assert.match(m, /target ₹173\.9 \(\+99%\) · risk −58% · R:R 1\.7 · Δ 0\.34 · liquid 1\.1%/);
-  assert.ok(m.length < 3800, `length ${m.length}`);
+test("hourly hot-premium message: verdict first, best call / put with buy zone, sell zone and the tested % chances", () => {
+  const row = (strike: number, side: "CE" | "PE", stars: number, pass: number, state: string) => ({ strike, side, money: "OTM", rank: 1, hot: false, ltp: 87, atTarget: 173.9, upPct: 99, riskPct: 58, rr: 1.7, liq: "GOOD", spreadPct: 1.1, delta: 0.34,
+    levels: { support: [{ price: 80.1, touches: 2 }], resistance: [{ price: 98, touches: 1 }], state: "MID-RANGE" }, rating: { stars, passPct: pass, failPct: 44, state, support: 80.1, resistance: 98 } });
+  const m = hotMessage({ name: "NIFTY 50", spot: 22811, ceTarget: 23094, peTarget: 22800, ceFrom: "plan T1", peFrom: "plan T1",
+    ce: [row(23000, "CE", 2, 12, "MID-RANGE"), row(23050, "CE", 5, 42, "BOUNCING")], pe: [row(22600, "PE", 3, 37, "AT SUPPORT")], label: "11:00 IST" });
+  assert.match(m, /👉 OPPORTUNITY: 23050 CE is moving up from its support ₹80\.1 — 42% chance to break ₹98/);
+  assert.match(m, /📈 BEST CALL: 23050 CE @ ₹87  ★★★★★/); assert.match(m, /Buy zone \(support\): ₹80\.1  ·  Sell zone \(resistance\): ₹98/);
+  assert.match(m, /✅ Chance to break resistance: 42%   ❌ Support breaks first: 44%/); assert.match(m, /Other calls \(strike · price · chance\): 23000 ₹87 12%/);
+  const w = hotMessage({ name: "SENSEX", spot: 73710, ceTarget: 74518, peTarget: 73229, ceFrom: "plan T1", peFrom: "plan T1", ce: [row(74000, "CE", 2, 33, "MID-RANGE")], pe: [], label: "11:00 IST" });
+  assert.match(w, /👉 WAIT/); assert.match(w, /BEST PUT: none/); assert.ok(m.length < 3800);
 });
