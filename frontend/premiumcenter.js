@@ -750,10 +750,17 @@ async function ppcCalcRun() {
 
 /** 🎯 3× potential (top of the screen): NIFTY + SENSEX, two strikes each with the best TESTED chance of tripling (2 years of
  *  Dhan option premiums) — on expiry day the same-day chance, otherwise the chance by expiry. Refreshed each minute. */
-async function ppcLoad3x() {
-  if (PPC._3xAt && Date.now() - PPC._3xAt < 60000) return; PPC._3xAt = Date.now();
-  let r = null; try { r = await fetch("/api/triple-potential").then((x) => x.json()); } catch { return; }
+async function ppcLoad3x(force) {
+  if (!force && PPC._3xAt && Date.now() - PPC._3xAt < 60000) return; PPC._3xAt = Date.now();
+  // your expected open per index (kept for today in this browser); empty = automatic (pre-open price, then the real open)
+  const day = new Date(Date.now() + 19800000).toISOString().slice(0, 10);
+  if (!PPC._3xOpen) { try { const o = JSON.parse(localStorage.getItem("ppc-3x-open") || "{}"); PPC._3xOpen = o.day === day ? o.v || {} : {}; } catch { PPC._3xOpen = {}; } }
+  const qs = `?nOpen=${PPC._3xOpen["^NSEI"] || ""}&sOpen=${PPC._3xOpen["^BSESN"] || ""}`;
+  let r = null; try { r = await fetch("/api/triple-potential" + qs).then((x) => x.json()); } catch { return; }
   const el = ppcEl("ppc-3x"); if (!el || !r?.ok) return;
+  if (!el._wired) { el._wired = true; el.addEventListener("change", (e) => { const i = e.target.closest("[data-3x-open]"); if (!i) return;
+    const v = Number(i.value); if (v > 0) PPC._3xOpen[i.dataset["3xOpen"]] = v; else delete PPC._3xOpen[i.dataset["3xOpen"]];
+    try { localStorage.setItem("ppc-3x-open", JSON.stringify({ day, v: PPC._3xOpen })); } catch { /* private mode */ } ppcLoad3x(true); }); }
   const n = (v) => (v == null ? "—" : Math.round(v).toLocaleString("en-IN")), rs = (v) => (v == null ? "—" : "₹" + (Math.round(v * 10) / 10).toLocaleString("en-IN"));
   const st = { "NEAR SUPPORT": "on support", "NEAR RESISTANCE": "near resistance", "BELOW SUPPORT": "below support", "MID-RANGE": "mid-range" };
   const pick = (x) => `<div class="p3x-r ${x.side === "CE" ? "ce" : "pe"}">
@@ -764,6 +771,17 @@ async function ppcLoad3x() {
         <span class="p3x-rr">Resistance ${(x.resistances || []).length ? x.resistances.map((z, i) => `R${i + 1} <b>${rs(z.price)}</b> <i>${z.touches}×</i>`).join(" · ") : "—"}</span>${x.state ? ` <span class="mut">· now ${st[x.state] || x.state.toLowerCase()}</span>` : ""}</div>
       ${x.plan ? `<div class="p3x-plan">📍 <b>Plan:</b> ${ppcEsc(x.plan.how)} · premium there ≈ <b>${rs(x.plan.entryPrem)}</b> → <b class="ppc-up">${rs(x.plan.exitPrem)}</b></div>` : ""}
       <div class="p3x-m mut">${x.needIndex != null ? `needs ${n(x.needIndex)} (${x.needMove >= 0 ? "+" : ""}${n(x.needMove)} pts) within 1 hour · ` : ""}${x.liq === "GOOD" ? "liquid" : x.liq === "NO QUOTE" ? "no live quote" : "wide spread"}${x.delta != null ? " · Δ " + x.delta : ""}</div></div>`;
+  // 📍 the opening scenario: the gap and what the day did after this kind of gap (2 years, Dhan 5-min + official daily)
+  const scen = (it) => {
+    if (it.gapOpen == null || !it.gapGroup) return `<div class="p3x-scn mut">📍 Opening scenario: type an expected open, or it fills in from the pre-open price (09:00) and the real open (09:15).</div>`;
+    const S = it.scenario, dn = /DOWN/.test(it.gapGroup), up = /UP/.test(it.gapGroup), w = dn ? "fell" : "rose", g = (v) => `<b>${v}%</b>`;
+    const head = `📍 Open <b>${n(it.gapOpen)}</b> <span class="mut">(${ppcEsc(it.openSrc)})</span> → <b class="${dn ? "ppc-dn" : up ? "ppc-up" : ""}">${ppcEsc(it.gapGroup)}</b> ${it.gapPts != null ? `${it.gapPts >= 0 ? "+" : "−"}${n(Math.abs(it.gapPts))} pts (${it.gapAtr >= 0 ? "+" : ""}${it.gapAtr} day-range) vs prev close ${n(it.pdc)}` : ""}`;
+    if (!S || (!dn && !up)) return `<div class="p3x-scn">${head}${!dn && !up ? ' <span class="mut">· flat open — no gap read; trade the levels</span>' : ""}</div>`;
+    return `<div class="p3x-scn">${head} <span class="mut">· ${S.n} past days like this:</span><br>
+      gap filled by 10:15 ${g(S.fill1015)} · by the close ${g(S.fillClose)} · ${w} another half-range ${g(S.cont50)} · closed ${dn ? "below" : "above"} the open ${g(S.closeWithGap)}<br>
+      👉 09:30 still ${dn ? "below" : "above"} the open → ${w} another half-range ${g(S.holds930.cont50)} <span class="mut">(${S.holds930.n} days)</span> · 09:30 back ${dn ? "above" : "below"} the open → gap filled ${g(S.against930.fillPct)} <span class="mut">(${S.against930.n} days)</span>
+      <span class="mut">· 3× odds below are from ${ppcEsc(it.oddsBasis)}${it.openSrc && it.openSrc !== "today's open" ? `, premiums priced at this open` : ""}</span></div>`;
+  };
   const turnRow = (it) => { const R = it.rejection, B = it.bounce, nm = (z) => (z ? `<b>${n(z.price)}</b> <i>${ppcEsc(z.label)}${z.hold != null && z.tests ? ` · held ${z.hold}% of ${z.tests}` : ""}</i>` : "—");
     return `<div class="p3x-turn"><span class="p3x-rr">🔴 Rejection likely at ${nm(R?.level)}${R?.firstWeak ? ` <span class="mut">(first ${n(R.firstWeak.price)} is weak — held ${R.firstWeak.hold}%)</span>` : ""}</span>
       <span class="p3x-s">🟢 Bounce likely at ${nm(B?.level)}${B?.firstWeak ? ` <span class="mut">(first ${n(B.firstWeak.price)} is weak — held ${B.firstWeak.hold}%)</span>` : ""}</span>
@@ -772,7 +790,9 @@ async function ppcLoad3x() {
       <span class="p3x-rr">▲ Index resistance ${L.resistances.length ? L.resistances.map((z) => `<b>${n(z.price)}</b> <i>${ppcEsc(z.label)}${z.hold != null && z.tests ? ` · held ${z.hold}%` : ""}</i>`).join(" · ") : "—"}</span></div>`;
   el.innerHTML = `<div class="p3x-h"><b>🎯 3× potential</b> <span class="mut">two strikes per index with the best TESTED chance of tripling — real Dhan option data, ~2 years</span></div>
     <div class="p3x-g">${r.items.map((it) => !it.ok ? `<div class="p3x-i"><div class="p3x-ih">${ppcEsc(it.symbol)}</div><div class="ppc-na">${ppcEsc(it.error || "not available")}</div></div>` : `<div class="p3x-i">
-      <div class="p3x-ih"><b>${ppcEsc(it.name)}</b> ${n(it.spot)} <span class="mut">· expiry ${ppcEsc(it.expiry)}${it.expiryDay ? " · <b class='ppc-wait'>EXPIRY DAY</b>" : ` · ${it.dte} day(s) left`} · odds at ${ppcEsc(it.slot)}</span></div>
+      <div class="p3x-ih"><b>${ppcEsc(it.name)}</b> ${n(it.spot)} <span class="mut">· expiry ${ppcEsc(it.expiry)}${it.expiryDay ? " · <b class='ppc-wait'>EXPIRY DAY</b>" : ` · ${it.dte} day(s) left`} · odds at ${ppcEsc(it.slot)}</span>
+        <label class="p3x-open">Open at <input type="number" inputmode="decimal" data-3x-open="${ppcEsc(it.symbol)}" placeholder="auto" value="${PPC._3xOpen[it.symbol] || ""}"></label></div>
+      ${scen(it)}
       ${turnRow(it)}${lv(it.indexLevels)}
       ${it.picks.length ? it.picks.map(pick).join("") : '<div class="ppc-na">no liquid strike with tested odds now</div>'}
       <div class="mut p3x-n">${ppcEsc(it.note)}</div></div>`).join("")}</div>

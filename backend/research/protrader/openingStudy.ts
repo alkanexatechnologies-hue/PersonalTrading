@@ -35,6 +35,7 @@ if (require.main === module) {
       const sec = await lookupDhanSecurity(name); if (!sec) { console.log(name, "no Dhan security"); continue; }
       const c5 = await fetchDhanCandles(sec, "5" as any, FROM, to);
       const d1: C[] = []; for (let y = 2024; y <= Number(to.slice(0, 4)); y++) for (const [a, b] of [[`${y}-01-01`, `${y}-06-30`], [`${y}-07-01`, `${y}-12-31`]]) { if (b < FROM || a > to) continue; d1.push(...(await fetchDhanCandles(sec, "1d" as any, a < FROM ? FROM : a, b > to ? to : b).catch(() => []))); }
+      fs.writeFileSync(path.join(OUT, `dhan5m_${name}.json`), JSON.stringify({ c5, d1, fetchedAt: new Date().toISOString() }));   // reused by the 3x study (gap per day)
       const s = study(name, featuresFrom(c5, d1));
       fs.writeFileSync(path.join(OUT, `${name}.json`), JSON.stringify({ ...s, source: "Dhan 5-min index candles + Dhan official daily candles" }, null, 1));
       console.log(name, s.days, "sessions", s.from, "→", s.to);

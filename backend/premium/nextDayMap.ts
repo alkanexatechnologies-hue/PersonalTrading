@@ -73,6 +73,36 @@ export const first5 = (f: DayFeat) => { const x = (f.p920 - f.open) / f.atr; ret
 /** Where the 09:30 price stands vs the previous day's high / close / low. */
 export const standZone = (p: number, pdh: number, pdc: number, pdl: number) => (p > pdh ? "ABOVE PDH" : p >= pdc ? "PDC–PDH" : p >= pdl ? "PDL–PDC" : "BELOW PDL");
 
+// ---------------------------------------------------------------- opening GAP scenarios (7 groups by gap size in daily ATR)
+export const GAP7 = [
+  { key: "BIG GAP DOWN", lo: -Infinity, hi: -0.7 }, { key: "GAP DOWN", lo: -0.7, hi: -0.35 }, { key: "SMALL GAP DOWN", lo: -0.35, hi: -0.15 }, { key: "FLAT", lo: -0.15, hi: 0.15 },
+  { key: "SMALL GAP UP", lo: 0.15, hi: 0.35 }, { key: "GAP UP", lo: 0.35, hi: 0.7 }, { key: "BIG GAP UP", lo: 0.7, hi: Infinity },
+] as const;
+export const gap7 = (gapAtr: number) => GAP7.find((b) => gapAtr >= b.lo && gapAtr < b.hi)!.key;
+export interface GapStat { n: number; fill1015: number; fillClose: number; cont25: number; cont50: number; contMed: number; againstMed: number; closeWithGap: number;
+  holds930: { n: number; contPct: number; cont50: number }; against930: { n: number; fillPct: number; closeAgainst: number } }
+/** What the day did after each kind of opening gap. "With the gap" = further in the gap's direction (down for a gap down);
+ *  fill = touched the previous close; the 09:30 split: still beyond the open in the gap direction (holds) or back across it. */
+export function gapStats(feats: DayFeat[]): Record<string, GapStat> {
+  const out: Record<string, GapStat> = {}, P = (a: number, n: number) => (n ? Math.round((a / n) * 100) : 0);
+  for (const g of GAP7) {
+    const xs = feats.filter((f) => gap7((f.open - f.pdc) / f.atr) === g.key), n = xs.length; if (!n) continue;
+    const dn = g.key.includes("DOWN"), up = g.key.includes("UP"), dir = dn ? -1 : up ? 1 : 0;
+    const lo = (f: DayFeat) => Math.min(f.or15l, f.lo1015, f.loAfter), hi = (f: DayFeat) => Math.max(f.or15h, f.hi1015, f.hiAfter);
+    const cont = (f: DayFeat) => (dir < 0 ? f.open - lo(f) : dir > 0 ? hi(f) - f.open : Math.max(f.open - lo(f), hi(f) - f.open)) / f.atr;
+    const ag = (f: DayFeat) => (dir < 0 ? hi(f) - f.open : dir > 0 ? f.open - lo(f) : 0) / f.atr;
+    const filled = (f: DayFeat, until: "1015" | "close") => (dir < 0 ? (until === "1015" ? f.hi1015 : hi(f)) >= f.pdc : dir > 0 ? (until === "1015" ? f.lo1015 : lo(f)) <= f.pdc : true);
+    const holds = xs.filter((f) => (dir < 0 ? f.p930 < f.open : dir > 0 ? f.p930 > f.open : false)), back = xs.filter((f) => !holds.includes(f) && f.p930 !== f.open);
+    const med = (v: number[]) => { const s = [...v].sort((a, b) => a - b); return s.length ? Math.round(s[Math.floor(s.length / 2)] * 100) / 100 : 0; };
+    out[g.key] = { n, fill1015: P(xs.filter((f) => filled(f, "1015")).length, n), fillClose: P(xs.filter((f) => filled(f, "close")).length, n),
+      cont25: P(xs.filter((f) => cont(f) >= 0.25).length, n), cont50: P(xs.filter((f) => cont(f) >= 0.5).length, n), contMed: med(xs.map(cont)), againstMed: med(xs.map(ag)),
+      closeWithGap: P(xs.filter((f) => (dir < 0 ? f.close < f.open : dir > 0 ? f.close > f.open : false)).length, n),
+      holds930: { n: holds.length, contPct: P(holds.filter((f) => (dir < 0 ? f.close < f.p930 : f.close > f.p930)).length, holds.length), cont50: P(holds.filter((f) => cont(f) >= 0.5).length, holds.length) },
+      against930: { n: back.length, fillPct: P(back.filter((f) => filled(f, "close")).length, back.length), closeAgainst: P(back.filter((f) => (dir < 0 ? f.close > f.p930 : f.close < f.p930)).length, back.length) } };
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- aggregation (the study)
 const pct = (a: number, n: number) => (n ? Math.round((a / n) * 100) : null);
 const q = (xs: number[], p: number) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); return r2(s[Math.min(s.length - 1, Math.floor(p * (s.length - 1) + 0.5))]); };
@@ -119,6 +149,7 @@ export function study(index: string, feats: DayFeat[]): Study {
     const xs = feats.filter((f) => z === "ALL" || zoneOf(f) === z);
     out.turn[z] = { n: xs.length, pullMed: q(xs.map((f) => f.pullAfterHi / f.atr), 0.5), pullP75: q(xs.map((f) => f.pullAfterHi / f.atr), 0.75), bounceMed: q(xs.map((f) => f.bounceAfterLo / f.atr), 0.5), bounceP75: q(xs.map((f) => f.bounceAfterLo / f.atr), 0.75) };
   }
+  (out as any).gapDay = gapStats(feats);
   return out;
 }
 

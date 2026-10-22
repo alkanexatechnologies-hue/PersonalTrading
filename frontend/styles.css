@@ -7953,3 +7953,5 @@ body.ppc-fullwidth .watchlist, body.ppc-fullwidth #watchlist { display: none !im
 .p3x-turn { display: flex; flex-direction: column; gap: 1px; padding: 5px 8px; border-radius: 6px; margin-bottom: 4px; background: rgba(255,152,0,.08); font-size: 12.5px; }
 .p3x-turn i { font-style: normal; font-size: 10.5px; color: #787b86; } .p3x-turn .mut { font-size: 10.5px; }
 .p3x-plan { font-size: 12px; margin: 2px 0; padding: 3px 6px; border-radius: 4px; background: rgba(41,98,255,.08); }
+.p3x-scn { font-size: 12.5px; line-height: 1.5; padding: 5px 8px; border-radius: 6px; margin-bottom: 4px; background: rgba(41,98,255,.08); border-left: 3px solid #2962ff; }
+.p3x-open { float: right; font-size: 11px; color: #787b86; } .p3x-open input { width: 86px; margin-left: 4px; padding: 2px 6px; font-size: 16px; border-radius: 4px; border: 1px solid #2a2e39; background: transparent; color: inherit; }

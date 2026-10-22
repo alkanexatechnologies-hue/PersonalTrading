@@ -8008,7 +8008,7 @@ function tripleTable(name: string): TRIPLE.TripleTable | null {
   let v: TRIPLE.TripleTable | null = null; try { v = JSON.parse(fs.readFileSync(path.join(process.cwd(), "data", "research-triple", `${name}.json`), "utf8")); } catch { /* not built */ }
   _tripleTab.set(name, { at: Date.now(), v }); return v;
 }
-async function triplePotentialFor(sym: string) {
+async function triplePotentialFor(sym: string, openArg?: number | null) {
   const def = findSymbolDef(sym), name = ({ "^NSEI": "NIFTY", "^BSESN": "SENSEX" } as Record<string, string>)[sym];
   const t = name ? tripleTable(name) : null; if (!def || !t) return { symbol: sym, ok: false, error: "3× study not built yet (runs after the 15:50 data refresh)" };
   let ch: any = await cached(`pc-chain:${sym}:0`, 30_000, () => dhanChainForExpiry(def, 0)).catch(() => null);
@@ -8022,58 +8022,77 @@ async function triplePotentialFor(sym: string) {
   if (after) do { sd = new Date(sd.getTime() + 86400_000); } while ([0, 6].includes(sd.getUTCDay()));
   const session = sd.toISOString().slice(0, 10), slot = after || istMin < 570 ? 570 : TRIPLE.slotOf(t, istMin), expiryDay = ch.expiry === session;
   let dte = 0; for (let d = new Date(sd.getTime() + 86400_000); d.toISOString().slice(0, 10) <= ch.expiry; d = new Date(d.getTime() + 86400_000)) if (![0, 6].includes(d.getUTCDay())) dte++;
-  const atm = Math.round(spot / step) * step, med = PC.chainMedianSpreadPct(ch.strikes, atm, step), open = !after && istMin >= 555;
+  // 📍 the OPEN this read is built on: your expected open (typed) → today's real open (after 09:15) → the pre-open price (09:00–09:15)
+  const inSession = !after && istMin >= 555, todayKey = ist.toISOString().slice(0, 10);
+  const c5t: any[] = inSession ? ((await getCandlesCached(sym, "5m" as Interval).catch(() => [])) as any[]).filter((c) => new Date((c.time + 19800) * 1000).toISOString().slice(0, 10) === todayKey) : [];
+  const gapOpen: number | null = openArg && openArg > 0 ? openArg : c5t.length ? c5t[0].open : !after && istMin >= 540 && q?.price > 0 ? q.price : null;
+  const openSrc = openArg && openArg > 0 ? "your expected open" : c5t.length ? "today's open" : gapOpen != null ? "pre-open price" : null;
+  const ref = inSession ? spot : gapOpen ?? spot, minsToOpen = inSession ? 0 : Math.max(0, after ? 0 : 555 - istMin);
+  const pdPay: any = await cached(`pos-pc15:${sym}`, 60_000, () => premiumCenterPayload({ symbol: sym, interval: "15m" })).catch(() => null);
+  const pdc = (pdPay?.trader?.levels || []).find((x: any) => /^Prev close/.test(x.label))?.price ?? pdPay?.spot?.prevClose ?? null;
+  const dly0: any[] = ((await getDailyCached(sym, 30).catch(() => [])) as any[]).slice(-14), atrD0 = dly0.length ? dly0.reduce((a, c) => a + (c.high - c.low), 0) / dly0.length : step * 6;
+  const gapAtr = gapOpen != null && pdc ? (gapOpen - pdc) / atrD0 : null, gapGroup = gapAtr != null ? NDM.gap7(gapAtr) : null;
+  let scenario: any = null; try { const st = JSON.parse(fs.readFileSync(path.join(process.cwd(), "data", "research-nextday", `${name}.json`), "utf8")); scenario = gapGroup ? st.gapDay?.[gapGroup] ?? null : null; } catch { scenario = null; }
+  const priceAt = (k: number, side: "CE" | "PE", lv: number, mins: number) => PCALC.premiumCalc({ spot, level: lv, step, expiry: ch.expiry, mins, strikes: ch.strikes, strike: k }).rows.find((r) => r.side === side)?.est ?? null;
+  const gapOdds = (side: "CE" | "PE", otm: number) => { const g = (t as any).gap || {}, one = g[`${side}|${otm}|${gapGroup}`], both = [g[`CE|${otm}|${gapGroup}`], g[`PE|${otm}|${gapGroup}`]].filter(Boolean);
+    const c = one && one.n >= 30 ? one : both.length ? both.reduce((a: any, x: any) => ({ n: a.n + x.n, same3: a.same3 + x.same3, exp3: a.exp3 + x.exp3, exp2: a.exp2 + x.exp2 }), { n: 0, same3: 0, exp3: 0, exp2: 0 }) : null;
+    return c && c.n >= 30 ? { today: { p3: Math.round((c.same3 / c.n) * 1000) / 10, p2: null, n: c.n }, toExpiry: { p3: Math.round((c.exp3 / c.n) * 1000) / 10, p2: Math.round((c.exp2 / c.n) * 1000) / 10, n: c.n } } : null; };
+  const atm = Math.round(ref / step) * step, med = PC.chainMedianSpreadPct(ch.strikes, atm, step), open = inSession;
   const cands: TRIPLE.Cand[] = [];
   for (const side of ["CE", "PE"] as const) for (let rel = -3; rel <= 3; rel++) {
     const k = atm + rel * step, r = ch.strikes.find((x: any) => x.strike === k); if (!r) continue;
-    const p = side === "CE" ? "ce" : "pe", ltp = r[`${p}Ltp`]; if (!(ltp > 0)) continue;
+    const p = side === "CE" ? "ce" : "pe", live = r[`${p}Ltp`]; if (!(live > 0)) continue;
+    const ltp = !inSession && gapOpen != null ? Math.round((priceAt(k, side, gapOpen, minsToOpen) ?? live) * 10) / 10 : live;   // before the open: priced AT that open
     const L = PC.liquidity(r[`${p}Bid`], r[`${p}Ask`], ltp, med, r[`${p}Vol`]), otm = side === "CE" ? rel : -rel;
     cands.push({ side, strike: k, otm, ltp, liq: !open && L.status === "NOT AVAILABLE" ? "NO QUOTE" : L.status, spreadPct: L.spreadPct, delta: r[`${p}Delta`] != null ? Math.round(Math.abs(r[`${p}Delta`]) * 100) / 100 : null,
-      today: TRIPLE.sameDayOdds(t, side, otm, slot, expiryDay), toExpiry: TRIPLE.byExpiryOdds(t, side, otm, dte, slot) });
+      ...(gapGroup && gapGroup !== "FLAT" && gapOdds(side, otm) ? gapOdds(side, otm)! : { today: TRIPLE.sameDayOdds(t, side, otm, slot, expiryDay), toExpiry: TRIPLE.byExpiryOdds(t, side, otm, dte, slot) }) });
   }
   const picks = TRIPLE.topTwo(cands.filter((c) => c.liq !== "NOT AVAILABLE"), expiryDay);
   const und = (def.nseSymbol || def.symbol).toUpperCase();
   const out = await Promise.all(picks.map(async (x) => {
     // the index level the calculator model needs for 3× within the next hour (time decay included)
-    const est = (lv: number) => PCALC.premiumCalc({ spot, level: lv, step, expiry: ch.expiry, mins: 60, strikes: ch.strikes, strike: x.strike }).rows.find((r) => r.side === x.side)?.est ?? 0;
-    let need: number | null = null; { let lo = spot, hi = x.side === "CE" ? spot * 1.06 : spot * 0.94; if (est(hi) >= 3 * x.ltp) { for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (est(m) >= 3 * x.ltp) hi = m; else lo = m; } need = Math.round(hi); } }
+    const est = (lv: number) => PCALC.premiumCalc({ spot, level: lv, step, expiry: ch.expiry, mins: 60 + minsToOpen, strikes: ch.strikes, strike: x.strike }).rows.find((r) => r.side === x.side)?.est ?? 0;
+    let need: number | null = null; { let lo = ref, hi = x.side === "CE" ? ref * 1.06 : ref * 0.94; if (est(hi) >= 3 * x.ltp) { for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (est(m) >= 3 * x.ltp) hi = m; else lo = m; } need = Math.round(hi); } }
     let zones: any = null;
     try {
       const cs: any[] = await withTimeout(cached(`hotc:${und}:${x.side}:${x.strike}:${ch.expiry}`, 5 * 60_000, async () => { const o = await lookupDhanOption(und, x.side, x.strike, ch.expiry); if (!o) return []; return dhanOptionCandles(o.securityId, nowSec - 6 * 86400, nowSec, 15, o.exchangeSegment); }), 15_000, "3x candles");
       zones = PPOS.premiumZones({ candles: (cs || []).filter((c) => c.time + 900 <= nowSec), current: x.ltp });
     } catch { zones = null; }
-    return { ...x, target3: Math.round(x.ltp * 3 * 100) / 100, needIndex: need, needMove: need != null ? Math.round(need - spot) : null, support: zones?.support?.[0] ?? null, resistance: zones?.resistance?.[0] ?? null,
+    return { ...x, target3: Math.round(x.ltp * 3 * 100) / 100, needIndex: need, needMove: need != null ? Math.round(need - ref) : null, support: zones?.support?.[0] ?? null, resistance: zones?.resistance?.[0] ?? null,
       supports: (zones?.support || []).slice(0, 2), resistances: (zones?.resistance || []).slice(0, 2), state: zones?.state ?? null };
   }));
   // the index's own nearest levels (plan ladder; today's H / L excluded) with the level-memory hold %
-  const pd: any = await cached(`pos-pc15:${sym}`, 60_000, () => premiumCenterPayload({ symbol: sym, interval: "15m" })).catch(() => null);
+  const pd: any = pdPay;
   const meta = LM_IDX[sym], lw = meta?.name === "NIFTY" ? 35 : 120, lad: any[] = (pd?.trader?.levels || []).filter((x: any) => x.kind !== "TODAY");
   const lvRow = (x: any) => { const z = meta ? lmZoneFor(meta.name, x.price, lw) : null; return { price: x.price, label: String(x.label).replace(/\s*\(.*\)$/, ""), hold: z?.holdPct ?? null, tests: z?.tests ?? 0 }; };
-  const indexLevels = { supports: lad.filter((x) => x.price < spot).sort((a, b) => b.price - a.price).slice(0, 2).map(lvRow), resistances: lad.filter((x) => x.price > spot).sort((a, b) => a.price - b.price).slice(0, 2).map(lvRow) };
+  const indexLevels = { supports: lad.filter((x) => x.price < ref).sort((a, b) => b.price - a.price).slice(0, 2).map(lvRow), resistances: lad.filter((x) => x.price > ref).sort((a, b) => a.price - b.price).slice(0, 2).map(lvRow) };
   // 🎯 where the index most likely TURNS today: within one normal day's reach (daily ATR), the level with the best tested hold %
   // (≥ 5 past tests); a weaker level met first is named, because it usually breaks
   const dly: any[] = ((await getDailyCached(sym, 30).catch(() => [])) as any[]).slice(-14), atrD = dly.length ? dly.reduce((a, c) => a + (c.high - c.low), 0) / dly.length : step * 6;
   const turn = (up: boolean) => {
     const reach = 1.25 * atrD;   // a normal-to-strong day's reach (the next-day map's 75th-percentile move is about this)
-    const pool = lad.filter((x) => (up ? x.price > spot && x.price <= spot + reach : x.price < spot && x.price >= spot - reach)).map(lvRow).sort((a, b) => (up ? a.price - b.price : b.price - a.price));
+    const pool = lad.filter((x) => (up ? x.price > ref && x.price <= ref + reach : x.price < ref && x.price >= ref - reach)).map(lvRow).sort((a, b) => (up ? a.price - b.price : b.price - a.price));
     const best = pool.filter((x) => x.tests >= 5 && x.hold != null).sort((a, b) => (b.hold ?? 0) - (a.hold ?? 0) || (up ? a.price - b.price : b.price - a.price))[0] ?? null;
     const first = pool[0] ?? null;
     return { level: best ?? first, firstWeak: first && best && first.price !== best.price && (first.hold ?? 100) < 50 && first.tests >= 5 ? first : null, reach: Math.round(reach) };
   };
   const rejection = turn(true), bounce = turn(false);
   // each pick: the plan in index terms with the premium at those levels (calculator, at the price now)
-  const at = (strike: number, side: "CE" | "PE", lv: number | null | undefined) => (lv ? Math.round((PCALC.premiumCalc({ spot, level: lv, step, expiry: ch.expiry, mins: 0, strikes: ch.strikes, strike }).rows.find((r) => r.side === side)?.est ?? 0) * 10) / 10 : null);
+  const at = (strike: number, side: "CE" | "PE", lv: number | null | undefined) => (lv ? Math.round((PCALC.premiumCalc({ spot, level: lv, step, expiry: ch.expiry, mins: minsToOpen, strikes: ch.strikes, strike }).rows.find((r) => r.side === side)?.est ?? 0) * 10) / 10 : null);
   for (const x of out as any[]) {
     const entry = x.side === "CE" ? bounce.level : rejection.level, exit = x.side === "CE" ? rejection.level : bounce.level;
     x.plan = entry && exit ? { entryIndex: entry.price, entryLabel: entry.label, entryPrem: at(x.strike, x.side, entry.price), exitIndex: exit.price, exitLabel: exit.label, exitPrem: at(x.strike, x.side, exit.price),
       how: x.side === "CE" ? `buy when ${def.name} holds ${Math.round(entry.price)} (a 15-min candle closes back above it) → sell near ${Math.round(exit.price)}` : `buy when ${def.name} is rejected at ${Math.round(entry.price)} (a 15-min candle closes back below it) → sell near ${Math.round(exit.price)}` } : null;
   }
   const hm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
-  return { symbol: sym, ok: true, name: def.name, spot, expiry: ch.expiry, session, expiryDay, dte, slot: hm(slot), picks: out, indexLevels, rejection, bounce, sessions: t.sessions, from: t.from, to: t.to,
+  return { symbol: sym, ok: true, name: def.name, spot, expiry: ch.expiry, session, expiryDay, dte, slot: hm(slot), picks: out, indexLevels, rejection, bounce, ref, gapOpen, openSrc, pdc, gapPts: gapOpen != null && pdc ? Math.round(gapOpen - pdc) : null, gapAtr: gapAtr != null ? Math.round(gapAtr * 100) / 100 : null, gapGroup, scenario, oddsBasis: gapGroup && gapGroup !== "FLAT" ? `${gapGroup.toLowerCase()} days` : "all days", sessions: t.sessions, from: t.from, to: t.to,
     note: expiryDay ? "expiry day: odds = same-day 3× (before 15:20)" : `${dte} trading day(s) to expiry: odds = 3× by expiry (held to ${ch.expiry} 15:20)` };
 }
 router.get("/triple-potential", requirePermission("oiAnalysis"), async (_req: Request, res: Response) => {
-  try { res.json({ ok: true, generatedAt: Math.floor(Date.now() / 1000), items: await Promise.all(["^NSEI", "^BSESN"].map((s) => cached(`triple:${s}`, 60_000, () => triplePotentialFor(s)).catch((e: any) => ({ symbol: s, ok: false, error: e?.message })))) }); }
+  try {
+    const op: Record<string, number> = { "^NSEI": Number(_req.query.nOpen) || 0, "^BSESN": Number(_req.query.sOpen) || 0 };
+    res.json({ ok: true, generatedAt: Math.floor(Date.now() / 1000), items: await Promise.all(["^NSEI", "^BSESN"].map((s) => cached(`triple:${s}:${op[s]}`, 60_000, () => triplePotentialFor(s, op[s] || null)).catch((e: any) => ({ symbol: s, ok: false, error: e?.message })))) });
+  }
   catch (e: any) { res.json({ ok: false, error: e?.message || "3× potential failed" }); }
 });
 /** 🔥 Hot premiums for one index (top 5 calls / puts with their premium S/R zones, rating and value at the index levels) —

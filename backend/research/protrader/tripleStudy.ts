@@ -11,6 +11,8 @@ import { assembleIndex } from "../multiIndex/data";
 import { FROM, latestRawDay } from "./dataRange";
 import { expiryDays } from "./premiumBacktest2";
 import { DATA_DIR } from "../../config/dataDir";
+import { featuresFrom } from "./openingStudy";
+import { gap7 } from "../../premium/nextDayMap";
 
 const OUT = path.join(DATA_DIR, "research-triple");
 const mn = (t: number) => Math.floor(((t + 19800) % 86400) / 60);
@@ -62,13 +64,32 @@ export function toExpiryCells(days: DayData[], step: number) {
   }
   return cells;
 }
+/** 3× odds by OPENING GAP group (gap7 of that day's open vs the previous close, in daily ATR), from 09:30: same day and by expiry. */
+export function gapCells(days: DayData[], step: number, gapOf: Map<string, string>) {
+  const ds = days.filter((d) => d.spot.size >= 300), exp = [...expiryDays(ds, step)].sort(), cells: Record<string, { n: number; same3: number; exp3: number; exp2: number }> = {};
+  const weekOf = (day: string) => exp.find((e) => e >= day) ?? null, byWeek = new Map<string, DayData[]>();
+  for (const d of ds) { const w = weekOf(d.day); if (w) (byWeek.get(w) || byWeek.set(w, []).get(w)!).push(d); }
+  for (const [, wd] of byWeek) { wd.sort((a, b) => a.day.localeCompare(b.day));
+    for (let i = 0; i < wd.length; i++) { const d = wd[i], g = gapOf.get(d.day); if (!g) continue;
+      const s = [...d.spot.entries()].sort((a, b) => a[0] - b[0]).filter(([t]) => mn(t) <= 570).pop(); if (!s) continue; const atm = Math.round(s[1] / step) * step;
+      for (const side of ["CE", "PE"] as const) for (let rel = -3; rel <= 3; rel++) {
+        const k = `${atm + rel * step}${side}`, bars = d.legs.get(k); if (!bars) continue; const at = bars.filter((b) => mn(b.t) <= 570).pop(); if (!at || mn(at.t) < 568 || at.c < 0.5) continue;
+        let sameHi = 0, expHi = 0; for (let q = i; q < wd.length; q++) for (const b of wd[q].legs.get(k) || []) if ((q > i || mn(b.t) > 570) && mn(b.t) <= 920) { expHi = Math.max(expHi, b.h); if (q === i) sameHi = Math.max(sameHi, b.h); }
+        const otm = side === "CE" ? rel : -rel, key = `${side}|${otm}|${g}`, c = (cells[key] = cells[key] || { n: 0, same3: 0, exp3: 0, exp2: 0 });
+        c.n++; if (sameHi >= 3 * at.c) c.same3++; if (expHi >= 3 * at.c) c.exp3++; if (expHi >= 2 * at.c) c.exp2++;
+      } } }
+  return cells;
+}
 if (require.main === module) {
   fs.mkdirSync(OUT, { recursive: true });
   const to = latestRawDay();
   for (const [name, days, step] of [["NIFTY", assemble(FROM, to).days, 50], ["SENSEX", assembleIndex("SENSEX", FROM, to), 100]] as const) {
     const ds = days.filter((d) => d.spot.size >= 300), cut = Math.floor((ds.length * 2) / 3);
     const all = tripleCells(ds, step), dev = tripleCells(ds.slice(0, cut), step), val = tripleCells(ds.slice(cut), step), expiry = toExpiryCells(ds, step);
-    fs.writeFileSync(path.join(OUT, `${name}.json`), JSON.stringify({ index: name, from: ds[0].day, to: ds[ds.length - 1].day, sessions: ds.length, step, times: TIMES, cells: all, dev, val, expiry, generatedAt: new Date().toISOString(),
+    // the opening gap of each day (Dhan 5-min + official daily, saved by openingStudy.ts) → gap-matched 3× odds
+    let gap: Record<string, any> = {};
+    try { const j = JSON.parse(fs.readFileSync(path.join(DATA_DIR, "research-nextday", `dhan5m_${name}.json`), "utf8")); const gapOf = new Map(featuresFrom(j.c5, j.d1).map((f) => [f.day, gap7((f.open - f.pdc) / f.atr)] as [string, string])); gap = gapCells(ds, step, gapOf); } catch { gap = {}; }
+    fs.writeFileSync(path.join(OUT, `${name}.json`), JSON.stringify({ index: name, from: ds[0].day, to: ds[ds.length - 1].day, sessions: ds.length, step, times: TIMES, cells: all, dev, val, expiry, gap, generatedAt: new Date().toISOString(),
       method: "real Dhan 1-min premiums: share of strikes whose premium reached 3x (2x) of its price at that half hour before 15:20 the same day" }));
     const sum = (f: (k: string) => boolean, c = all) => Object.entries(c).filter(([k]) => f(k)).reduce((a, [, v]) => ({ n: a.n + v.n, hit3: a.hit3 + v.hit3, hit2: a.hit2 + v.hit2 }), { n: 0, hit3: 0, hit2: 0 });
     const pc = (x: Cell) => `n ${x.n} · 3× ${((x.hit3 / Math.max(1, x.n)) * 100).toFixed(1)}% · 2× ${((x.hit2 / Math.max(1, x.n)) * 100).toFixed(1)}%`;
