@@ -15,7 +15,7 @@ test("a fake break below the previous day low and a close back above within 3 ca
   const L = buildLesson({ ...base, bars });
   const kinds = L.steps.map((s) => `${s.i}:${s.kind}`);
   assert.ok(kinds.includes("0:open")); assert.ok(kinds.some((k) => /^2:break/.test(k)), kinds.join(" ")); assert.ok(kinds.some((k) => /^3:sweep/.test(k)), kinds.join(" "));
-  assert.match(L.steps.find((s) => s.kind === "sweep")!.text, /liquidity sweep/);
+  assert.match(L.steps.find((s) => s.kind === "sweep")!.text, /liquidity sweep/); assert.match(L.steps.find((s) => s.kind === "sweep")!.hi, /लिक्विडिटी स्वीप/); assert.ok(L.steps.every((s) => s.hi && /[\u0900-\u097F]/.test(s.hi)), "every lesson has Hindi");
   assert.equal(L.steps[L.steps.length - 1].kind, "end");
 });
 test("no look-ahead: the lesson for the first candles is identical whether or not later candles exist", () => {

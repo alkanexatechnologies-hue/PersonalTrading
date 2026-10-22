@@ -753,7 +753,12 @@ async function ppcCalcRun() {
 // ================================================================ 🎓 CHART SCHOOL — replay any day, a teacher explains it aloud
 // Lessons come from /api/learn/day (rule-based, only what was known at each candle — no look-ahead). Voice = the browser's own
 // speech (Indian English voice when available); playback waits for the teacher to finish before the next candle.
-const SCH = { sym: "^NSEI", day: null, iv: 5, data: null, idx: 0, playing: false, speed: 1, voice: true, chart: null, series: null, lines: [], run: 0 };
+const SCH = { sym: "^NSEI", day: null, iv: 5, data: null, idx: 0, playing: false, speed: 1, voice: true, lang: "hi", chart: null, series: null, lines: [], run: 0 };
+const schT = (s) => (SCH.lang === "hi" ? s.hi || s.text : s.text);   // the lesson in the chosen language
+function schVoice() {
+  const vs = ("speechSynthesis" in window) ? speechSynthesis.getVoices() : [];
+  return SCH.lang === "hi" ? vs.find((v) => /hi[-_]IN/i.test(v.lang)) || vs.find((v) => /^hi/i.test(v.lang)) || null : vs.find((v) => /en-IN/i.test(v.lang)) || vs.find((v) => /^en/i.test(v.lang)) || null;
+}
 function ppcSchoolInit() {
   const el = ppcEl("ppc-school"); if (!el || el._init) return; el._init = true;
   el.innerHTML = `<div class="sch-bar">
@@ -763,10 +768,11 @@ function ppcSchoolInit() {
       <span class="sch-ctl"><button type="button" data-sch="first" title="start of the day">⏮</button><button type="button" data-sch="prev" title="one candle back">◀</button>
       <button type="button" data-sch="play" class="sch-play" title="play / pause">▶ Play</button><button type="button" data-sch="next" title="one candle forward">▶|</button><button type="button" data-sch="last" title="end of the day">⏭</button></span>
       <select id="sch-speed" title="speed"><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option></select>
+      <select id="sch-lang" title="language"><option value="hi">हिंदी</option><option value="en">English</option></select>
       <label class="sch-voice"><input type="checkbox" id="sch-voice" checked> 🔊 Teacher's voice</label>
       <span id="sch-pos" class="ppc-sub"></span></div>
     <div class="sch-main"><div id="sch-chart" class="sch-chart"></div>
-      <div class="sch-side"><div id="sch-now" class="sch-now"><div class="ppc-sub">Choose a day and press ▶ Play — the teacher explains each candle as it appears.</div></div><div id="sch-list" class="sch-list"></div></div></div>`;
+      <div class="sch-side"><div id="sch-now" class="sch-now"><div class="ppc-sub">दिन चुनिए और ▶ Play दबाइए — टीचर हर कैंडल को आते ही समझाएगा। / Choose a day and press ▶ Play.</div></div><div id="sch-vnote" class="ppc-sub sch-vnote"></div><div id="sch-list" class="sch-list"></div></div></div>`;
   el.addEventListener("click", (e) => {
     const b = e.target.closest("[data-sch]"), li = e.target.closest("[data-sch-i]");
     if (li) { schStop(); SCH.idx = Number(li.dataset.schI); schRender(); schSpeakAt(SCH.idx); return; }
@@ -780,9 +786,16 @@ function ppcSchoolInit() {
     if (t.id === "sch-day") { SCH.day = t.value; schLoad(); }
     if (t.id === "sch-iv") { SCH.iv = Number(t.value); schLoad(); }
     if (t.id === "sch-speed") SCH.speed = Number(t.value);
+    if (t.id === "sch-lang") { SCH.lang = t.value; schStop(); schVoiceNote(); }
     if (t.id === "sch-voice") { SCH.voice = t.checked; if (!t.checked) try { speechSynthesis.cancel(); } catch { /* none */ } }
   });
-  schLoadDays();
+  schLoadDays(); schVoiceNote();
+  if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = schVoiceNote;   // voices load late in some browsers
+}
+function schVoiceNote() {
+  const el = ppcEl("sch-vnote"); if (!el) return;
+  const v = schVoice();
+  el.textContent = !("speechSynthesis" in window) ? "This browser has no voice — the lessons are shown as text." : v ? `🔊 ${v.name} (${v.lang})` : SCH.lang === "hi" ? "⚠️ इस डिवाइस पर हिंदी आवाज़ इंस्टॉल नहीं है — सेटिंग्स में Hindi voice जोड़िए (Mac: System Settings → Accessibility → Spoken Content; Android: Google Text-to-Speech → Hindi). पाठ नीचे लिखा दिखेगा।" : "⚠️ No English voice found on this device.";
 }
 async function schLoadDays() {
   schStop(); const sel = ppcEl("sch-day"); if (!sel) return;
@@ -819,21 +832,22 @@ function schRender() {
   const hm = (t) => new Date((t + 19800) * 1000).toISOString().slice(11, 16), c = d.candles[SCH.idx];
   const pos = ppcEl("sch-pos"); if (pos) pos.textContent = `${d.index} · ${d.day} · candle ${SCH.idx + 1}/${d.candles.length} · ${hm(c.time)} · close ${Math.round(c.close).toLocaleString("en-IN")}`;
   const cur = schStepsAt(SCH.idx), last = cur.length ? cur : d.steps.filter((s) => s.i <= SCH.idx).slice(-1);
-  const now = ppcEl("sch-now"); if (now) now.innerHTML = last.length ? last.map((s) => `<div class="sch-lesson ${s.kind}"><b>${hm(s.time)}</b> ${ppcEsc(s.text)}</div>`).join("") : `<div class="ppc-sub">${hm(c.time)} — a quiet candle; nothing new to learn here.</div>`;
-  const list = ppcEl("sch-list"); if (list) { list.innerHTML = d.steps.map((s) => `<div class="sch-li ${s.i <= SCH.idx ? "done" : ""} ${s.i === SCH.idx ? "cur" : ""}" data-sch-i="${s.i}"><b>${hm(s.time)}</b> <i>${ppcEsc(s.kind)}</i> ${ppcEsc(s.text.slice(0, 90))}…</div>`).join(""); const curEl = list.querySelector(".cur"); if (curEl) curEl.scrollIntoView({ block: "nearest" }); }
+  const now = ppcEl("sch-now"); if (now) now.innerHTML = last.length ? last.map((s) => `<div class="sch-lesson ${s.kind}"><b>${hm(s.time)}</b> ${ppcEsc(schT(s))}</div>`).join("") : `<div class="ppc-sub">${hm(c.time)} — ${SCH.lang === "hi" ? "एक शांत कैंडल; यहाँ कुछ नया नहीं।" : "a quiet candle; nothing new to learn here."}</div>`;
+  const list = ppcEl("sch-list"); if (list) { list.innerHTML = d.steps.map((s) => `<div class="sch-li ${s.i <= SCH.idx ? "done" : ""} ${s.i === SCH.idx ? "cur" : ""}" data-sch-i="${s.i}"><b>${hm(s.time)}</b> <i>${ppcEsc(s.kind)}</i> ${ppcEsc(schT(s).slice(0, 90))}…</div>`).join(""); const curEl = list.querySelector(".cur"); if (curEl) curEl.scrollIntoView({ block: "nearest" }); }
   const pb = document.querySelector("#ppc-school .sch-play"); if (pb) pb.textContent = SCH.playing ? "⏸ Pause" : "▶ Play";
 }
 function schSpeak(text, run) {
   return new Promise((res) => {
     if (!SCH.voice || !("speechSynthesis" in window)) return res();
     try {
-      const u = new SpeechSynthesisUtterance(text), vs = speechSynthesis.getVoices();
-      u.voice = vs.find((v) => /en-IN/i.test(v.lang)) || vs.find((v) => /^en/i.test(v.lang)) || null; u.rate = SCH.speed >= 4 ? 1.25 : SCH.speed >= 2 ? 1.1 : 0.98;
+      const u = new SpeechSynthesisUtterance(text), v = schVoice();
+      if (SCH.lang === "hi" && !v) return res();   // no Hindi voice: never read Devanagari with an English voice
+      u.voice = v; u.lang = SCH.lang === "hi" ? "hi-IN" : "en-IN"; u.rate = SCH.speed >= 4 ? 1.2 : SCH.speed >= 2 ? 1.05 : 0.92;
       u.onend = u.onerror = () => res(); if (run !== SCH.run) return res(); speechSynthesis.speak(u);
     } catch { res(); }
   });
 }
-async function schSpeakAt(i) { try { speechSynthesis.cancel(); } catch { /* none */ } const run = SCH.run; for (const s of schStepsAt(i)) { if (run !== SCH.run) return; await schSpeak(s.text, run); } }
+async function schSpeakAt(i) { try { speechSynthesis.cancel(); } catch { /* none */ } const run = SCH.run; for (const s of schStepsAt(i)) { if (run !== SCH.run) return; await schSpeak(schT(s), run); } }
 function schStop() { SCH.playing = false; SCH.run++; try { speechSynthesis.cancel(); } catch { /* none */ } schRender(); }
 async function schPlay() {
   const d = SCH.data; if (!d) return; if (SCH.idx >= d.candles.length - 1) SCH.idx = 0;
@@ -843,7 +857,7 @@ async function schPlay() {
     await new Promise((r) => setTimeout(r, 700 / SCH.speed)); if (!SCH.playing || run !== SCH.run) break;
     SCH.idx++; schRender();
     const st = schStepsAt(SCH.idx);
-    if (st.length) { if (SCH.voice) for (const s of st) { if (run !== SCH.run) break; await schSpeak(s.text, run); } else await new Promise((r) => setTimeout(r, 2500 / SCH.speed)); }
+    if (st.length) { if (SCH.voice && schVoice()) for (const s of st) { if (run !== SCH.run) break; await schSpeak(schT(s), run); } else await new Promise((r) => setTimeout(r, 6000 / SCH.speed)); }   // no voice → time to read
   }
   if (run === SCH.run) { SCH.playing = false; schRender(); }
 }

@@ -7966,8 +7966,9 @@ body.ppc-fullwidth .watchlist, body.ppc-fullwidth #watchlist { display: none !im
 .sch-main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 10px; }
 .sch-chart { height: 380px; min-width: 0; }
 .sch-side { display: flex; flex-direction: column; gap: 6px; min-width: 0; max-height: 380px; }
-.sch-now { padding: 8px; border-radius: 6px; background: rgba(41,98,255,.10); border-left: 3px solid #2962ff; font-size: 13.5px; line-height: 1.5; min-height: 90px; overflow-y: auto; max-height: 190px; }
+.sch-now { padding: 8px; border-radius: 6px; background: rgba(41,98,255,.10); border-left: 3px solid #2962ff; font-size: 13.5px; line-height: 1.5; min-height: 110px; overflow-y: auto; max-height: 250px; }
 .sch-lesson + .sch-lesson { margin-top: 6px; } .sch-lesson.sweep, .sch-lesson.held { border-left: 3px solid #26a69a; padding-left: 6px; } .sch-lesson.break, .sch-lesson.confirmed { border-left: 3px solid #ef5350; padding-left: 6px; }
 .sch-list { overflow-y: auto; font-size: 11.5px; border-top: 1px solid #2a2e39; padding-top: 4px; }
 .sch-li { padding: 3px 4px; border-radius: 4px; cursor: pointer; color: #787b86; } .sch-li.done { color: #b2b5be; } .sch-li.cur { background: rgba(41,98,255,.18); color: #fff; } .sch-li i { font-style: normal; color: #ff9800; }
 @media (max-width: 900px) { .sch-main { grid-template-columns: 1fr; } .sch-chart { height: 300px; } .sch-side { max-height: none; } .sch-list { max-height: 260px; } }
+.sch-vnote { font-size: 11px; }
