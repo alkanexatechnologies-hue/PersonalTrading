@@ -87,6 +87,7 @@ import * as NDM from "../premium/nextDayMap";
 import * as PBNC from "../premium/premiumBounce";
 import * as POS from "../sentiment/positioning";
 import * as TRIPLE from "../premium/triple";
+import * as LEARN from "../premium/learnReplay";
 import * as PHIST from "../sentiment/participantHistory";
 import * as IFUT from "../sentiment/indexFutures";
 import { candidateDates } from "../sentiment/nseParticipantOi";
@@ -8001,6 +8002,43 @@ function bounceStudyFor(sym: string): PBNC.BounceStudy | null {
   _pbStudy.set(name, { at: Date.now(), v }); return v;
 }
 // 🧮 Premium calculator: the premium of each strike if the index goes to `level` (optionally after `mins` minutes)
+// ===================== 🎓 CHART SCHOOL: replay any day with a teacher's narration (Dhan 5-min history; no look-ahead) =====================
+const _learnData = new Map<string, { at: number; byDay: Map<string, any[]>; daily: Map<string, any>; days: string[] }>();
+async function learnData(name: string, sym: string) {
+  const c = _learnData.get(name); if (c && Date.now() - c.at < 30 * 60_000) return c;
+  const dayOf = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(0, 10), byDay = new Map<string, any[]>(), daily = new Map<string, any>();
+  try { const j = JSON.parse(fs.readFileSync(path.join(process.cwd(), "data", "research-nextday", `dhan5m_${name}.json`), "utf8"));
+    for (const x of j.c5) (byDay.get(dayOf(x.time)) || byDay.set(dayOf(x.time), []).get(dayOf(x.time))!).push(x); for (const d of j.d1 || []) daily.set(dayOf(d.time), d); } catch { /* not built yet */ }
+  // the latest sessions from the live 5-min feed (today / days after the last 15:50 refresh)
+  const live: any[] = ((await getCandlesCached(sym, "5m" as Interval).catch(() => [])) as any[]).filter((x) => x.time + 300 <= Date.now() / 1000);
+  for (const x of live) { const d = dayOf(x.time); if (!byDay.has(d) || byDay.get(d)!.length < live.filter((y) => dayOf(y.time) === d).length) byDay.set(d, live.filter((y) => dayOf(y.time) === d)); }
+  for (const arr of byDay.values()) arr.sort((a, b) => a.time - b.time);
+  const v = { at: Date.now(), byDay, daily, days: [...byDay.keys()].filter((d) => (byDay.get(d) || []).length >= 6).sort() };
+  _learnData.set(name, v); return v;
+}
+const LEARN_IDX: Record<string, { name: string; round: number }> = { "^NSEI": { name: "NIFTY", round: 100 }, "^BSESN": { name: "SENSEX", round: 500 } };
+router.get("/learn/days", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  const m = LEARN_IDX[String(req.query.symbol || "^NSEI")]; if (!m) return res.json({ ok: false, error: "NIFTY or SENSEX" });
+  const D = await learnData(m.name, String(req.query.symbol || "^NSEI")); res.json({ ok: true, days: [...D.days].reverse() });
+});
+router.get("/learn/day", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  try {
+    const sym = String(req.query.symbol || "^NSEI"), m = LEARN_IDX[sym]; if (!m) return res.json({ ok: false, error: "NIFTY or SENSEX" });
+    const D = await learnData(m.name, sym), day = String(req.query.day || D.days[D.days.length - 1]), iv = Number(req.query.interval) === 15 ? 15 : 5;
+    const k = D.days.indexOf(day); if (k < 1) return res.json({ ok: false, error: `no data for ${day}` });
+    const prevDay = D.days[k - 1], pb = D.byDay.get(prevDay)!, od = D.daily.get(prevDay);
+    const prev = od ? { high: od.high, low: od.low, close: od.close } : { high: Math.max(...pb.map((x) => x.high)), low: Math.min(...pb.map((x) => x.low)), close: pb[pb.length - 1].close };
+    const rng = (d: string) => { const o2 = D.daily.get(d), b = D.byDay.get(d) || []; return o2 ? o2.high - o2.low : b.length ? Math.max(...b.map((x) => x.high)) - Math.min(...b.map((x) => x.low)) : null; };
+    const r14 = D.days.slice(Math.max(0, k - 14), k).map(rng).filter((x): x is number => x != null), atrDaily = r14.reduce((a, x) => a + x, 0) / Math.max(1, r14.length);
+    const wk = (d: string) => { const t = new Date(d + "T00:00:00Z"); return new Date(t.getTime() - ((t.getUTCDay() + 6) % 7) * 86400_000).toISOString().slice(0, 10); };
+    const pw = D.days.slice(0, k).filter((d) => wk(d) < wk(day)), lastWk = pw.length ? wk(pw[pw.length - 1]) : null, wDays = lastWk ? pw.filter((d) => wk(d) === lastWk) : [];
+    const hiOf = (d: string) => D.daily.get(d)?.high ?? Math.max(...D.byDay.get(d)!.map((x) => x.high)), loOf = (d: string) => D.daily.get(d)?.low ?? Math.min(...D.byDay.get(d)!.map((x) => x.low));
+    const prevWeek = wDays.length ? { high: Math.max(...wDays.map(hiOf)), low: Math.min(...wDays.map(loOf)) } : null;
+    const bars = D.byDay.get(day)!, gapGroup = NDM.gap7((bars[0].open - prev.close) / atrDaily);
+    let gap: any = null; try { gap = JSON.parse(fs.readFileSync(path.join(process.cwd(), "data", "research-nextday", `${m.name}.json`), "utf8")).gapDay?.[gapGroup] ?? null; } catch { gap = null; }
+    res.json({ ok: true, ...LEARN.buildLesson({ index: m.name, day, interval: iv, bars, prevBars: pb, prev, prevWeek, atrDaily, roundStep: m.round, gap, gapGroup }), gapGroup, prevDay });
+  } catch (e: any) { res.json({ ok: false, error: e?.message || "lesson failed" }); }
+});
 // ===================== 🎯 3× POTENTIAL (Premium Prediction, top): two strikes per index with the best TESTED chance of tripling =====================
 const _tripleTab = new Map<string, { at: number; v: TRIPLE.TripleTable | null }>();
 function tripleTable(name: string): TRIPLE.TripleTable | null {

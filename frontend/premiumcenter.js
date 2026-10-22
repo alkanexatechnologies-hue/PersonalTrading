@@ -94,6 +94,8 @@ function ppcShell() {
     </div>
     <div class="ppc-side"><div class="ppc-side-h">Level ladder <span class="ppc-sub">★ confluence · risk = for a buyer trading the break</span></div><div class="ppc-rk-key"><i class="ppc-rk ppc-rk-low">LOW RISK</i><i class="ppc-rk ppc-rk-med">MED RISK</i><i class="ppc-rk ppc-rk-high">HIGH RISK</i><i class="ppc-rk ppc-rk-far">FAR</i> <span class="ppc-sub">hover a level for why</span></div><div id="ppc-ladder"></div></div>
   </div>
+  <div class="ppc-sec">🎓 Chart School <span class="ppc-sub">— replay any day; the teacher explains every move (voice)</span></div>
+  <div class="ppc-school" id="ppc-school"></div>
   <div class="ppc-sec">⑤ Context</div>
   <div class="ppc-ctx"><div id="ppc-eye" class="ppc-eye"></div><div id="ppc-trend" class="ppc-trendstrip"></div></div>
   <div id="ppc-lm" class="ppc-lm"></div>
@@ -167,7 +169,7 @@ function ppcRender() {
   ppcEl("ppc-quote").innerHTML = `<span class="ppc-qname">${ppcEsc(d.name)}</span><span class="ppc-qpx ${ppcCls(sp.change)}">${ppcNs(sp.price)}</span><span class="${ppcCls(sp.change)}">${ppcSg(sp.change)} (${ppcSg(sp.changePct, 2, "%")})</span>
     <span>O <b>${ppcNs(sp.open)}</b></span><span>H <b>${ppcNs(sp.high)}</b></span><span>L <b>${ppcNs(sp.low)}</b></span><span>Prev close <b>${ppcNs(sp.prevClose)}</b></span>
     <span>ATM <b>${d.atm ?? "—"}</b></span><span>Expiry <b>${ppcEsc(d.expiry || "—")}</b></span>${d.session !== "OPEN" ? `<span class="ppc-warnt">Session ${ppcEsc(sp.sessionDay || "")} — market ${ppcEsc(d.session)}</span>` : ""}`;
-  ppcLoad3x(); ppcCalcInit(); if (ppcEl("ppc-calc")?.open && PPC._calcKey !== `${PPC.sym}:${PPC.off || 0}`) ppcCalcOpen(); ppcRenderMaster(); ppcRenderProTrader(); ppcRenderLevelMemory(); ppcRenderRadar(); ppcLoadZH(); ppcLoadZHToday(); ppcLoadEye(); ppcRenderBTSD(); ppcRenderCoach(); ppcRenderTV(); ppcRenderLadder(); ppcRenderPlans(); ppcRenderHistory(); if (ppcEl("ppc-more")?.open) { ppcRenderCards(); ppcRenderCharts(); ppcRenderRank(); }
+  ppcLoad3x(); ppcSchoolInit(); ppcCalcInit(); if (ppcEl("ppc-calc")?.open && PPC._calcKey !== `${PPC.sym}:${PPC.off || 0}`) ppcCalcOpen(); ppcRenderMaster(); ppcRenderProTrader(); ppcRenderLevelMemory(); ppcRenderRadar(); ppcLoadZH(); ppcLoadZHToday(); ppcLoadEye(); ppcRenderBTSD(); ppcRenderCoach(); ppcRenderTV(); ppcRenderLadder(); ppcRenderPlans(); ppcRenderHistory(); if (ppcEl("ppc-more")?.open) { ppcRenderCards(); ppcRenderCharts(); ppcRenderRank(); }
   ppcEl("ppc-foot").innerHTML = `${ppcEsc(d.note)} · ${ppcEsc(d.version)} · <span title="${ppcEsc(PPC_TIPS.PROB)}">${ppcEsc(d.validation?.status)}: ${ppcEsc(d.validation?.detail)}</span>`;
 }
 
@@ -746,6 +748,104 @@ async function ppcCalcRun() {
       </tbody></table>
       <div class="ppc-sub">Estimate: live premium + Black-Scholes change at one IV for the expiry (average of the ATM call and put IV); "after N min" includes time decay; ⚠ stale = the quote was below intrinsic value, the model price is used. Real premiums also move with IV and demand.</div>`;
   } catch (e) { out.innerHTML = `<div class="ppc-na">calculator unavailable — ${ppcEsc(e.message || "")}</div>`; }
+}
+
+// ================================================================ 🎓 CHART SCHOOL — replay any day, a teacher explains it aloud
+// Lessons come from /api/learn/day (rule-based, only what was known at each candle — no look-ahead). Voice = the browser's own
+// speech (Indian English voice when available); playback waits for the teacher to finish before the next candle.
+const SCH = { sym: "^NSEI", day: null, iv: 5, data: null, idx: 0, playing: false, speed: 1, voice: true, chart: null, series: null, lines: [], run: 0 };
+function ppcSchoolInit() {
+  const el = ppcEl("ppc-school"); if (!el || el._init) return; el._init = true;
+  el.innerHTML = `<div class="sch-bar">
+      <select id="sch-sym"><option value="^NSEI">NIFTY</option><option value="^BSESN">SENSEX</option></select>
+      <select id="sch-day"><option>loading…</option></select>
+      <select id="sch-iv"><option value="5">5 min</option><option value="15">15 min</option></select>
+      <span class="sch-ctl"><button type="button" data-sch="first" title="start of the day">⏮</button><button type="button" data-sch="prev" title="one candle back">◀</button>
+      <button type="button" data-sch="play" class="sch-play" title="play / pause">▶ Play</button><button type="button" data-sch="next" title="one candle forward">▶|</button><button type="button" data-sch="last" title="end of the day">⏭</button></span>
+      <select id="sch-speed" title="speed"><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option></select>
+      <label class="sch-voice"><input type="checkbox" id="sch-voice" checked> 🔊 Teacher's voice</label>
+      <span id="sch-pos" class="ppc-sub"></span></div>
+    <div class="sch-main"><div id="sch-chart" class="sch-chart"></div>
+      <div class="sch-side"><div id="sch-now" class="sch-now"><div class="ppc-sub">Choose a day and press ▶ Play — the teacher explains each candle as it appears.</div></div><div id="sch-list" class="sch-list"></div></div></div>`;
+  el.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-sch]"), li = e.target.closest("[data-sch-i]");
+    if (li) { schStop(); SCH.idx = Number(li.dataset.schI); schRender(); schSpeakAt(SCH.idx); return; }
+    if (!b || !SCH.data) return; const n = SCH.data.candles.length, a = b.dataset.sch;
+    if (a === "play") { SCH.playing ? schStop() : schPlay(); return; }
+    schStop(); SCH.idx = a === "first" ? 0 : a === "last" ? n - 1 : a === "prev" ? Math.max(0, SCH.idx - 1) : Math.min(n - 1, SCH.idx + 1); schRender(); if (a === "next" || a === "prev") schSpeakAt(SCH.idx);
+  });
+  el.addEventListener("change", (e) => {
+    const t = e.target;
+    if (t.id === "sch-sym") { SCH.sym = t.value; schLoadDays(); }
+    if (t.id === "sch-day") { SCH.day = t.value; schLoad(); }
+    if (t.id === "sch-iv") { SCH.iv = Number(t.value); schLoad(); }
+    if (t.id === "sch-speed") SCH.speed = Number(t.value);
+    if (t.id === "sch-voice") { SCH.voice = t.checked; if (!t.checked) try { speechSynthesis.cancel(); } catch { /* none */ } }
+  });
+  schLoadDays();
+}
+async function schLoadDays() {
+  schStop(); const sel = ppcEl("sch-day"); if (!sel) return;
+  let r = null; try { r = await fetch(`/api/learn/days?symbol=${encodeURIComponent(SCH.sym)}`).then((x) => x.json()); } catch { /* keep */ }
+  if (!r?.ok || !r.days?.length) { sel.innerHTML = "<option>no data</option>"; return; }
+  const wd = (d) => new Date(d + "T00:00:00Z").toUTCString().slice(0, 3);
+  sel.innerHTML = r.days.map((d) => `<option value="${d}">${wd(d)} ${d}</option>`).join(""); SCH.day = r.days[0]; schLoad();
+}
+async function schLoad() {
+  schStop(); const now = ppcEl("sch-now");
+  if (now) now.innerHTML = `<div class="ppc-sub">loading the lesson…</div>`;
+  let r = null; try { r = await fetch(`/api/learn/day?symbol=${encodeURIComponent(SCH.sym)}&day=${SCH.day}&interval=${SCH.iv}`).then((x) => x.json()); } catch { /* keep */ }
+  if (!r?.ok) { if (now) now.innerHTML = `<div class="ppc-na">${ppcEsc(r?.error || "lesson not available")}</div>`; return; }
+  SCH.data = r; SCH.idx = 0;
+  const host = ppcEl("sch-chart"); if (!host) return;
+  if (!SCH.chart) {
+    SCH.chart = LightweightCharts.createChart(host, { width: host.clientWidth || 600, height: host.clientHeight || 360, layout: { background: { type: "solid", color: "#0a0e17" }, textColor: "#8a97ad", fontSize: 10 },
+      grid: { vertLines: { color: "#121a2b" }, horzLines: { color: "#121a2b" } }, rightPriceScale: { borderColor: "#2a2e39" }, timeScale: { borderColor: "#2a2e39", timeVisible: true, secondsVisible: false } });
+    SCH.series = SCH.chart.addCandlestickSeries({ upColor: "#26a69a", downColor: "#ef5350", borderUpColor: "#26a69a", borderDownColor: "#ef5350", wickUpColor: "#26a69a", wickDownColor: "#ef5350" });
+    window.addEventListener("resize", () => { if (SCH.chart && host.clientWidth) SCH.chart.applyOptions({ width: host.clientWidth }); });
+  }
+  for (const l of SCH.lines) try { SCH.series.removePriceLine(l); } catch { /* gone */ }
+  const col = { "PREV DAY": "#2962ff", PIVOT: "#ff9800", WEEK: "#ab47bc", ROUND: "#5d606b" };
+  SCH.lines = r.levels.map((L) => SCH.series.createPriceLine({ price: L.price, color: col[L.kind] || "#787b86", lineWidth: L.kind === "ROUND" ? 1 : 2, lineStyle: 2, axisLabelVisible: true, title: L.label.replace("previous ", "prev ").replace("round number", "") }));
+  schRender();
+}
+function schStepsAt(i) { return (SCH.data?.steps || []).filter((s) => s.i === i); }
+function schRender() {
+  const d = SCH.data; if (!d || !SCH.series) return;
+  const shift = (t) => t + 19800;   // show IST on the time axis
+  SCH.series.setData(d.candles.slice(0, SCH.idx + 1).map((c) => ({ ...c, time: shift(c.time) })));
+  SCH.series.setMarkers(d.steps.filter((s) => s.i <= SCH.idx && s.marker).map((s) => ({ time: shift(s.time), ...s.marker })));
+  SCH.chart.timeScale().setVisibleLogicalRange({ from: -1, to: d.candles.length + 1 });   // the whole day's width — candles fill in from the left
+  const hm = (t) => new Date((t + 19800) * 1000).toISOString().slice(11, 16), c = d.candles[SCH.idx];
+  const pos = ppcEl("sch-pos"); if (pos) pos.textContent = `${d.index} · ${d.day} · candle ${SCH.idx + 1}/${d.candles.length} · ${hm(c.time)} · close ${Math.round(c.close).toLocaleString("en-IN")}`;
+  const cur = schStepsAt(SCH.idx), last = cur.length ? cur : d.steps.filter((s) => s.i <= SCH.idx).slice(-1);
+  const now = ppcEl("sch-now"); if (now) now.innerHTML = last.length ? last.map((s) => `<div class="sch-lesson ${s.kind}"><b>${hm(s.time)}</b> ${ppcEsc(s.text)}</div>`).join("") : `<div class="ppc-sub">${hm(c.time)} — a quiet candle; nothing new to learn here.</div>`;
+  const list = ppcEl("sch-list"); if (list) { list.innerHTML = d.steps.map((s) => `<div class="sch-li ${s.i <= SCH.idx ? "done" : ""} ${s.i === SCH.idx ? "cur" : ""}" data-sch-i="${s.i}"><b>${hm(s.time)}</b> <i>${ppcEsc(s.kind)}</i> ${ppcEsc(s.text.slice(0, 90))}…</div>`).join(""); const curEl = list.querySelector(".cur"); if (curEl) curEl.scrollIntoView({ block: "nearest" }); }
+  const pb = document.querySelector("#ppc-school .sch-play"); if (pb) pb.textContent = SCH.playing ? "⏸ Pause" : "▶ Play";
+}
+function schSpeak(text, run) {
+  return new Promise((res) => {
+    if (!SCH.voice || !("speechSynthesis" in window)) return res();
+    try {
+      const u = new SpeechSynthesisUtterance(text), vs = speechSynthesis.getVoices();
+      u.voice = vs.find((v) => /en-IN/i.test(v.lang)) || vs.find((v) => /^en/i.test(v.lang)) || null; u.rate = SCH.speed >= 4 ? 1.25 : SCH.speed >= 2 ? 1.1 : 0.98;
+      u.onend = u.onerror = () => res(); if (run !== SCH.run) return res(); speechSynthesis.speak(u);
+    } catch { res(); }
+  });
+}
+async function schSpeakAt(i) { try { speechSynthesis.cancel(); } catch { /* none */ } const run = SCH.run; for (const s of schStepsAt(i)) { if (run !== SCH.run) return; await schSpeak(s.text, run); } }
+function schStop() { SCH.playing = false; SCH.run++; try { speechSynthesis.cancel(); } catch { /* none */ } schRender(); }
+async function schPlay() {
+  const d = SCH.data; if (!d) return; if (SCH.idx >= d.candles.length - 1) SCH.idx = 0;
+  SCH.playing = true; const run = ++SCH.run; schRender();
+  await schSpeakAt(SCH.idx);
+  while (SCH.playing && run === SCH.run && SCH.idx < d.candles.length - 1) {
+    await new Promise((r) => setTimeout(r, 700 / SCH.speed)); if (!SCH.playing || run !== SCH.run) break;
+    SCH.idx++; schRender();
+    const st = schStepsAt(SCH.idx);
+    if (st.length) { if (SCH.voice) for (const s of st) { if (run !== SCH.run) break; await schSpeak(s.text, run); } else await new Promise((r) => setTimeout(r, 2500 / SCH.speed)); }
+  }
+  if (run === SCH.run) { SCH.playing = false; schRender(); }
 }
 
 /** 🎯 3× potential (top of the screen): NIFTY + SENSEX, two strikes each with the best TESTED chance of tripling (2 years of
