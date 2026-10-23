@@ -13,7 +13,7 @@ import { fetchDhanCandles, DhanBacktestInterval } from "./dhanHistorical";
 import { CONFIG } from "../config/arbitration";
 import { checkedUnderlying } from "../oi/parity";
 import { recordDhanDataSuccess, recordDhanError } from "./dhanHealth";
-import { recordTick, recordDayOhlc, liveCandles, fallbackCandles, noteChartFail, noteChartOk, chartApiDown } from "./liveBars";
+import { recordTick, recordDayOhlc, liveCandles, fallbackCandles, noteChartFail, noteChartOk, chartApiDown, savedOptionCandles } from "./liveBars";
 
 const round2 = (n: number) => Math.round(Number(n) * 100) / 100;
 const num = (v: any): number => { const n = Number(v); return isFinite(n) ? n : 0; };
@@ -646,7 +646,7 @@ export async function dhanOptionCandles(
     const msg = `Dhan option history ${res.status}: ${t.slice(0, 200)}`;
     // chart API down → today's bars built from the live Dhan option chain for this contract (see liveBars.ts)
     noteChartFail(msg);
-    const fb = liveCandles(`sec:${optionSecurityId}`, intervalMin).filter(c => c.time >= startEpoch && c.time <= endEpoch);
+    const fb = [...savedOptionCandles(optionSecurityId, intervalMin, startEpoch), ...liveCandles(`sec:${optionSecurityId}`, intervalMin)].filter(c => c.time >= startEpoch && c.time <= endEpoch);
     if (fb.length) return fb;
     throw new Error(msg);
   }

@@ -17,3 +17,8 @@ test("resampleSession aligns hourly bars to 09:15, not to the clock hour", () =>
   const out = resampleSession([bar(0, 1, 1, 1, 1), bar(59, 2, 2, 2, 2), bar(60, 3, 3, 3, 3)], 60);
   assert.deepEqual(out.map((c) => c.time), [T0, T0 + 3600]);
 });
+
+test("resampleSession drops minutes outside 09:15–15:30 IST", () => {
+  const out = resampleSession([bar(-5, 1, 1, 1, 1), bar(0, 2, 2, 2, 2), bar(375, 3, 3, 3, 3)], 15);
+  assert.deepEqual(out.map((c) => c.time), [T0]);
+});

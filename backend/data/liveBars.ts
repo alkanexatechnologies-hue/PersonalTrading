@@ -69,7 +69,7 @@ export function recordDayOhlc(nse: string, q: { open?: number; high: number; low
 export function resampleSession(cs: Candle[], iv: number): Candle[] {
   const out = new Map<number, Candle>();
   for (const c of [...cs].sort((a, b) => a.time - b.time)) {
-    const dayStart = c.time - ((c.time + IST) % 86400), m = istMin(c.time); if (m < OPEN_MIN) continue;
+    const dayStart = c.time - ((c.time + IST) % 86400), m = istMin(c.time); if (m < OPEN_MIN || m >= CLOSE_MIN) continue;
     const bt = dayStart + (OPEN_MIN + Math.floor((m - OPEN_MIN) / iv) * iv) * 60, b = out.get(bt);
     if (!b) out.set(bt, { ...c, time: bt });
     else { b.high = Math.max(b.high, c.high); b.low = Math.min(b.low, c.low); b.close = c.close; b.volume += c.volume; }
@@ -115,4 +115,36 @@ export function chartApiDown() { return downSince > 0; }
 export function chartApiStatus() {
   return { down: downSince > 0, since: downSince || null, lastError: downSince ? lastErr : null, lastOk: lastOk || null,
     source: downSince > 0 ? "live Dhan quotes (chart API down)" : "Dhan chart API" };
+}
+
+// ---- saved Dhan option premiums (up to yesterday) ----
+// The research job saves real Dhan 1-min premiums for the NEAREST weekly expiry, rolling ATM ± 3
+// (data/research-nifty20/raw1m, data/research-multi/<INDEX>/raw1m; one file per side + offset, each minute carries
+// the strike it priced). A contract's history = the minutes whose strike matches, on days after the previous
+// weekly expiry (so the minutes belong to THIS contract's expiry week). Used only as the chart-API fallback.
+const optMeta = new Map<string, { und: string; side: "CE" | "PE"; strike: number; expiry: string }>();
+/** Remember which contract a Dhan option securityId is (called from lookupDhanOption). */
+export function registerOption(secId: string, und: string, side: "CE" | "PE", strike: number, expiry: string) { optMeta.set(String(secId), { und: und.toUpperCase(), side, strike, expiry }); }
+const RAW_DIR: Record<string, string> = { NIFTY: path.join(DATA_DIR, "research-nifty20", "raw1m"), SENSEX: path.join(DATA_DIR, "research-multi", "SENSEX", "raw1m") };
+const rawCache = new Map<string, { mtime: number; j: any }>();
+function rawFile(f: string) {
+  try { const mt = fs.statSync(f).mtimeMs, c = rawCache.get(f); if (c && c.mtime === mt) return c.j; const j = JSON.parse(fs.readFileSync(f, "utf8")); rawCache.set(f, { mtime: mt, j }); return j; } catch { return null; }
+}
+export function savedOptionCandles(secId: string, iv: number, fromEpoch: number): Candle[] {
+  const m = optMeta.get(String(secId)), dir = m && RAW_DIR[m.und]; if (!m || !dir) return [];
+  const today = istDay(Math.floor(Date.now() / 1000));
+  const weekStart = new Date(Date.parse(m.expiry + "T00:00:00Z") - 7 * 86400000).toISOString().slice(0, 10);   // after the previous weekly expiry
+  let files: string[] = []; try { files = fs.readdirSync(dir).filter((f) => f.endsWith(".json") && f.includes(`_${m.side}_`)); } catch { return []; }
+  const fromDay = istDay(Math.max(fromEpoch, 0));
+  const out = new Map<number, Candle>();
+  for (const f of files) {
+    const parts = f.replace(/\.json$/, "").split("_"); if (parts.length < 4 || parts[1] < fromDay || parts[1] <= weekStart) continue;   // file range ends too early
+    const j = rawFile(path.join(dir, f)); if (!j?.timestamp) continue;
+    for (let i = 0; i < j.timestamp.length; i++) {
+      const t = j.timestamp[i], d = istDay(t);
+      if (j.strike[i] !== m.strike || t < fromEpoch || d <= weekStart || d >= today || d > m.expiry || !(j.close[i] > 0)) continue;
+      out.set(t, { time: t, open: j.open[i], high: j.high[i], low: j.low[i], close: j.close[i], volume: j.volume?.[i] ?? 0 });
+    }
+  }
+  return resampleSession([...out.values()], Math.max(1, iv));
 }

@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { registerOption } from "./liveBars";
 
 // ---- Dhan instrument master (for backtesting only - see dhanHistorical.ts) ----
 // Dhan's historical-data API needs a numeric securityId + exchangeSegment +
@@ -158,7 +159,9 @@ export async function lookupDhanOption(
   expiry: string,
 ): Promise<DhanOptionSecurity | null> {
   await ensureLoaded();
-  return optionIndex?.get(optionKey(underlying, expiry, strike, type)) || null;
+  const o = optionIndex?.get(optionKey(underlying, expiry, strike, type)) || null;
+  if (o) registerOption(o.securityId, underlying, type, strike, expiry);   // lets the chart-API fallback find its saved history
+  return o;
 }
 
 /** The near-month index future (first expiry on or after `today`), for futures price / OI. Null when not in the scrip master. */
