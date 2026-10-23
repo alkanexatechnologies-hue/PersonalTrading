@@ -552,7 +552,12 @@ function oiSnapshotFresh(oi: any): boolean {
   if (!oi || !oi.available) return false;
   if (oi.expiry && String(oi.expiry) < istDateStr()) return false;
   const asOf = Number(oi.asOf) || 0;
-  return asOf > 0 && Date.now() - asOf * 1000 < 20 * 3600_000;
+  if (!(asOf > 0 && Date.now() - asOf * 1000 < 20 * 3600_000)) return false;
+  // a chain saved DURING a session is not the day's final OI once that session has closed: after 15:30 Dhan serves the
+  // closing OI, so fetch it once (the new snapshot is then taken after the close and stays fresh until the next open)
+  const t = new Date(asOf * 1000 + 19800000), m = t.getUTCHours() * 60 + t.getUTCMinutes(), closeMs = Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate(), 15, 31) - 19800000;
+  if (t.getUTCDay() % 6 !== 0 && m >= 555 && m < 930 && Date.now() > closeMs) return false;
+  return true;
 }
 // The index's own price, used to check the option chain's underlying (Dhan's chain last_price can be wrong).
 // Cache first: a recent index quote (≤ 60 s), then a live quote (5 s cap — the quote API allows 1 call/s and queues under
@@ -574,10 +579,11 @@ async function liveOptionOi(def: SymbolDef): Promise<OiAnalysis> {
     return oi;
   }
   const disk = loadLastOiJson(def.symbol);
-  // A chain saved DURING market hours stays the reference until the next open (weekends and
-  // holidays included) as long as its expiry hasn't passed. Dhan's after-hours chain is not
-  // reliable (wrong last_price, OI and IV differ from the session), so it never replaces it.
-  if (disk && disk.available && disk.sessionDate && (!disk.expiry || String(disk.expiry) >= istDateStr()))
+  // After hours the reference is the session's CLOSING chain. A chain saved mid-session (whenever a screen or the minute
+  // monitor last fetched it — e.g. 12:35) is replaced once after 15:30 by Dhan's closing chain: cross-checked 2026-10-23,
+  // its OI matches NSE's official end-of-day bhavcopy (PCR NIFTY 0.823 vs 0.821, MIDCPNIFTY identical), whereas the stale
+  // mid-session snapshot was off (NIFTY 0.78, FINNIFTY 0.92 vs 0.755). The underlying price still comes from the index quote.
+  if (disk && disk.available && disk.sessionDate && (!disk.expiry || String(disk.expiry) >= istDateStr()) && oiSnapshotFresh(disk))
     return { ...disk, message: `After hours: last session OI (${disk.sessionDate})` };
   if (gp && !oiSnapshotFresh(disk) && Date.now() - (_afterHoursOiTry.get(def.symbol) || 0) > 5 * 60_000) {
     // Saved snapshot is from an older session (or its expiry has passed): pull the
@@ -587,9 +593,10 @@ async function liveOptionOi(def: SymbolDef): Promise<OiAnalysis> {
     try {
       const oi = await withTimeout(dhanOiAnalysis(def, await indexSpotFor(def)), 15_000, `dhan OI after-hours ${def.symbol}`);
       if (oi && oi.available) {
-        const ah = { ...oi, afterHours: true };
+        const nowIst = new Date(Date.now() + 19800000), wkday = nowIst.getUTCDay() % 6 !== 0, afterClose = nowIst.getUTCHours() * 60 + nowIst.getUTCMinutes() > 930;
+        const ah = { ...oi, afterHours: true, sessionDate: wkday && afterClose ? istDateStr() : disk?.sessionDate ?? undefined };   // the session this closing chain belongs to
         try { saveLastOiJson(def.symbol, ah); } catch { /* best-effort */ }
-        return { ...ah, message: "After hours: Dhan's after-hours chain — OI / IV can differ from the session" };
+        return { ...ah, message: `After hours: closing OI${ah.sessionDate ? ` (${ah.sessionDate})` : ""} — matches NSE's end-of-day file` };
       }
     } catch { /* fall back to the saved snapshot */ }
   }
