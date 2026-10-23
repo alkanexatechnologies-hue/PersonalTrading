@@ -10,13 +10,15 @@
 //  - Credentials are checked SERVER-SIDE only (never shipped in frontend JS).
 //  - Admin password: SHA-256 + constant-time compare (unchanged from before).
 //  - User passwords: scrypt hash + constant-time compare (auth/passwordHash.ts).
-//  - Sessions are opaque random tokens held in memory, now carrying identity
+//  - Sessions are opaque random tokens (in memory + SHA-256 hashes in data/auth-sessions.json), carrying identity
 //    (userId/username/role/permissions), and expire daily at 07:00 AM IST.
 //  - DEV MODE: credentials.ts's setPasswordless(true) makes the ADMIN path
 //    accept any password (including blank) for the admin username only - user
 //    accounts are never affected by this flag.
 
 import crypto from "crypto";
+import fs from "fs";
+import { dataFile } from "../config/dataDir";
 import { getCredentials } from "./credentials";
 import {
   findByUsername, effectiveStatus, recordLoginSuccess, recordLoginFailure, Permission,
@@ -41,8 +43,28 @@ export interface SessionRecord {
   permissions: Permission[]; // empty for admin - admin has implicit full access, checked by role, not this list
 }
 
-// token -> session record
-const sessions = new Map<string, SessionRecord>();
+// token -> session record. Kept in memory AND saved to data/auth-sessions.json (only the SHA-256 of each
+// token is stored, never the token itself) so a server restart no longer logs every open browser out.
+// Not persisted under `node --test`, so tests never touch the real file.
+const SESS_FILE = dataFile("auth-sessions.json"), PERSIST = !process.env.NODE_TEST_CONTEXT;
+class SessionMap {
+  private m = new Map<string, SessionRecord>();
+  constructor() {
+    if (!PERSIST) return;
+    try { const j = JSON.parse(fs.readFileSync(SESS_FILE, "utf8")); for (const [k, r] of Object.entries<SessionRecord>(j)) if (r.expiresAt > Date.now()) this.m.set(k, r); } catch { /* none saved */ }
+  }
+  private key(token: string) { return crypto.createHash("sha256").update(token, "utf8").digest("hex"); }
+  private save() {
+    if (!PERSIST) return;
+    try { fs.writeFileSync(SESS_FILE, JSON.stringify(Object.fromEntries(this.m)), { mode: 0o600 }); } catch { /* best effort */ }
+  }
+  get(token: string) { return this.m.get(this.key(token)); }
+  set(token: string, rec: SessionRecord) { this.m.set(this.key(token), rec); this.save(); }
+  delete(token: string) { if (this.m.delete(this.key(token))) this.save(); }
+  /** Remove every session matching `pred`; returns how many. */
+  deleteWhere(pred: (rec: SessionRecord) => boolean) { let n = 0; for (const [k, r] of this.m) if (pred(r)) { this.m.delete(k); n++; } if (n) this.save(); return n; }
+}
+const sessions = new SessionMap();
 
 // Next 07:00 AM IST (= 01:30 UTC) strictly after `now`.
 function nextExpiry(now = Date.now()): number {
@@ -54,7 +76,7 @@ function nextExpiry(now = Date.now()): number {
 }
 
 function sweep(now = Date.now()) {
-  for (const [t, rec] of sessions) if (rec.expiresAt <= now) sessions.delete(t);
+  sessions.deleteWhere((rec) => rec.expiresAt <= now);
 }
 
 export interface LoginResult {
@@ -143,11 +165,7 @@ export function logout(token: string | undefined | null): void {
 // Admin action: kill every active session belonging to a given userId
 // ("Revoke Access"). Returns how many sessions were terminated.
 export function revokeUserSessions(userId: string): number {
-  let count = 0;
-  for (const [t, rec] of sessions) {
-    if (rec.userId === userId) { sessions.delete(t); count++; }
-  }
-  return count;
+  return sessions.deleteWhere((rec) => rec.userId === userId);
 }
 
 // Expiry the frontend can show ("Session ends daily at 7:00 AM IST").
