@@ -13,6 +13,7 @@ import { fetchDhanCandles, DhanBacktestInterval } from "./dhanHistorical";
 import { CONFIG } from "../config/arbitration";
 import { checkedUnderlying } from "../oi/parity";
 import { recordDhanDataSuccess, recordDhanError } from "./dhanHealth";
+import { recordTick, recordDayOhlc, liveCandles, fallbackCandles, noteChartFail, noteChartOk, chartApiDown } from "./liveBars";
 
 const round2 = (n: number) => Math.round(Number(n) * 100) / 100;
 const num = (v: any): number => { const n = Number(v); return isFinite(n) ? n : 0; };
@@ -109,7 +110,15 @@ export class DhanProvider implements MarketDataProvider {
     const fromD = new Date(Date.now() + 19800000 - days * 86400000);
     const fromDate = fromD.toISOString().slice(0, 10);
 
-    let candles = await fetchDhanCandles(sec, dhanInterval, fromDate, toDate);
+    let candles: Candle[];
+    try { candles = await fetchDhanCandles(sec, dhanInterval, fromDate, toDate); noteChartOk(); }
+    catch (e: any) {
+      // Dhan chart API down → saved Dhan history + today's bars built from live Dhan quotes (see liveBars.ts)
+      noteChartFail(e?.message || String(e));
+      const fb = fallbackCandles(nse, dhanInterval === "1d" ? "1d" : Number(dhanInterval), days);
+      if (!fb.length) throw e;
+      candles = fb;
+    }
 
     // Resample 15m → 30m if requested
     if (interval === "30m" && dhanInterval === "15") {
@@ -194,6 +203,7 @@ function buildQuoteFromOhlc(symbol: string, def: SymbolDef, data: any): Quote {
   const low = num(ohlc.low ?? data.low ?? price);
   const close = num(ohlc.close ?? data.close ?? data.prev_close ?? 0);
   const volume = num(data.volume ?? data.Volume ?? 0);
+  if (def.nseSymbol && price > 0) { recordTick(`sym:${def.nseSymbol}`, price, volume || null); recordDayOhlc(def.nseSymbol, { open: num(ohlc.open), high: high || price, low: low || price, close: price, volume }); }
   const change = round2(price - close);
   const changePct = close > 0 ? round2((change / close) * 100) : 0;
   // Dhan market feed may include last_traded_time as epoch (sec or ms).
@@ -410,6 +420,9 @@ export async function dhanChainForExpiry(def: SymbolDef, expiryOffset = 0): Prom
 
     if (!strikes.length || !spot) return { available: false, message: "Empty chain." };
     recordDhanOk("chain");
+    // real Dhan prices → 1-min bars (used only if the chart API fails; see liveBars.ts)
+    recordTick(`sym:${def.nseSymbol}`, spot);
+    for (const r of strikes as any[]) { if (r.ceSecId && r.ceLtp) recordTick(`sec:${r.ceSecId}`, r.ceLtp, r.ceVol); if (r.peSecId && r.peLtp) recordTick(`sec:${r.peSecId}`, r.peLtp, r.peVol); }
     return { available: true, expiries: list, expiry, expiryIdx: idx, spot, strikes };
   } catch (e: any) {
     recordDhanFail(e?.message);
@@ -630,8 +643,14 @@ export async function dhanOptionCandles(
   });
   if (!res.ok) {
     const t = await res.text().catch(() => "");
-    throw new Error(`Dhan option history ${res.status}: ${t.slice(0, 200)}`);
+    const msg = `Dhan option history ${res.status}: ${t.slice(0, 200)}`;
+    // chart API down → today's bars built from the live Dhan option chain for this contract (see liveBars.ts)
+    noteChartFail(msg);
+    const fb = liveCandles(`sec:${optionSecurityId}`, intervalMin).filter(c => c.time >= startEpoch && c.time <= endEpoch);
+    if (fb.length) return fb;
+    throw new Error(msg);
   }
+  noteChartOk();
   const payload = await res.json();
   return toCandles(payload).filter(c => c.time >= startEpoch && c.time <= endEpoch);
 }
@@ -648,7 +667,9 @@ export async function dhanSpotCandles(
   const fromDate = new Date((startEpoch - 86400) * 1000).toISOString().slice(0, 10);
   const toDate = new Date((endEpoch + 86400) * 1000).toISOString().slice(0, 10);
   const interval = intervalMin <= 5 ? "5" : intervalMin <= 15 ? "15" : "60";
-  const candles = await fetchDhanCandles(sec, interval as DhanBacktestInterval, fromDate, toDate);
+  let candles: Candle[];
+  try { candles = await fetchDhanCandles(sec, interval as DhanBacktestInterval, fromDate, toDate); noteChartOk(); }
+  catch (e: any) { noteChartFail(e?.message || String(e)); candles = fallbackCandles(nseSymbol, Number(interval), Math.ceil((Date.now() / 1000 - startEpoch) / 86400) + 1); if (!candles.length) throw e; }
   return candles.filter(c => c.time >= startEpoch && c.time <= endEpoch);
 }
 
@@ -667,3 +688,14 @@ function toCandles(payload: any): Candle[] {
   }
   return out;
 }
+
+// ---- Live-bar sampler: while Dhan's chart API is down, read NIFTY + SENSEX quotes every 20 s and their nearest
+// option chains every 60 s so liveBars.ts keeps building real 1-min candles even when no screen is open. ----
+let _sampleN = 0;
+const _sampler = setInterval(async () => {
+  const m = Math.floor(((Date.now() / 1000 + 19800) % 86400) / 60), dow = new Date(Date.now() + 19800000).getUTCDay();
+  if (m < 555 || m >= 930 || dow === 0 || dow === 6 || !chartApiDown() || !loadDhanConfig().accessToken) return;
+  try { await new DhanProvider().getQuotes(["^NSEI", "^BSESN", "^NSEBANK", "^CNXFIN", "^NSEMDCP50"]); } catch { /* next tick */ }
+  if (_sampleN++ % 3 === 0) for (const s of ["^NSEI", "^BSESN"]) { const d = findSymbolDef(s); if (d) await dhanChainForExpiry(d, 0).catch(() => null); }
+}, 20_000);
+_sampler.unref?.();
