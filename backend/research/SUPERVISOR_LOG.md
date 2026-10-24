@@ -165,3 +165,16 @@ or together with the live-level fake, on 5m and 15m, NIFTY + SENSEX, development
   in validation.
 - NIFTY 15m fake-up at owner S/R is +2 / +5 points on n ≈ 70, and SENSEX does not confirm it. Watch only.
 - **No change to live logic.**
+
+## 2026-10-24 · Fake-move grid search, 22,304 combinations (`RESULTS_FAKE_MOVE.md` §5)
+
+**Tested:** every combination of up to 3 of 16 filters, fixed 1 : 1 scoring, selection on development only.
+
+**Verdict:**
+- **80% not reachable reliably.** The development → validation correlation of the edge is 0.11.
+- **One family held** in development and both validation halves on both indices: **5m FAKE-UP at an owner S/R
+  level + call writing + level touched earlier today**. It was right 61–81% vs a 54–55% baseline, +0.17 to +0.50 R,
+  and the ATM PE gained +3.7% to +14.8% per trade before costs.
+- **The mirror FAKE-DOWN fails.**
+- **PROMISING, NOT APPROVED:** it was picked from 22k rules, has a small n, and works one way only. Forward paper test
+  first; no change to live logic.

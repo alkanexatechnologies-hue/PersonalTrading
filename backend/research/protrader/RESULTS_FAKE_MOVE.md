@@ -117,3 +117,48 @@ Right % vs the same-stop baseline (development → validation):
   FAKE-UP does not confirm it (−1 → −3). Watch only.
 
 **Verdict:** no improvement. No change to live logic.
+
+## Study #5: grid search of every combination (`fakeMoveGrid.ts`; raw output in `RESULTS_FAKE_GRID_raw.txt`)
+
+**Search space:** 22,304 rules = up to 3 of 16 trader filters × 4 level sources × 5m / 15m × entry at the confirmation
+or after follow-through × FAKE-DOWN / FAKE-UP, on NIFTY and SENSEX.
+
+**Filters:** strong close, rejection wick, shallow sweep, AM / midday / PM, higher-TF, day-average side, open side,
+quiet day, low ATR, premium agrees, premium new high, opposite-side writing, opposite-side volume trap, level tested
+earlier today.
+
+**Data:** spot and ATM option price / OI / volume.
+
+**Scoring:**
+- **Fixed 1 : 1 reward : risk**, so accuracy cannot be raised by shrinking the target. Accuracy = wins ÷ (wins +
+  losses), and the "open" share (neither hit in time) is shown beside it.
+- Rules were picked on **development only**, n ≥ 60 on both indices.
+
+**Overall:**
+- **The development edge barely carries into validation:** the correlation is 0.11 across 9,851 rules, so most
+  development "winners" were luck.
+- **No rule reaches ≥ 80% in validation on both indices.**
+- **The highest development numbers are not real:** 15m FAKE-UP after follow-through, PM, scored 87%, but 75% of its
+  trades never hit the target or the stop, and its avg R was only +0.14.
+- **No single filter helps on average** in validation (−6.8 to +0.6 points).
+
+**The one family that held everywhere: 5m FAKE-UP at an OWNER S/R level + call writing + level touched earlier today**
+(entry at the confirming close).
+
+| | Development | Validation half 1 | Validation half 2 |
+|---|---|---|---|
+| NIFTY | 69% vs 52% · n 92 · +0.21 R · ATM PE +12.6% | 61% vs 55% · n 22 · +0.17 R · +3.7% | 67% vs 55% · n 25 · +0.22 R · +5.1% |
+| SENSEX | 65% vs 50% · n 105 · +0.19 R · ATM PE +4.1% | 71% vs 54% · n 24 · +0.26 R · +14.8% | 81% vs 54% · n 26 · +0.50 R · +11.5% |
+
+- Adding "PE premium makes a new 4-bar high" gives 64–79% in validation; adding a strong close gives 63–73%.
+- **The mirror (FAKE-DOWN + put writing) does NOT work:** 32–56%, mostly below baseline.
+- **The 15-min version** is weaker: 56–74% vs 56–57%.
+- It fires about once every 3–4 sessions per index.
+- Premium P&L is before costs (about 1–2% round trip for an ATM option).
+
+**Verdict (ProTrader):**
+- **PROMISING, NOT APPROVED for live trading.** It is the best of 22,304 tried rules, so some of its result is
+  selection luck. Validation n is only 47–50 per index. It works in one direction only.
+- **Next:** a forward paper test, logged from Monday and judged after about 30 live signals, before it can become a
+  co-pilot trade.
+- **80% accuracy is not reached reliably.** The honest level for the best rule is about 65–75%.

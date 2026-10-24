@@ -1,0 +1,191 @@
+Rules tested: 22304 · with n ≥ 60 on both indices in development: 9854
+
+HIGHEST DEVELOPMENT WIN % (either index) — and what happened next (validation):
+  15m FAKE-UP LIVE E1 pm+twap+premUp
+     DEV  NIFTY 87.0% (b 59.6) n91 open 75% +0.14R | SENSEX 65.2% (b 56.0) n79 open 71% +0.08R
+     VAL  NIFTY 71.4% (b 59.2) n43 open 67% +0.15R | SENSEX 72.7% (b 58.9) n36 open 69% +0.15R
+  15m FAKE-UP LIVE E1 pm+htf
+     DEV  NIFTY 86.7% (b 59.3) n60 open 75% +0.10R | SENSEX 58.3% (b 56.2) n62 open 81% +0.02R
+     VAL  NIFTY 61.9% (b 57.2) n44 open 52% +0.12R | SENSEX 78.9% (b 58.6) n38 open 50% +0.30R
+  15m FAKE-UP LIVE E1 pm+open+premUp
+     DEV  NIFTY 84.6% (b 59.4) n70 open 81% +0.07R | SENSEX 66.7% (b 56.0) n60 open 75% +0.08R
+     VAL  NIFTY 69.2% (b 59.2) n36 open 64% +0.14R | SENSEX 63.6% (b 58.4) n29 open 62% +0.10R
+  15m FAKE-UP LIVE E1 pm+premUp
+     DEV  NIFTY 84.0% (b 59.4) n100 open 75% +0.11R | SENSEX 64.0% (b 56.2) n87 open 71% +0.08R
+     VAL  NIFTY 60.9% (b 56.8) n55 open 58% +0.10R | SENSEX 66.7% (b 58.6) n48 open 63% +0.11R
+  15m FAKE-UP LIVE E1 pm+premUp+retest
+     DEV  NIFTY 83.3% (b 59.4) n94 open 74% +0.12R | SENSEX 62.5% (b 56.4) n82 open 71% +0.07R
+     VAL  NIFTY 60.9% (b 56.8) n51 open 55% +0.10R | SENSEX 66.7% (b 58.6) n45 open 60% +0.15R
+
+TOP 25 BY DEVELOPMENT EDGE (weaker index), read on VALIDATION:
+  15m FAKE-DOWN CANDLE E0 strong+am+write
+     DEV  NIFTY 73.1% (b 52.3) n63 open 59% +0.24R | SENSEX 73.9% (b 50.4) n65 open 65% +0.20R
+     VAL  NIFTY 33.3% (b 42.4) n36 open 67% -0.27R | SENSEX 45.5% (b 44.8) n33 open 67% -0.08R
+  15m FAKE-UP LIVE E1 strong+pm+premUp
+     DEV  NIFTY 81.8% (b 59.2) n85 open 74% +0.11R | SENSEX 76.5% (b 56.3) n74 open 77% +0.12R
+     VAL  NIFTY 57.1% (b 56.7) n51 open 59% +0.06R | SENSEX 64.7% (b 58.4) n43 open 60% +0.10R
+  5m FAKE-UP LIVE E1 strong+wick+htf
+     DEV  NIFTY 71.4% (b 52.0) n72 open 61% +0.16R | SENSEX 71.0% (b 49.8) n73 open 58% +0.19R
+     VAL  NIFTY 63.6% (b 55.6) n39 open 44% +0.06R | SENSEX 60.0% (b 54.8) n37 open 46% +0.08R
+  15m FAKE-UP CANDLE E1 strong+pm+premUp
+     DEV  NIFTY 82.6% (b 58.8) n71 open 68% +0.17R | SENSEX 75.0% (b 55.8) n69 open 65% +0.17R
+     VAL  NIFTY 50.0% (b 59.5) n38 open 47% +0.03R | SENSEX 47.6% (b 57.8) n38 open 45% -0.03R
+  15m FAKE-DOWN DAY E1 strong+open+quiet
+     DEV  NIFTY 75.0% (b 52.8) n79 open 65% +0.23R | SENSEX 70.4% (b 51.3) n79 open 66% +0.16R
+     VAL  NIFTY 50.0% (b 39.7) n30 open 73% -0.07R | SENSEX 33.3% (b 43.8) n35 open 74% -0.13R
+  15m FAKE-DOWN CANDLE E0 strong+am+quiet
+     DEV  NIFTY 71.0% (b 51.9) n66 open 53% +0.26R | SENSEX 72.7% (b 50.4) n78 open 58% +0.22R
+     VAL  NIFTY 33.3% (b 43.2) n37 open 59% -0.31R | SENSEX 38.5% (b 44.4) n35 open 63% -0.13R
+  5m FAKE-UP OWNER E0 twap+write+retest
+     DEV  NIFTY 70.2% (b 51.8) n78 open 40% +0.22R | SENSEX 70.8% (b 49.7) n81 open 41% +0.24R
+     VAL  NIFTY 61.5% (b 54.9) n33 open 21% +0.20R | SENSEX 83.3% (b 54.3) n39 open 23% +0.50R
+  5m FAKE-UP LIVE E1 wick+htf+open
+     DEV  NIFTY 70.4% (b 52.1) n65 open 58% +0.19R | SENSEX 75.9% (b 49.9) n71 open 59% +0.24R
+     VAL  NIFTY 57.9% (b 55.6) n35 open 46% -0.00R | SENSEX 53.3% (b 55.3) n32 open 53% -0.03R
+  15m FAKE-UP LIVE E1 lowvol+premHH+write
+     DEV  NIFTY 80.0% (b 59.8) n66 open 70% +0.15R | SENSEX 72.7% (b 54.5) n65 open 66% +0.15R
+     VAL  NIFTY 61.5% (b 56.3) n40 open 68% +0.14R | SENSEX 66.7% (b 58.3) n37 open 59% +0.23R
+  15m FAKE-UP CANDLE E1 strong+pm+twap
+     DEV  NIFTY 76.9% (b 58.8) n75 open 65% +0.19R | SENSEX 75.0% (b 55.4) n67 open 64% +0.21R
+     VAL  NIFTY 50.0% (b 60.1) n35 open 49% +0.07R | SENSEX 47.6% (b 58.3) n37 open 43% -0.04R
+  5m FAKE-UP OWNER E1 twap+premUp+premHH
+     DEV  NIFTY 75.9% (b 52.4) n82 open 65% +0.11R | SENSEX 68.2% (b 50.5) n79 open 72% +0.10R
+     VAL  NIFTY 55.6% (b 56.6) n42 open 57% +0.19R | SENSEX 64.3% (b 55.9) n35 open 60% +0.23R
+  5m FAKE-UP OWNER E0 premHH+write+retest
+     DEV  NIFTY 70.6% (b 51.7) n63 open 46% +0.19R | SENSEX 67.4% (b 49.7) n82 open 44% +0.19R
+     VAL  NIFTY 72.0% (b 55.8) n34 open 26% +0.31R | SENSEX 74.1% (b 54.7) n38 open 29% +0.34R
+  5m FAKE-UP OWNER E1 twap+premHH
+     DEV  NIFTY 75.9% (b 52.4) n83 open 65% +0.10R | SENSEX 68.2% (b 50.5) n86 open 74% +0.09R
+     VAL  NIFTY 55.6% (b 56.6) n44 open 59% +0.20R | SENSEX 64.3% (b 56.0) n40 open 65% +0.21R
+  15m FAKE-UP CANDLE E1 pm+twap+premUp
+     DEV  NIFTY 76.7% (b 59.0) n82 open 63% +0.17R | SENSEX 76.7% (b 56.3) n74 open 59% +0.23R
+     VAL  NIFTY 52.9% (b 61.0) n33 open 48% +0.07R | SENSEX 42.1% (b 58.0) n34 open 44% -0.06R
+  15m FAKE-DOWN DAY E1 strong+twap+quiet
+     DEV  NIFTY 71.4% (b 52.9) n84 open 67% +0.19R | SENSEX 69.0% (b 51.5) n88 open 67% +0.17R
+     VAL  NIFTY 60.0% (b 39.9) n32 open 69% -0.00R | SENSEX 40.0% (b 43.6) n36 open 72% -0.10R
+  15m FAKE-DOWN DAY E1 strong+quiet
+     DEV  NIFTY 73.3% (b 52.9) n89 open 66% +0.21R | SENSEX 68.8% (b 51.3) n96 open 67% +0.17R
+     VAL  NIFTY 56.3% (b 40.9) n39 open 59% +0.00R | SENSEX 50.0% (b 44.6) n48 open 63% -0.05R
+  15m FAKE-DOWN DAY E1 strong+quiet+retest
+     DEV  NIFTY 73.3% (b 52.9) n89 open 66% +0.21R | SENSEX 68.8% (b 51.3) n96 open 67% +0.17R
+     VAL  NIFTY 56.3% (b 40.9) n39 open 59% +0.00R | SENSEX 50.0% (b 44.6) n48 open 63% -0.05R
+  5m FAKE-UP OWNER E0 quiet+premHH+trap
+     DEV  NIFTY 69.4% (b 52.4) n89 open 60% +0.17R | SENSEX 70.6% (b 49.9) n85 open 60% +0.21R
+     VAL  NIFTY 53.8% (b 56.3) n29 open 55% +0.04R | SENSEX 55.6% (b 55.1) n37 open 51% +0.05R
+  5m FAKE-UP OWNER E0 strong+write+retest
+     DEV  NIFTY 69.8% (b 51.7) n71 open 39% +0.19R | SENSEX 66.7% (b 49.7) n92 open 38% +0.21R
+     VAL  NIFTY 67.7% (b 54.9) n41 open 24% +0.25R | SENSEX 71.9% (b 54.5) n43 open 26% +0.32R
+  5m FAKE-UP OWNER E0 twap+premUp+retest
+     DEV  NIFTY 68.6% (b 51.7) n84 open 39% +0.21R | SENSEX 71.4% (b 49.6) n90 open 46% +0.24R
+     VAL  NIFTY 58.1% (b 54.7) n39 open 21% +0.16R | SENSEX 80.6% (b 54.2) n42 open 26% +0.45R
+  5m FAKE-UP LIVE E1 wick+htf+premUp
+     DEV  NIFTY 69.0% (b 52.1) n74 open 61% +0.13R | SENSEX 69.2% (b 50.0) n70 open 63% +0.17R
+     VAL  NIFTY 60.0% (b 55.4) n35 open 43% +0.04R | SENSEX 52.6% (b 55.0) n35 open 46% -0.02R
+  5m FAKE-UP OWNER E0 htf+premHH+write
+     DEV  NIFTY 69.1% (b 52.4) n115 open 52% +0.16R | SENSEX 69.1% (b 50.0) n112 open 51% +0.18R
+     VAL  NIFTY 53.6% (b 56.3) n58 open 52% +0.05R | SENSEX 69.0% (b 55.2) n54 open 46% +0.24R
+  15m FAKE-DOWN CANDLE E0 strong+am
+     DEV  NIFTY 68.6% (b 51.9) n78 open 55% +0.22R | SENSEX 68.4% (b 50.5) n89 open 57% +0.18R
+     VAL  NIFTY 33.3% (b 42.6) n41 open 63% -0.28R | SENSEX 42.9% (b 44.5) n40 open 65% -0.09R
+  15m FAKE-DOWN CANDLE E0 strong+am+retest
+     DEV  NIFTY 68.6% (b 51.9) n78 open 55% +0.22R | SENSEX 68.4% (b 50.5) n89 open 57% +0.18R
+     VAL  NIFTY 33.3% (b 42.6) n41 open 63% -0.28R | SENSEX 42.9% (b 44.5) n40 open 65% -0.09R
+  5m FAKE-UP OWNER E0 mid+twap+premUp
+     DEV  NIFTY 68.8% (b 52.2) n73 open 34% +0.20R | SENSEX 69.0% (b 50.2) n62 open 53% +0.19R
+     VAL  NIFTY 61.5% (b 55.8) n48 open 46% +0.17R | SENSEX 69.0% (b 55.4) n47 open 38% +0.26R
+
+Of the top 25, held on validation (both indices ≥ +3 points over baseline, n ≥ 20): 9
+Correlation of development edge with validation edge over 9851 rules: 0.11 (≈ 0 → the development winners were luck)
+Rules at ≥ 80 % in validation on either index (n ≥ 30): 51; on both: 0
+
+Average edge of rules containing each filter (development → validation, points over baseline):
+  trap     rules  1557  -1.2 → +0.6
+  mid      rules  1338  +0.0 → -0.5
+  premHH   rules  1787  +1.5 → -0.5
+  twap     rules  2295  +0.2 → -0.6
+  lowvol   rules  1547  -1.4 → -0.7
+  strong   rules  2214  +0.3 → -0.8
+  retest   rules  2057  +0.2 → -1.0
+  wick     rules   930  +0.0 → -1.3
+  write    rules  2214  -0.8 → -1.3
+  premUp   rules  2236  +0.6 → -1.3
+  open     rules  2159  -0.1 → -1.5
+  am       rules  1041  -0.8 → -1.9
+  quiet    rules  1955  +0.4 → -2.4
+  pm       rules   985  -0.9 → -2.4
+  htf      rules  1902  -1.0 → -4.3
+  shallow  rules     5  -2.8 → -6.8
+
+FOCUS — fake at OWNER S/R + opposite-side writing + retest (premium P&L = ATM trade-side option, % of premium):
+  5m FAKE-DOWN E0 write+retest
+     NIFTY: DEV 32%/b49 n99 -0.22R prem -7.0% | VAL-1 40%/b48 n17 -0.09R prem 1.7% | VAL-2 38%/b47 n17 -0.18R prem -5.0%
+     SENSEX: DEV 56%/b49 n80 +0.13R prem 2.2% | VAL-1 47%/b47 n27 -0.03R prem -2.7% | VAL-2 43%/b47 n25 -0.19R prem -5.7%
+  5m FAKE-DOWN E0 write+retest+premHH
+     NIFTY: DEV 28%/b49 n65 -0.23R prem -7.0% | VAL-1 50%/b50 n10 +0.05R prem 11.1% | VAL-2 50%/b47 n14 -0.04R prem -3.0%
+     SENSEX: DEV 56%/b48 n53 +0.13R prem 0.7% | VAL-1 50%/b49 n16 +0.00R prem -4.9% | VAL-2 33%/b48 n16 -0.27R prem -6.6%
+  5m FAKE-DOWN E0 write+retest+strong
+     NIFTY: DEV 32%/b49 n83 -0.20R prem -6.1% | VAL-1 44%/b48 n14 -0.03R prem 2.7% | VAL-2 33%/b46 n14 -0.18R prem -8.3%
+     SENSEX: DEV 53%/b49 n67 +0.09R prem 3.0% | VAL-1 44%/b47 n20 -0.12R prem -4.5% | VAL-2 33%/b47 n21 -0.26R prem -7.0%
+  5m FAKE-DOWN E1 write+retest
+     NIFTY: DEV 50%/b48 n39 -0.06R prem -5.9% | VAL-1 33%/b53 n9 -0.17R prem 4.7% | VAL-2 —%/b52 n8 -0.03R prem 4.5%
+     SENSEX: DEV 69%/b48 n36 +0.20R prem 3.1% | VAL-1 80%/b52 n11 +0.25R prem 5.9% | VAL-2 17%/b48 n11 -0.37R prem -10.5%
+  5m FAKE-DOWN E1 write+retest+premHH
+     NIFTY: DEV 42%/b48 n26 -0.12R prem -8.0% | VAL-1 0%/b53 n6 -0.38R prem -11.7% | VAL-2 —%/b53 n8 +0.08R prem 5.2%
+     SENSEX: DEV 67%/b48 n25 +0.17R prem -4.4% | VAL-1 75%/b53 n8 +0.26R prem 1.8% | VAL-2 0%/b49 n9 -0.60R prem -14.4%
+  5m FAKE-DOWN E1 write+retest+strong
+     NIFTY: DEV 53%/b48 n35 +0.00R prem -3.9% | VAL-1 33%/b52 n7 -0.19R prem 7.1% | VAL-2 —%/b52 n8 -0.03R prem 4.5%
+     SENSEX: DEV 64%/b48 n33 +0.17R prem 3.2% | VAL-1 75%/b50 n8 +0.13R prem 1.2% | VAL-2 17%/b49 n10 -0.36R prem -10.7%
+  5m FAKE-UP E0 write+retest
+     NIFTY: DEV 69%/b52 n92 +0.21R prem 12.6% | VAL-1 61%/b55 n22 +0.17R prem 3.7% | VAL-2 67%/b55 n25 +0.22R prem 5.1%
+     SENSEX: DEV 65%/b50 n105 +0.19R prem 4.1% | VAL-1 71%/b54 n24 +0.26R prem 14.8% | VAL-2 81%/b54 n26 +0.50R prem 11.5%
+  5m FAKE-UP E0 write+retest+premHH
+     NIFTY: DEV 71%/b52 n63 +0.19R prem 10.9% | VAL-1 64%/b56 n15 +0.18R prem 3.4% | VAL-2 79%/b55 n19 +0.41R prem 8.4%
+     SENSEX: DEV 67%/b50 n82 +0.19R prem 5.2% | VAL-1 69%/b55 n19 +0.26R prem 18.9% | VAL-2 79%/b55 n19 +0.42R prem 7.0%
+  5m FAKE-UP E0 write+retest+strong
+     NIFTY: DEV 70%/b52 n71 +0.19R prem 11.7% | VAL-1 63%/b55 n19 +0.18R prem 3.9% | VAL-2 73%/b55 n22 +0.30R prem 6.3%
+     SENSEX: DEV 67%/b50 n92 +0.21R prem 4.3% | VAL-1 73%/b55 n21 +0.33R prem 19.2% | VAL-2 71%/b54 n22 +0.32R prem 3.1%
+  5m FAKE-UP E1 write+retest
+     NIFTY: DEV 80%/b53 n38 +0.21R prem 5.9% | VAL-1 57%/b56 n12 +0.13R prem -2.9% | VAL-2 100%/b56 n11 +0.43R prem 17.5%
+     SENSEX: DEV 72%/b50 n44 +0.21R prem 1.7% | VAL-1 100%/b57 n10 +0.51R prem 24.5% | VAL-2 57%/b55 n11 +0.24R prem 11.3%
+  5m FAKE-UP E1 write+retest+premHH
+     NIFTY: DEV 89%/b53 n27 +0.22R prem 2.8% | VAL-1 33%/b57 n9 -0.01R prem -10.1% | VAL-2 100%/b56 n10 +0.42R prem 18.0%
+     SENSEX: DEV 69%/b50 n35 +0.18R prem 1.8% | VAL-1 100%/b56 n7 +0.58R prem 38.5% | VAL-2 60%/b55 n8 +0.28R prem 3.1%
+  5m FAKE-UP E1 write+retest+strong
+     NIFTY: DEV 73%/b52 n30 +0.13R prem 1.2% | VAL-1 57%/b56 n12 +0.13R prem -2.9% | VAL-2 100%/b57 n10 +0.37R prem 17.6%
+     SENSEX: DEV 71%/b50 n41 +0.19R prem 0.3% | VAL-1 100%/b56 n9 +0.58R prem 31.8% | VAL-2 50%/b55 n9 +0.14R prem 1.7%
+  15m FAKE-DOWN E0 write+retest
+     NIFTY: DEV 41%/b51 n119 -0.14R prem -9.2% | VAL-1 40%/b42 n27 -0.11R prem -9.8% | VAL-2 36%/b44 n28 -0.13R prem -7.5%
+     SENSEX: DEV 53%/b51 n111 +0.03R prem -1.1% | VAL-1 53%/b43 n28 +0.02R prem 11.1% | VAL-2 38%/b44 n30 -0.17R prem -13.2%
+  15m FAKE-DOWN E0 write+retest+premHH
+     NIFTY: DEV 45%/b52 n58 -0.10R prem -12.1% | VAL-1 50%/b40 n15 +0.01R prem -3.9% | VAL-2 0%/b43 n15 -0.37R prem -12.8%
+     SENSEX: DEV 53%/b51 n50 +0.04R prem -5.2% | VAL-1 45%/b43 n18 -0.02R prem 19.7% | VAL-2 57%/b44 n19 -0.03R prem -7.9%
+  15m FAKE-DOWN E0 write+retest+strong
+     NIFTY: DEV 49%/b51 n85 -0.05R prem -7.9% | VAL-1 45%/b44 n21 -0.08R prem -10.7% | VAL-2 38%/b44 n21 -0.13R prem -7.2%
+     SENSEX: DEV 54%/b51 n77 +0.06R prem -1.0% | VAL-1 45%/b43 n23 -0.07R prem 11.1% | VAL-2 50%/b44 n22 -0.02R prem -7.9%
+  15m FAKE-DOWN E1 write+retest
+     NIFTY: DEV 73%/b51 n40 +0.23R prem 13.3% | VAL-1 40%/b40 n12 -0.07R prem -9.2% | VAL-2 0%/b38 n11 -0.21R prem -13.0%
+     SENSEX: DEV 52%/b52 n47 -0.04R prem -7.3% | VAL-1 80%/b45 n13 +0.32R prem -7.7% | VAL-2 0%/b43 n11 -0.16R prem -6.1%
+  15m FAKE-DOWN E1 write+retest+premHH
+     NIFTY: DEV 80%/b51 n20 +0.17R prem 5.3% | VAL-1 67%/b43 n7 +0.22R prem 11.4% | VAL-2 —%/b38 n7 -0.17R prem -11.8%
+     SENSEX: DEV 56%/b52 n24 -0.04R prem -5.8% | VAL-1 67%/b45 n10 +0.12R prem -14.0% | VAL-2 0%/b44 n9 -0.08R prem -4.2%
+  15m FAKE-DOWN E1 write+retest+strong
+     NIFTY: DEV 77%/b51 n34 +0.27R prem 13.3% | VAL-1 40%/b43 n11 -0.08R prem -6.8% | VAL-2 0%/b38 n10 -0.29R prem -17.9%
+     SENSEX: DEV 47%/b52 n39 -0.06R prem -8.3% | VAL-1 67%/b45 n11 +0.11R prem -13.2% | VAL-2 0%/b43 n10 -0.12R prem -4.5%
+  15m FAKE-UP E0 write+retest
+     NIFTY: DEV 62%/b58 n112 +0.16R prem 4.8% | VAL-1 63%/b56 n25 +0.13R prem 3.7% | VAL-2 56%/b56 n28 +0.13R prem 13.6%
+     SENSEX: DEV 58%/b54 n95 +0.10R prem 4.6% | VAL-1 74%/b56 n32 +0.44R prem 13.9% | VAL-2 63%/b57 n27 +0.20R prem 8.4%
+  15m FAKE-UP E0 write+retest+premHH
+     NIFTY: DEV 64%/b59 n54 +0.15R prem 6.5% | VAL-1 67%/b59 n12 +0.22R prem 8.7% | VAL-2 40%/b56 n12 +0.02R prem 9.0%
+     SENSEX: DEV 79%/b55 n43 +0.25R prem 10.1% | VAL-1 43%/b57 n11 -0.02R prem -3.4% | VAL-2 60%/b59 n11 +0.26R prem 12.7%
+  15m FAKE-UP E0 write+retest+strong
+     NIFTY: DEV 54%/b59 n76 +0.07R prem 0.7% | VAL-1 63%/b58 n14 +0.16R prem 7.8% | VAL-2 62%/b55 n20 +0.23R prem 15.2%
+     SENSEX: DEV 65%/b55 n64 +0.17R prem 5.5% | VAL-1 79%/b56 n22 +0.51R prem 13.2% | VAL-2 50%/b57 n19 +0.02R prem 1.7%
+  15m FAKE-UP E1 write+retest
+     NIFTY: DEV 54%/b59 n52 -0.00R prem -11.4% | VAL-1 75%/b54 n10 +0.22R prem 0.8% | VAL-2 100%/b56 n9 +0.23R prem 10.0%
+     SENSEX: DEV 53%/b56 n41 +0.02R prem 2.0% | VAL-1 70%/b58 n17 +0.34R prem 5.4% | VAL-2 63%/b57 n16 +0.17R prem 2.2%
+  15m FAKE-UP E1 write+retest+premHH
+     NIFTY: DEV 75%/b59 n26 +0.14R prem -0.6% | VAL-1 —%/b— n4 +0.07R prem -9.3% | VAL-2 —%/b49 n3 -0.03R prem -5.6%
+     SENSEX: DEV 57%/b56 n21 +0.07R prem 1.1% | VAL-1 50%/b59 n6 +0.09R prem -12.0% | VAL-2 100%/b58 n6 +0.47R prem 15.0%
+  15m FAKE-UP E1 write+retest+strong
+     NIFTY: DEV 50%/b60 n38 -0.08R prem -15.4% | VAL-1 75%/b55 n8 +0.35R prem 10.7% | VAL-2 100%/b58 n8 +0.14R prem 2.7%
+     SENSEX: DEV 50%/b56 n35 -0.01R prem -0.7% | VAL-1 89%/b57 n13 +0.64R prem 18.4% | VAL-2 67%/b58 n12 +0.25R prem 5.7%
