@@ -19,7 +19,7 @@
   const set = (node, html) => { if (node && node.__mcx !== html) { node.innerHTML = html; node.__mcx = html; } };   // no flicker: write only on change
   const mcOn = () => $("panel-marketcommand")?.classList.contains("active") && !document.hidden;
 
-  const X = { view: "mc", plan: "bull", tab: "levels", seen: null, pc: {}, desk: null, hour: null, pos: {}, sent: null, walls: {}, ot: { strike: null, side: "both", tf: 5, expiry: null, expiries: [], sym: null, data: {}, charts: {} }, wb: { win: "15", data: null, sym: null }, err: {} };
+  const X = { c5: {}, view: "mc", plan: "bull", tab: "levels", seen: null, pc: {}, desk: null, hour: null, pos: {}, sent: null, walls: {}, ot: { strike: null, side: "both", tf: 5, expiry: null, expiries: [], sym: null, data: {}, charts: {} }, wb: { win: "15", data: null, sym: null }, err: {} };
   window.__mcx = X;   // read-only handle for diagnosis in the browser console
   const get = async (url, ms) => { try { const d = await fetchJSON(url, ms || 25000); if (d && (d.error || d.disabled)) X.err[url.split("?")[0]] = d.error || "disabled"; return d; } catch (e) { X.err[url.split("?")[0]] = String((e && e.message) || e); return null; } };
 
@@ -33,6 +33,7 @@
     if (due("hour", 120_000)) jobs.push(get("/api/hour-outlook").then((d) => { if (d && d.outlook) { X.hour = d; X.hourAt = now; } }));
     if (due("pos" + sym, 300_000)) jobs.push(get(`/api/positioning?symbol=${enc}`).then((d) => { if (d && d.ok) { X.pos[sym] = d; X["pos" + sym + "At"] = now; } }));
     if (due("sent", 300_000)) jobs.push(get("/api/market-sentiment-brief").then((d) => { if (d && d.india) { X.sent = d; X.sentAt = now; } }));
+    if (MC.tf !== "5m" && due("c5" + sym, 60_000)) jobs.push(get(`/api/candles/${enc}?interval=5m`).then((d) => { if (d && Array.isArray(d.candles) && d.candles.length) { X.c5[sym] = d.candles; X["c5" + sym + "At"] = now; } }));   // 5m reaction on the ladder
     if (due("walls" + sym, 60_000)) jobs.push(get(`/api/oi-walls?symbol=${enc}`).then((d) => { if (d && d.available) { X.walls[sym] = d; X["walls" + sym + "At"] = now; } }));
     await Promise.all(jobs);
     renderAll();
@@ -103,10 +104,16 @@
     if (P.bear) add(P.bear.entry, "Bear start", `15-min close below → ${P.bear.strike ?? ""} PE`, "P");
     if (s != null) rows.push({ p: s, label: "Spot", why: d.historical ? "replay" : "", kind: "N" });
     rows.sort((a, b) => b.p - a.p);
+    // 5-minute candle reaction at each level — information only (levelReaction.js)
+    const LR = window.LevelReaction, c5 = MC.tf === "5m" ? d.candles : X.c5[sym], lc = LR && c5 ? LR.lastClosed(c5, Date.now() / 1000, !!d.historical) : null;
+    const a5 = lc ? LR.atr14(c5.slice(0, lc.index + 1).slice(-15)) : null, rx = [];
+    if (lc) for (const x of rows) if (x.kind !== "N" && !x.range) { const r = LR.react(lc.candle, x.p, LR.tolOf(x.p, a5)); if (r.code !== "NONE") { x.rx = r; rx.push(x); } }
+    const ct = lc ? lc.candle : null, ctxt = ct ? `${hm(ct.time)} candle O ${f0(ct.open)} H ${f0(ct.high)} L ${f0(ct.low)} C ${f0(ct.close)}` : "";
+    const rxTip = (x) => `Last closed 5-min ${ctxt}. ${f0(x.p)} acted as ${x.rx.role}: ${LR.LABEL[x.rx.code].text}${x.rx.wickPct != null ? ` · wick ${Math.round(x.rx.wickPct * 100)}% of the candle` : ""}. Information only — in a 2-year test a rejection candle at a level was right about as often as a random entry (no edge).`;
     const col = { R: "#F23645", S: "#089981", P: "#f5c542", N: "#4ea1ff" };
     const tabs = [["levels", "Levels"], ["plan", "Plan"], ["notes", "Notes"]].map(([k, l]) => `<button type="button" role="tab" data-mcx-tab="${k}" class="${X.tab === k ? "on" : ""}" aria-selected="${X.tab === k}">${l}</button>`).join("");
     let body = "";
-    if (X.tab === "levels") body = rows.map((x) => { const dd = x.kind === "N" ? null : x.p - s; return `<div class="mcx-lv${x.kind === "N" ? " spot" : ""}" title="${esc(x.why)}"><span class="bar" style="background:${col[x.kind]}"></span><span class="nm">${esc(x.label)} <small>${x.why ? "· " + esc(x.why) : ""}</small></span><span class="px">${x.range || f0(x.p)}</span><span class="ds" style="color:${dd == null ? "#8ab8ff" : dd > 0 ? "#ff6b72" : "#26c6a6"}">${dd == null ? "SPOT" : sg(dd)}</span></div>`; }).join("");
+    if (X.tab === "levels") body = rows.map((x) => { const dd = x.kind === "N" ? null : x.p - s; return `<div class="mcx-lv${x.kind === "N" ? " spot" : ""}" title="${esc(x.why)}"><span class="bar" style="background:${col[x.kind]}"></span><span class="nm"><span class="nmt">${esc(x.label)} <small>${x.why ? "· " + esc(x.why) : ""}</small></span>${x.rx ? `<span class="rj ${LR.LABEL[x.rx.code].cls}" title="${esc(rxTip(x))}">${LR.LABEL[x.rx.code].short.replace("5m ", "")}</span>` : ""}</span><span class="px${x.range ? " rg" : ""}">${x.range || f0(x.p)}</span><span class="ds" style="color:${dd == null ? "#8ab8ff" : dd > 0 ? "#ff6b72" : "#26c6a6"}">${dd == null ? "SPOT" : sg(dd)}</span></div>`; }).join("") + (ct ? `<p class="mcx-rjnote" title="Rejection = wick into the level ≥ 40% of the candle and a close back on the level's side; break = a close beyond it. Information, not a signal.">5m ${esc(hm(ct.time))}: ${rx.length ? rx.map((x) => `${esc(LR.LABEL[x.rx.code].short.replace("5m ", ""))} ${esc(x.label)} ${f0(x.p)}`).join(" · ") : "no level reached"} · <i>info, not a signal</i></p>` : "");
     else if (X.tab === "plan") body = `<p class="mcx-note" style="font-size:12px;color:#c9d0da">A trade exists only after a 15-min candle CLOSES beyond a start, then a 5-min retest — no chasing, no new trade in a fast market.</p>${P.bull ? `<p class="mcx-note" style="padding:6px 8px;margin-top:6px;background:#0c2420;border:1px solid #136e5c;border-radius:6px;color:#e7ebf0">Bull: 15-min close above <b>${f0(P.bull.entry)}</b> → buy ${P.bull.strike} CE · SL ${f0(P.bull.stop)} · T1 ${f0(P.bull.t1)}</p>` : ""}${P.bear ? `<p class="mcx-note" style="padding:6px 8px;margin-top:4px;background:#2a1215;border:1px solid #7a2a31;border-radius:6px;color:#e7ebf0">Bear: 15-min close below <b>${f0(P.bear.entry)}</b> → buy ${P.bear.strike} PE · SL ${f0(P.bear.stop)} · T1 ${f0(P.bear.t1)}</p>` : ""}`;
     else body = `<ul class="mcx-note" style="padding-left:16px;display:flex;flex-direction:column;gap:4px;font-size:12px;color:#c9d0da"><li>Data age ${d.dataAgeSec != null ? Math.round(d.dataAgeSec) + " s" : "—"}${d.dataStale ? " · STALE" : ""}${d.historical ? " · REPLAY" : ""}.</li><li>PCR shown is the whole chain (${d.oi?.pcr ?? "—"}); the OI screen's near-the-money PCR is a different basis.</li><li>OI walls are positioning, not a forecast (2-year study).</li></ul>`;
     set($("mcx-levels"), `<div class="mcx-row" style="margin-bottom:6px"><h2 class="mcx-h">Key Levels &amp; Trade Plan</h2><div class="mcx-seg" role="tablist" style="margin-left:auto">${tabs}</div></div>${body}`);
