@@ -5723,7 +5723,7 @@ function startDecisionFlowLive() { dfStartLive("flow"); }
 // Live Order Block trading screen with candlestick chart + command panel.
 // Reuses: /api/market-command → OI Command + Liquidity Status + Order Block + Master Selector.
 const MC = {
-  sym: "^NSEI", tf: "15m", chart: null, candleSeries: null,
+  sym: "^NSEI", tf: "5m", chart: null, candleSeries: null,   // 5-min by default: the main chart and the CE / PE charts share one timing (owner 2026-10-24)
   ema9Series: null, ema21Series: null, ema50Series: null, vwapSeries: null,
   obMarkers: [], _levelLines: [], _overlaySig: null, _obSig: null, _indSig: null, priceLine: null, timer: null, loading: false, lastData: null,
   show: { vwap: true, ema21: true, ema50: true, ema9: false, ema200: true, ob: true, vol: true, rsi: false, macd: true, forecast: true, levels: true, bos: true, liq: true, orb: false, trade: true },

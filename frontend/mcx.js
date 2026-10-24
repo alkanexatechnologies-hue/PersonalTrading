@@ -127,13 +127,13 @@
     const chips = [-2, -1, 0, 1, 2].map((o) => { const k = atm != null ? atm + o * step : null; return `<button type="button" role="tab" data-mcx-strike="${k}" class="${k === ot.strike ? "on" : ""}" aria-selected="${k === ot.strike}" title="${k ?? ""} · ${o === 0 ? "at the money" : o > 0 ? "CE OTM · PE ITM" : "CE ITM · PE OTM"}" ${k == null ? "disabled" : ""}>${o === 0 ? "ATM" : (o > 0 ? "+" : "−") + Math.abs(o)}</button>`; }).join("");
     const exps = (ot.expiries.length ? ot.expiries : [ot.expiry].filter(Boolean)).slice(0, 4).map((e) => `<button type="button" role="tab" data-mcx-exp="${e}" class="${e === ot.expiry ? "on" : ""}" aria-selected="${e === ot.expiry}">${new Date(e + "T00:00:00Z").toUTCString().slice(5, 11)}</button>`).join("");
     const sides = [["ce", "CE", "g"], ["pe", "PE", "r"], ["both", "Both", ""]].map(([k, l, c]) => `<button type="button" data-mcx-side="${k}" class="${ot.side === k ? "on " + c : ""}" aria-pressed="${ot.side === k}">${l}</button>`).join("");
-    const tfs = [5, 15, 30, 60].map((t) => `<button type="button" role="tab" data-mcx-tf="${t}" class="${ot.tf === t ? "on" : ""}" aria-selected="${ot.tf === t}">${t === 60 ? "1h" : t + "m"}</button>`).join("");
+    const tfs = `<span class="mcx-chip" title="CE / PE follow the main chart's timeframe">${ot.tf === 60 ? "1h" : ot.tf + "m"} · synced</span>`;
     const o = ot.strike != null && atm != null ? (ot.strike - atm) / step : 0;
     const money = o === 0 ? `At the money · spot ${f0(MC.lastData?.spot)}` : `${o > 0 ? `CE ${o} OTM · PE ${o} ITM` : `CE ${-o} ITM · PE ${-o} OTM`} · ${Math.abs(ot.strike - (MC.lastData?.spot || 0)).toFixed(0)} pts from spot`;
     const card = (side) => `<div class="mcx-opt" data-side="${side}" ${ot.side !== "both" && ot.side !== side.toLowerCase() ? "hidden" : ""}><div class="mcx-opt-hd" id="mcx-ot-hd-${side}">—</div><div class="mcx-opt-chart" id="mcx-ot-ch-${side}"></div><p class="mcx-note" id="mcx-ot-nt-${side}" hidden></p></div>`;
     const html = `<div class="mcx-row"><h2 class="mcx-h" title="Pullback zone = the premium's break level (BIOS) ± the main chart's zone (±${typeof mcZoneHalf === "function" ? mcZoneHalf(sym) : 10} pts) × Δ · candles after 15:30 are dropped">Options</h2><div class="mcx-seg" role="tablist" aria-label="Expiry">${exps}</div><div class="mcx-seg" role="group" aria-label="Calls, puts or both" style="margin-left:auto">${sides}</div></div>
       <div class="mcx-otf" role="group" aria-label="Option filters"><div class="mcx-step" title="${esc(money)}"><button type="button" data-mcx-step="-1" aria-label="Lower strike">−</button><span>${ot.strike ?? "—"}</span><button type="button" data-mcx-step="1" aria-label="Higher strike">+</button></div>
-      <div class="mcx-seg" role="tablist" aria-label="Strike from ATM">${chips}</div><div class="mcx-seg" role="tablist" aria-label="Premium timeframe" style="margin-left:auto">${tfs}</div></div>
+      <div class="mcx-seg" role="tablist" aria-label="Strike from ATM">${chips}</div><span style="margin-left:auto">${tfs}</span></div>
       <div class="mcx-otc">${card("CE")}${card("PE")}</div>`;
     const host = $("mcx-ot"); if (!host) return;
     if (host.__mcx !== html) {   // filters changed → rebuild the shell and re-attach the charts (data is kept)
@@ -144,6 +144,7 @@
   }
   async function loadOt() {
     const ot = X.ot, sym = MC.sym, d = MC.lastData; if (!d) return;
+    ot.tf = ({ "5m": 5, "15m": 15, "30m": 30, "60m": 60 })[MC.tf] || 5;   // one timing for all three charts
     if (ot.sym !== sym) { ot.sym = sym; ot.strike = null; ot.expiry = null; ot.expiries = []; ot.data = {}; }
     if (ot.strike == null) ot.strike = d.optionChain?.atmStrike ?? null;
     if (!ot.expiry) ot.expiry = d.oi?.expiry || null;
@@ -310,7 +311,6 @@
     else if (t.dataset.mcxPlan) { X.plan = t.dataset.mcxPlan; renderAll(); }
     else if (t.dataset.mcxTab) { X.tab = t.dataset.mcxTab; renderAll(); }
     else if (t.dataset.mcxSide) { X.ot.side = t.dataset.mcxSide; otShell(); }
-    else if (t.dataset.mcxTf) { X.ot.tf = Number(t.dataset.mcxTf); otShell(); loadOt(); }
     else if (t.dataset.mcxExp) { X.ot.expiry = t.dataset.mcxExp; otShell(); loadOt(); }
     else if (t.dataset.mcxStrike && t.dataset.mcxStrike !== "null") { X.ot.strike = Number(t.dataset.mcxStrike); otShell(); loadOt(); }
     else if (t.dataset.mcxStep) { const st = STEP[MC.sym] || 50; if (X.ot.strike != null) { X.ot.strike += Number(t.dataset.mcxStep) * st; otShell(); loadOt(); } }
