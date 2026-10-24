@@ -42,7 +42,7 @@ const barsN = (mins: [number, number][], n: number): Bar[] => {
 };
 const atr14 = (b: Bar[]) => { if (b.length < 15) return null; let s = 0; for (let i = b.length - 14; i < b.length; i++) s += Math.max(b[i].high - b[i].low, Math.abs(b[i].high - b[i - 1].close), Math.abs(b[i].low - b[i - 1].close)); return s / 14; };
 function group(b: Bar[], sec: number): Bar[] { const out: Bar[] = []; for (const x of b) { const k = x.time - (((x.time + 19800 - 33300) % sec) + sec) % sec; const l = out[out.length - 1]; if (l && l.time === k) { l.high = Math.max(l.high, x.high); l.low = Math.min(l.low, x.low); l.close = x.close; } else out.push({ ...x, time: k }); } return out; }
-function score1to1(path: [number, number][], entry: number, stop: number, dir: number, a: number): Res {
+export function score1to1(path: [number, number][], entry: number, stop: number, dir: number, a: number): Res {
   const d = Math.max(dir * (entry - stop), 0.25 * a), s = entry - dir * d, tg = entry + dir * d;
   for (const [t, p] of path) { if (dir * (p - s) <= 0) return { win: false, loss: true, r: -1, stopPts: d / a, tOut: t }; if (dir * (p - tg) >= 0) return { win: true, loss: false, r: 1, stopPts: d / a, tOut: t }; }
   return { win: false, loss: false, r: path.length ? (dir * (path[path.length - 1][1] - entry)) / d : 0, stopPts: d / a, tOut: path.length ? path[path.length - 1][0] : undefined };
