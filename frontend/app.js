@@ -1948,7 +1948,7 @@ function switchTab(name) {
   }
   // OI Analysis — read-only OI desk (full-width), follows Market Command's index.
   document.body.classList.toggle("oia-fullwidth", name === "oianalysis");
-  if (name === "oianalysis") { initOiAnalysis(); syncOIAFromMC(); startOiAnalysisLive(); }
+  if (name === "oianalysis") { if (typeof mcxRestoreOia === "function") mcxRestoreOia(); initOiAnalysis(); syncOIAFromMC(); startOiAnalysisLive(); }
   // Market Command Summary — one-screen summary (full-width), opened from Market Command.
   document.body.classList.toggle("mcs-fullwidth", name === "mcsummary");
   if (name === "mcsummary" && typeof initMcSummary === "function") initMcSummary();
@@ -5882,9 +5882,9 @@ function initMarketCommand() {
     timeScale: { borderColor: "#2a2e39", timeVisible: true, secondsVisible: false, tickMarkFormatter: (t) => fmtIST(t, false), barSpacing: 12, rightOffset: 25 },
   });
 
-  MC.candleSeries = MC.chart.addCandlestickSeries({
-    upColor: "#16c784", downColor: "#ea3943", borderVisible: false,
-    wickUpColor: "#16c784", wickDownColor: "#ea3943",
+  MC.candleSeries = MC.chart.addCandlestickSeries({   // TradingView candle colours (owner 2026-10-24)
+    upColor: "#089981", downColor: "#F23645", borderVisible: false,
+    wickUpColor: "#089981", wickDownColor: "#F23645",
   });
 
   // Volume histogram pinned to the bottom of the price pane
@@ -6419,6 +6419,12 @@ function syncTEFromMC() {
 // it indicate?"). Reads /api/oi-analysis/*; never mutates MC/TE or any strategy.
 const OIA = { sym: "^NSEI", screen: "minute", timer: null, loading: false, inited: false, status: null, selStrike: null, selSide: "CALL", lastMv: null, window: 1, mainView: "bar", hmSide: "calls", reqToken: 0 };
 function oiaEl(id) { return document.getElementById(id); }
+/** OI Analysis is on screen: its own page, or mounted in Market Command's 🔬 OI Analysis tab (mcx.js). */
+function oiaVisible() {
+  if (oiaEl("panel-oianalysis")?.classList.contains("active")) return true;
+  const host = oiaEl("mcx-oi-host"), wrap = document.querySelector(".oia-wrap");
+  return !!(host && wrap && host.contains(wrap) && !host.hidden && oiaEl("panel-marketcommand")?.classList.contains("active"));
+}
 
 function initOiAnalysis() {
   if (OIA.inited) return;
@@ -6451,7 +6457,7 @@ function initOiAnalysis() {
     if (OIA.lastMv) fillOiamHeat(OIA.lastMv.heatmap);
   }));
   fetchJSON("/api/oi-analysis/status", 12000).then((s) => { OIA.status = s; renderOiaBanner(); }).catch(() => {});
-  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (oiaEl("panel-oianalysis")?.classList.contains("active") && OIA.screen === "movement" && OIA.lastMv) oiaRedraw(); }, 150); });
+  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (oiaVisible() && OIA.screen === "movement" && OIA.lastMv) oiaRedraw(); }, 150); });
 }
 
 function renderOiaBanner() {
@@ -6468,6 +6474,8 @@ function applyOiaScreen() {
   if (mn) mn.hidden = OIA.screen !== "minute";
   if (mv) mv.hidden = OIA.screen !== "movement";
   if (sm) sm.hidden = OIA.screen !== "summary";
+  const wb = oiaEl("oia-wallbuilder"); if (wb) wb.hidden = OIA.screen !== "minute";
+  if (OIA.screen === "minute" && typeof mcxWallLoad === "function") mcxWallLoad();
 }
 
 function syncOIAFromMC(skipMc) {
@@ -6512,7 +6520,7 @@ function startOiAnalysisLive() {
   applyOiaScreen();
   loadOiAnalysis();
   if (OIA.timer) clearInterval(OIA.timer);
-  OIA.timer = setInterval(() => { if (oiaEl("panel-oianalysis")?.classList.contains("active") && OIA.screen !== "minute") loadOiAnalysis(); }, 30000);   // the 1-Min monitor reloads on its own minute schedule (oimonitor.js)
+  OIA.timer = setInterval(() => { if (oiaVisible() && OIA.screen !== "minute") loadOiAnalysis(); }, 30000);   // the 1-Min monitor reloads on its own minute schedule (oimonitor.js)
 }
 
 async function loadOiaStrikeHistory() {
@@ -9630,7 +9638,7 @@ function renderMCChart(d) {
   const candles = (d.candles || []).map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close }));
   const volumes = (d.candles || []).map((c) => ({
     time: c.time, value: c.volume || 0,
-    color: c.close >= c.open ? "rgba(22,199,132,.5)" : "rgba(234,57,67,.5)",
+    color: c.close >= c.open ? "rgba(8,153,129,.5)" : "rgba(242,54,69,.5)",
   }));
   // On a LIVE refresh of the same view, update only the last candle(s) so the
   // chart doesn't redraw/jump — the forming bar grows in place. Full setData

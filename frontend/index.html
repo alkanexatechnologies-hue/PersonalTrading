@@ -7,7 +7,7 @@
          under the home indicator. Android ignores it harmlessly. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>BC Data Status</title>
-    <link rel="stylesheet" href="styles.css?v=20261023-sch4" />
+    <link rel="stylesheet" href="styles.css?v=20261024-mcx1" />
     <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   </head>
   <body class="oi-focus">
@@ -1586,7 +1586,16 @@
               </div>
             </div>
 
-            <!-- ===== INDEX CARDS ===== -->
+            <!-- ===== REDESIGN (mcx.js): view tabs · market tape · decision row; OI Analysis mounts into #mcx-oi-host ===== -->
+            <div class="mcx-tabs" role="tablist" aria-label="Market Command views">
+              <button type="button" role="tab" class="mcx-tab active" data-mcx-view="mc" aria-selected="true">⚡ Market Command<span>chart · plan · options</span></button>
+              <button type="button" role="tab" class="mcx-tab" data-mcx-view="oi" aria-selected="false">🔬 OI Analysis<span>monitor · walls · movement · summary</span></button>
+            </div>
+            <section class="mcx-tape" id="mcx-tape" aria-label="Market stats"></section>
+            <div class="mcx-dec" id="mcx-dec"></div>
+            <div class="mcx-oiview" id="mcx-oi-host" hidden></div>
+
+            <!-- ===== INDEX CARDS (hidden in the redesign: VIX moved to the tape, direction to the decision row) ===== -->
             <div class="mc2-cards" id="mc2-cards">
               <div class="mc2-card" data-card="VIX"><div class="mc2-card-hd">INDIA VIX</div><div class="mc2-card-row"><span class="mc2-card-val" data-f="val">—</span><span class="mc2-card-chg" data-f="chg"></span></div><svg class="mc2-spark" data-f="spark" viewBox="0 0 120 34" preserveAspectRatio="none"></svg></div>
               <!-- Index Direction (moved up from the right column; sits next to India VIX) -->
@@ -1693,6 +1702,7 @@
 
               <!-- RIGHT COLUMN -->
               <div class="mc2-right">
+                <div class="mc2-panel mcx-levels" id="mcx-levels" aria-label="Key levels"></div>
 
                 <!-- ADDITIVE: OI Movement judge (5M trade / 15M direction) — read-only; hidden on older backend -->
                 <div class="mc2-panel mc2-oim-panel" id="mc-oimove-panel" hidden>
@@ -1775,8 +1785,8 @@
                   <div class="mc2-scen-rev"><span class="mc2-rev-pill">REVERSAL WATCH</span><span id="mc-scen-rev">—</span></div>
                 </div>
 
-                <!-- Option Chain -->
-                <div class="mc2-panel">
+                <!-- Option Chain (hidden in the redesign — owner: no option chain on Market Command) -->
+                <div class="mc2-panel mcx-hidden-oc">
                   <div class="mc2-panel-hd">
                     <span class="mc2-panel-title" id="mc-oc-title">Option Chain</span>
                     <span class="mc2-oc-tabs" id="mc-oc-tabs">
@@ -1808,6 +1818,9 @@
                 </div>
               </div>
             </div>
+
+            <!-- ===== OPTION TERMINAL (mcx.js): CE / PE premium charts, TradingView style ===== -->
+            <section class="mcx-ot" id="mcx-ot" aria-label="Option terminal"></section>
 
             <!-- ===== BOTTOM BAR ===== -->
             <div class="mc2-bottom">
@@ -2094,6 +2107,9 @@
               <button class="oia-subtab" data-oia="movement">📊 OI Movement<span class="oia-subtab-q">what is changing right now?</span></button>
               <button class="oia-subtab" data-oia="summary">🧭 OI Summary<span class="oia-subtab-q">what does it indicate?</span></button>
             </div>
+
+            <!-- 🧱 Wall Builder (mcx.js) — shown with the 1-Min OI Monitor -->
+            <section class="oia-wb" id="oia-wallbuilder" aria-label="Wall builder" hidden></section>
 
             <!-- ===== Screen 0: strike-wise 1-minute OI monitor (oimonitor.js) ===== -->
             <div class="oia-screen" id="oia-minute"></div>
@@ -2580,10 +2596,11 @@
         <div id="dc-body" class="dc-body">Loading…</div>
       </div>
     </div>
-    <script src="app.js?v=20261021-ipos2"></script>
+    <script src="app.js?v=20261024-mcx1"></script>
     <script src="mcsummary.js?v=20261012-dh1"></script>
     <script src="premiumcenter.js?v=20261023-sch4"></script>
-    <script src="oimonitor.js?v=20261014-ma2"></script>
+    <script src="oimonitor.js?v=20261024-mcx1"></script>
     <script src="liquidity.js?v=20261007-lqa7"></script>
+    <script src="mcx.js?v=20261024-mcx1"></script>
   </body>
 </html>

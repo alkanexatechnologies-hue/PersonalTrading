@@ -7972,3 +7972,95 @@ body.ppc-fullwidth .watchlist, body.ppc-fullwidth #watchlist { display: none !im
 .sch-li { padding: 3px 4px; border-radius: 4px; cursor: pointer; color: #787b86; } .sch-li.done { color: #b2b5be; } .sch-li.cur { background: rgba(41,98,255,.18); color: #fff; } .sch-li i { font-style: normal; color: #ff9800; }
 @media (max-width: 900px) { .sch-main { grid-template-columns: 1fr; } .sch-chart { height: 300px; } .sch-side { max-height: none; } .sch-list { max-height: 260px; } }
 .sch-vnote { font-size: 11px; }
+
+/* ============================ Market Command redesign (mcx.js · owner-approved 2026-10-24) ============================ */
+/* removed from Market Command: top cards (VIX / Index Direction / News), FINAL DECISION row, S2 Breakout row,
+   OI Movement, Multi-Timeframe Direction and the option chain (their useful content moved to the tape / decision row) */
+#panel-marketcommand .mc2-cards, #panel-marketcommand #mc-decision, #panel-marketcommand #mc-bo,
+#panel-marketcommand #mc-oimove-panel, #panel-marketcommand #mc-mtfdir-panel, #panel-marketcommand .mcx-hidden-oc { display: none !important; }
+body.mcx-oi #panel-marketcommand .mc2-main, body.mcx-oi #mcx-dec, body.mcx-oi #mcx-ot { display: none !important; }
+#mcx-oi-host .oia-wrap .te-navbtn, #mcx-oi-host .oia-wrap .te-brand { display: none; }
+.mcx-tabs { display: flex; gap: 0; border-bottom: 1px solid #1e2530; margin: 6px 0; }
+.mcx-tab { min-height: 42px; padding: 5px 16px; background: transparent; border: 1px solid transparent; border-bottom: 2px solid transparent; border-radius: 8px 8px 0 0; color: #aeb7c4; font-size: 13px; font-weight: 700; text-align: left; cursor: pointer; margin-bottom: -1px; }
+.mcx-tab span { display: block; font-size: 10.5px; font-weight: 500; color: #9aa3b0; }
+.mcx-tab.active { background: #11151c; border-color: #1e2530; border-bottom-color: #4ea1ff; color: #fff; }
+.mcx-tape { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1px; background: #1e2530; border: 1px solid #1e2530; border-radius: 8px; overflow: hidden; margin-bottom: 6px; }
+.mcx-tape:empty, .mcx-dec:empty, .mcx-levels:empty, .mcx-ot:empty { display: none; }
+.mcx-tape > div { background: #11151c; padding: 4px 10px; display: flex; align-items: baseline; gap: 6px; white-space: nowrap; overflow: hidden; }
+.mcx-k { font-size: 10px; font-weight: 700; letter-spacing: .4px; color: #9aa3b0; text-transform: uppercase; }
+.mcx-v { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; font-weight: 700; color: #e7ebf0; }
+.mcx-s { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 10.5px; color: #7d8693; }
+.mcx-up { color: #26c6a6 !important; } .mcx-dn { color: #ff6b72 !important; } .mcx-am { color: #f5c542 !important; } .mcx-mu { color: #9aa3b0 !important; }
+.mcx-dec { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.mcx-card { background: #11151c; border: 1px solid #1e2530; border-radius: 8px; padding: 6px 10px; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.mcx-row { display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; }
+.mcx-h { margin: 0; font-size: 10.5px; font-weight: 700; letter-spacing: .6px; color: #9aa3b0; text-transform: uppercase; }
+.mcx-line { margin: 0; font-size: 11.5px; color: #c9d0da; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mcx-badge { display: inline-flex; align-items: center; gap: 4px; padding: 1px 10px; border-radius: 6px; font-size: 14px; font-weight: 800; letter-spacing: .5px; }
+.mcx-badge.wait { background: #2a210a; border: 1px solid #8a6a1a; color: #f5c542; }
+.mcx-badge.ce { background: #0c2420; border: 1px solid #136e5c; color: #26c6a6; }
+.mcx-badge.pe { background: #2a1215; border: 1px solid #7a2a31; color: #ff6b72; }
+.mcx-chip { background: #0b0e14; border: 1px solid #1e2530; border-radius: 5px; padding: 0 6px; font-size: 11.5px; }
+.mcx-seg { display: flex; gap: 2px; padding: 1px; background: #0b0e14; border: 1px solid #1e2530; border-radius: 6px; }
+.mcx-seg button { min-height: 26px; padding: 1px 9px; border: 0; border-radius: 5px; background: transparent; color: #aeb7c4; font-size: 12px; font-weight: 600; cursor: pointer; }
+.mcx-seg button:disabled { opacity: .4; cursor: default; }
+.mcx-seg button.on { background: #1d3b6b; color: #fff; } .mcx-seg button.on.g { background: #0c2c26; color: #c8f7ea; } .mcx-seg button.on.r { background: #3a1518; color: #ffd0d3; }
+.mcx-kv { white-space: nowrap; font-size: 11.5px; } .mcx-kv i { font-style: normal; color: #9aa3b0; font-size: 10.5px; margin-right: 3px; } .mcx-kv b { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+.mcx-risk { margin: 0; font-size: 11px; color: #f2cf7a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mcx-note { margin: 0; font-size: 11px; color: #9aa3b0; }
+.mcx-levels .mcx-lv { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 6px; background: #0b0e14; border: 1px solid #1e2530; font-size: 12px; margin-bottom: 2px; }
+.mcx-lv .bar { width: 4px; align-self: stretch; border-radius: 2px; flex-shrink: 0; }
+.mcx-lv .nm { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .mcx-lv .nm small { font-size: 11px; color: #9aa3b0; }
+.mcx-lv .px { min-width: 92px; text-align: right; font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 600; }
+.mcx-lv .ds { min-width: 44px; text-align: right; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; font-weight: 600; }
+.mcx-lv.spot { background: #12305a; border-color: #2a5ea8; font-weight: 700; }
+.mcx-ot { background: #11151c; border: 1px solid #1e2530; border-radius: 8px; padding: 8px 10px; margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+.mcx-otf { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 6px 8px; background: #0b0e14; border: 1px solid #1e2530; border-radius: 8px; }
+.mcx-otf .mcx-seg button { min-height: 34px; text-align: center; }
+.mcx-step { display: flex; align-items: center; border: 1px solid #2a3443; border-radius: 6px; overflow: hidden; }
+.mcx-step button { min-width: 32px; min-height: 30px; background: #11151c; border: 0; color: #e7ebf0; font-size: 15px; cursor: pointer; }
+.mcx-step span { min-width: 64px; text-align: center; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; font-weight: 700; }
+.mcx-otc { display: flex; flex-wrap: wrap; gap: 6px; }
+.mcx-opt { flex: 1 1 320px; min-width: 0; background: #0b0e14; border: 1px solid #1e2530; border-radius: 8px; padding: 6px 8px; }
+.mcx-opt[hidden] { display: none; }
+.mcx-opt-hd { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: 12px; margin-bottom: 4px; }
+.mcx-opt-chart { height: 200px; }
+/* 🧱 Wall Builder */
+.oia-wb { background: #11151c; border: 1px solid #1e2530; border-radius: 10px; padding: 10px; margin: 8px 0; display: flex; flex-direction: column; gap: 8px; color: #e7ebf0; }
+.oia-wb[hidden] { display: none; }
+.wb-panel { min-width: 0; padding: 8px 10px; background: #0d1118; border: 1px solid #1e2530; border-radius: 8px; }
+.wb-grid { display: grid; gap: 4px; }
+.wb-cols { grid-template-columns: repeat(3, minmax(0, 1fr)) 128px repeat(3, minmax(0, 1fr)) 150px 92px 92px 104px 66px; }
+.wb-hg { padding: 2px 4px 4px; text-align: center; border-bottom: 2px solid; }
+.wb-box { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 34px; padding: 2px 4px; border-radius: 6px; text-align: center; white-space: nowrap; overflow: hidden; background: rgba(var(--t), var(--a)); border: 1px solid rgba(var(--t), var(--b)); }
+.wb-box b { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #f2f5f8; }
+.wb-box i { font-style: normal; font-size: 9px; font-weight: 700; letter-spacing: .5px; color: rgba(242, 245, 248, .72); max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.wb-dark { background: #121821; border: 1px solid #1e2530; }
+.wb-spot { display: flex; align-items: center; justify-content: center; height: 20px; background: linear-gradient(#2a5ea8, #2a5ea8) center / 100% 1px no-repeat; }
+.wb-spot span { font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 700; font-size: 11.5px; color: #cfe3ff; padding: 1px 12px; background: #12305a; border: 1px solid #2a5ea8; border-radius: 999px; }
+.wb-mrow { display: grid; grid-template-columns: 70px repeat(3, minmax(0, 1fr)) 10px repeat(3, minmax(0, 1fr)) 10px minmax(0, 1fr); gap: 4px; align-items: stretch; }
+.wb-mhead span { font-size: 10.5px; font-weight: 700; color: #9aa3b0; text-align: center; }
+.wb-mlab { display: flex; align-items: center; padding-left: 4px; border-radius: 6px; font-size: 12px; font-weight: 700; color: #9aa3b0; }
+.wb-mlab.on { background: #16233a; color: #fff; }
+.wb-legend { font-size: 11.5px; color: #9aa3b0; gap: 6px 14px; }
+.wb-legend span { display: inline-flex; align-items: center; gap: 5px; } .wb-legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+@media (max-width: 760px) {
+  .mcx-tab { padding: 5px 10px; font-size: 12.5px; }
+  .mcx-line, .mcx-risk { white-space: normal; }
+}
+/* the redesign adds rows above and the option terminal below the chart: the screen scrolls as a page and the
+   chart area keeps a real height (it used to take "whatever is left", which became ~0) */
+body.mc-fullwidth #panel-marketcommand .mc-wrap { overflow-y: auto; }
+#panel-marketcommand .mc2-main { flex: none; height: clamp(520px, calc(100vh - 150px), 920px); }
+body.mc-fullwidth #panel-marketcommand .mc2-right { width: 300px; }
+@media (max-width: 1200px) { body.mc-fullwidth #panel-marketcommand .mc2-right { width: 270px; } }
+@media (max-width: 900px) { #panel-marketcommand .mc2-main { height: auto; } }
+/* the ladder sits in the 300px right column: short names, reason on hover (and inline when there is room) */
+.mcx-lv .px { min-width: 76px; } .mcx-lv .ds { min-width: 40px; }
+#panel-marketcommand .mc2-right .mcx-lv .nm small { display: none; }
+/* phone / tablet: the header rows wrap, the 1-min OI table scrolls in its own box, the screen never scrolls sideways */
+@media (max-width: 1024px) {
+  #panel-marketcommand .mc2-idx, #panel-marketcommand .mc-ohlc-bar, #panel-marketcommand .mc-ohlc-detail, #panel-marketcommand .mc2-bottom, #panel-marketcommand .mc2-bottom-status { flex-wrap: wrap; }
+  #mcx-oi-host table.oimm-t { display: block; overflow-x: auto; max-width: 100%; }
+  body.mc-fullwidth #panel-marketcommand .mc-wrap { overflow-x: hidden; }
+}

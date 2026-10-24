@@ -193,7 +193,7 @@ function oimSchedule() {
   const ms = 60_000 - (Date.now() % 60_000) + 15_000;
   OIM.tick = setTimeout(() => {
     const hm = new Date(Date.now() + 19800000).toISOString().slice(11, 16);   // IST
-    const on = document.getElementById("panel-oianalysis")?.classList.contains("active") && OIA.screen === "minute" && OIM.mode === "live" && hm >= "09:15" && hm <= "15:13";
+    const on = (typeof oiaVisible === "function" ? oiaVisible() : document.getElementById("panel-oianalysis")?.classList.contains("active")) && OIA.screen === "minute" && OIM.mode === "live" && hm >= "09:15" && hm <= "15:13";
     if (on && !document.hidden) loadOiMinute();
     oimSchedule();
   }, ms > 60_000 ? ms - 60_000 : ms);

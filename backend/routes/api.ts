@@ -251,6 +251,7 @@ import { globalCues, indexSentiment, indiaSentiment, briefPhase, briefHeadline, 
 import { sessionsOf, analyseDay, aggregate, buildLevels, LiqEvent, LiqLevel } from "../liquidity/liquidityTake";
 import { evaluateSession, dailyAtrFrom5m, summarizeReplay, analyzeMoves, SETUP_CONFIG, SetupSignal, SessionResult } from "../signals/setupSignals";
 import { writeOiMinute, listOiMinuteDays, oiMinuteFilePath } from "../oi/oiMinuteLog";
+import * as OIW from "../oi/wallBuilder";
 import { jwtExp, renewDecision, pickRenewedToken } from "../data/dhanTokenRenew";
 import { dhanFetch as dhanGuardedFetch } from "../data/dhanClient";
 import { notify, notifyDetached } from "../integrations/notificationService";
@@ -10647,6 +10648,25 @@ router.get("/oi-minute/file", requirePermission("oiAnalysis"), (req: Request, re
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename="oi-${String(req.query.date)}-${String(req.query.name)}"`);
   fs.createReadStream(f).pipe(res);
+});
+// 🧱 Wall Builder: who is writing, where, over 1 / 5 / 15 min — from the 1-minute OI log (positioning, not a forecast)
+// /api/oi-walls?symbol=^NSEI[&date=YYYY-MM-DD][&at=HH:MM]   (no date → the latest logged day)
+const WB_INDEX: Record<string, string> = { "^NSEI": "NIFTY", "^NSEBANK": "BANKNIFTY", "^CNXFIN": "FINNIFTY", "^NSEMDCP50": "MIDCPNIFTY", "^BSESN": "SENSEX" };
+router.get("/oi-walls", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  const ix = WB_INDEX[String(req.query.symbol || "^NSEI")]; if (!ix) return res.status(400).json({ error: "unknown index" });
+  const day = String(req.query.date || "") || listOiMinuteDays()[0]?.date || "", at = /^\d\d:\d\d$/.test(String(req.query.at || "")) ? String(req.query.at) : undefined;
+  try {
+    const out = await cached(`oi-walls:${ix}:${day}:${at || "now"}`, 20_000, async () => {
+      const f = oiMinuteFilePath(day, `strikes-${ix}.csv`), sf = oiMinuteFilePath(day, "summary.csv");
+      if (!f) return { available: false, index: ix, day, message: "No 1-minute OI log for this day yet." };
+      const rows = OIW.parseStrikeCsv(fs.readFileSync(f, "utf8"));
+      let expiry: string | null = null;
+      if (sf) { const s = fs.readFileSync(sf, "utf8").trim().split("\n").filter((l) => l.split(",")[3] === ix).pop(); expiry = s ? s.split(",")[5] || null : null; }
+      const wb = OIW.buildWalls(rows, { index: ix, day, expiry, at });
+      return wb ? { available: true, expiry, ...wb } : { available: false, index: ix, day, message: "No minutes logged yet." };
+    });
+    res.json(out);
+  } catch (e: any) { res.status(500).json({ available: false, error: e?.message || "wall builder failed" }); }
 });
 router.get("/market-sentiment-brief", requirePermission("oiAnalysis"), async (_req: Request, res: Response) => {
   try { res.json(await cached("sentiment-brief", 60_000, () => buildSentimentBrief())); }
