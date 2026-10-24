@@ -87,3 +87,33 @@ Validation right % vs the same-stop baseline:
 (`api.ts` `side: p >= spot ? …`). Once price closes beyond a level, that level switches sides, so the detector's
 BREAKOUT / BREAKDOWN ACCEPTED states can practically never fire. This is also why the badge read "closed below
 Swing **High**". Fixing it means using the level's role: highs are resistance, lows are support.
+
+## Study #4: candle fake AT a support / resistance level (`fakeMoveStudy4.ts`, owner's idea)
+
+**Event:** a previous-candle fake (study #3 C1). It counts only when the swept candle level sits within 0.3 × ATR of a
+support / resistance level.
+
+**Variants:**
+- **K1:** at a live S/R level (swing points, PDH / PDL, ORB)
+- **K2:** at an owner S/R level (`priceActionLevels`: 15-min turn clusters and flip zones of the previous 5 sessions)
+- **K3:** the live-level fake fires on the same candle
+- **K4:** any S/R level, tight (0.15 × ATR)
+- **K1 + K2**
+
+Right % vs the same-stop baseline (development → validation):
+
+| Variant | NIFTY 5m DOWN | NIFTY 15m UP | SENSEX 5m DOWN | SENSEX 15m UP |
+|---|---|---|---|---|
+| K0 candle fake alone | 56.5/57.1 → 53.5/53.4 | 51.2/52.0 → 51.4/53.6 | 55.8/56.4 → 53.1/53.1 | 49.1/49.9 → 49.9/53.0 |
+| K1 at live S/R | 56.4/57.6 → 52.4/53.6 | 51.2/52.2 → 51.6/53.8 | 54.6/56.8 → 48.8/53.3 | 49.2/49.8 → 49.3/53.1 |
+| K2 at owner S/R | 53.8/57.2 → 53.7/52.8 | 53.6/51.7 → 57.7/53.1 (n 78) | **62.0/56.8 → 40.5/53.2** | 48.7/49.8 → 50.5/53.5 |
+| K1 + K2 | 59.8/57.3 → 52.3/52.9 | 54.1/52.0 → 58.7/53.1 (n 63) | **68.5/57.1 (n 130) → 34.0/53.6 (n 50)** | 47.3/49.9 → 48.8/53.4 |
+
+**Results:**
+- **No variant beats the baseline in both periods for both indices.**
+- The best development result, SENSEX 5m FAKE-DOWN at live + owner S/R (68.5% vs 57.1%), reverses in validation to
+  34.0% vs 53.6%. This is the classic sign of a chance pattern.
+- **NIFTY 15m FAKE-UP at owner S/R** is better in both periods (+2 → +5 points), but n is only 63–78, and SENSEX 15m
+  FAKE-UP does not confirm it (−1 → −3). Watch only.
+
+**Verdict:** no improvement. No change to live logic.

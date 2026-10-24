@@ -154,3 +154,14 @@ and as break (two closes beyond).
 - **No change to live logic.**
 - **Side-by-spot quirk noted:** accepted breaks are almost never reported, and the "Swing High" wording is wrong. This
   is a display fix only.
+
+## 2026-10-24 · Candle fake at support / resistance (`RESULTS_FAKE_MOVE.md` §4)
+
+**Tested:** previous-candle fake-down / up counted only near a live S/R level or an owner S/R level (0.3 / 0.15 ATR),
+or together with the live-level fake, on 5m and 15m, NIFTY + SENSEX, development / validation.
+
+**Verdict:**
+- **NO IMPROVEMENT.** The best development cell, SENSEX 5m at both S/R types (68.5% vs 57.1%), falls to 34.0% vs 53.6%
+  in validation.
+- NIFTY 15m fake-up at owner S/R is +2 / +5 points on n ≈ 70, and SENSEX does not confirm it. Watch only.
+- **No change to live logic.**
