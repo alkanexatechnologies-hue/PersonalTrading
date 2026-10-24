@@ -14,6 +14,9 @@ import { run as emaRun } from "../emaCrossStudy";
 type IX = "NIFTY" | "BANKNIFTY" | "SENSEX";
 const LOT: Record<IX, number> = { NIFTY: 75, BANKNIFTY: 30, SENSEX: 20 };
 const OUT = path.join(__dirname);
+// LAX_STRIKE=ITM1 (pre-registered 2026-10-25): buy the strike 1 step IN the money (CE: ATM − step, PE: ATM + step); everything
+// else unchanged. Output goes to *_ITM1 files so the ATM results stay as they were.
+const ITM1 = process.env.LAX_STRIKE === "ITM1", SFX = ITM1 ? "_ITM1" : "";
 const hm = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(11, 16);
 const barsN = (pts: [number, number][], n: number): Bar[] => { const out: Bar[] = []; let cur: Bar | null = null, key = -1;
   for (const [t, p] of pts) { const m = istMin(t); if (m < 555 || m >= 930) continue; const k = Math.floor((m - 555) / n);
@@ -48,7 +51,7 @@ type P = ReturnType<typeof prepareIndex>;
 function evaluate(Pp: P, di: number, strat: string, s: Signal): Trade | null {
   const d = Pp.ds[di], end = Math.floor(Date.parse(d.day + "T15:15:00+05:30") / 1000), path = Pp.mins[di].filter(([t]) => t >= s.t);
   if (path.length < 5) return null;
-  const x = indexExit(path, s, LAX, end), strike = Math.round(s.entry / Pp.step) * Pp.step, key = `${strike}${s.dir > 0 ? "CE" : "PE"}`;
+  const x = indexExit(path, s, LAX, end), strike = Math.round(s.entry / Pp.step) * Pp.step - (ITM1 ? s.dir * Pp.step : 0), key = `${strike}${s.dir > 0 ? "CE" : "PE"}`;
   const prem0 = Pp.premAt(di, key, s.t), prem1 = Pp.premAt(di, key, x.exitT), p0c = Pp.premAt(di, key, s.t + 60), p1c = Pp.premAt(di, key, x.exitT + 60);
   const b = prem0 != null && prem1 != null ? optionPnl(prem0, prem1, Pp.lot) : null, c = p0c != null && p1c != null ? optionPnl(p0c, p1c, Pp.lot, true) : null;
   const info = Pp.dayInfo(di), dt = d.day;
@@ -219,11 +222,11 @@ if (require.main === module) {
   W("", "## DEV15 — every LAX trade and every rejected setup", "", "| Index | Date | Entry | Side | Level | Entry idx | Stop | Target | Exit | Why | Index pts | Premium in → out | Net ₹ | Net ₹ cons |", "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
   for (const t of L.filter((t) => t.dev15).sort((p, q) => p.t - q.t)) W(`| ${t.ix} | ${t.day.slice(5)} | ${hm(t.t)} | ${t.dir > 0 ? "CE" : "PE"} | ${t.levelKind} ${Math.round(t.level)} | ${Math.round(t.entry)} | ${Math.round(t.stop)} | ${Math.round(t.target)} | ${hm(t.x.exitT)} | ${t.x.why} | ${F1(t.idxPts)} | ${t.prem0?.toFixed(1)} → ${t.prem1?.toFixed(1)} | ${R0(t.net ?? NaN)} | ${R0(t.netC ?? NaN)} |`);
   W("", "Rejected setups (WAIT) in DEV15:", "", ...dev15Rejects.map((x) => `- ${x}`));
-  fs.writeFileSync(path.join(OUT, "FINAL_15_60_POINT_BACKTEST_raw.md"), out.join("\n"));
+  fs.writeFileSync(path.join(OUT, `FINAL_15_60_POINT_BACKTEST${SFX}_raw.md`), out.join("\n"));
   // ---- trade-level CSV ----
   const csvHead = "strategy,index,date,set,dev15,block,expiry_day,day_type_hindsight,entry_time,side,level_kind,level,entry_index,stop,target,room_pts,consumed_pts,atr5,exit_time,exit_why,exit_index,index_pts,mfe_pts,mae_pts,reach15,reach20,reach30,reach45,reach60,strike,premium_in,premium_out,gross_rs,net_rs,net_conservative_rs";
   const csv = (T: Trade[]) => [csvHead, ...T.sort((p, q) => p.t - q.t).map((t) => [t.strat, t.ix, t.day, t.set, t.dev15, t.block, t.expiry, t.dayType, hm(t.t), t.dir > 0 ? "CE" : "PE", t.levelKind, t.level.toFixed(2), t.entry.toFixed(2), t.stop.toFixed(2), t.target.toFixed(2), Number.isFinite(t.room) ? t.room.toFixed(1) : "", t.consumed.toFixed(1), t.atr.toFixed(2), hm(t.x.exitT), t.x.why, t.x.exitPx.toFixed(2), t.idxPts.toFixed(1), t.x.mfe.toFixed(1), t.x.mae.toFixed(1), ...REACH.map((r) => (t.x.reach[r] ? 1 : 0)), t.strike, t.prem0 ?? "", t.prem1 ?? "", t.gross?.toFixed(0) ?? "", t.net?.toFixed(0) ?? "", t.netC?.toFixed(0) ?? ""].join(","))].join("\n");
-  fs.writeFileSync(path.join(OUT, "lax_trades.csv"), csv(L)); fs.writeFileSync(path.join(OUT, "comparison_trades.csv"), csv([...all.C2, ...all.EMA, ...all.ORB]));
+  fs.writeFileSync(path.join(OUT, `lax_trades${SFX}.csv`), csv(L)); if (!ITM1) fs.writeFileSync(path.join(OUT, "comparison_trades.csv"), csv([...all.C2, ...all.EMA, ...all.ORB]));
   console.log(out.slice(0, 40).join("\n"));
   console.log(`\nwrote FINAL_15_60_POINT_BACKTEST_raw.md, lax_trades.csv (${L.length} rows), comparison_trades.csv`);
   process.exit(0);

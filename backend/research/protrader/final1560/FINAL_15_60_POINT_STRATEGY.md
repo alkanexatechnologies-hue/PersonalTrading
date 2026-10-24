@@ -124,3 +124,19 @@ evaluated on them before.
 - **YES:** A1–A6 all pass.
 - **PARTIALLY:** implemented, and a criterion fails or cannot be evaluated because of a stated data limitation.
 - **NO:** the candidate fails on the evidence.
+
+## Addendum (pre-registered 2026-10-25, before running): ITM1 monetisation test
+
+**The change:** the only change is the option strike. Buy **1 strike in the money**: CE at ATM − step, PE at ATM + step.
+Run with `LAX_STRIKE=ITM1`.
+
+**Everything else is identical:**
+- the signals, index exits and portfolio rules;
+- the costs;
+- the periods and the primary out-of-sample sample;
+- acceptance criteria A1–A6.
+
+**Reason:** the ATM option moved about 0.51 × the index, and break-even needed 4.7–13.8 index points per trade. An ITM
+option has a higher delta.
+
+**Verdict rule:** if A1–A6 do not all pass, LAX is dropped.
