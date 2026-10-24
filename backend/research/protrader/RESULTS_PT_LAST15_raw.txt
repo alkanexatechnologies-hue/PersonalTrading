@@ -1,0 +1,125 @@
+
+================ NIFTY · last 15 sessions 2026-10-01 → 2026-10-23 · 37 signals ================
+ 2026-10-05
+   09:25 CE ✅ WIN  | entry 22569 SL 22544 (25) T 22595 | best +48 worst -82 | 143 pts past EMA21 · candle 0.88 ATR · ATR 1.46× | +30pts ✅ | option +11.3%
+   09:45 CE ❌ STOP | entry 22610 SL 22591 (19) T 22629 | best +7 worst -136 | 131 pts past EMA21 · candle 0.79 ATR · ATR 1.45× | +30pts ✗ | option -12.5%  ← broke at 09:58
+   11:45 PE ✅ WIN  | entry 22461 SL 22473 (12) T 22450 | best +56 worst -13 | 30 pts past EMA21 · candle 0.63 ATR · ATR 0.81× | +30pts ✅ | option +9.0%
+   13:35 CE ✅ WIN  | entry 22507 SL 22477 (30) T 22536 | best +55 worst -9 | 39 pts past EMA21 · candle 1.83 ATR · ATR 0.70× | +30pts ✅ | option +24.2%
+ 2026-10-06  (EXPIRY DAY)
+   09:30 CE ✅ WIN  | entry 22612 SL 22592 (20) T 22632 | best +51 worst -8 | 59 pts past EMA21 · candle 1.25 ATR · ATR 0.69× | +30pts ✅ | option +16.1%
+   09:45 CE ✅ WIN  | entry 22634 SL 22620 (14) T 22648 | best +42 worst -6 | 64 pts past EMA21 · candle 1.00 ATR · ATR 0.71× | +30pts ✅ | option +11.6%
+   12:35 CE ⏱ TIME | entry 22711 SL 22691 (20) T 22731 | best +13 worst -15 | 31 pts past EMA21 · candle 1.72 ATR · ATR 0.60× | +30pts ✗ | option -13.4%  ← broke at 13:39
+   13:35 CE ✅ WIN  | entry 22711 SL 22707 (4) T 22715 | best +17 worst -24 | 11 pts past EMA21 · candle 0.87 ATR · ATR 0.59× | +30pts ✗ | option -0.2%
+   14:00 CE ✅ WIN  | entry 22721 SL 22714 (7) T 22727 | best +7 worst -34 | 16 pts past EMA21 · candle 1.32 ATR · ATR 0.54× | +30pts ✗ | option +7.3%
+ 2026-10-09
+   09:20 CE ✅ WIN  | entry 22303 SL 22297 (7) T 22310 | best +191 worst 2 | 61 pts past EMA21 · candle 1.30 ATR · ATR 1.37× | +30pts ✅ | option +7.2%
+   09:25 CE ✅ WIN  | entry 22375 SL 22305 (70) T 22445 | best +134 worst -6 | 120 pts past EMA21 · candle 2.33 ATR · ATR 1.53× | +30pts ✅ | option +34.2%
+   12:50 CE ✅ WIN  | entry 22502 SL 22493 (9) T 22510 | best +33 worst -15 | 24 pts past EMA21 · candle 0.61 ATR · ATR 0.64× | +30pts ✗ | option +3.3%
+ 2026-10-12
+   09:50 PE ❌ STOP | entry 22478 SL 22512 (34) T 22445 | best +42 worst -55 | 53 pts past EMA21 · candle 1.02 ATR · ATR 1.60× | +30pts ✗ | option -23.9%  ← broke at 09:56
+   13:30 PE ❌ STOP | entry 22367 SL 22380 (13) T 22354 | best +40 worst -21 | 19 pts past EMA21 · candle 0.89 ATR · ATR 0.76× | +30pts ✗ | option -11.4%  ← broke at 13:52
+   14:10 PE ✅ WIN  | entry 22346 SL 22370 (25) T 22321 | best +37 worst -8 | 31 pts past EMA21 · candle 1.55 ATR · ATR 0.88× | +30pts ✅ | option +10.6%
+ 2026-10-13  (EXPIRY DAY)
+   09:20 CE ✅ WIN  | entry 22456 SL 22424 (33) T 22489 | best +120 worst 6 | 97 pts past EMA21 · candle 1.39 ATR · ATR 1.30× | +30pts ✅ | option +15.3%
+   12:30 CE ❌ STOP | entry 22550 SL 22541 (9) T 22558 | best +10 worst -25 | 33 pts past EMA21 · candle 0.69 ATR · ATR 0.82× | +30pts ✗ | option -17.6%  ← broke at 12:36
+   13:40 CE ✅ WIN  | entry 22556 SL 22545 (11) T 22566 | best +104 worst -5 | 18 pts past EMA21 · candle 0.96 ATR · ATR 0.66× | +30pts ✅ | option +6.1%
+   14:00 CE ✅ WIN  | entry 22567 SL 22553 (14) T 22581 | best +145 worst 5 | 23 pts past EMA21 · candle 1.53 ATR · ATR 0.65× | +30pts ✅ | option +17.6%
+   14:05 CE ✅ WIN  | entry 22580 SL 22572 (8) T 22588 | best +132 worst -4 | 33 pts past EMA21 · candle 1.15 ATR · ATR 0.72× | +30pts ✅ | option +47.9%
+ 2026-10-14
+   11:30 PE ✅ WIN  | entry 22682 SL 22687 (5) T 22678 | best +22 worst -55 | 21 pts past EMA21 · candle 0.65 ATR · ATR 1.02× | +30pts ✗ | option +8.1%
+   12:00 CE ❌ STOP | entry 22728 SL 22717 (11) T 22739 | best +9 worst -116 | 20 pts past EMA21 · candle 0.65 ATR · ATR 0.91× | +30pts ✗ | option -8.9%  ← broke at 12:30
+   12:55 PE ✅ WIN  | entry 22669 SL 22698 (29) T 22640 | best +107 worst 8 | 41 pts past EMA21 · candle 2.57 ATR · ATR 0.70× | +30pts ✅ | option +17.0%
+ 2026-10-16
+   10:05 CE ✅ WIN  | entry 23063 SL 23055 (8) T 23071 | best +84 worst -2 | 73 pts past EMA21 · candle 0.32 ATR · ATR 1.69× | +30pts ✅ | option +5.6%
+   13:30 CE ❌ STOP | entry 23137 SL 23124 (13) T 23150 | best +1 worst -62 | 19 pts past EMA21 · candle 1.02 ATR · ATR 0.68× | +30pts ✗ | option -12.9%  ← broke at 13:45
+ 2026-10-19
+   09:25 PE ❌ STOP | entry 22982 SL 23068 (86) T 22896 | best -2 worst -180 | 119 pts past EMA21 · candle 3.38 ATR · ATR 1.51× | +30pts ✗ | option -52.5%  ← broke at 09:33
+   10:45 PE ❌ STOP | entry 23039 SL 23053 (14) T 23025 | best +47 worst -41 | 43 pts past EMA21 · candle 0.78 ATR · ATR 1.30× | +30pts ✗ | option -14.7%  ← broke at 10:52
+   11:35 PE ✅ WIN  | entry 22992 SL 23026 (34) T 22958 | best +66 worst -20 | 69 pts past EMA21 · candle 1.69 ATR · ATR 0.88× | +30pts ✅ | option +28.9%
+   13:25 PE ❌ STOP | entry 22862 SL 22882 (20) T 22842 | best +14 worst -40 | 76 pts past EMA21 · candle 1.23 ATR · ATR 0.76× | +30pts ✗ | option -28.5%  ← broke at 13:36
+   14:25 PE ✅ WIN  | entry 22857 SL 22861 (4) T 22852 | best +5 worst -35 | 35 pts past EMA21 · candle 0.51 ATR · ATR 0.85× | +30pts ✗ | option +2.3%
+ 2026-10-22
+   10:25 CE ✅ WIN  | entry 22715 SL 22704 (10) T 22725 | best +65 worst -34 | 48 pts past EMA21 · candle 0.50 ATR · ATR 1.55× | +30pts ✅ | option +4.5%
+   11:50 PE ❌ STOP | entry 22627 SL 22636 (9) T 22618 | best +40 worst -113 | 73 pts past EMA21 · candle 0.57 ATR · ATR 1.01× | +30pts ✗ | option -7.3%  ← broke at 11:55
+   12:55 CE ❌ STOP | entry 22710 SL 22703 (7) T 22717 | best +2 worst -104 | 46 pts past EMA21 · candle 0.94 ATR · ATR 0.95× | +30pts ✗ | option -6.3%  ← broke at 13:02
+   13:35 PE ❌ STOP | entry 22615 SL 22625 (11) T 22604 | best +3 worst -57 | 39 pts past EMA21 · candle 0.65 ATR · ATR 0.96× | +30pts ✗ | option -10.1%  ← broke at 13:47
+   14:20 PE ❌ STOP | entry 22621 SL 22646 (25) T 22596 | best +1 worst -86 | 18 pts past EMA21 · candle 1.28 ATR · ATR 0.68× | +30pts ✗ | option -15.9%  ← broke at 14:33
+ 2026-10-23
+   09:55 PE ✅ WIN  | entry 22611 SL 22643 (32) T 22579 | best +182 worst 10 | 55 pts past EMA21 · candle 1.12 ATR · ATR 0.99× | +30pts ✅ | option +11.0%
+   13:40 CE ❌ STOP | entry 22580 SL 22523 (57) T 22636 | best -6 worst -124 | 132 pts past EMA21 · candle 2.10 ATR · ATR 0.98× | +30pts ✗ | option -24.7%  ← broke at 13:53
+ TOTAL 37: 22 win / 14 stop / 1 time → 59% · +pts target 17 · avg option net 1.0%
+   CE (index above EMA21)             22 signals · 15 win (68%)
+   PE (index below EMA21)             15 signals · 7 win (47%)
+   on expiry days                     10 signals · 8 win (80%)
+   other days                         27 signals · 14 win (52%)
+   candle ≤ 1 ATR                     17 signals · 9 win (53%)
+   candle > 1 ATR                     20 signals · 13 win (65%)
+   ATR expanding ≥ 1.2×               10 signals · 6 win (60%)
+   ATR < 1.2×                         27 signals · 16 win (59%)
+   before 10:30                       12 signals · 9 win (75%)
+   after 13:00                        14 signals · 8 win (57%)
+
+================ SENSEX · last 15 sessions 2026-10-01 → 2026-10-23 · 39 signals ================
+ 2026-10-01  (EXPIRY DAY)
+   09:50 PE ❌ STOP | entry 72338 SL 72405 (68) T 72270 | best -25 worst -222 | 110 pts past EMA21 · candle 1.09 ATR · ATR 1.13× | +100pts ✗ | option -26.9%  ← broke at 09:59
+   12:05 PE ✅ WIN  | entry 72278 SL 72317 (39) T 72240 | best +738 worst 23 | 96 pts past EMA21 · candle 0.88 ATR · ATR 0.88× | +100pts ✅ | option +19.9%
+   12:10 PE ✅ WIN  | entry 72238 SL 72256 (18) T 72220 | best +698 worst 2 | 124 pts past EMA21 · candle 1.03 ATR · ATR 0.91× | +100pts ✅ | option +10.2%
+ 2026-10-05
+   13:35 CE ✅ WIN  | entry 72160 SL 72076 (83) T 72243 | best +207 worst -1 | 108 pts past EMA21 · candle 1.67 ATR · ATR 0.68× | +100pts ✅ | option +14.8%
+   13:40 CE ❌ STOP | entry 72315 SL 72278 (37) T 72352 | best +52 worst -156 | 239 pts past EMA21 · candle 0.81 ATR · ATR 0.79× | +100pts ✗ | option -14.9%  ← broke at 14:04
+ 2026-10-06
+   09:35 CE ✅ WIN  | entry 72586 SL 72534 (52) T 72638 | best +151 worst -33 | 214 pts past EMA21 · candle 1.04 ATR · ATR 0.67× | +100pts ✅ | option +7.4%
+   09:50 CE ✅ WIN  | entry 72652 SL 72625 (27) T 72679 | best +111 worst -48 | 219 pts past EMA21 · candle 0.55 ATR · ATR 0.66× | +100pts ✗ | option +3.3%
+ 2026-10-08  (EXPIRY DAY)
+   09:20 PE ✅ WIN  | entry 72395 SL 72476 (81) T 72314 | best +211 worst 7 | 203 pts past EMA21 · candle 1.39 ATR · ATR 1.08× | +100pts ✅ | option +26.0%
+   09:30 PE ✅ WIN  | entry 72335 SL 72388 (53) T 72282 | best +165 worst -34 | 219 pts past EMA21 · candle 0.84 ATR · ATR 1.16× | +100pts ✅ | option +16.0%
+ 2026-10-09
+   12:50 CE ✅ WIN  | entry 72412 SL 72384 (28) T 72440 | best +115 worst -35 | 71 pts past EMA21 · candle 0.71 ATR · ATR 0.58× | +100pts ✗ | option +1.5%
+ 2026-10-12
+   09:35 PE ✅ WIN  | entry 72368 SL 72452 (84) T 72284 | best +207 worst -49 | 149 pts past EMA21 · candle 0.93 ATR · ATR 1.40× | +100pts ✅ | option +13.8%
+   13:30 PE ✅ WIN  | entry 71888 SL 71913 (25) T 71862 | best +159 worst -58 | 54 pts past EMA21 · candle 0.62 ATR · ATR 0.72× | +100pts ✗ | option +3.2%
+   14:15 PE ✅ WIN  | entry 71818 SL 71828 (10) T 71807 | best +132 worst 9 | 82 pts past EMA21 · candle 0.58 ATR · ATR 0.76× | +100pts ✅ | option +3.7%
+ 2026-10-13
+   09:20 CE ✅ WIN  | entry 72242 SL 72137 (105) T 72347 | best +357 worst 28 | 370 pts past EMA21 · candle 1.43 ATR · ATR 1.35× | +100pts ✅ | option +15.3%
+   12:25 CE ✅ WIN  | entry 72483 SL 72444 (40) T 72523 | best +60 worst -25 | 85 pts past EMA21 · candle 0.78 ATR · ATR 0.84× | +100pts ✗ | option +5.2%
+ 2026-10-14
+   11:30 PE ✅ WIN  | entry 72961 SL 72976 (15) T 72946 | best +68 worst -189 | 62 pts past EMA21 · candle 0.85 ATR · ATR 1.06× | +100pts ✗ | option +14.5%
+   12:05 CE ❌ STOP | entry 73137 SL 73117 (20) T 73157 | best +8 worst -478 | 87 pts past EMA21 · candle 0.58 ATR · ATR 0.97× | +100pts ✗ | option -5.7%  ← broke at 12:12
+   12:55 PE ✅ WIN  | entry 72927 SL 73020 (93) T 72834 | best +329 worst 31 | 130 pts past EMA21 · candle 2.21 ATR · ATR 0.75× | +100pts ✅ | option +27.0%
+   13:00 PE ✅ WIN  | entry 72749 SL 72868 (118) T 72631 | best +151 worst -146 | 280 pts past EMA21 · candle 2.40 ATR · ATR 0.94× | +100pts ✅ | option +31.8%
+   13:10 PE ❌ STOP | entry 72598 SL 72636 (38) T 72560 | best -21 worst -298 | 365 pts past EMA21 · candle 0.59 ATR · ATR 1.16× | +100pts ✗ | option -14.3%  ← broke at 13:15
+ 2026-10-15  (EXPIRY DAY)
+   09:35 CE ❌ STOP | entry 73300 SL 73282 (19) T 73319 | best +511 worst -31 | 334 pts past EMA21 · candle 0.72 ATR · ATR 1.28× | +100pts ✗ | option -9.2%  ← broke at 09:41
+   09:45 CE ✅ WIN  | entry 73392 SL 73325 (67) T 73459 | best +504 worst 23 | 362 pts past EMA21 · candle 1.13 ATR · ATR 1.40× | +100pts ✅ | option +15.0%
+ 2026-10-16
+   13:30 CE ❌ STOP | entry 74714 SL 74676 (38) T 74752 | best -2 worst -194 | 59 pts past EMA21 · candle 0.96 ATR · ATR 0.63× | +100pts ✗ | option -5.6%  ← broke at 13:43
+   14:25 PE ❌ STOP | entry 74550 SL 74570 (20) T 74529 | best +21 worst -180 | 78 pts past EMA21 · candle 1.36 ATR · ATR 0.63× | +100pts ✗ | option -2.2%  ← broke at 14:31
+ 2026-10-19
+   10:00 PE ❌ STOP | entry 74465 SL 74523 (58) T 74407 | best +157 worst -90 | 129 pts past EMA21 · candle 0.40 ATR · ATR 2.21× | +100pts ✗ | option -11.9%  ← broke at 10:22
+   10:35 PE ✅ WIN  | entry 74391 SL 74454 (64) T 74327 | best +199 worst -98 | 145 pts past EMA21 · candle 0.56 ATR · ATR 1.62× | +100pts ✗ | option +10.4%
+   11:35 PE ✅ WIN  | entry 74191 SL 74305 (113) T 74078 | best +220 worst -66 | 240 pts past EMA21 · candle 1.77 ATR · ATR 0.87× | +100pts ✅ | option +14.4%
+   12:00 PE ✅ WIN  | entry 74059 SL 74163 (104) T 73955 | best +133 worst -62 | 274 pts past EMA21 · candle 1.75 ATR · ATR 0.80× | +100pts ✅ | option +7.3%
+   12:35 PE ✅ WIN  | entry 74037 SL 74051 (14) T 74023 | best +254 worst -0 | 147 pts past EMA21 · candle 0.33 ATR · ATR 0.77× | +100pts ✅ | option +2.5%
+   13:15 PE ✅ WIN  | entry 73851 SL 73939 (89) T 73762 | best +110 worst -42 | 208 pts past EMA21 · candle 1.98 ATR · ATR 0.65× | +100pts ✅ | option +6.5%
+   13:30 PE ❌ STOP | entry 73806 SL 73818 (12) T 73794 | best +85 worst -86 | 187 pts past EMA21 · candle 0.29 ATR · ATR 0.71× | +100pts ✗ | option -3.9%  ← broke at 13:36
+ 2026-10-21
+   09:40 CE ❌ STOP | entry 74598 SL 74574 (24) T 74623 | best -21 worst -507 | 451 pts past EMA21 · candle 0.69 ATR · ATR 1.49× | +100pts ✗ | option -8.5%  ← broke at 09:46
+   11:45 PE ✅ WIN  | entry 73776 SL 73801 (25) T 73750 | best +413 worst -4 | 276 pts past EMA21 · candle 0.34 ATR · ATR 0.96× | +100pts ✅ | option +0.6%
+   11:55 PE ✅ WIN  | entry 73725 SL 73779 (54) T 73672 | best +363 worst 5 | 272 pts past EMA21 · candle 0.76 ATR · ATR 0.93× | +100pts ✅ | option +13.0%
+ 2026-10-22  (EXPIRY DAY)
+   09:20 PE ❌ STOP | entry 73060 SL 73218 (158) T 72902 | best +33 worst -491 | 325 pts past EMA21 · candle 1.49 ATR · ATR 1.50× | +100pts ✗ | option -23.8%  ← broke at 09:30
+   10:00 PE ❌ STOP | entry 73114 SL 73260 (146) T 72968 | best -42 worst -532 | 188 pts past EMA21 · candle 1.00 ATR · ATR 1.90× | +100pts ✗ | option -42.3%  ← broke at 10:12
+   10:30 CE ❌ STOP | entry 73633 SL 73533 (101) T 73734 | best +65 worst -259 | 274 pts past EMA21 · candle 0.80 ATR · ATR 1.53× | +100pts ✗ | option -28.3%  ← broke at 10:43
+   11:10 CE ❌ STOP | entry 73697 SL 73656 (41) T 73738 | best +1 worst -595 | 229 pts past EMA21 · candle 0.38 ATR · ATR 1.22× | +100pts ✗ | option -20.2%  ← broke at 11:20
+   12:00 PE ✅ WIN  | entry 73190 SL 73236 (46) T 73144 | best +118 worst -347 | 213 pts past EMA21 · candle 0.56 ATR · ATR 0.89× | +100pts ✅ | option +5.1%
+ TOTAL 39: 25 win / 14 stop / 0 time → 64% · +pts target 19 · avg option net 1.8%
+   CE (index above EMA21)             14 signals · 7 win (50%)
+   PE (index below EMA21)             25 signals · 18 win (72%)
+   on expiry days                     12 signals · 6 win (50%)
+   other days                         27 signals · 19 win (70%)
+   candle ≤ 1 ATR                     24 signals · 14 win (58%)
+   candle > 1 ATR                     15 signals · 11 win (73%)
+   ATR expanding ≥ 1.2×               11 signals · 4 win (36%)
+   ATR < 1.2×                         28 signals · 21 win (75%)
+   before 10:30                       13 signals · 7 win (54%)
+   after 13:00                        10 signals · 5 win (50%)
