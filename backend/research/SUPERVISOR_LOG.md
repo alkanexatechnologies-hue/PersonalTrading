@@ -264,3 +264,27 @@ The owner's SL 5 / T 40 is negative in DEV and VAL on both indices (the last 15 
 entry is worse. Index-candle agreement helps SENSEX in every period, but DEV is still negative.
 
 **Verdict:** REJECT for live use. No change. The entry signal lacks an edge after costs.
+
+## 2026-10-25 · FINAL 15–60 index-point candidate LAX (`protrader/final1560/`)
+
+**Setup:**
+- **Pre-registered:** commit `789102f`, before evaluation.
+- **Data:** NIFTY / BANKNIFTY / SENSEX, 2024-10-14 → 2026-10-23.
+- **Periods:** DEV / VAL / TEST; the primary out-of-sample (OOS) excludes the 15 development sessions.
+- **Engine check:** the C2 re-implementation reproduces Phase 1 exactly.
+
+**Results:**
+- **LAX OOS:** 323 trades; +15 reach 61% vs random 52%; net −₹143 per trade; conservative −₹226 [−322, −142]; PF 0.50;
+  all indices and half-years negative.
+- **Acceptance:** 1 of 6 criteria pass.
+- **C2 two years (own exit):** −₹146 per trade. EMA −₹92, ORB −₹167, random −₹146.
+
+**Diagnosis:** a real but small directional bias. The exits capture +2.3 index points per trade on average vs a
+break-even of 4.7–13.8 points, after ATM option delta (~0.51) and costs (~₹143 per trade).
+
+**Verdict:** REJECT. No live change.
+
+**Next:**
+- pre-registered ITM / spread monetisation and one trailing exit;
+- C4 paper results;
+- OI-wall tests after 60+ sessions of the ±10 OI log.
