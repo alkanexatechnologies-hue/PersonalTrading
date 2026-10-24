@@ -1,0 +1,354 @@
+PHASE 1 · last 15 sessions 2026-10-01 → 2026-10-23 · PRELIMINARY (exploratory, not validated)
+
+NIFTY
+  RANDOM           n 1800 | OPTION X1: target  25% · SL  63% · net ₹ -2.56 / ₹ -3.21 pess | INDEX X2: 2R  36% · avg  0.13R
+  B0 PT            n  37 | OPTION X1: target  30% · SL  65% · net ₹ -2.73 / ₹ -3.17 pess | INDEX X2: 2R  35% · avg  0.34R
+  H4 M0            n  27 | OPTION X1: target  26% · SL  59% · net ₹  0.13 / ₹ -0.37 pess | INDEX X2: 2R  33% · avg  0.30R
+  H1               n  91 | OPTION X1: target  30% · SL  49% · net ₹  3.74 / ₹  3.22 pess | INDEX X2: 2R  35% · avg  0.14R
+  H1+OI            n  48 | OPTION X1: target  29% · SL  56% · net ₹  1.16 / ₹  0.49 pess | INDEX X2: 2R  25% · avg -0.14R
+  H2a              n 265 | OPTION X1: target  27% · SL  63% · net ₹ -2.41 / ₹ -3.04 pess | INDEX X2: 2R  31% · avg  0.03R
+  H2               n 213 | OPTION X1: target  30% · SL  62% · net ₹ -1.00 / ₹ -1.66 pess | INDEX X2: 2R  26% · avg  0.08R
+  H2+OI            n 169 | OPTION X1: target  34% · SL  59% · net ₹  0.36 / ₹ -0.27 pess | INDEX X2: 2R  28% · avg  0.13R
+  H5 fake-up+OI    n   5 | OPTION X1: target  60% · SL  40% · net ₹ 10.62 / ₹ 10.05 pess | INDEX X2: 2R   0% · avg  0.37R
+
+SENSEX
+  RANDOM           n 1800 | OPTION X1: target  26% · SL  62% · net ₹ -5.54 / ₹ -7.42 pess | INDEX X2: 2R  38% · avg  0.19R
+  B0 PT            n  39 | OPTION X1: target  33% · SL  56% · net ₹  1.12 / ₹  0.68 pess | INDEX X2: 2R  44% · avg  0.47R
+  H4 M0            n  24 | OPTION X1: target  25% · SL  71% · net ₹ -7.54 / ₹ -8.88 pess | INDEX X2: 2R  21% · avg -0.24R
+  H1               n  86 | OPTION X1: target  26% · SL  55% · net ₹ -0.67 / ₹ -1.78 pess | INDEX X2: 2R  47% · avg  0.41R
+  H1+OI            n  43 | OPTION X1: target  21% · SL  60% · net ₹ -4.68 / ₹ -5.63 pess | INDEX X2: 2R  42% · avg  0.26R
+  H2a              n 281 | OPTION X1: target  28% · SL  63% · net ₹ -2.94 / ₹ -4.66 pess | INDEX X2: 2R  32% · avg  0.05R
+  H2               n 228 | OPTION X1: target  30% · SL  63% · net ₹ -2.60 / ₹ -4.04 pess | INDEX X2: 2R  28% · avg  0.10R
+  H2+OI            n 184 | OPTION X1: target  32% · SL  61% · net ₹  0.61 / ₹ -1.00 pess | INDEX X2: 2R  28% · avg  0.14R
+  H5 fake-up+OI    n   8 | OPTION X1: target  63% · SL  38% · net ₹ 34.39 / ₹ 34.39 pess | INDEX X2: 2R  25% · avg  0.71R
+
+BOTH INDICES
+  RANDOM           n 3600 | OPTION X1: target  25% · SL  62% · net ₹ -4.05 / ₹ -5.31 pess | INDEX X2: 2R  37% · avg  0.16R
+  B0 PT            n  76 | OPTION X1: target  32% · SL  61% · net ₹ -0.75 / ₹ -1.20 pess | INDEX X2: 2R  39% · avg  0.41R
+  H4 M0            n  51 | OPTION X1: target  25% · SL  65% · net ₹ -3.48 / ₹ -4.37 pess | INDEX X2: 2R  27% · avg  0.05R
+  H1               n 177 | OPTION X1: target  28% · SL  52% · net ₹  1.60 / ₹  0.79 pess | INDEX X2: 2R  41% · avg  0.27R
+  H1+OI            n  91 | OPTION X1: target  25% · SL  58% · net ₹ -1.60 / ₹ -2.41 pess | INDEX X2: 2R  33% · avg  0.05R
+  H2a              n 546 | OPTION X1: target  27% · SL  63% · net ₹ -2.68 / ₹ -3.87 pess | INDEX X2: 2R  32% · avg  0.04R
+  H2               n 441 | OPTION X1: target  30% · SL  63% · net ₹ -1.83 / ₹ -2.89 pess | INDEX X2: 2R  27% · avg  0.09R
+  H2+OI            n 353 | OPTION X1: target  33% · SL  60% · net ₹  0.49 / ₹ -0.65 pess | INDEX X2: 2R  28% · avg  0.13R
+  H5 fake-up+OI    n  13 | OPTION X1: target  62% · SL  38% · net ₹ 25.25 / ₹ 25.03 pess | INDEX X2: 2R  15% · avg  0.58R
+
+WHY / WHEN — B0 PT (current logic)
+
+  lag: index move already made from the last hour's extreme (ATR)
+    1–2 ATR                    n   2 | OPTION X1: target   0% · SL 100% · net ₹-12.88 / ₹-15.11 pess | INDEX X2: 2R   0% · avg -1.00R
+    ≥2 ATR (late)              n  74 | OPTION X1: target  32% · SL  59% · net ₹ -0.43 / ₹ -0.82 pess | INDEX X2: 2R  41% · avg  0.44R
+
+  time of day
+    09:30-10:30                n  25 | OPTION X1: target  40% · SL  44% · net ₹  7.32 / ₹  6.54 pess | INDEX X2: 2R  56% · avg  0.80R
+    10:30-12:30                n  19 | OPTION X1: target  26% · SL  68% · net ₹ -1.76 / ₹ -1.97 pess | INDEX X2: 2R  42% · avg  0.63R
+    12:30-14:30                n  32 | OPTION X1: target  28% · SL  69% · net ₹ -6.46 / ₹ -6.79 pess | INDEX X2: 2R  25% · avg -0.03R
+
+  ATR vs normal
+    ATR <1.2×                  n  55 | OPTION X1: target  33% · SL  64% · net ₹ -2.99 / ₹ -3.28 pess | INDEX X2: 2R  42% · avg  0.51R
+    ATR ≥1.2× (hot)            n  21 | OPTION X1: target  29% · SL  52% · net ₹  5.09 / ₹  4.27 pess | INDEX X2: 2R  33% · avg  0.14R
+
+  opposite signal in last 60 min
+    after a flip               n   9 | OPTION X1: target  33% · SL  67% · net ₹ -7.29 / ₹ -7.29 pess | INDEX X2: 2R  33% · avg  0.00R
+    no flip                    n  67 | OPTION X1: target  31% · SL  60% · net ₹  0.12 / ₹ -0.38 pess | INDEX X2: 2R  40% · avg  0.46R
+
+WHY / WHEN — H1 S/R rejection
+
+  level type
+    ORB high                   n  12 | OPTION X1: target  17% · SL  67% · net ₹-14.14 / ₹-15.41 pess | INDEX X2: 2R  33% · avg  0.00R
+    ORB low                    n  12 | OPTION X1: target  33% · SL  25% · net ₹ 10.91 / ₹ 10.68 pess | INDEX X2: 2R  42% · avg  0.43R
+    PDC                        n   7 | OPTION X1: target   0% · SL  43% · net ₹ 20.97 / ₹ 20.66 pess | INDEX X2: 2R  43% · avg  0.29R
+    PDH                        n   6 | OPTION X1: target   0% · SL  67% · net ₹ 11.10 / ₹  9.52 pess | INDEX X2: 2R  50% · avg  0.50R
+    PDL                        n   5 | OPTION X1: target   0% · SL  80% · net ₹-35.12 / ₹-36.68 pess | INDEX X2: 2R  40% · avg  0.64R
+    intraday pivot             n 109 | OPTION X1: target  31% · SL  55% · net ₹  0.20 / ₹ -0.64 pess | INDEX X2: 2R  41% · avg  0.26R
+    owner S/R                  n  26 | OPTION X1: target  35% · SL  38% · net ₹ 10.06 / ₹  9.56 pess | INDEX X2: 2R  38% · avg  0.24R
+
+  touches of the level earlier today
+    0                          n   2 | OPTION X1: target   0% · SL  50% · net ₹ 70.53 / ₹ 69.61 pess | INDEX X2: 2R  50% · avg  0.50R
+    1                          n  33 | OPTION X1: target  15% · SL  61% · net ₹ -9.09 / ₹-10.01 pess | INDEX X2: 2R  42% · avg  0.27R
+    2+                         n 142 | OPTION X1: target  31% · SL  50% · net ₹  3.11 / ₹  2.33 pess | INDEX X2: 2R  40% · avg  0.27R
+
+  entry distance from level (ATR)
+    0.5–1 ATR                  n  53 | OPTION X1: target  36% · SL  47% · net ₹  3.94 / ₹  3.27 pess | INDEX X2: 2R  42% · avg  0.37R
+    <0.5 ATR                   n 122 | OPTION X1: target  24% · SL  54% · net ₹  0.68 / ₹ -0.20 pess | INDEX X2: 2R  41% · avg  0.24R
+    ≥1 ATR                     n   2 | OPTION X1: target  50% · SL  50% · net ₹ -4.25 / ₹ -4.25 pess | INDEX X2: 2R   0% · avg -0.48R
+
+  rejection wick
+    wick 40–60%                n  58 | OPTION X1: target  29% · SL  53% · net ₹ -1.55 / ₹ -2.48 pess | INDEX X2: 2R  36% · avg  0.10R
+    wick ≥60%                  n 119 | OPTION X1: target  27% · SL  51% · net ₹  3.13 / ₹  2.38 pess | INDEX X2: 2R  43% · avg  0.35R
+
+  OI at the level strike (opposite side)
+    BUY                        n  55 | OPTION X1: target  29% · SL  51% · net ₹ -0.73 / ₹ -1.60 pess | INDEX X2: 2R  49% · avg  0.49R
+    COVER                      n  22 | OPTION X1: target  18% · SL  36% · net ₹ 14.40 / ₹ 13.54 pess | INDEX X2: 2R  45% · avg  0.46R
+    FLAT                       n   9 | OPTION X1: target  67% · SL  33% · net ₹ 16.84 / ₹ 16.59 pess | INDEX X2: 2R  56% · avg  0.67R
+    WRITE                      n  91 | OPTION X1: target  25% · SL  58% · net ₹ -1.60 / ₹ -2.41 pess | INDEX X2: 2R  33% · avg  0.05R
+
+  ATR vs normal
+    ATR <1.2×                  n 133 | OPTION X1: target  31% · SL  55% · net ₹ -1.33 / ₹ -2.25 pess | INDEX X2: 2R  41% · avg  0.28R
+    ATR ≥1.2× (hot)            n  44 | OPTION X1: target  18% · SL  43% · net ₹ 10.45 / ₹  9.98 pess | INDEX X2: 2R  41% · avg  0.25R
+
+  time of day
+    09:30-10:30                n  40 | OPTION X1: target  15% · SL  45% · net ₹  8.38 / ₹  7.80 pess | INDEX X2: 2R  40% · avg  0.23R
+    10:30-12:30                n  65 | OPTION X1: target  42% · SL  43% · net ₹  7.74 / ₹  7.02 pess | INDEX X2: 2R  54% · avg  0.62R
+    12:30-14:30                n  72 | OPTION X1: target  22% · SL  64% · net ₹ -7.71 / ₹ -8.73 pess | INDEX X2: 2R  29% · avg -0.02R
+
+WHY / WHEN — H2 breakout acceptance
+
+  level type
+    ORB high                   n  27 | OPTION X1: target  56% · SL  44% · net ₹ 24.80 / ₹ 24.50 pess | INDEX X2: 2R  37% · avg  0.40R
+    ORB low                    n  26 | OPTION X1: target  31% · SL  54% · net ₹  0.47 / ₹ -1.57 pess | INDEX X2: 2R  23% · avg -0.03R
+    PDC                        n  15 | OPTION X1: target  47% · SL  20% · net ₹ 33.97 / ₹ 33.57 pess | INDEX X2: 2R  47% · avg  0.80R
+    PDH                        n  14 | OPTION X1: target  43% · SL  50% · net ₹ 12.00 / ₹  9.47 pess | INDEX X2: 2R  21% · avg  0.39R
+    PDL                        n  16 | OPTION X1: target  38% · SL  56% · net ₹  5.92 / ₹  5.07 pess | INDEX X2: 2R  25% · avg  0.03R
+    intraday pivot             n 284 | OPTION X1: target  26% · SL  69% · net ₹ -7.02 / ₹ -8.06 pess | INDEX X2: 2R  25% · avg  0.02R
+    owner S/R                  n  59 | OPTION X1: target  31% · SL  61% · net ₹ -4.53 / ₹ -5.46 pess | INDEX X2: 2R  31% · avg  0.09R
+
+  OI at the level strike (opposite side)
+    BUY                        n  17 | OPTION X1: target  18% · SL  76% · net ₹-15.77 / ₹-17.20 pess | INDEX X2: 2R  35% · avg  0.06R
+    COVER                      n   9 | OPTION X1: target   0% · SL 100% · net ₹-42.12 / ₹-43.22 pess | INDEX X2: 2R   0% · avg -0.95R
+    FLAT                       n  13 | OPTION X1: target  46% · SL  31% · net ₹ 17.22 / ₹ 16.88 pess | INDEX X2: 2R  46% · avg  0.54R
+    UNWIND                     n  49 | OPTION X1: target  16% · SL  78% · net ₹-11.32 / ₹-11.90 pess | INDEX X2: 2R  18% · avg -0.16R
+    WRITE                      n 353 | OPTION X1: target  33% · SL  60% · net ₹  0.49 / ₹ -0.65 pess | INDEX X2: 2R  28% · avg  0.13R
+
+  ATR vs normal
+    ATR <1.2×                  n 326 | OPTION X1: target  29% · SL  65% · net ₹ -4.72 / ₹ -5.66 pess | INDEX X2: 2R  29% · avg  0.10R
+    ATR ≥1.2× (hot)            n 115 | OPTION X1: target  33% · SL  55% · net ₹  6.37 / ₹  4.98 pess | INDEX X2: 2R  22% · avg  0.04R
+
+UNIQUE ENTRIES (each index / time / direction once)
+  H1               n 142 | OPTION X1: target  27% · SL  54% · net ₹ -0.82 / ₹ -1.68 pess | INDEX X2: 2R  40% · avg  0.24R
+  H1+OI            n  77 | OPTION X1: target  26% · SL  61% · net ₹ -2.66 / ₹ -3.51 pess | INDEX X2: 2R  34% · avg  0.05R
+  H2a              n 429 | OPTION X1: target  27% · SL  63% · net ₹ -3.09 / ₹ -4.36 pess | INDEX X2: 2R  34% · avg  0.07R
+  H2               n 328 | OPTION X1: target  30% · SL  62% · net ₹ -1.52 / ₹ -2.65 pess | INDEX X2: 2R  27% · avg  0.07R
+  H2+OI            n 261 | OPTION X1: target  33% · SL  59% · net ₹  1.16 / ₹ -0.03 pess | INDEX X2: 2R  28% · avg  0.13R
+
+COMBINATIONS (hypotheses for phase 2)
+  C1 rejection · major level · wick ≥60% · before 12:30
+    NIFTY  n  16 | OPTION X1: target  38% · SL  31% · net ₹ 10.77 / ₹ 10.77 pess | INDEX X2: 2R  63% · avg  0.88R
+    SENSEX n  16 | OPTION X1: target  19% · SL  50% · net ₹  4.13 / ₹  3.06 pess | INDEX X2: 2R  56% · avg  0.69R
+    BOTH   n  32 | OPTION X1: target  28% · SL  41% · net ₹  7.45 / ₹  6.91 pess | INDEX X2: 2R  59% · avg  0.78R
+  C2 acceptance · major level · no unwind/cover/buy
+    NIFTY  n  56 | OPTION X1: target  41% · SL  48% · net ₹  5.58 / ₹  5.02 pess | INDEX X2: 2R  29% · avg  0.16R
+    SENSEX n  65 | OPTION X1: target  38% · SL  51% · net ₹ 15.61 / ₹ 13.96 pess | INDEX X2: 2R  35% · avg  0.32R
+    BOTH   n 121 | OPTION X1: target  40% · SL  50% · net ₹ 10.97 / ₹  9.82 pess | INDEX X2: 2R  32% · avg  0.25R
+  C3 PT · before 12:30 · no flip
+    NIFTY  n  17 | OPTION X1: target  35% · SL  59% · net ₹  0.10 / ₹ -0.38 pess | INDEX X2: 2R  53% · avg  0.90R
+    SENSEX n  23 | OPTION X1: target  39% · SL  43% · net ₹ 13.64 / ₹ 12.98 pess | INDEX X2: 2R  52% · avg  0.76R
+    BOTH   n  40 | OPTION X1: target  38% · SL  50% · net ₹  7.89 / ₹  7.30 pess | INDEX X2: 2R  53% · avg  0.82R
+  C4 = H5 fake-up + call writing (paper rule)
+    NIFTY  n   5 | OPTION X1: target  60% · SL  40% · net ₹ 10.62 / ₹ 10.05 pess | INDEX X2: 2R   0% · avg  0.37R
+    SENSEX n   8 | OPTION X1: target  63% · SL  38% · net ₹ 34.39 / ₹ 34.39 pess | INDEX X2: 2R  25% · avg  0.71R
+    BOTH   n  13 | OPTION X1: target  62% · SL  38% · net ₹ 25.25 / ₹ 25.03 pess | INDEX X2: 2R  15% · avg  0.58R
+  RANDOM before 12:30 (reference)
+    BOTH   n 2160 | OPTION X1: target  25% · SL  60% · net ₹ -4.36 / ₹ -5.60 pess | INDEX X2: 2R  37% · avg  0.17R
+
+TRADES OF C1 / C2 / C3 / C4 (for review on the replay screen)
+  C1 rejection · major level · wick ≥60% · before 12:30
+    NIFTY  2026-10-01 entry 10:20 PE · ORB high 22582 · option SL -17.5 · index SL -1.00R
+    SENSEX 2026-10-01 entry 10:40 PE · PDC 72480 · option TIME +26.9 · index TARGET 2.00R
+    SENSEX 2026-10-01 entry 11:00 CE · ORB high 72410 · option SL -56.0 · index SL -1.00R
+    NIFTY  2026-10-05 entry 09:40 CE · ORB high 22569 · option SL -16.7 · index SL -1.00R
+    SENSEX 2026-10-05 entry 09:40 CE · ORB high 72428 · option SL -51.2 · index SL -1.00R
+    NIFTY  2026-10-05 entry 11:35 PE · ORB low 22517 · option TARGET +30.1 · index TARGET 2.00R
+    SENSEX 2026-10-06 entry 09:55 CE · PDH 72626 · option SL -39.7 · index TARGET 2.00R
+    SENSEX 2026-10-07 entry 09:35 PE · ORB high 72667 · option SL -41.1 · index SL -1.00R
+    NIFTY  2026-10-07 entry 10:00 CE · ORB low 22610 · option SL -13.9 · index SL -1.00R
+    SENSEX 2026-10-07 entry 10:05 CE · ORB low 72599 · option TARGET +78.8 · index TARGET 2.00R
+    NIFTY  2026-10-07 entry 11:35 CE · owner S/R 22665 · option TARGET +28.4 · index TARGET 2.00R
+    NIFTY  2026-10-08 entry 09:40 PE · owner S/R 22516 · option TARGET +30.8 · index TARGET 2.00R
+    SENSEX 2026-10-08 entry 09:40 PE · owner S/R 72372 · option TIME +76.2 · index TARGET 2.00R
+    NIFTY  2026-10-08 entry 10:00 PE · ORB low 22481 · option TIME +14.8 · index SL -1.00R
+    SENSEX 2026-10-08 entry 11:10 PE · owner S/R 72238 · option TARGET +70.6 · index TARGET 2.00R
+    SENSEX 2026-10-09 entry 09:55 CE · owner S/R 72237 · option TIME +14.8 · index SL -1.00R
+    SENSEX 2026-10-12 entry 10:20 CE · owner S/R 72238 · option SL -78.8 · index SL -1.00R
+    NIFTY  2026-10-13 entry 10:25 PE · owner S/R 22552 · option TARGET +28.4 · index TARGET 2.00R
+    SENSEX 2026-10-13 entry 11:30 CE · ORB high 72304 · option TARGET +82.4 · index TARGET 2.00R
+    NIFTY  2026-10-14 entry 09:35 CE · ORB low 22674 · option TIME +2.1 · index TARGET 2.00R
+    NIFTY  2026-10-14 entry 09:50 PE · ORB high 22748 · option TIME -2.3 · index TARGET 2.00R
+    SENSEX 2026-10-14 entry 09:50 PE · ORB high 73164 · option TIME -13.3 · index TARGET 2.00R
+    SENSEX 2026-10-14 entry 10:35 CE · PDC 73034 · option SL -63.1 · index SL -1.00R
+    NIFTY  2026-10-14 entry 10:50 CE · PDH 22722 · option SL -18.9 · index SL -1.00R
+    SENSEX 2026-10-14 entry 11:10 CE · PDH 73036 · option SL -64.6 · index SL -1.00R
+    NIFTY  2026-10-16 entry 09:50 CE · ORB low 22948 · option TARGET +40.5 · index TARGET 2.00R
+    NIFTY  2026-10-19 entry 09:40 PE · PDH 23147 · option TIME +46.3 · index TARGET 2.00R
+    SENSEX 2026-10-19 entry 09:40 PE · PDH 74769 · option TIME +155.1 · index TARGET 2.00R
+    NIFTY  2026-10-19 entry 12:10 PE · ORB low 22978 · option TIME +6.2 · index TARGET 2.00R
+    SENSEX 2026-10-19 entry 12:30 PE · PDL 74024 · option SL -48.0 · index TARGET 2.00R
+    NIFTY  2026-10-21 entry 09:40 CE · owner S/R 23103 · option SL -21.6 · index SL -1.00R
+    NIFTY  2026-10-21 entry 10:45 PE · owner S/R 22978 · option TARGET +35.6 · index TARGET 2.00R
+  C2 acceptance · major level · no unwind/cover/buy
+    SENSEX 2026-10-01 entry 10:05 CE · PDL 72378 · option SL -51.0 · index TIME -0.95R
+    NIFTY  2026-10-01 entry 10:10 CE · ORB high 22582 · option SL -18.0 · index SL -1.00R
+    SENSEX 2026-10-01 entry 10:10 CE · PDC 72480 · option SL -53.9 · index SL -1.00R
+    NIFTY  2026-10-01 entry 10:20 PE · ORB high 22582 · option SL -17.5 · index SL -1.00R
+    SENSEX 2026-10-01 entry 10:20 PE · PDC 72480 · option TIME +1.9 · index SL -1.00R
+    SENSEX 2026-10-01 entry 11:10 PE · ORB high 72410 · option SL -34.3 · index SL -1.00R
+    SENSEX 2026-10-01 entry 11:15 PE · PDL 72378 · option SL -38.3 · index SL -1.00R
+    SENSEX 2026-10-01 entry 12:20 PE · owner S/R 72270 · option TARGET +58.4 · index TARGET 2.00R
+    NIFTY  2026-10-01 entry 12:25 PE · ORB low 22513 · option TARGET +20.8 · index TARGET 2.00R
+    SENSEX 2026-10-05 entry 09:40 CE · ORB high 72428 · option SL -51.2 · index SL -1.00R
+    SENSEX 2026-10-05 entry 09:55 CE · PDH 72559 · option SL -72.5 · index SL -1.00R
+    NIFTY  2026-10-05 entry 10:05 PE · owner S/R 22573 · option TARGET +25.8 · index TARGET 2.00R
+    SENSEX 2026-10-05 entry 10:05 PE · PDH 72559 · option TARGET +94.4 · index TIME 1.18R
+    SENSEX 2026-10-05 entry 10:10 PE · ORB high 72428 · option TARGET +95.1 · index TARGET 2.00R
+    NIFTY  2026-10-05 entry 10:30 PE · ORB low 22517 · option TARGET +24.8 · index SL -1.00R
+    SENSEX 2026-10-05 entry 10:30 PE · ORB low 72260 · option TARGET +94.6 · index SL -1.00R
+    SENSEX 2026-10-05 entry 11:35 CE · owner S/R 72087 · option SL -48.5 · index SL -1.00R
+    SENSEX 2026-10-05 entry 12:15 PE · PDC 71910 · option SL -49.7 · index SL -1.00R
+    NIFTY  2026-10-05 entry 12:25 CE · PDC 22422 · option TIME +7.6 · index TARGET 2.00R
+    SENSEX 2026-10-05 entry 12:25 CE · PDC 71910 · option TIME +22.5 · index TARGET 2.00R
+    SENSEX 2026-10-05 entry 13:30 PE · owner S/R 72087 · option SL -50.2 · index SL -1.00R
+    NIFTY  2026-10-05 entry 13:50 CE · ORB low 22517 · option SL -20.3 · index SL -1.00R
+    SENSEX 2026-10-05 entry 13:50 CE · ORB low 72260 · option SL -52.2 · index SL -1.00R
+    NIFTY  2026-10-06 entry 09:40 CE · ORB high 22600 · option TARGET +21.5 · index TARGET 2.00R
+    SENSEX 2026-10-06 entry 09:40 CE · ORB high 72517 · option TARGET +65.6 · index TARGET 2.00R
+    NIFTY  2026-10-06 entry 09:55 CE · PDH 22617 · option SL -11.5 · index TIME 0.78R
+    SENSEX 2026-10-06 entry 09:55 CE · PDH 72626 · option SL -39.7 · index TARGET 2.00R
+    NIFTY  2026-10-06 entry 10:45 CE · owner S/R 22663 · option SL -9.6 · index SL -1.00R
+    SENSEX 2026-10-06 entry 12:45 CE · owner S/R 72877 · option SL -32.2 · index SL -1.00R
+    SENSEX 2026-10-06 entry 14:35 PE · owner S/R 72877 · option SL -29.0 · index SL -1.00R
+    SENSEX 2026-10-07 entry 09:50 CE · ORB low 72599 · option SL -62.5 · index SL -1.00R
+    NIFTY  2026-10-07 entry 10:25 CE · ORB high 22627 · option SL -17.1 · index TIME 0.38R
+    SENSEX 2026-10-07 entry 10:25 CE · ORB high 72667 · option TARGET +84.3 · index TIME 0.32R
+    NIFTY  2026-10-07 entry 10:30 CE · owner S/R 22665 · option SL -22.9 · index SL -1.00R
+    NIFTY  2026-10-07 entry 10:40 PE · owner S/R 22665 · option SL -20.9 · index SL -1.00R
+    NIFTY  2026-10-07 entry 13:05 PE · ORB high 22627 · option TARGET +20.4 · index TARGET 2.00R
+    NIFTY  2026-10-07 entry 13:15 PE · ORB low 22610 · option SL -15.0 · index TIME 0.60R
+    SENSEX 2026-10-07 entry 13:15 PE · ORB high 72667 · option SL -40.9 · index TIME 0.90R
+    NIFTY  2026-10-07 entry 14:15 PE · PDL 22569 · option SL -15.4 · index SL -1.00R
+    NIFTY  2026-10-08 entry 09:50 PE · ORB low 22481 · option TIME -2.3 · index SL -1.00R
+    SENSEX 2026-10-08 entry 09:50 PE · ORB low 72278 · option SL -47.3 · index SL -1.00R
+    SENSEX 2026-10-08 entry 10:40 PE · owner S/R 72238 · option SL -33.9 · index TARGET 2.00R
+    NIFTY  2026-10-09 entry 09:40 CE · ORB high 22375 · option TARGET +41.1 · index TARGET 2.00R
+    SENSEX 2026-10-09 entry 09:40 CE · ORB high 72021 · option TARGET +118.7 · index TARGET 2.00R
+    SENSEX 2026-10-09 entry 09:55 CE · owner S/R 72237 · option TIME +14.8 · index SL -1.00R
+    NIFTY  2026-10-09 entry 11:25 CE · owner S/R 22517 · option SL -15.1 · index SL -1.00R
+    SENSEX 2026-10-09 entry 11:30 PE · owner S/R 72485 · option TARGET +59.6 · index TARGET 2.00R
+    NIFTY  2026-10-09 entry 11:35 PE · owner S/R 22517 · option TARGET +21.8 · index TARGET 2.00R
+    SENSEX 2026-10-09 entry 13:50 CE · owner S/R 72485 · option SL -36.6 · index SL -1.00R
+    SENSEX 2026-10-09 entry 14:05 CE · PDH 72502 · option TARGET +61.9 · index TARGET 2.00R
+    SENSEX 2026-10-09 entry 14:15 CE · owner S/R 72553 · option TARGET +58.4 · index TARGET 2.00R
+    NIFTY  2026-10-09 entry 14:25 CE · owner S/R 22552 · option SL -16.5 · index SL -1.00R
+    NIFTY  2026-10-12 entry 09:40 PE · PDH 22579 · option TIME +15.9 · index TIME 0.48R
+    SENSEX 2026-10-12 entry 09:40 PE · PDC 72472 · option TIME +72.1 · index TIME 1.16R
+    SENSEX 2026-10-12 entry 09:45 PE · ORB low 72418 · option TIME +82.6 · index TARGET 2.00R
+    NIFTY  2026-10-12 entry 10:00 PE · ORB low 22523 · option TIME +43.1 · index SL -1.00R
+    SENSEX 2026-10-12 entry 10:35 PE · owner S/R 72238 · option TARGET +87.3 · index TARGET 2.00R
+    SENSEX 2026-10-12 entry 14:20 PE · PDL 71820 · option TARGET +57.6 · index TARGET 2.00R
+    NIFTY  2026-10-13 entry 09:40 CE · ORB high 22477 · option TARGET +30.7 · index TIME -0.43R
+    SENSEX 2026-10-13 entry 09:40 CE · ORB high 72304 · option TARGET +107.1 · index TIME -0.48R
+    NIFTY  2026-10-13 entry 09:55 CE · owner S/R 22552 · option SL -17.3 · index SL -1.00R
+    SENSEX 2026-10-13 entry 09:55 CE · owner S/R 72489 · option SL -57.4 · index SL -1.00R
+    NIFTY  2026-10-13 entry 10:25 PE · owner S/R 22552 · option TARGET +28.4 · index TARGET 2.00R
+    SENSEX 2026-10-13 entry 13:05 PE · owner S/R 72489 · option SL -29.7 · index SL -1.00R
+    NIFTY  2026-10-14 entry 09:50 CE · PDH 22722 · option SL -28.7 · index SL -1.00R
+    SENSEX 2026-10-14 entry 09:50 CE · PDH 73036 · option SL -75.6 · index SL -1.00R
+    NIFTY  2026-10-14 entry 10:00 PE · PDH 22722 · option SL -21.2 · index SL -1.00R
+    SENSEX 2026-10-14 entry 13:00 PE · PDH 73036 · option TARGET +61.2 · index TARGET 2.00R
+    NIFTY  2026-10-14 entry 13:05 PE · ORB low 22674 · option TARGET +19.8 · index TIME -0.40R
+    NIFTY  2026-10-14 entry 13:10 PE · owner S/R 22643 · option SL -13.9 · index SL -1.00R
+    SENSEX 2026-10-14 entry 13:10 PE · ORB low 72907 · option SL -47.6 · index TIME -0.44R
+    NIFTY  2026-10-14 entry 13:30 CE · owner S/R 22577 · option TARGET +31.8 · index SL -1.00R
+    NIFTY  2026-10-14 entry 14:00 CE · owner S/R 22643 · option SL -16.9 · index SL -1.00R
+    SENSEX 2026-10-14 entry 14:00 CE · owner S/R 72836 · option SL -51.3 · index SL -1.00R
+    NIFTY  2026-10-15 entry 09:40 CE · ORB high 22751 · option TARGET +34.8 · index SL -1.00R
+    SENSEX 2026-10-15 entry 09:40 CE · ORB high 73263 · option TARGET +98.9 · index TARGET 2.00R
+    NIFTY  2026-10-15 entry 09:55 CE · PDH 22756 · option TARGET +34.5 · index TIME 1.12R
+    NIFTY  2026-10-16 entry 09:40 PE · ORB low 22948 · option SL -23.1 · index SL -1.00R
+    SENSEX 2026-10-16 entry 09:40 PE · ORB low 74109 · option SL -68.9 · index SL -1.00R
+    NIFTY  2026-10-16 entry 09:50 CE · ORB low 22948 · option TARGET +40.5 · index TARGET 2.00R
+    SENSEX 2026-10-16 entry 09:50 CE · ORB low 74109 · option TARGET +132.1 · index TARGET 2.00R
+    SENSEX 2026-10-16 entry 10:05 CE · PDH 74323 · option TARGET +101.2 · index TIME 0.98R
+    SENSEX 2026-10-16 entry 10:10 CE · ORB high 74410 · option TARGET +99.8 · index TARGET 2.00R
+    NIFTY  2026-10-16 entry 10:15 CE · PDH 23053 · option TARGET +24.5 · index TIME -0.11R
+    NIFTY  2026-10-19 entry 09:40 CE · owner S/R 23053 · option SL -33.0 · index SL -1.00R
+    NIFTY  2026-10-19 entry 09:55 PE · owner S/R 23139 · option TIME +29.4 · index TARGET 2.00R
+    SENSEX 2026-10-19 entry 09:55 PE · PDC 74729 · option TIME +115.9 · index TARGET 2.00R
+    SENSEX 2026-10-19 entry 10:05 PE · owner S/R 74512 · option TIME -6.0 · index SL -1.00R
+    NIFTY  2026-10-19 entry 11:40 PE · owner S/R 23053 · option SL -14.7 · index TIME 0.74R
+    SENSEX 2026-10-19 entry 12:05 PE · ORB low 74198 · option SL -48.9 · index TIME 0.35R
+    NIFTY  2026-10-19 entry 12:10 PE · ORB low 22978 · option TIME +6.2 · index TARGET 2.00R
+    SENSEX 2026-10-19 entry 12:25 PE · PDL 74024 · option SL -50.3 · index SL -1.00R
+    SENSEX 2026-10-19 entry 12:40 CE · PDL 74024 · option SL -46.9 · index SL -1.00R
+    NIFTY  2026-10-19 entry 13:25 PE · PDL 22918 · option SL -9.4 · index TIME 0.32R
+    NIFTY  2026-10-21 entry 09:40 CE · ORB high 23085 · option SL -21.6 · index SL -1.00R
+    SENSEX 2026-10-21 entry 09:40 CE · ORB high 74527 · option SL -61.3 · index SL -1.00R
+    NIFTY  2026-10-21 entry 09:50 PE · owner S/R 23103 · option TARGET +32.4 · index TARGET 2.00R
+    NIFTY  2026-10-21 entry 09:55 PE · ORB high 23085 · option TARGET +32.4 · index TIME 1.06R
+    SENSEX 2026-10-21 entry 09:55 PE · ORB high 74527 · option TARGET +103.4 · index TARGET 2.00R
+    NIFTY  2026-10-21 entry 10:00 PE · owner S/R 23053 · option TARGET +29.8 · index TARGET 2.00R
+    SENSEX 2026-10-21 entry 10:10 PE · ORB low 74331 · option SL -50.8 · index TIME 0.29R
+    NIFTY  2026-10-21 entry 10:15 PE · owner S/R 22978 · option SL -22.5 · index SL -1.00R
+    NIFTY  2026-10-21 entry 11:30 PE · PDC 22889 · option TARGET +34.7 · index TARGET 2.00R
+    SENSEX 2026-10-21 entry 11:40 PE · owner S/R 73900 · option TARGET +85.2 · index TARGET 2.00R
+    NIFTY  2026-10-21 entry 11:45 PE · PDL 22848 · option TARGET +32.1 · index TARGET 2.00R
+    SENSEX 2026-10-21 entry 11:45 PE · PDC 73853 · option TARGET +91.2 · index TARGET 2.00R
+    SENSEX 2026-10-22 entry 09:45 CE · ORB low 73060 · option SL -105.6 · index TIME 0.75R
+    NIFTY  2026-10-22 entry 09:50 CE · ORB high 22627 · option SL -28.8 · index SL -1.00R
+    NIFTY  2026-10-22 entry 10:10 PE · ORB high 22627 · option SL -29.4 · index SL -1.00R
+    SENSEX 2026-10-22 entry 10:10 PE · PDL 73251 · option SL -88.2 · index SL -1.00R
+    NIFTY  2026-10-22 entry 10:20 CE · PDL 22659 · option TARGET +51.6 · index TARGET 2.00R
+    SENSEX 2026-10-22 entry 10:20 CE · PDL 73251 · option TARGET +166.8 · index TARGET 2.00R
+    NIFTY  2026-10-22 entry 10:40 CE · owner S/R 22741 · option SL -25.2 · index SL -1.00R
+    NIFTY  2026-10-22 entry 11:55 PE · PDL 22659 · option SL -19.5 · index SL -1.00R
+    SENSEX 2026-10-22 entry 12:25 PE · owner S/R 73151 · option SL -49.9 · index SL -1.00R
+    NIFTY  2026-10-23 entry 09:40 PE · PDC 22688 · option TARGET +40.2 · index SL -1.00R
+    SENSEX 2026-10-23 entry 09:40 PE · ORB low 73519 · option TARGET +114.2 · index SL -1.00R
+    SENSEX 2026-10-23 entry 10:05 PE · PDC 73249 · option TARGET +103.8 · index TARGET 2.00R
+    NIFTY  2026-10-23 entry 10:15 PE · PDL 22560 · option TARGET +31.9 · index TIME 0.43R
+    SENSEX 2026-10-23 entry 10:15 PE · PDL 73027 · option TARGET +135.9 · index TIME 0.71R
+    SENSEX 2026-10-23 entry 13:50 CE · PDL 73027 · option SL -77.0 · index SL -1.00R
+  C3 PT · before 12:30 · no flip
+    SENSEX 2026-10-01 entry 09:55 PE · option SL -51.3 · index SL -1.00R
+    SENSEX 2026-10-01 entry 12:10 PE · option TARGET +63.8 · index TARGET 2.00R
+    SENSEX 2026-10-01 entry 12:15 PE · option TARGET +55.2 · index TARGET 2.00R
+    NIFTY  2026-10-05 entry 09:30 CE · option TARGET +8.5 · index SL -1.00R
+    NIFTY  2026-10-05 entry 09:50 CE · option SL -21.4 · index SL -1.00R
+    NIFTY  2026-10-05 entry 11:50 PE · option TARGET +21.2 · index TARGET 2.00R
+    NIFTY  2026-10-06 entry 09:35 CE · option TARGET +22.7 · index TARGET 2.00R
+    SENSEX 2026-10-06 entry 09:40 CE · option TARGET +65.6 · index TARGET 2.00R
+    NIFTY  2026-10-06 entry 09:50 CE · option SL -10.5 · index TARGET 2.00R
+    SENSEX 2026-10-06 entry 09:55 CE · option SL -39.7 · index TARGET 2.00R
+    SENSEX 2026-10-08 entry 09:25 PE · option TARGET +6.9 · index TARGET 2.00R
+    SENSEX 2026-10-08 entry 09:35 PE · option TIME +31.2 · index TARGET 2.00R
+    NIFTY  2026-10-09 entry 09:25 CE · option TARGET +8.5 · index TARGET 2.00R
+    NIFTY  2026-10-09 entry 09:30 CE · option SL -6.5 · index TIME 1.92R
+    SENSEX 2026-10-12 entry 09:40 PE · option TIME +72.1 · index TARGET 2.00R
+    NIFTY  2026-10-12 entry 09:55 PE · option SL -25.6 · index SL -1.00R
+    NIFTY  2026-10-13 entry 09:25 CE · option SL -6.5 · index TARGET 2.00R
+    SENSEX 2026-10-13 entry 09:25 CE · option TARGET +5.6 · index TARGET 2.00R
+    SENSEX 2026-10-13 entry 12:30 CE · option SL -42.9 · index TIME -0.32R
+    NIFTY  2026-10-14 entry 11:35 PE · option SL -15.9 · index TARGET 2.00R
+    SENSEX 2026-10-14 entry 11:35 PE · option SL -51.1 · index TARGET 2.00R
+    SENSEX 2026-10-15 entry 09:40 CE · option TARGET +98.9 · index SL -1.00R
+    SENSEX 2026-10-15 entry 09:50 CE · option TARGET +92.8 · index TARGET 2.00R
+    NIFTY  2026-10-16 entry 10:10 CE · option TARGET +29.3 · index TARGET 2.00R
+    NIFTY  2026-10-19 entry 09:30 PE · option SL -6.6 · index SL -1.00R
+    SENSEX 2026-10-19 entry 10:05 PE · option TIME -6.0 · index SL -1.00R
+    SENSEX 2026-10-19 entry 10:40 PE · option TIME +126.5 · index SL -1.00R
+    NIFTY  2026-10-19 entry 10:50 PE · option SL -21.9 · index SL -1.00R
+    NIFTY  2026-10-19 entry 11:40 PE · option SL -14.7 · index TIME 1.38R
+    SENSEX 2026-10-19 entry 11:40 PE · option SL -50.6 · index TIME 1.36R
+    SENSEX 2026-10-19 entry 12:05 PE · option SL -48.9 · index TIME 0.48R
+    SENSEX 2026-10-21 entry 09:45 CE · option SL -63.2 · index SL -1.00R
+    SENSEX 2026-10-21 entry 11:50 PE · option TARGET +91.2 · index TARGET 2.00R
+    SENSEX 2026-10-21 entry 12:00 PE · option TARGET +94.1 · index TARGET 2.00R
+    SENSEX 2026-10-22 entry 09:25 PE · option SL -19.1 · index SL -1.00R
+    SENSEX 2026-10-22 entry 10:05 PE · option SL -74.7 · index SL -1.00R
+    NIFTY  2026-10-22 entry 10:30 CE · option TIME +20.6 · index TARGET 2.00R
+    SENSEX 2026-10-22 entry 11:15 CE · option SL -57.7 · index SL -1.00R
+    NIFTY  2026-10-22 entry 11:55 PE · option SL -19.5 · index SL -1.00R
+    NIFTY  2026-10-23 entry 10:00 PE · option TARGET +32.0 · index TARGET 2.00R
+  C4 = H5 fake-up + call writing (paper rule)
+    SENSEX 2026-10-01 entry 11:05 PE · option SL -40.5 · index TIME 0.62R
+    SENSEX 2026-10-01 entry 12:15 PE · option TARGET +55.2 · index TARGET 2.00R
+    SENSEX 2026-10-05 entry 10:25 PE · option TARGET +78.2 · index TIME 0.82R
+    NIFTY  2026-10-06 entry 11:00 PE · option SL -14.3 · index SL -1.00R
+    SENSEX 2026-10-06 entry 14:30 PE · option SL -28.1 · index SL -1.00R
+    NIFTY  2026-10-07 entry 13:00 PE · option TARGET +19.7 · index TIME 1.13R
+    SENSEX 2026-10-07 entry 13:10 PE · option SL -32.7 · index TIME 0.01R
+    SENSEX 2026-10-08 entry 10:25 PE · option TARGET +67.8 · index TIME 1.21R
+    NIFTY  2026-10-13 entry 10:20 PE · option TARGET +29.4 · index TIME 1.24R
+    SENSEX 2026-10-13 entry 10:25 PE · option TARGET +80.8 · index TARGET 2.00R
+    NIFTY  2026-10-21 entry 09:55 PE · option TARGET +32.4 · index TIME 0.70R
+    SENSEX 2026-10-21 entry 10:05 PE · option TARGET +94.4 · index TIME -0.01R
+    NIFTY  2026-10-22 entry 11:50 PE · option SL -16.9 · index TIME -0.24R
