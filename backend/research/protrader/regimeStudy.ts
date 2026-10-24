@@ -38,7 +38,7 @@ const CFGS: [string, RegimeConfig][] = [
 ];
 type Pt = { ix: string; day: string; set: string; T: number; tb: string; exp: boolean; truth: string; back: string; lab: Record<string, Regime> };
 
-function prepare(ix: "NIFTY" | "SENSEX", days: DayData[], step: number) {
+export function prepare(ix: "NIFTY" | "SENSEX", days: DayData[], step: number) {
   const ds = days.filter((d) => d.spot.size >= 300), N = ds.length, d1 = Math.floor(N * 0.6), d2 = Math.floor(N * 0.8), exp = expiryDays(ds, step);
   const setOf = (i: number) => (i === d1 || i === d2 ? "PURGE" : i < d1 ? "DEV" : i < d2 ? "VAL" : "TEST");
   const c5: Candle[] = [], c15: Candle[] = [], legs = new Map<string, Map<string, Map<number, number>>>(), mins = new Map<string, [number, number][]>();
