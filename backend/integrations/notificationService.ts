@@ -40,7 +40,9 @@ export interface NotifyResult {
 }
 
 const LOG = path.join(process.cwd(), "data", "notification-log.json");
-const MAX_LOG = 60;
+const MAX_LOG = 600;   // ~3 trading days of messages, so a whole day can be audited
+// `node --test` must never write into the real send log (fake-token test sends were pushing out real history)
+const LOG_ENABLED = !process.env.NODE_TEST_CONTEXT;
 
 interface LogRow {
   at: number;
@@ -55,6 +57,7 @@ interface LogRow {
 }
 
 function appendLog(row: LogRow): void {
+  if (!LOG_ENABLED) return;
   try {
     let rows: LogRow[] = [];
     try { rows = JSON.parse(fs.readFileSync(LOG, "utf-8")); } catch { rows = []; }

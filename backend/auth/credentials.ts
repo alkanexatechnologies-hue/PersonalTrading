@@ -79,7 +79,8 @@ function announce(creds: StoredCredentials, justRotated: boolean): void {
   if (process.env.LOGIN_PASS) return; // fixed via env - nothing new to report
   console.log(`\n  Dashboard login${justRotated ? " (just rotated)" : ""}:`);
   console.log(`    user     : ${creds.username}`);
-  console.log(`    password : ${creds.password}`);
+  // never print the password itself: logs and terminal screenshots get shared. It is in data/auth-credentials.json (git-ignored) and is sent by email / Telegram.
+  console.log(`    password : (hidden — see data/auth-credentials.json, your email or Telegram)`);
   console.log(`  Stays the same across restarts now; rotates automatically at 08:00 IST daily.`);
   console.log(
     creds.notifyEmail
