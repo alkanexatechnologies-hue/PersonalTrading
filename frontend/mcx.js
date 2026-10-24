@@ -278,6 +278,22 @@
     if (main.style.height !== h) { main.style.height = h; try { mcFitPanes(); } catch {} }
   }
   window.addEventListener("resize", () => { clearTimeout(X._fit); X._fit = setTimeout(fitFrame, 120); });
+  // the chart's level tags live in the empty space right of the latest candle (rightOffset bars). With thinner
+  // candles 25 bars became narrower than the tags (~270 px), so the tags covered the candles: keep that space at
+  // least TAG_PX wide whatever the bar spacing. Display only — the chart's data, overlays and logic are untouched.
+  const TAG_PX = 280;
+  function fitTagSpace() {
+    if (typeof MC === "undefined" || !MC.chart) return;
+    const ts = MC.chart.timeScale(), bs = ts.options().barSpacing || 12;
+    const ro = Math.max(window.innerWidth <= 600 ? 10 : 25, Math.ceil((window.innerWidth <= 600 ? 120 : TAG_PX) / bs));
+    if (X._ro !== ro) { X._ro = ro; ts.applyOptions({ rightOffset: ro }); }
+  }
+  setInterval(() => {
+    if (typeof MC === "undefined" || !MC.chart || X._roHooked) return;
+    X._roHooked = true;
+    MC.chart.timeScale().subscribeVisibleLogicalRangeChange(() => { clearTimeout(X._roT); X._roT = setTimeout(fitTagSpace, 200); });
+    fitTagSpace();
+  }, 1000);
 
   // ------------------------------------------------------------ wiring
   function renderAll() {

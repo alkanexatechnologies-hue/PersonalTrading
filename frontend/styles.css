@@ -8084,3 +8084,7 @@ body.mc-fullwidth #panel-marketcommand .mc2-right { width: 300px; }
 #panel-marketcommand .mc2-main > .mcx-ot .mcx-step button { min-width: 26px; min-height: 26px; }
 #panel-marketcommand .mc2-main > .mcx-ot .mcx-step span { min-width: 54px; font-size: 12px; }
 #panel-marketcommand .mc2-main > .mcx-ot .mcx-opt-hd { flex-wrap: nowrap; overflow: hidden; white-space: nowrap; }
+/* the main chart keeps the width its level tags need (its right-hand tag area must not spill onto the candles) */
+#panel-marketcommand .mc2-main > .mcx-ot { flex-basis: clamp(300px, 24vw, 430px); }
+body.mc-fullwidth #panel-marketcommand .mc2-right { width: 260px; }
+@media (max-width: 1200px) { body.mc-fullwidth #panel-marketcommand .mc2-right { width: 240px; } #panel-marketcommand .mc2-main > .mcx-ot { flex-basis: 290px; } }
