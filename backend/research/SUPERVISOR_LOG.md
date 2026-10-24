@@ -288,3 +288,12 @@ break-even of 4.7–13.8 points, after ATM option delta (~0.51) and costs (~₹1
 - pre-registered ITM / spread monetisation and one trailing exit;
 - C4 paper results;
 - OI-wall tests after 60+ sessions of the ±10 OI log.
+
+## 2026-10-25 · LAX ITM1 monetisation test (pre-registered, commit `4d323df`)
+
+**Change:** only the strike (1 in the money).
+
+**Primary OOS:** conservative −₹239 per trade [−345, −147] vs −₹226 at ATM; PF 0.51; 0 / 3 indices and 0 / 5 half-years
+positive. 1 of 6 criteria pass.
+
+**Verdict:** REJECT. LAX is dropped, as pre-registered. No live change.
