@@ -128,3 +128,17 @@ fast-market skip, and no-chasing + fast-market together.
 - **REJECT** wider stop, hard touch stop, premium targets (half at +50%), time filter.
 
 **Still not proven profitable** — paper / minimum size.
+
+## 2026-10-24 · FAKE-DOWN / FAKE-UP label accuracy — owner asked for ~90 % on 5-min or 15-min (`protrader/RESULTS_FAKE_MOVE.md`)
+
+**Tested:**
+- the live detector on 2 years of NIFTY + SENSEX data, 5-min and 15-min candles, development / validation
+- variants: follow-through, hold 2 bars, day-average side, higher-TF structure, their combinations, and a target sweep
+- each against a same-stop baseline
+
+**Verdict:**
+- **NO EDGE.** Validation right % is about 54–65% on 5-min and 39–58% on 15-min, always within about ±3 points of the
+  same-stop baseline; avg R ≈ 0 or negative.
+- **90% is not reachable honestly:** a 0.25-ATR target gives about 80% right with negative avg R.
+- **No change to live logic.** Keep the label as information only. Next: premium confirmation, and OI at the level once
+  the 1-min OI log has 60+ sessions.
