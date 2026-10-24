@@ -8064,3 +8064,23 @@ body.mc-fullwidth #panel-marketcommand .mc2-right { width: 300px; }
   #mcx-oi-host table.oimm-t { display: block; overflow-x: auto; max-width: 100%; }
   body.mc-fullwidth #panel-marketcommand .mc-wrap { overflow-x: hidden; }
 }
+/* ---- one frame: main chart | CE over PE | key levels, all in the window height (mcx.js sizes .mc2-main) ---- */
+#panel-marketcommand .mc2-main > .mcx-ot { flex: 0 0 clamp(340px, 30vw, 540px); margin: 0; border-radius: 0; border-width: 0 1px; padding: 6px 8px; min-height: 0; overflow: hidden; gap: 5px; }
+#panel-marketcommand .mc2-main > .mcx-ot .mcx-otc { flex: 1; min-height: 0; flex-direction: column; flex-wrap: nowrap; gap: 5px; }
+#panel-marketcommand .mc2-main > .mcx-ot .mcx-opt { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; padding: 4px 6px; }
+#panel-marketcommand .mc2-main > .mcx-ot .mcx-opt-chart { flex: 1; min-height: 90px; height: auto; }
+#panel-marketcommand .mc2-main > .mcx-ot .mcx-opt-hd { font-size: 11.5px; margin-bottom: 2px; }
+#panel-marketcommand .mc2-main > .mcx-ot .mcx-otf { padding: 4px 6px; gap: 4px 8px; }
+#panel-marketcommand .mc2-main > .mcx-ot .mcx-otf .mcx-seg button { min-height: 28px; padding: 1px 6px; font-size: 11.5px; }
+#panel-marketcommand .mc2-main > .mcx-ot .mcx-note { font-size: 10.5px; }
+@media (max-width: 900px) {
+  #panel-marketcommand .mc2-main > .mcx-ot { flex: none; border-width: 1px 0; }
+  #panel-marketcommand .mc2-main > .mcx-ot .mcx-opt { flex: none; }
+  #panel-marketcommand .mc2-main > .mcx-ot .mcx-opt-chart { height: 220px; flex: none; }
+}
+/* slimmer view tabs; option filters fit two rows in the column */
+.mcx-tab { min-height: 32px; padding: 4px 16px; }
+#panel-marketcommand .mc2-main > .mcx-ot .mcx-otf .mcx-seg button, #panel-marketcommand .mc2-main > .mcx-ot > .mcx-row .mcx-seg button { min-height: 26px; padding: 1px 6px; font-size: 11px; }
+#panel-marketcommand .mc2-main > .mcx-ot .mcx-step button { min-width: 26px; min-height: 26px; }
+#panel-marketcommand .mc2-main > .mcx-ot .mcx-step span { min-width: 54px; font-size: 12px; }
+#panel-marketcommand .mc2-main > .mcx-ot .mcx-opt-hd { flex-wrap: nowrap; overflow: hidden; white-space: nowrap; }

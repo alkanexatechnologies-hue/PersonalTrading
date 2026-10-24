@@ -7,7 +7,7 @@
          under the home indicator. Android ignores it harmlessly. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>BC Data Status</title>
-    <link rel="stylesheet" href="styles.css?v=20261024-mcx1" />
+    <link rel="stylesheet" href="styles.css?v=20261024-mcx3" />
     <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   </head>
   <body class="oi-focus">
@@ -1588,8 +1588,8 @@
 
             <!-- ===== REDESIGN (mcx.js): view tabs · market tape · decision row; OI Analysis mounts into #mcx-oi-host ===== -->
             <div class="mcx-tabs" role="tablist" aria-label="Market Command views">
-              <button type="button" role="tab" class="mcx-tab active" data-mcx-view="mc" aria-selected="true">⚡ Market Command<span>chart · plan · options</span></button>
-              <button type="button" role="tab" class="mcx-tab" data-mcx-view="oi" aria-selected="false">🔬 OI Analysis<span>monitor · walls · movement · summary</span></button>
+              <button type="button" role="tab" class="mcx-tab active" data-mcx-view="mc" aria-selected="true" title="chart · plan · options">⚡ Market Command</button>
+              <button type="button" role="tab" class="mcx-tab" data-mcx-view="oi" aria-selected="false" title="1-min monitor · wall builder · movement · summary">🔬 OI Analysis</button>
             </div>
             <section class="mcx-tape" id="mcx-tape" aria-label="Market stats"></section>
             <div class="mcx-dec" id="mcx-dec"></div>
@@ -1701,6 +1701,8 @@
               </div>
 
               <!-- RIGHT COLUMN -->
+              <!-- ===== OPTION TERMINAL (mcx.js): CE over PE premium charts, in the same frame as the main chart ===== -->
+              <section class="mcx-ot" id="mcx-ot" aria-label="Option terminal"></section>
               <div class="mc2-right">
                 <div class="mc2-panel mcx-levels" id="mcx-levels" aria-label="Key levels"></div>
 
@@ -1818,9 +1820,6 @@
                 </div>
               </div>
             </div>
-
-            <!-- ===== OPTION TERMINAL (mcx.js): CE / PE premium charts, TradingView style ===== -->
-            <section class="mcx-ot" id="mcx-ot" aria-label="Option terminal"></section>
 
             <!-- ===== BOTTOM BAR ===== -->
             <div class="mc2-bottom">
@@ -2601,6 +2600,6 @@
     <script src="premiumcenter.js?v=20261023-sch4"></script>
     <script src="oimonitor.js?v=20261024-mcx1"></script>
     <script src="liquidity.js?v=20261007-lqa7"></script>
-    <script src="mcx.js?v=20261024-mcx1"></script>
+    <script src="mcx.js?v=20261024-mcx3"></script>
   </body>
 </html>

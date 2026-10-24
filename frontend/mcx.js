@@ -124,18 +124,17 @@
   const emaArr = (xs, n) => { const k = 2 / (n + 1); let v = null; return xs.map((x) => (v = v == null ? x : x * k + v * (1 - k))); };
   function otShell() {
     const ot = X.ot, sym = MC.sym, step = STEP[sym] || 50, atm = MC.lastData?.optionChain?.atmStrike;
-    const chips = [-2, -1, 0, 1, 2].map((o) => { const k = atm != null ? atm + o * step : null; return `<button type="button" role="tab" data-mcx-strike="${k}" class="${k === ot.strike ? "on" : ""}" aria-selected="${k === ot.strike}" ${k == null ? "disabled" : ""}>${o === 0 ? "ATM" : (o > 0 ? "ATM +" : "ATM −") + Math.abs(o)}<small style="display:block;font-size:9.5px;color:#9aa3b0">${o === 0 ? (k ?? "") : o > 0 ? "CE OTM · PE ITM" : "CE ITM · PE OTM"}</small></button>`; }).join("");
+    const chips = [-2, -1, 0, 1, 2].map((o) => { const k = atm != null ? atm + o * step : null; return `<button type="button" role="tab" data-mcx-strike="${k}" class="${k === ot.strike ? "on" : ""}" aria-selected="${k === ot.strike}" title="${k ?? ""} · ${o === 0 ? "at the money" : o > 0 ? "CE OTM · PE ITM" : "CE ITM · PE OTM"}" ${k == null ? "disabled" : ""}>${o === 0 ? "ATM" : (o > 0 ? "+" : "−") + Math.abs(o)}</button>`; }).join("");
     const exps = (ot.expiries.length ? ot.expiries : [ot.expiry].filter(Boolean)).slice(0, 4).map((e) => `<button type="button" role="tab" data-mcx-exp="${e}" class="${e === ot.expiry ? "on" : ""}" aria-selected="${e === ot.expiry}">${new Date(e + "T00:00:00Z").toUTCString().slice(5, 11)}</button>`).join("");
     const sides = [["ce", "CE", "g"], ["pe", "PE", "r"], ["both", "Both", ""]].map(([k, l, c]) => `<button type="button" data-mcx-side="${k}" class="${ot.side === k ? "on " + c : ""}" aria-pressed="${ot.side === k}">${l}</button>`).join("");
     const tfs = [5, 15, 30, 60].map((t) => `<button type="button" role="tab" data-mcx-tf="${t}" class="${ot.tf === t ? "on" : ""}" aria-selected="${ot.tf === t}">${t === 60 ? "1h" : t + "m"}</button>`).join("");
     const o = ot.strike != null && atm != null ? (ot.strike - atm) / step : 0;
     const money = o === 0 ? `At the money · spot ${f0(MC.lastData?.spot)}` : `${o > 0 ? `CE ${o} OTM · PE ${o} ITM` : `CE ${-o} ITM · PE ${-o} OTM`} · ${Math.abs(ot.strike - (MC.lastData?.spot || 0)).toFixed(0)} pts from spot`;
-    const card = (side) => `<div class="mcx-opt" data-side="${side}" ${ot.side !== "both" && ot.side !== side.toLowerCase() ? "hidden" : ""}><div class="mcx-opt-hd" id="mcx-ot-hd-${side}">—</div><div class="mcx-opt-chart" id="mcx-ot-ch-${side}"></div><p class="mcx-note" id="mcx-ot-nt-${side}"></p></div>`;
-    const html = `<div class="mcx-row"><h2 class="mcx-h">Option Terminal · ${esc(MC.lastData?.name || sym)}</h2><div class="mcx-seg" role="tablist" aria-label="Expiry">${exps}</div><span class="mcx-chip" style="margin-left:auto;padding:3px 8px;font-family:'JetBrains Mono',monospace;font-weight:700">Spot ${f2(MC.lastData?.spot)}</span><div class="mcx-seg" role="group" aria-label="Calls, puts or both">${sides}</div></div>
-      <div class="mcx-otf" role="group" aria-label="Option filters"><span class="mcx-k">Strike</span><div class="mcx-step"><button type="button" data-mcx-step="-1" aria-label="Lower strike">−</button><span>${ot.strike ?? "—"}</span><button type="button" data-mcx-step="1" aria-label="Higher strike">+</button></div>
-      <div class="mcx-seg" role="tablist" aria-label="Strike from ATM">${chips}</div><span class="mcx-k">Timeframe</span><div class="mcx-seg" role="tablist" aria-label="Premium timeframe">${tfs}</div><span class="mcx-s" style="margin-left:auto;color:#c9d0da;font-size:11.5px">${esc(money)}</span></div>
-      <div class="mcx-otc">${card("CE")}${card("PE")}</div>
-      <p class="mcx-note">Pullback zone = the premium's break level (BIOS) ± the main chart's zone (±${typeof mcZoneHalf === "function" ? mcZoneHalf(sym) : 10} pts) × Δ · candles after 15:30 are dropped.</p>`;
+    const card = (side) => `<div class="mcx-opt" data-side="${side}" ${ot.side !== "both" && ot.side !== side.toLowerCase() ? "hidden" : ""}><div class="mcx-opt-hd" id="mcx-ot-hd-${side}">—</div><div class="mcx-opt-chart" id="mcx-ot-ch-${side}"></div><p class="mcx-note" id="mcx-ot-nt-${side}" hidden></p></div>`;
+    const html = `<div class="mcx-row"><h2 class="mcx-h" title="Pullback zone = the premium's break level (BIOS) ± the main chart's zone (±${typeof mcZoneHalf === "function" ? mcZoneHalf(sym) : 10} pts) × Δ · candles after 15:30 are dropped">Options</h2><div class="mcx-seg" role="tablist" aria-label="Expiry">${exps}</div><div class="mcx-seg" role="group" aria-label="Calls, puts or both" style="margin-left:auto">${sides}</div></div>
+      <div class="mcx-otf" role="group" aria-label="Option filters"><div class="mcx-step" title="${esc(money)}"><button type="button" data-mcx-step="-1" aria-label="Lower strike">−</button><span>${ot.strike ?? "—"}</span><button type="button" data-mcx-step="1" aria-label="Higher strike">+</button></div>
+      <div class="mcx-seg" role="tablist" aria-label="Strike from ATM">${chips}</div><div class="mcx-seg" role="tablist" aria-label="Premium timeframe" style="margin-left:auto">${tfs}</div></div>
+      <div class="mcx-otc">${card("CE")}${card("PE")}</div>`;
     const host = $("mcx-ot"); if (!host) return;
     if (host.__mcx !== html) {   // filters changed → rebuild the shell and re-attach the charts (data is kept)
       host.innerHTML = html; host.__mcx = html;
@@ -180,8 +179,10 @@
       const bios = S?.bios?.price;
       if (bios != null) { pl(bios + half, "rgba(239,68,68,.85)", "PB zone", 0); pl(bios - half, "rgba(239,68,68,.85)", "", 0); }
       const ltp = cl[cl.length - 1];
-      if (hd) hd.innerHTML = `<b>${esc(MC.lastData?.name || "")} ${ot.strike} ${side}</b> <span class="mcx-chip ${side === "CE" ? "mcx-up" : "mcx-dn"}" style="font-weight:700">${side === "CE" ? "CALL" : "PUT"}</span> <b style="font-family:'JetBrains Mono',monospace;font-size:14px">₹${f2(ltp)}</b> <span class="mcx-mu">structure ${esc(S?.structure || "—")}${bios != null ? ` · BIOS ${S.bios.direction === "BULLISH" ? "▲" : "▼"} ${f2(bios)}` : ""}</span><span style="flex-basis:100%;font-family:'JetBrains Mono',monospace;font-size:11px;color:#b4bdca"><span style="color:#4ea1ff">EMA9 ${f2(e9[e9.length - 1])}</span> · <span style="color:#f5c542">EMA21 ${f2(e21[e21.length - 1])}</span> · ATR(14) ₹${atr != null ? atr.toFixed(1) : "—"} · Δ≈${delta.toFixed(2)} → ${zh} index pts ≈ ₹${(zh * delta).toFixed(1)}</span>`;
-      if (nt) nt.textContent = bios != null ? `Pullback zone ${f2(bios - half)} – ${f2(bios + half)} (±${half})` : "No break in option structure yet — no pullback zone.";
+      // one compact line per chart (the full detail is on hover) so CE and PE fit beside the main chart
+      const tip = `structure ${S?.structure || "—"}${bios != null ? ` · BIOS ${S.bios.direction === "BULLISH" ? "▲" : "▼"} ${f2(bios)} · pullback zone ${f2(bios - half)} – ${f2(bios + half)} (±${half})` : " · no break in option structure yet"} · EMA9 ${f2(e9[e9.length - 1])} · EMA21 ${f2(e21[e21.length - 1])} · ATR(14) ₹${atr != null ? atr.toFixed(1) : "—"} · Δ≈${delta.toFixed(2)} → ${zh} index pts ≈ ₹${(zh * delta).toFixed(1)}`;
+      if (hd) { hd.title = tip; hd.innerHTML = `<b>${ot.strike} ${side}</b> <b style="font-family:'JetBrains Mono',monospace;font-size:13px;color:${side === "CE" ? "#26c6a6" : "#ff6b72"}">₹${f2(ltp)}</b> <span class="mcx-mu" style="font-family:'JetBrains Mono',monospace;font-size:10.5px">${S?.structure ? esc(S.structure) + " · " : ""}<span style="color:#4ea1ff">E9 ${f2(e9[e9.length - 1])}</span> · <span style="color:#f5c542">E21 ${f2(e21[e21.length - 1])}</span> · ATR ${atr != null ? atr.toFixed(1) : "—"} · Δ ${delta.toFixed(2)}</span>`; }
+      if (nt) nt.textContent = "";
     }
   }
 
@@ -264,8 +265,19 @@
     document.body.classList.toggle("mcx-oi", v === "oi");
     document.querySelectorAll("[data-mcx-view]").forEach((b) => { const on = b.getAttribute("data-mcx-view") === v; b.classList.toggle("active", on); b.setAttribute("aria-selected", String(on)); });
     const host = $("mcx-oi-host"); if (host) host.hidden = v !== "oi";
-    if (v === "oi") mountOia(); else restoreOia();
+    if (v === "oi") mountOia(); else { restoreOia(); setTimeout(fitFrame, 50); }
   }
+
+  // ------------------------------------------------------------ one frame: main chart · CE / PE · key levels in the window height
+  function fitFrame() {
+    const main = document.querySelector("#panel-marketcommand .mc2-main"), wrap = document.querySelector("#panel-marketcommand .mc-wrap");
+    if (!main || !wrap || !mcOn() || X.view !== "mc") return;
+    if (window.innerWidth <= 900) { if (main.style.height) { main.style.height = ""; try { mcFitPanes(); } catch {} } return; }
+    const top = main.getBoundingClientRect().top - wrap.getBoundingClientRect().top + wrap.scrollTop + wrap.getBoundingClientRect().top;
+    const h = Math.max(460, Math.floor(window.innerHeight - top - 6)) + "px";
+    if (main.style.height !== h) { main.style.height = h; try { mcFitPanes(); } catch {} }
+  }
+  window.addEventListener("resize", () => { clearTimeout(X._fit); X._fit = setTimeout(fitFrame, 120); });
 
   // ------------------------------------------------------------ wiring
   function renderAll() {
@@ -274,6 +286,7 @@
     try { renderDecision(d); } catch (e) { console.warn("[mcx] decision", e); }
     try { renderLevels(d); } catch (e) { console.warn("[mcx] levels", e); }
     try { otShell(); } catch (e) { console.warn("[mcx] option terminal", e); }
+    try { fitFrame(); } catch (e) { console.warn("[mcx] frame", e); }
   }
   document.addEventListener("click", (e) => {
     const t = e.target.closest("button"); if (!t) return;
