@@ -127,7 +127,7 @@
     const chips = [-2, -1, 0, 1, 2].map((o) => { const k = atm != null ? atm + o * step : null; return `<button type="button" role="tab" data-mcx-strike="${k}" class="${k === ot.strike ? "on" : ""}" aria-selected="${k === ot.strike}" title="${k ?? ""} · ${o === 0 ? "at the money" : o > 0 ? "CE OTM · PE ITM" : "CE ITM · PE OTM"}" ${k == null ? "disabled" : ""}>${o === 0 ? "ATM" : (o > 0 ? "+" : "−") + Math.abs(o)}</button>`; }).join("");
     const exps = (ot.expiries.length ? ot.expiries : [ot.expiry].filter(Boolean)).slice(0, 4).map((e) => `<button type="button" role="tab" data-mcx-exp="${e}" class="${e === ot.expiry ? "on" : ""}" aria-selected="${e === ot.expiry}">${new Date(e + "T00:00:00Z").toUTCString().slice(5, 11)}</button>`).join("");
     const sides = [["ce", "CE", "g"], ["pe", "PE", "r"], ["both", "Both", ""]].map(([k, l, c]) => `<button type="button" data-mcx-side="${k}" class="${ot.side === k ? "on " + c : ""}" aria-pressed="${ot.side === k}">${l}</button>`).join("");
-    const tfs = `<span class="mcx-chip" title="CE / PE follow the main chart's timeframe">${ot.tf === 60 ? "1h" : ot.tf + "m"} · synced</span>`;
+    const tfs = `<span class="mcx-chip" title="CE / PE follow the main chart's timeframe">${ot.tf === "D" ? "1D" : ot.tf === 60 ? "1h" : ot.tf + "m"} · synced</span>`;
     const o = ot.strike != null && atm != null ? (ot.strike - atm) / step : 0;
     const money = o === 0 ? `At the money · spot ${f0(MC.lastData?.spot)}` : `${o > 0 ? `CE ${o} OTM · PE ${o} ITM` : `CE ${-o} ITM · PE ${-o} OTM`} · ${Math.abs(ot.strike - (MC.lastData?.spot || 0)).toFixed(0)} pts from spot`;
     const card = (side) => `<div class="mcx-opt" data-side="${side}" ${ot.side !== "both" && ot.side !== side.toLowerCase() ? "hidden" : ""}><div class="mcx-opt-hd" id="mcx-ot-hd-${side}">—</div><div class="mcx-opt-chart" id="mcx-ot-ch-${side}"></div><p class="mcx-note" id="mcx-ot-nt-${side}" hidden></p></div>`;
@@ -138,13 +138,13 @@
     const host = $("mcx-ot"); if (!host) return;
     if (host.__mcx !== html) {   // filters changed → rebuild the shell and re-attach the charts (data is kept)
       host.innerHTML = html; host.__mcx = html;
-      for (const side of ["CE", "PE"]) { const n = $(`mcx-ot-ch-${side}`); if (n && typeof LightweightCharts !== "undefined") { X.ot.charts[side]?.ch?.remove?.(); X.ot.charts[side] = otChart(n); } }
+      for (const side of ["CE", "PE"]) { const n = $(`mcx-ot-ch-${side}`); if (n && typeof LightweightCharts !== "undefined") { X.ot.charts[side]?.ch?.remove?.(); X.ot.charts[side] = otChart(n); X.ot.charts[side].ch.applyOptions({ timeScale: { timeVisible: MC.tf !== "1d" } }); } }
       drawOt();
     }
   }
   async function loadOt() {
     const ot = X.ot, sym = MC.sym, d = MC.lastData; if (!d) return;
-    ot.tf = ({ "5m": 5, "15m": 15, "30m": 30, "60m": 60 })[MC.tf] || 5;   // one timing for all three charts
+    ot.tf = ({ "5m": 5, "15m": 15, "30m": 30, "60m": 60, "1d": "D" })[MC.tf] || 5;   // one timing for all three charts
     if (ot.sym !== sym) { ot.sym = sym; ot.strike = null; ot.expiry = null; ot.expiries = []; ot.data = {}; }
     if (ot.strike == null) ot.strike = d.optionChain?.atmStrike ?? null;
     if (!ot.expiry) ot.expiry = d.oi?.expiry || null;
@@ -167,7 +167,7 @@
       const C = ot.charts[side], src = side === "CE" ? D.ce : D.pe, S = D.st?.[side.toLowerCase()];
       const hd = $(`mcx-ot-hd-${side}`), nt = $(`mcx-ot-nt-${side}`);
       if (!C || !src?.candles?.length) { if (hd) hd.innerHTML = `<b>${esc(MC.lastData?.name || "")} ${ot.strike} ${side}</b> <span class="mcx-mu">— no premium candles (${esc(src?.message || "loading")})</span>`; continue; }
-      const cs = src.candles.filter((c) => { const m = Math.floor(((c.time + IST) % 86400) / 60); return m >= 555 && m < 930; }).map((c) => ({ time: c.time + IST, open: c.open, high: c.high, low: c.low, close: c.close }));
+      const cs = src.candles.filter((c) => { if (ot.tf === "D") return true; const m = Math.floor(((c.time + IST) % 86400) / 60); return m >= 555 && m < 930; }).map((c) => ({ time: c.time + IST, open: c.open, high: c.high, low: c.low, close: c.close }));
       if (!cs.length) continue;
       C.c.setData(cs);
       const cl = cs.map((c) => c.close), e9 = emaArr(cl, 9), e21 = emaArr(cl, 21);
@@ -289,6 +289,15 @@
     const ro = Math.max(window.innerWidth <= 600 ? 10 : 25, Math.ceil((window.innerWidth <= 600 ? 120 : TAG_PX) / bs));
     if (X._ro !== ro) { X._ro = ro; ts.applyOptions({ rightOffset: ro }); }
   }
+  // 1D: every time axis shows dates instead of "00:00" (display only)
+  const dayLabel = (t) => new Date((typeof t === "number" ? t : 0) * 1000).toUTCString().slice(5, 11);
+  function syncAxisLabels() {
+    if (typeof MC === "undefined" || !MC.chart || X._axisTf === MC.tf) return;
+    X._axisTf = MC.tf; const daily = MC.tf === "1d";
+    try { MC.chart.applyOptions({ timeScale: { timeVisible: !daily, tickMarkFormatter: daily ? (t) => dayLabel(t + IST) : (t) => fmtIST(t, false) } }); } catch { /* the main chart keeps its own formatter */ }
+    for (const C of Object.values(X.ot.charts)) try { C.ch.applyOptions({ timeScale: { timeVisible: !daily } }); } catch { /* ignore */ }
+  }
+  setInterval(syncAxisLabels, 1000);
   setInterval(() => {
     if (typeof MC === "undefined" || !MC.chart || X._roHooked) return;
     X._roHooked = true;

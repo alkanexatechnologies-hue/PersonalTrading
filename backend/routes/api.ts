@@ -8370,6 +8370,19 @@ router.get("/zero-hero-live", requirePermission("oiAnalysis"), async (req: Reque
   res.json(out);
 });
 
+/** Option premium candles for a chart: `interval` minutes, or "D" = Dhan 60-min candles of the last 60 days grouped
+ *  into IST trading days (real data; a contract only has the days it has existed). */
+async function optionChartCandles(secId: string, seg: string, interval: number | "D", start: number, now: number) {
+  if (interval !== "D") return dhanOptionCandles(secId, start, now, interval, seg);
+  const h = await dhanOptionCandles(secId, now - 60 * 86400, now, 60, seg), days = new Map<number, any>();
+  for (const c of h) {
+    const m = Math.floor(((c.time + 19800) % 86400) / 60); if (m < 555 || m >= 930) continue;
+    const d0 = Math.floor((c.time + 19800) / 86400) * 86400 - 19800, x = days.get(d0);
+    if (!x) days.set(d0, { time: d0, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume || 0 });
+    else { x.high = Math.max(x.high, c.high); x.low = Math.min(x.low, c.low); x.close = c.close; x.volume += c.volume || 0; }
+  }
+  return [...days.values()].sort((a, b) => a.time - b.time);
+}
 router.get("/option-candles", async (req: Request, res: Response) => {
   const provider = getProvider();
   if (provider.name !== "dhan") return res.json({ available: false, message: "Option chart के लिए Dhan चाहिए।" });
@@ -8378,7 +8391,7 @@ router.get("/option-candles", async (req: Request, res: Response) => {
   const type = req.query.type === "PE" ? "PE" : "CE";
   const strike = Number(req.query.strike);
   const expiry = String(req.query.expiry || "");
-  const interval = Math.max(1, Math.min(60, Number(req.query.interval) || 15));
+  const interval: number | "D" = String(req.query.interval) === "D" ? "D" : Math.max(1, Math.min(60, Number(req.query.interval) || 15));
   if (!underlying || !expiry || !Number.isFinite(strike)) return res.status(400).json({ error: "symbol, type, strike, expiry required" });
   try {
     const inst = await findOption(underlying, type, strike, expiry); // Groww symbol + lot/display
@@ -8387,7 +8400,7 @@ router.get("/option-candles", async (req: Request, res: Response) => {
     // Option Terminal premium candles: Dhan only (no Groww connection needed on this screen); needs the option's numeric securityId.
     const dhanOpt = await lookupDhanOption(underlying, type, strike, expiry);
     if (!dhanOpt) return res.json({ available: false, source: "dhan", message: `${underlying} ${strike} ${type} (${expiry}) — contract नहीं मिला।` });
-    const candles = await dhanOptionCandles(dhanOpt.securityId, start, now, interval, dhanOpt.exchangeSegment);
+    const candles = await optionChartCandles(dhanOpt.securityId, dhanOpt.exchangeSegment, interval, start, now);
     res.json({
       available: candles.length > 0, source: "dhan", tradingSymbol: inst?.tradingSymbol ?? null, securityId: dhanOpt.securityId,
       underlying, name: def?.name || underlying, type, strike, expiry, interval, lotSize: inst?.lotSize ?? null,
@@ -8415,7 +8428,7 @@ router.get("/option-structure", async (req: Request, res: Response) => {
   const underlying = (def?.nseSymbol || String(req.query.symbol || "").replace(/\.NS$/i, "")).toUpperCase();
   const strike = Number(req.query.strike);
   const expiry = String(req.query.expiry || "");
-  const interval = Math.max(1, Math.min(60, Number(req.query.interval) || 15));
+  const interval: number | "D" = String(req.query.interval) === "D" ? "D" : Math.max(1, Math.min(60, Number(req.query.interval) || 15));
   if (!underlying || !expiry || !Number.isFinite(strike)) return res.status(400).json({ error: "symbol, strike, expiry required" });
 
   const r2n = (n: number) => Math.round(n * 100) / 100;
@@ -8428,9 +8441,9 @@ router.get("/option-structure", async (req: Request, res: Response) => {
       {
         const dhanOpt = await lookupDhanOption(underlying, type, strike, expiry);
         if (!dhanOpt) return { available: false, reason: "contract not found" };
-        candles = await dhanOptionCandles(dhanOpt.securityId, start, now, interval, dhanOpt.exchangeSegment);
+        candles = await optionChartCandles(dhanOpt.securityId, dhanOpt.exchangeSegment, interval, start, now);
       }
-      if (!candles || candles.length < 10) return { available: false, reason: "not enough premium candles" };
+      if (!candles || candles.length < 10) return { available: false, reason: interval === "D" ? "fewer than 10 trading days of this contract" : "not enough premium candles" };
       // EXISTING structure engine, run on the PREMIUM candles.
       const ms = detectMarketStructure(candles, 3, vwap(candles));
       const cur = candles[candles.length - 1].close;
