@@ -3926,6 +3926,10 @@ body.mode-decisionflow #index-strip { display: none !important; }
 .mc-replay-btn:hover { border-color: #f7931a; color: #f7931a; }
 .mc-replay-btn.active { background: rgba(247,147,26,.18); border-color: #f7931a; color: #f7931a; }
 .mc-replay-pop { position: absolute; top: 36px; left: 0; z-index: 50; width: 230px; background: #1e222d; border: 1px solid #2a2e39; border-radius: 6px; padding: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+.mc-hd-replay { position: relative; display: inline-flex; align-items: center; }
+.mc-date-btn { cursor: pointer; border-radius: 6px; } .mc-date-btn::after { content: " ▾"; opacity: .8; }
+.mc-date-btn:hover, .mc-date-btn:focus-visible { outline: 1px solid #2a5ea8; outline-offset: 1px; }
+.mc-hd-replay .mc-replay-pop { top: 30px; left: 0; max-width: calc(100vw - 32px); }
 .mc-replay-pop label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: #787b86; margin-bottom: 4px; }
 .mc-replay-pop input[type=date] { width: 100%; background: #131722; border: 1px solid #2a2e39; border-radius: 4px; color: #d1d4dc; padding: 6px 8px; font-size: 13px; }
 .mc-replay-actions { display: flex; gap: 6px; margin-top: 8px; }

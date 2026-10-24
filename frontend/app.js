@@ -5852,6 +5852,20 @@ function initMarketCommand() {
       loadMarketCommand();
     });
   }
+  // The 📅 date chip on the chart header opens the SAME replay picker right there (owner 2026-10-25: the top-row
+  // ↺ Replay button is out of view while scrolled to the chart). One popover, moved to whichever control opened it.
+  const dateChip = el("mc-chart-date");
+  if (dateChip && rPop && rToggle) {
+    const home = rPop.parentElement, hdHost = document.createElement("span");
+    hdHost.className = "mc-hd-replay"; dateChip.parentElement.insertBefore(hdHost, dateChip); hdHost.appendChild(dateChip);
+    dateChip.classList.add("mc-date-btn"); dateChip.setAttribute("role", "button"); dateChip.tabIndex = 0;
+    dateChip.title = "Pick a date — replay that session (chart + CE/PE premiums) · Back to Live returns";
+    const openHere = () => { if (rPop.parentElement !== hdHost) { hdHost.appendChild(rPop); rPop.hidden = false; } else rPop.hidden = !rPop.hidden; if (!rPop.hidden) rDate?.focus(); };
+    dateChip.addEventListener("click", openHere);
+    dateChip.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openHere(); } });
+    // the top-row button takes the popover back (capture phase: before its own toggle runs)
+    rToggle.addEventListener("click", () => { if (rPop.parentElement !== home) { home.appendChild(rPop); rPop.hidden = true; } }, true);
+  }
 
   // Wire collapsible sections
   document.querySelectorAll("[data-mc-toggle]").forEach((trigger) => {
