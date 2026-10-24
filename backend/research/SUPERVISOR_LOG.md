@@ -178,3 +178,24 @@ or together with the live-level fake, on 5m and 15m, NIFTY + SENSEX, development
 - **The mirror FAKE-DOWN fails.**
 - **PROMISING, NOT APPROVED:** it was picked from 22k rules, has a small n, and works one way only. Forward paper test
   first; no change to live logic.
+
+## 2026-10-24 · Quantitative audit of the live fake-move detector (`protrader/RESULTS_FAKE_AUDIT.md`)
+
+**Baseline reproduced exactly:** 70,103 evaluations, 0 mismatches vs the live functions.
+
+**Results:** 1:1 trade precision DEV 31.0% / VAL 36.0% / TEST 32.8%, equal to the same-stop baseline. Net after costs
+−8.4% / −6.5% / −4.8% per trade, with CIs below zero.
+
+**Reconciliation:** the earlier 55–60% comes from a 1-ATR target vs a 2.2-ATR median stop.
+
+**Ablations:** none of 13 one-change variants passed the pre-registered DEV gate (≥ +3 points, n ≥ 100). Nothing
+was frozen.
+
+**Main false-positive source:** breaks ≥ 1 ATR (85% of signals; level picker tolerance + side by spot). The confidence
+score is anti-calibrated (100 → 28.6%).
+
+**Verdict:**
+- **REJECT** as a trade signal.
+- 90% is not supported; the best validated precision is 50.3% [44.8–55.8], 1.6 signals per session, no DEV support.
+- Display-only proposals go to the owner.
+- No live code changed.

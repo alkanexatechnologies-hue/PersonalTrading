@@ -1,0 +1,196 @@
+# STEP 1 — BASELINE REPRODUCTION
+Equivalence of the research copy vs the LIVE detectFakeMoveTF + buildFakeMoveResult: 70103 bar evaluations, mismatches 0 (5m 0 · 15m 0 · signal 0 · confidence 0)
+NIFTY: 2024-11-04 → 2026-10-23 · sessions DEV 292 / VAL 96 / TEST 97 (purged 2) · VAL starts 2026-01-08, TEST starts 2026-06-04
+SENSEX: 2024-11-04 → 2026-10-23 · sessions DEV 292 / VAL 96 / TEST 97 (purged 2) · VAL starts 2026-01-08, TEST starts 2026-06-04
+DEV: eligible setups (level interactions) 9339, of which reversal-positive 3030
+  DEV NIFTY FAKE-DOWN                        n  1562 | trade prec  29.1% [26.9–31.4] same-stop 31.7% · decided 46.3% · T/S/time/amb 455/528/579/0 | dir 44.2% (wrong 47.6%) | avgR -0.05 | net -9.6% [-13.7–-6.4] | 5.35/sess, false 3.79/sess, recall 30.9%
+  DEV NIFTY FAKE-UP                          n  1527 | trade prec  32.5% [30.2–34.9] same-stop 31.7% · decided 51.0% · T/S/time/amb 497/478/552/0 | dir 45.2% (wrong 46.8%) | avgR 0.00 | net -5.1% [-8.2–-2.1] | 5.23/sess, false 3.53/sess, recall 33.8%
+  DEV SENSEX FAKE-DOWN                       n  1569 | trade prec  30.1% [27.9–32.4] same-stop 32.0% · decided 46.5% · T/S/time/amb 472/544/553/0 | dir 43.8% (wrong 46.7%) | avgR -0.04 | net -8.9% [-17.3–-0.7] | 5.37/sess, false 3.76/sess, recall 30.3%
+  DEV SENSEX FAKE-UP                         n  1578 | trade prec  32.1% [29.9–34.5] same-stop 32.1% · decided 50.2% · T/S/time/amb 507/503/568/0 | dir 45.2% (wrong 47.5%) | avgR -0.01 | net -10.1% [-17.0–-5.1] | 5.40/sess, false 3.67/sess, recall 32.5%
+  DEV ALL baseline                           n  6236 | trade prec  31.0% [29.8–32.1] same-stop 31.9% · decided 48.5% · T/S/time/amb 1931/2053/2252/0 | dir 44.6% (wrong 47.1%) | avgR -0.03 | net -8.4% [-11.5–-5.3] | 10.68/sess, false 7.37/sess, recall 63.7%
+VAL: eligible setups (level interactions) 3099, of which reversal-positive 1103
+  VAL NIFTY FAKE-DOWN                        n   516 | trade prec  34.5% [30.5–38.7] same-stop 32.2% · decided 49.2% · T/S/time/amb 178/184/154/0 | dir 43.8% (wrong 48.4%) | avgR -0.01 | net -8.4% [-16.7–-1.3] | 5.38/sess, false 3.52/sess, recall 32.4%
+  VAL NIFTY FAKE-UP                          n   521 | trade prec  37.6% [33.6–41.9] same-stop 36.6% · decided 53.7% · T/S/time/amb 196/169/156/0 | dir 46.8% (wrong 44.1%) | avgR 0.05 | net -4.6% [-11.1–0.7] | 5.43/sess, false 3.39/sess, recall 35.7%
+  VAL SENSEX FAKE-DOWN                       n   507 | trade prec  32.0% [28.0–36.1] same-stop 31.9% · decided 48.1% · T/S/time/amb 162/175/170/0 | dir 45.2% (wrong 48.1%) | avgR -0.03 | net -11.6% [-26.3–0.5] | 5.28/sess, false 3.59/sess, recall 29.2%
+  VAL SENSEX FAKE-UP                         n   542 | trade prec  39.7% [35.6–43.8] same-stop 36.9% · decided 57.8% · T/S/time/amb 215/157/170/0 | dir 48.0% (wrong 45.0%) | avgR 0.10 | net -1.6% [-7.0–3.9] | 5.65/sess, false 3.41/sess, recall 38.8%
+  VAL ALL baseline                           n  2086 | trade prec  36.0% [34.0–38.1] same-stop 34.4% · decided 52.3% · T/S/time/amb 751/685/650/0 | dir 46.0% (wrong 46.4%) | avgR 0.03 | net -6.5% [-10.8–-1.3] | 10.86/sess, false 6.95/sess, recall 68.1%
+Reconciliation with the earlier "55–60 %" (target 1 × ATR vs the 4-bar stop, TIME = not right), same signals:
+  DEV FAKE-DOWN: right 56.4% of all, 65.6% of decided · median stop 2.23 ATR vs a 1-ATR target
+  DEV FAKE-UP: right 58.1% of all, 67.6% of decided · median stop 2.34 ATR vs a 1-ATR target
+  VAL FAKE-DOWN: right 54.7% of all, 63.3% of decided · median stop 2.03 ATR vs a 1-ATR target
+  VAL FAKE-UP: right 57.9% of all, 66.9% of decided · median stop 2.13 ATR vs a 1-ATR target
+(TEST is untouched until the parameters are frozen — see Step 5.)
+
+# STEP 2 — WHERE THE FALSE POSITIVES COME FROM (DEV only; baseline signals)
+
+## Level type
+  Swing Low                  n  2181 · prec 30.4% [28.5–32.4] vs same-stop 31.5% · losers 1517 (35.2% of all losers) · net -12.8%
+  Swing High                 n  2057 · prec 30.8% [28.8–32.8] vs same-stop 31.4% · losers 1424 (33.1% of all losers) · net -8.8%
+  ORB Low                    n   707 · prec 32.0% [28.6–35.5] vs same-stop 33.9% · losers 481 (11.2% of all losers) · net -3.5%
+  ORB High                   n   688 · prec 33.1% [29.7–36.7] vs same-stop 33.6% · losers 460 (10.7% of all losers) · net -2.9%
+  Prev Day Low               n   323 · prec 28.5% [23.8–33.6] vs same-stop 30.8% · losers 231 (5.4% of all losers) · net -5.1%
+  Prev Day High              n   280 · prec 31.4% [26.3–37.1] vs same-stop 29.7% · losers 192 (4.5% of all losers) · net -1.8%
+
+## Timeframe that confirmed
+  5m+15m                     n  3133 · prec 27.5% [26.0–29.1] vs same-stop 29.2% · losers 2271 (52.8% of all losers) · net -4.6%
+  5m                         n  2516 · prec 33.9% [32.1–35.8] vs same-stop 33.9% · losers 1662 (38.6% of all losers) · net -13.0%
+  15m                        n   587 · prec 36.6% [32.8–40.6] vs same-stop 37.6% · losers 372 (8.6% of all losers) · net -9.1%
+
+## 5m/15m state
+  aligned (both confirmed)   n  3133 · prec 27.5% [26.0–29.1] vs same-stop 29.2% · losers 2271 (52.8% of all losers) · net -4.6%
+  one TF only / other watching or none n  3103 · prec 34.5% [32.8–36.1] vs same-stop 34.6% · losers 2034 (47.2% of all losers) · net -12.3%
+
+## Prior touches today
+  2+                         n  2266 · prec 32.2% [30.3–34.1] vs same-stop 32.6% · losers 1537 (35.7% of all losers) · net -15.0%
+  1                          n  2183 · prec 29.9% [28.0–31.8] vs same-stop 31.7% · losers 1531 (35.6% of all losers) · net -4.9%
+  0                          n  1787 · prec 30.8% [28.7–33.0] vs same-stop 31.3% · losers 1237 (28.7% of all losers) · net -4.4%
+
+## Break distance (ATR)
+  ≥1                         n  5290 · prec 28.8% [27.6–30.0] vs same-stop 29.7% · losers 3766 (87.5% of all losers) · net -8.6%
+  0.5–1                      n   590 · prec 43.2% [39.3–47.2] vs same-stop 44.2% · losers 335 (7.8% of all losers) · net -10.4%
+  <0.25                      n   298 · prec 43.3% [37.8–49.0] vs same-stop 43.7% · losers 169 (3.9% of all losers) · net -2.4%
+  0.25–0.5                   n    58 · prec 39.7% [28.1–52.5] vs same-stop 47.9% · losers 35 (0.8% of all losers) · net -4.4%
+
+## Option volume expansion (index has no volume)
+  <1×                        n  2117 · prec 33.3% [31.3–35.3] vs same-stop 35.4% · losers 1412 (32.8% of all losers) · net -4.1%
+  1–1.5×                     n  2073 · prec 29.9% [28.0–31.9] vs same-stop 31.2% · losers 1453 (33.8% of all losers) · net -8.2%
+  ≥1.5×                      n  1195 · prec 26.9% [24.5–29.5] vs same-stop 26.6% · losers 873 (20.3% of all losers) · net -20.8%
+  n/a                        n   851 · prec 33.4% [30.3–36.6] vs same-stop 32.3% · losers 567 (13.2% of all losers) · net -2.5%
+
+## Volatility (ATR vs its 100-bar mean)
+  0.8–1.2                    n  2608 · prec 31.7% [29.9–33.5] vs same-stop 31.1% · losers 1782 (41.4% of all losers) · net -7.3%
+  ≥1.2 expanding             n  2060 · prec 29.6% [27.7–31.6] vs same-stop 33.3% · losers 1450 (33.7% of all losers) · net -9.4%
+  <0.8 quiet                 n  1568 · prec 31.6% [29.3–33.9] vs same-stop 31.4% · losers 1073 (24.9% of all losers) · net -9.1%
+
+## Time of day
+  09:15-10:30                n  1921 · prec 32.5% [30.4–34.6] vs same-stop 33.4% · losers 1297 (30.1% of all losers) · net -2.3%
+  13:30-15:30                n  1793 · prec 26.4% [24.4–28.5] vs same-stop 27.8% · losers 1320 (30.7% of all losers) · net -23.0%
+  12:00-13:30                n  1295 · prec 35.5% [33.0–38.2] vs same-stop 34.8% · losers 835 (19.4% of all losers) · net -1.9%
+  10:30-12:00                n  1227 · prec 30.5% [28.0–33.1] vs same-stop 32.6% · losers 853 (19.8% of all losers) · net -3.6%
+
+## Expiry context
+  other day                  n  3614 · prec 30.8% [29.3–32.3] vs same-stop 32.0% · losers 2500 (58.1% of all losers) · net -1.7%
+  day before expiry          n  1331 · prec 29.7% [27.3–32.2] vs same-stop 31.9% · losers 936 (21.7% of all losers) · net -2.9%
+  EXPIRY day                 n  1291 · prec 32.7% [30.2–35.3] vs same-stop 31.6% · losers 869 (20.2% of all losers) · net -33.2%
+
+## Follow-through next bar (descriptive, known only after entry)
+  no                         n  3584 · prec 19.7% [18.4–21.0] vs same-stop 32.3% · losers 2878 (66.9% of all losers) · net -13.7%
+  yes                        n  2652 · prec 46.2% [44.3–48.1] vs same-stop 31.4% · losers 1427 (33.1% of all losers) · net -1.3%
+
+## Wick-only rejection (WATCH, never shown as confirmed) vs close-through (CONFIRMED) — DEV
+  close-through (baseline)                   n  6236 | trade prec  31.0% [29.8–32.1] same-stop 31.9% · decided 48.5% · T/S/time/amb 1931/2053/2252/0 | dir 44.6% (wrong 47.1%) | avgR -0.03 | net -8.4% [-11.5–-5.3] | 10.68/sess, false 7.37/sess, recall 63.7%
+  wick-only (WATCH)                          n  3890 | trade prec  42.1% [40.6–43.7] same-stop 42.5% · decided 49.4% · T/S/time/amb 1638/1675/577/0 | dir 46.3% (wrong 44.5%) | avgR -0.01 | net -8.7% [-13.3–-5.0] | 6.66/sess, false 3.86/sess, recall 54.1%
+
+## Excursions (ATR): winners MAE median 0.26 p90 1.22 · losers MFE median 0.26 p90 1.19 · stop width median 2.28 ATR
+
+# STEP 3 — ONE-CHANGE ABLATIONS (DEV → VAL; edge = precision − same-stop baseline)
+BASELINE DEV                                 n  6236 | trade prec  31.0% [29.8–32.1] same-stop 31.9% · decided 48.5% · T/S/time/amb 1931/2053/2252/0 | dir 44.6% (wrong 47.1%) | avgR -0.03 | net -8.4% [-11.5–-5.3] | 10.68/sess, false 7.37/sess, recall 63.7%
+BASELINE VAL                                 n  2086 | trade prec  36.0% [34.0–38.1] same-stop 34.4% · decided 52.3% · T/S/time/amb 751/685/650/0 | dir 46.0% (wrong 46.4%) | avgR 0.03 | net -6.5% [-10.8–-1.3] | 10.86/sess, false 6.95/sess, recall 68.1%
+
+A1 stable level identity (side frozen pre-break)
+  DEV                                          n  4613 | trade prec  42.7% [41.3–44.2] same-stop 42.9% · decided 49.9% · T/S/time/amb 1971/1980/662/0 | dir 46.2% (wrong 45.0%) | avgR 0.00 | net -7.6% [-10.6–-5.5] | 7.90/sess, false 4.52/sess, recall 65.0%
+  VAL                                          n  1607 | trade prec  43.1% [40.7–45.5] same-stop 43.3% · decided 50.4% · T/S/time/amb 692/681/234/0 | dir 44.7% (wrong 46.5%) | avgR 0.01 | net -7.5% [-13.5–-3.0] | 8.37/sess, false 4.77/sess, recall 62.7%
+  edge change vs baseline: DEV +0.7 pts · VAL -1.8 pts
+
+A2 ATR threshold 0.05
+  DEV                                          n  6579 | trade prec  33.6% [32.5–34.8] same-stop 34.4% · decided 49.0% · T/S/time/amb 2212/2304/2063/0 | dir 45.0% (wrong 46.7%) | avgR -0.02 | net -7.7% [-10.7–-4.5] | 11.27/sess, false 7.48/sess, recall 73.0%
+  VAL                                          n  2096 | trade prec  38.1% [36.0–40.2] same-stop 35.7% · decided 53.3% · T/S/time/amb 798/700/598/0 | dir 45.9% (wrong 45.5%) | avgR 0.04 | net -3.9% [-6.5–-0.8] | 10.92/sess, false 6.76/sess, recall 72.3%
+  edge change vs baseline: DEV +0.2 pts · VAL +0.8 pts
+
+A2 ATR threshold 0.1
+  DEV                                          n  6645 | trade prec  33.4% [32.3–34.5] same-stop 34.2% · decided 48.8% · T/S/time/amb 2218/2323/2104/0 | dir 45.1% (wrong 46.5%) | avgR -0.02 | net -8.1% [-10.8–-4.8] | 11.38/sess, false 7.58/sess, recall 73.2%
+  VAL                                          n  2119 | trade prec  38.0% [36.0–40.1] same-stop 35.6% · decided 53.3% · T/S/time/amb 806/707/606/0 | dir 46.4% (wrong 45.4%) | avgR 0.04 | net -3.6% [-6.3–-0.7] | 11.04/sess, false 6.84/sess, recall 73.1%
+  edge change vs baseline: DEV +0.1 pts · VAL +0.9 pts
+
+A2 ATR threshold 0.2
+  DEV                                          n  6744 | trade prec  32.8% [31.7–34.0] same-stop 33.8% · decided 48.7% · T/S/time/amb 2215/2334/2195/0 | dir 45.3% (wrong 46.5%) | avgR -0.02 | net -8.8% [-11.9–-5.5] | 11.55/sess, false 7.76/sess, recall 73.1%
+  VAL                                          n  2164 | trade prec  37.3% [35.3–39.4] same-stop 35.4% · decided 52.7% · T/S/time/amb 807/723/634/0 | dir 46.1% (wrong 45.6%) | avgR 0.03 | net -4.6% [-7.5–-1.5] | 11.27/sess, false 7.07/sess, recall 73.2%
+  edge change vs baseline: DEV -0.0 pts · VAL +0.3 pts
+
+A3 prior touches ≥ 1
+  DEV                                          n  4449 | trade prec  31.0% [29.7–32.4] same-stop 32.1% · decided 48.5% · T/S/time/amb 1381/1469/1599/0 | dir 43.7% (wrong 47.4%) | avgR -0.03 | net -10.1% [-14.3–-6.0] | 7.62/sess, false 5.25/sess, recall 45.6%
+  VAL                                          n  1549 | trade prec  36.0% [33.6–38.4] same-stop 35.2% · decided 51.1% · T/S/time/amb 557/532/460/0 | dir 45.2% (wrong 47.1%) | avgR 0.01 | net -8.2% [-13.6–-1.7] | 8.07/sess, false 5.17/sess, recall 50.5%
+  edge change vs baseline: DEV -0.2 pts · VAL -0.8 pts
+
+A3 prior touches ≥ 2
+  DEV                                          n  2266 | trade prec  32.2% [30.3–34.1] same-stop 32.6% · decided 48.3% · T/S/time/amb 729/781/756/0 | dir 42.7% (wrong 48.0%) | avgR -0.04 | net -15.0% [-21.7–-9.9] | 3.88/sess, false 2.63/sess, recall 24.1%
+  VAL                                          n   736 | trade prec  37.8% [34.3–41.3] same-stop 36.0% · decided 52.3% · T/S/time/amb 278/254/204/0 | dir 47.1% (wrong 44.7%) | avgR 0.04 | net -10.2% [-23.5–-0.4] | 3.83/sess, false 2.39/sess, recall 25.2%
+  edge change vs baseline: DEV +0.5 pts · VAL +0.2 pts
+
+A4a completed 15m only
+  DEV                                          n  6339 | trade prec  31.0% [29.8–32.1] same-stop 31.9% · decided 48.2% · T/S/time/amb 1962/2111/2266/0 | dir 44.5% (wrong 47.2%) | avgR -0.03 | net -9.0% [-12.5–-6.1] | 10.85/sess, false 7.49/sess, recall 64.8%
+  VAL                                          n  2141 | trade prec  35.3% [33.3–37.3] same-stop 34.2% · decided 52.1% · T/S/time/amb 755/694/692/0 | dir 45.8% (wrong 46.3%) | avgR 0.02 | net -6.0% [-10.4–-2.1] | 11.15/sess, false 7.22/sess, recall 68.4%
+  edge change vs baseline: DEV -0.1 pts · VAL -0.5 pts
+
+A4b completed 15m structure not against
+  DEV                                          n  3113 | trade prec  31.0% [29.4–32.6] same-stop 32.1% · decided 49.5% · T/S/time/amb 964/984/1165/0 | dir 46.5% (wrong 45.2%) | avgR -0.01 | net -6.2% [-10.1–-1.5] | 5.33/sess, false 3.68/sess, recall 31.8%
+  VAL                                          n   997 | trade prec  34.5% [31.6–37.5] same-stop 35.3% · decided 50.4% · T/S/time/amb 344/338/315/0 | dir 43.6% (wrong 48.2%) | avgR -0.00 | net -6.4% [-11.3–-0.4] | 5.19/sess, false 3.40/sess, recall 31.2%
+  edge change vs baseline: DEV -0.2 pts · VAL -2.4 pts
+
+A5a option volume ≥ 1.5× pace
+  DEV                                          n  1195 | trade prec  26.9% [24.5–29.5] same-stop 26.6% · decided 51.5% · T/S/time/amb 322/303/570/0 | dir 45.5% (wrong 46.9%) | avgR 0.00 | net -20.8% [-29.4–-15.2] | 2.05/sess, false 1.49/sess, recall 10.6%
+  VAL                                          n   476 | trade prec  33.6% [29.5–38.0] same-stop 31.7% · decided 56.1% · T/S/time/amb 160/125/191/0 | dir 46.8% (wrong 46.4%) | avgR 0.07 | net -13.1% [-29.4–0.0] | 2.48/sess, false 1.65/sess, recall 14.5%
+  edge change vs baseline: DEV +1.3 pts · VAL +0.3 pts
+
+A5b ATR expanding ≥ 1.2
+  DEV                                          n  2060 | trade prec  29.6% [27.7–31.6] same-stop 33.3% · decided 49.0% · T/S/time/amb 610/634/816/0 | dir 46.5% (wrong 45.3%) | avgR -0.00 | net -9.4% [-17.2–-4.4] | 3.53/sess, false 2.48/sess, recall 20.1%
+  VAL                                          n   600 | trade prec  34.5% [30.8–38.4] same-stop 34.9% · decided 52.1% · T/S/time/amb 207/190/203/0 | dir 43.0% (wrong 48.2%) | avgR 0.01 | net -9.1% [-18.7–-1.6] | 3.13/sess, false 2.05/sess, recall 18.8%
+  edge change vs baseline: DEV -2.8 pts · VAL -2.0 pts
+
+A5c ATR quiet < 0.8
+  DEV                                          n  1568 | trade prec  31.6% [29.3–33.9] same-stop 31.4% · decided 46.6% · T/S/time/amb 495/567/506/0 | dir 41.6% (wrong 49.6%) | avgR -0.07 | net -9.1% [-13.4–-4.7] | 2.68/sess, false 1.84/sess, recall 16.3%
+  VAL                                          n   508 | trade prec  41.7% [37.5–46.1] same-stop 35.2% · decided 53.3% · T/S/time/amb 212/186/110/0 | dir 48.0% (wrong 47.0%) | avgR 0.05 | net -0.1% [-3.5–3.4] | 2.65/sess, false 1.54/sess, recall 19.2%
+  edge change vs baseline: DEV +1.1 pts · VAL +5.0 pts
+
+A6 premium reaction (my side up, other down)
+  DEV                                          n  4954 | trade prec  29.1% [27.8–30.3] same-stop 30.0% · decided 48.1% · T/S/time/amb 1440/1554/1960/0 | dir 44.4% (wrong 47.6%) | avgR -0.03 | net -3.5% [-4.9–-2.0] | 8.48/sess, false 6.02/sess, recall 47.5%
+  VAL                                          n  1642 | trade prec  34.2% [31.9–36.5] same-stop 32.7% · decided 51.8% · T/S/time/amb 561/523/558/0 | dir 46.4% (wrong 46.5%) | avgR 0.02 | net -1.1% [-3.4–1.4] | 8.55/sess, false 5.63/sess, recall 50.9%
+  edge change vs baseline: DEV -0.0 pts · VAL -0.1 pts
+
+A7 opposite-side ATM OI writing
+  DEV                                          n  4416 | trade prec  30.3% [28.9–31.6] same-stop 31.0% · decided 48.0% · T/S/time/amb 1336/1447/1633/0 | dir 44.7% (wrong 47.2%) | avgR -0.03 | net -6.3% [-8.3–-4.4] | 7.56/sess, false 5.27/sess, recall 44.1%
+  VAL                                          n  1454 | trade prec  35.7% [33.3–38.2] same-stop 33.1% · decided 52.7% · T/S/time/amb 519/466/469/0 | dir 47.1% (wrong 45.5%) | avgR 0.04 | net -5.6% [-11.3–-0.7] | 7.57/sess, false 4.87/sess, recall 47.1%
+  edge change vs baseline: DEV +0.1 pts · VAL +1.0 pts
+
+A8 no-trade filter (no expiry day, break < 1 ATR, 09:30–15:00)
+  DEV                                          n   725 | trade prec  43.9% [40.3–47.5] same-stop 44.3% · decided 49.1% · T/S/time/amb 318/330/77/0 | dir 45.4% (wrong 44.8%) | avgR -0.02 | net -1.7% [-2.9–-0.2] | 1.24/sess, false 0.70/sess, recall 10.5%
+  VAL                                          n   312 | trade prec  50.3% [44.8–55.8] same-stop 45.4% · decided 53.4% · T/S/time/amb 157/137/18/0 | dir 44.2% (wrong 47.8%) | avgR 0.05 | net -0.2% [-1.8–1.4] | 1.63/sess, false 0.81/sess, recall 14.2%
+  edge change vs baseline: DEV +0.5 pts · VAL +3.4 pts
+
+A9 follow-through entry (post-hoc from Step 2)
+  DEV                                          n  2652 | trade prec  20.4% [18.9–21.9] same-stop 25.5% · decided 46.0% · T/S/time/amb 540/635/1477/0 | dir 42.3% (wrong 47.4%) | avgR -0.04 | net -5.8% [-9.8–-1.3] | 4.54/sess, false 3.62/sess, recall 17.8%
+  VAL                                          n   896 | trade prec  26.2% [23.5–29.2] same-stop 27.6% · decided 52.0% · T/S/time/amb 235/217/444/0 | dir 45.5% (wrong 44.3%) | avgR 0.00 | net -4.5% [-9.2–0.6] | 4.67/sess, false 3.44/sess, recall 21.3%
+  edge change vs baseline: DEV -4.2 pts · VAL -2.9 pts
+
+OI data reliability (ATM opposite-side OI present at both window ends): 8191/8322 signals (98.4%)
+
+# STEP 3b — COMBINATIONS OF THE PROMISING CHANGES ONLY (selected on DEV, confirmed on VAL)
+Promising filters on DEV (n ≥ 100, edge ≥ +3 pts): none
+
+FROZEN for the final test: nothing passed DEV → VAL; the baseline is reported on TEST for completeness
+
+# PRECISION vs COVERAGE (VAL) — can any pre-specified stack reach high precision?
+  VAL ≥ 0 promising filters                  n  2086 | trade prec  36.0% [34.0–38.1] same-stop 34.4% · decided 52.3% · T/S/time/amb 751/685/650/0 | dir 46.0% (wrong 46.4%) | avgR 0.03 | net -6.5% [-10.8–-1.3] | 10.86/sess, false 6.95/sess, recall 68.1%
+Highest VAL trade precision among all pre-specified variants with n ≥ 30: A8 no-trade filter (no expiry day, break < 1 ATR, 09:30–15:00) → 50.3% [44.8–55.8] on n 312 (decided 53.4%), same-stop 45.4%
+
+# CALIBRATION of the live confidence score (DEV+VAL, baseline signals)
+  confidence  35: n  1881 · trade prec 33.8% [31.7–36.0] · direction 43.2% · same-stop 33.7%
+  confidence  45: n   417 · trade prec 42.7% [38.0–47.5] · direction 49.9% · same-stop 39.4%
+  confidence  55: n  1457 · trade prec 37.4% [35.0–39.9] · direction 45.7% · same-stop 35.9%
+  confidence 100: n  4226 · trade prec 28.6% [27.2–30.0] · direction 44.8% · same-stop 29.8%
+
+# STEP 5 — FINAL TEST (untouched by this audit; frozen choice and baseline)
+  TEST BASELINE                              n  2084 | trade prec  32.8% [30.8–34.8] same-stop 33.3% · decided 48.6% · T/S/time/amb 683/721/680/0 | dir 46.1% (wrong 47.0%) | avgR -0.02 | net -4.8% [-8.8–-2.0] | 10.74/sess, false 7.22/sess, recall 66.2%
+    NIFTY                                    n  1041 | trade prec  32.1% [29.3–35.0] same-stop 33.1% · decided 47.9% · T/S/time/amb 334/363/344/0 | dir 45.6% (wrong 47.8%) | avgR -0.03 | net -7.5% [-14.9–-2.8] | 10.73/sess, false 7.29/sess, recall 65.7%
+    SENSEX                                   n  1043 | trade prec  33.5% [30.7–36.4] same-stop 33.4% · decided 49.4% · T/S/time/amb 349/358/336/0 | dir 46.5% (wrong 46.2%) | avgR -0.00 | net -2.1% [-4.4–-0.3] | 10.75/sess, false 7.15/sess, recall 66.7%
+    regime HIGH-VOL day                      n   872 | trade prec  37.3% [34.1–40.5] same-stop 33.0% · decided 53.8% · T/S/time/amb 325/279/268/0 | dir 50.0% (wrong 42.5%) | avgR 0.07 | net 1.7% [-0.4–3.7] | 4.49/sess, false 2.82/sess, recall 31.5%
+    regime LOW-VOL day                       n  1212 | trade prec  29.5% [27.0–32.2] same-stop 33.5% · decided 44.8% · T/S/time/amb 358/442/412/0 | dir 43.2% (wrong 50.2%) | avgR -0.08 | net -9.5% [-16.4–-4.8] | 6.25/sess, false 4.40/sess, recall 34.7%
+    regime TREND day                         n   841 | trade prec  33.8% [30.7–37.0] same-stop 33.3% · decided 50.1% · T/S/time/amb 284/283/274/0 | dir 47.4% (wrong 46.0%) | avgR 0.02 | net -5.3% [-15.9–0.8] | 4.34/sess, false 2.87/sess, recall 27.5%
+    regime RANGE day                         n  1243 | trade prec  32.1% [29.6–34.7] same-stop 33.2% · decided 47.7% · T/S/time/amb 399/438/406/0 | dir 45.1% (wrong 47.7%) | avgR -0.04 | net -4.5% [-7.1–-2.4] | 6.41/sess, false 4.35/sess, recall 38.7%
+
+# STABILITY by half-year (all periods, baseline)
+  2024-H2: baseline n 837 prec 29.5% (same-stop 32.1%) net -8.4%
+  2025-H1: baseline n 2661 prec 29.3% (same-stop 32.2%) net -8.8%
+  2025-H2: baseline n 2631 prec 33.0% (same-stop 31.6%) net -8.2%
+  2026-H1: baseline n 2594 prec 35.1% (same-stop 34.2%) net -6.0%
+  2026-H2: baseline n 1683 prec 33.3% (same-stop 33.0%) net -5.0%
