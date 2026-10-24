@@ -30,7 +30,7 @@ export interface Trade {
   x: IndexExit; idxPts: number; strike: number; prem0: number | null; prem1: number | null; net: number | null; netC: number | null; gross: number | null; native?: { net: number; res: string };
 }
 
-function prepareIndex(ix: IX) {
+export function prepareIndex(ix: IX) {
   const days = load(ix), ds = days.filter((d) => d.spot.size >= 300), N = ds.length, d1 = Math.floor(N * 0.6), d2 = Math.floor(N * 0.8), step = STEP[ix];
   const setOf = (i: number) => (i === d1 || i === d2 ? "PURGE" : i < d1 ? "DEV" : i < d2 ? "VAL" : "TEST");
   const dev15 = new Set(ds.slice(-15).map((d) => d.day)), exp = expiryDays(ds, step);
@@ -100,7 +100,7 @@ function randomDay(Pp: P, di: number) {
 }
 // C2, re-implemented exactly as phase1.ts (H2 at major levels incl. owner S/R, 09:30–14:25, first ACCEPTED event per level /
 // direction / day, opposite-side OI at the level strike WRITE or FLAT) — checked against the 121 Phase-1 trades
-function c2Day(Pp: P, di: number) {
+export function c2Day(Pp: P, di: number) {
   const o = Pp.off[di], n = Pp.n5[di], B = Pp.all5.slice(o, o + n), d = Pp.ds[di], pm = Pp.mins[di - 1]; if (!pm) return [];
   const pdh = Math.max(...pm.map(([, p]) => p)), pdl = Math.min(...pm.map(([, p]) => p)), pdc = pm[pm.length - 1][1];
   const prev15 = Pp.mins.slice(Math.max(0, di - 5), di).flatMap((m) => barsN(m, 15)), a15 = atr14(prev15, prev15.length - 1) || 1;

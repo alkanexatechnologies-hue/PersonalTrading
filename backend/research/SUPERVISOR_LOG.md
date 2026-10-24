@@ -297,3 +297,18 @@ break-even of 4.7–13.8 points, after ATM option delta (~0.51) and costs (~₹1
 positive. 1 of 6 criteria pass.
 
 **Verdict:** REJECT. LAX is dropped, as pre-registered. No live change.
+
+## 2026-10-24 · C4 audit: existing rule replayed over 2 years with costs (`protrader/RESULTS_C4_AUDIT.md`)
+
+**First net-after-costs figures for C4:**
+- 299 signals (NIFTY + SENSEX); +₹265 per trade; conservative +₹193; PF 1.47 / 1.33; max DD (conservative) ₹20,027.
+- DEV +₹210 / VAL +₹371.
+- Half-years: 2024-H2 −₹150 · 2025-H1 −₹13 · then +₹353 / +₹499 / +₹355.
+
+**Caveats:** the rule was selected from 22,304 combinations, so these figures carry selection bias.
+
+**C2 direction filter:** no added value (C2 DOWN +₹278 vs C2 UP +₹281).
+
+**Live paper records:** none yet (the test starts 2026-10-26).
+
+**Verdict:** CONTINUE PAPER TESTING. Not a proven edge.
