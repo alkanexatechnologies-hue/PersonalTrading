@@ -1,0 +1,58 @@
+Data 2024-10-01 → 2026-10-23
+
+DEV  (sessions: NIFTY 292, SENSEX 292)
+ NIFTY
+  B0 index EMA21 break alone     n  2086 (7.14/session) | WIN 1:1 47.4% [45.3–49.6] · decided 49.3% · random same stop 47.7% | WIN 2:1 30.0% | option net -2.6% [-3.8–-1.7], option wins 44.1% | premium +20/−10 net -2.8% [-3.7–-2.3], wins 34.6%
+  S0 + premium cross same candle n    47 (0.16/session) | WIN 1:1 57.4% [43.3–70.5] · decided 60.0% · random same stop 46.7% | WIN 2:1 36.2% | option net 1.8% [-5.0–10.0], option wins 59.6% | premium +20/−10 net 2.7% [-1.9–8.2], wins 48.9%
+  S2 + premium cross ≤ 2 candles n    59 (0.20/session) | WIN 1:1 57.6% [44.9–69.4] · decided 59.6% · random same stop 46.9% | WIN 2:1 33.9% | option net 0.7% [-4.8–7.2], option wins 54.2% | premium +20/−10 net 3.8% [-0.8–8.3], wins 49.2%
+  SS + premium EMA9 above EMA21  n   298 (1.02/session) | WIN 1:1 53.7% [48.0–59.3] · decided 55.7% · random same stop 48.1% | WIN 2:1 36.2% | option net 0.2% [-1.6–1.8], option wins 52.0% | premium +20/−10 net 0.2% [-1.4–2.3], wins 43.3%
+ SENSEX
+  B0 index EMA21 break alone     n  2087 (7.15/session) | WIN 1:1 48.0% [45.9–50.2] · decided 49.8% · random same stop 47.7% | WIN 2:1 30.7% | option net -1.3% [-1.9–-0.6], option wins 44.8% | premium +20/−10 net -1.8% [-2.4–-1.2], wins 35.4%
+  S0 + premium cross same candle n    44 (0.15/session) | WIN 1:1 63.6% [48.9–76.2] · decided 73.7% · random same stop 46.2% | WIN 2:1 36.4% | option net -0.9% [-9.0–6.2], option wins 56.8% | premium +20/−10 net 3.0% [-2.0–8.1], wins 47.7%
+  S2 + premium cross ≤ 2 candles n    57 (0.20/session) | WIN 1:1 59.6% [46.7–71.4] · decided 66.7% · random same stop 47.2% | WIN 2:1 35.1% | option net -0.4% [-6.2–5.0], option wins 50.9% | premium +20/−10 net 2.9% [-1.5–7.2], wins 43.9%
+  SS + premium EMA9 above EMA21  n   289 (0.99/session) | WIN 1:1 53.3% [47.5–59.0] · decided 55.2% · random same stop 48.3% | WIN 2:1 35.3% | option net -0.8% [-2.2–1.1], option wins 48.4% | premium +20/−10 net -0.0% [-1.5–1.9], wins 42.6%
+ BOTH
+  B0 index EMA21 break alone     n  4173 (7.15/session) | WIN 1:1 47.7% [46.2–49.2] · decided 49.5% · random same stop 47.7% | WIN 2:1 30.3% | option net -2.0% [-2.8–-1.2], option wins 44.5% | premium +20/−10 net -2.3% [-3.0–-1.6], wins 35.0%
+  S0 + premium cross same candle n    91 (0.16/session) | WIN 1:1 60.4% [50.2–69.9] · decided 66.3% · random same stop 46.5% | WIN 2:1 36.3% | option net 0.5% [-4.9–6.3], option wins 58.2% | premium +20/−10 net 2.9% [-0.9–6.0], wins 48.4%
+  S2 + premium cross ≤ 2 candles n   116 (0.20/session) | WIN 1:1 58.6% [49.5–67.2] · decided 63.0% · random same stop 47.0% | WIN 2:1 34.5% | option net 0.2% [-4.4–4.5], option wins 52.6% | premium +20/−10 net 3.3% [-0.3–6.5], wins 46.6%
+  SS + premium EMA9 above EMA21  n   587 (1.01/session) | WIN 1:1 53.5% [49.4–57.5] · decided 55.5% · random same stop 48.2% | WIN 2:1 35.8% | option net -0.3% [-1.8–1.1], option wins 50.3% | premium +20/−10 net 0.1% [-2.0–1.7], wins 42.9%
+    S0 break UP (CE)             n    37 (0.06/session) | WIN 1:1 67.6% [51.5–80.4] · decided 75.8% · random same stop 47.7% | WIN 2:1 51.4% | option net 1.5% [-4.3–6.8], option wins 67.6% | premium +20/−10 net 6.1% [0.6–11.9], wins 51.4%
+    S0 break DOWN (PE)           n    54 (0.09/session) | WIN 1:1 55.6% [42.4–68.0] · decided 60.0% · random same stop 45.4% | WIN 2:1 25.9% | option net -0.2% [-7.8–7.4], option wins 51.9% | premium +20/−10 net 0.6% [-4.2–5.6], wins 46.3%
+
+VAL  (sessions: NIFTY 96, SENSEX 96)
+ NIFTY
+  B0 index EMA21 break alone     n   659 (6.86/session) | WIN 1:1 47.3% [43.6–51.2] · decided 48.5% · random same stop 48.2% | WIN 2:1 34.0% | option net -1.5% [-2.8–-0.5], option wins 47.0% | premium +20/−10 net -0.9% [-1.8–0.1], wins 38.4%
+  S0 + premium cross same candle n    22 (0.23/session) | WIN 1:1 40.9% [23.3–61.3] · decided 42.9% · random same stop 48.0% | WIN 2:1 27.3% | option net -4.9% [-14.0–1.1], option wins 40.9% | premium +20/−10 net -1.2% [-7.1–5.2], wins 40.9%
+  S2 + premium cross ≤ 2 candles n    28 (0.29/session) | WIN 1:1 39.3% [23.6–57.6] · decided 40.7% · random same stop 48.0% | WIN 2:1 28.6% | option net -3.9% [-11.2–1.7], option wins 39.3% | premium +20/−10 net 0.4% [-5.0–6.9], wins 46.4%
+  SS + premium EMA9 above EMA21  n   114 (1.19/session) | WIN 1:1 48.2% [39.3–57.3] · decided 50.0% · random same stop 47.7% | WIN 2:1 35.1% | option net -1.3% [-4.2–1.0], option wins 48.2% | premium +20/−10 net 0.3% [-2.9–3.3], wins 43.0%
+ SENSEX
+  B0 index EMA21 break alone     n   660 (6.88/session) | WIN 1:1 45.9% [42.1–49.7] · decided 46.9% · random same stop 48.2% | WIN 2:1 30.6% | option net -2.2% [-3.6–-1.1], option wins 44.7% | premium +20/−10 net -1.5% [-2.6–-0.4], wins 35.8%
+  S0 + premium cross same candle n    10 (0.10/session) | WIN 1:1 30.0% [10.8–60.3] · decided 30.0% · random same stop 48.0% | WIN 2:1 20.0% | option net -9.7% [-18.4–-1.8], option wins 30.0% | premium +20/−10 net -10.4% [-14.7–-6.1], wins 10.0%
+  S2 + premium cross ≤ 2 candles n    17 (0.18/session) | WIN 1:1 41.2% [21.6–64.0] · decided 41.2% · random same stop 48.8% | WIN 2:1 23.5% | option net -4.8% [-11.8–2.6], option wins 41.2% | premium +20/−10 net -5.8% [-12.3–1.4], wins 29.4%
+  SS + premium EMA9 above EMA21  n    80 (0.83/session) | WIN 1:1 47.5% [36.9–58.3] · decided 47.5% · random same stop 47.6% | WIN 2:1 32.5% | option net -4.0% [-6.7–-1.7], option wins 45.0% | premium +20/−10 net -0.1% [-4.4–4.2], wins 42.5%
+ BOTH
+  B0 index EMA21 break alone     n  1319 (6.87/session) | WIN 1:1 46.6% [43.9–49.3] · decided 47.7% · random same stop 48.2% | WIN 2:1 32.3% | option net -1.9% [-2.8–-1.0], option wins 45.9% | premium +20/−10 net -1.2% [-2.1–-0.4], wins 37.1%
+  S0 + premium cross same candle n    32 (0.17/session) | WIN 1:1 37.5% [22.9–54.7] · decided 38.7% · random same stop 48.0% | WIN 2:1 25.0% | option net -6.4% [-13.2–-0.2], option wins 37.5% | premium +20/−10 net -4.0% [-8.5–1.5], wins 31.3%
+  S2 + premium cross ≤ 2 candles n    45 (0.23/session) | WIN 1:1 40.0% [27.0–54.5] · decided 40.9% · random same stop 48.3% | WIN 2:1 26.7% | option net -4.2% [-9.5–0.9], option wins 40.0% | premium +20/−10 net -1.9% [-6.6–3.6], wins 40.0%
+  SS + premium EMA9 above EMA21  n   194 (1.01/session) | WIN 1:1 47.9% [41.0–54.9] · decided 48.9% · random same stop 47.6% | WIN 2:1 34.0% | option net -2.4% [-4.6–-0.4], option wins 46.9% | premium +20/−10 net 0.1% [-2.7–3.2], wins 42.8%
+    S0 break UP (CE)             n    19 (0.10/session) | WIN 1:1 26.3% [11.8–48.8] · decided 27.8% · random same stop 47.1% | WIN 2:1 15.8% | option net -9.5% [-20.1–-2.0], option wins 26.3% | premium +20/−10 net -4.2% [-9.7–2.7], wins 31.6%
+    S0 break DOWN (PE)           n    13 (0.07/session) | WIN 1:1 53.8% [29.1–76.8] · decided 53.8% · random same stop 49.8% | WIN 2:1 38.5% | option net -1.8% [-8.8–6.2], option wins 53.8% | premium +20/−10 net -3.8% [-11.1–5.9], wins 30.8%
+
+TEST  (sessions: NIFTY 97, SENSEX 97)
+ NIFTY
+  B0 index EMA21 break alone     n   679 (7.00/session) | WIN 1:1 47.7% [44.0–51.5] · decided 48.9% · random same stop 48.6% | WIN 2:1 30.9% | option net -2.8% [-4.0–-1.5], option wins 46.1% | premium +20/−10 net -2.9% [-4.4–-1.2], wins 34.9%
+  S0 + premium cross same candle n     9 (0.09/session) | WIN 1:1 66.7% [35.4–87.9] · decided 75.0% · random same stop 46.8% | WIN 2:1 55.6% | option net 4.1% [-4.1–14.2], option wins 66.7% | premium +20/−10 net 9.8% [-3.5–22.5], wins 55.6%
+  S2 + premium cross ≤ 2 candles n    13 (0.13/session) | WIN 1:1 53.8% [29.1–76.8] · decided 58.3% · random same stop 47.7% | WIN 2:1 46.2% | option net -1.0% [-8.7–7.3], option wins 53.8% | premium +20/−10 net 4.5% [-6.1–15.8], wins 46.2%
+  SS + premium EMA9 above EMA21  n    97 (1.00/session) | WIN 1:1 50.5% [40.7–60.3] · decided 51.6% · random same stop 48.5% | WIN 2:1 35.1% | option net -1.7% [-3.7–0.4], option wins 49.5% | premium +20/−10 net -2.7% [-5.7–0.4], wins 32.0%
+ SENSEX
+  B0 index EMA21 break alone     n   631 (6.51/session) | WIN 1:1 46.1% [42.3–50.0] · decided 47.3% · random same stop 48.8% | WIN 2:1 31.2% | option net -1.5% [-2.6–-0.3], option wins 43.9% | premium +20/−10 net -1.4% [-2.6–-0.3], wins 36.9%
+  S0 + premium cross same candle n     6 (0.06/session) | WIN 1:1 33.3% [9.7–70.0] · decided 33.3% · random same stop 50.7% | WIN 2:1 33.3% | option net -7.0% [-11.7–-2.4], option wins 33.3% | premium +20/−10 net 0.5% [-11.5–12.9], wins 33.3%
+  S2 + premium cross ≤ 2 candles n    11 (0.11/session) | WIN 1:1 36.4% [15.2–64.6] · decided 36.4% · random same stop 51.6% | WIN 2:1 27.3% | option net -8.3% [-14.4–-2.4], option wins 36.4% | premium +20/−10 net -4.3% [-11.1–4.0], wins 18.2%
+  SS + premium EMA9 above EMA21  n    83 (0.86/session) | WIN 1:1 53.0% [42.4–63.4] · decided 54.3% · random same stop 48.7% | WIN 2:1 41.0% | option net -1.4% [-3.0–0.3], option wins 47.0% | premium +20/−10 net -2.6% [-5.5–0.8], wins 31.3%
+ BOTH
+  B0 index EMA21 break alone     n  1310 (6.75/session) | WIN 1:1 46.9% [44.3–49.7] · decided 48.1% · random same stop 48.7% | WIN 2:1 31.1% | option net -2.2% [-3.1–-1.2], option wins 45.0% | premium +20/−10 net -2.2% [-3.2–-1.2], wins 35.9%
+  S0 + premium cross same candle n    15 (0.08/session) | WIN 1:1 53.3% [30.1–75.2] · decided 57.1% · random same stop 48.3% | WIN 2:1 46.7% | option net -0.4% [-5.6–7.1], option wins 53.3% | premium +20/−10 net 6.1% [-3.4–15.8], wins 46.7%
+  S2 + premium cross ≤ 2 candles n    24 (0.12/session) | WIN 1:1 45.8% [27.9–64.9] · decided 47.8% · random same stop 49.5% | WIN 2:1 37.5% | option net -4.3% [-10.1–2.3], option wins 45.8% | premium +20/−10 net 0.5% [-6.4–9.5], wins 33.3%
+  SS + premium EMA9 above EMA21  n   180 (0.93/session) | WIN 1:1 51.7% [44.4–58.9] · decided 52.8% · random same stop 48.6% | WIN 2:1 37.8% | option net -1.6% [-3.0–0.4], option wins 48.3% | premium +20/−10 net -2.7% [-5.4–0.2], wins 31.7%
+    S0 break UP (CE)             n     6 (0.03/session) | WIN 1:1 33.3% [9.7–70.0] · decided 40.0% · random same stop 44.3% | WIN 2:1 33.3% | option net 1.6% [-9.1–17.8], option wins 33.3% | premium +20/−10 net 8.1% [-7.1–25.6], wins 50.0%
+    S0 break DOWN (PE)           n     9 (0.05/session) | WIN 1:1 66.7% [35.4–87.9] · decided 66.7% · random same stop 50.8% | WIN 2:1 55.6% | option net -1.6% [-6.8–4.0], option wins 66.7% | premium +20/−10 net 4.8% [-6.4–16.5], wins 44.4%

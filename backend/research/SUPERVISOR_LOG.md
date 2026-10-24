@@ -199,3 +199,14 @@ score is anti-calibrated (100 → 28.6%).
 - 90% is not supported; the best validated precision is 50.3% [44.8–55.8], 1.6 signals per session, no DEV support.
 - Display-only proposals go to the owner.
 - No live code changed.
+
+## 2026-10-25 · Index EMA 21 break + premium EMA 9/21 cross (`protrader/RESULTS_EMA_CROSS.md`)
+
+**Owner's question:** the win probability.
+
+**Results:**
+- **Alone:** 47% at 1:1, the same as random; −2% per option trade after costs.
+- **With the same-candle premium cross:** DEV 60% → VAL 37.5% → TEST 53% (n 91 / 32 / 15). Pooled 54%, unstable,
+  and the option net is about 0 or negative.
+
+**Verdict:** NO EDGE. Information only; no change to live logic.
