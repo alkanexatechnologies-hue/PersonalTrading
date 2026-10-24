@@ -253,3 +253,14 @@ unvalidated thresholds) with 11 unit tests.
 **PT regime gate:** DEV NIFTY 63% vs 47%, but VAL 46% vs 50% → not robust.
 
 **Verdict:** NOT VALIDATED. Research only; no live change.
+
+## 2026-10-25 · Fine-tuning the PT logic, 2 years (`protrader/ptSl5/RESULTS_PT_IMPROVE.md`)
+
+**Diagnosis:** the ₹5 stop = 0.45 × NIFTY and 0.12 × SENSEX premium ATR; about half the stopped trades reached +40
+later.
+
+**Variants:** stops sized by premium ATR raise the win rate (SENSEX up to 40–47%) but nothing is profitable in DEV.
+The owner's SL 5 / T 40 is negative in DEV and VAL on both indices (the last 15 days were favourable). A pullback limit
+entry is worse. Index-candle agreement helps SENSEX in every period, but DEV is still negative.
+
+**Verdict:** REJECT for live use. No change. The entry signal lacks an edge after costs.

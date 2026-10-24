@@ -1,0 +1,114 @@
+
+=== LAST 15 SESSIONS ===
+ NIFTY
+   E0 owner (SL 5 / T 40)         n   38 · WIN  21.1% · SL  78.9% · miss  0.0% · net/trade ₹  2.94 best / ₹  1.83 pessimistic
+   S1 SL 1×pATR / T 40            n   38 · WIN  31.6% · SL  65.8% · miss  2.6% · net/trade ₹  2.90 best / ₹  2.04 pessimistic
+   S2 SL 1×pATR / T 3×SL          n   38 · WIN  31.6% · SL  65.8% · miss  2.6% · net/trade ₹  0.58 best / ₹ -0.33 pessimistic
+   S3 SL 1.5×pATR / T 3×SL        n   38 · WIN  31.6% · SL  55.3% · miss 13.2% · net/trade ₹  3.23 best / ₹  2.89 pessimistic
+   P1 pullback limit + S2         n   18 · WIN  22.2% · SL  72.2% · miss  5.6% · net/trade ₹ -0.24 best / ₹ -1.68 pessimistic · no fill 20
+   S2 + F1 no flip                n   35 · WIN  31.4% · SL  65.7% · miss  2.9% · net/trade ₹  0.71 best / ₹ -0.29 pessimistic
+   S2 + F2 ATR < 1.2              n   28 · WIN  28.6% · SL  67.9% · miss  3.6% · net/trade ₹ -0.38 best / ₹ -0.82 pessimistic
+   S2 + F3 09:30–14:30            n   33 · WIN  27.3% · SL  69.7% · miss  3.0% · net/trade ₹ -1.39 best / ₹ -2.31 pessimistic
+   S2 + F4 index candle agrees    n   33 · WIN  33.3% · SL  63.6% · miss  3.0% · net/trade ₹  1.84 best / ₹  0.99 pessimistic
+   S2 + F1+F2                     n   25 · WIN  28.0% · SL  68.0% · miss  4.0% · net/trade ₹ -0.32 best / ₹ -0.82 pessimistic
+   S2 + F1+F2+F3+F4               n   22 · WIN  31.8% · SL  63.6% · miss  4.5% · net/trade ₹  1.88 best / ₹  1.45 pessimistic
+   P1 + F1+F2                     n   12 · WIN  16.7% · SL  75.0% · miss  8.3% · net/trade ₹ -4.17 best / ₹ -4.99 pessimistic · no fill 13
+ SENSEX
+   E0 owner (SL 5 / T 40)         n   44 · WIN  27.3% · SL  72.7% · miss  0.0% · net/trade ₹  3.49 best / ₹ -1.85 pessimistic
+   S1 SL 1×pATR / T 40            n   44 · WIN  54.5% · SL  45.5% · miss  0.0% · net/trade ₹ -0.90 best / ₹ -1.49 pessimistic
+   S2 SL 1×pATR / T 3×SL          n   44 · WIN  36.4% · SL  61.4% · miss  2.3% · net/trade ₹ 13.36 best / ₹ 12.70 pessimistic
+   S3 SL 1.5×pATR / T 3×SL        n   44 · WIN  27.3% · SL  45.5% · miss 27.3% · net/trade ₹ 32.22 best / ₹ 30.08 pessimistic
+   P1 pullback limit + S2         n   15 · WIN   6.7% · SL  80.0% · miss 13.3% · net/trade ₹-15.76 best / ₹-17.36 pessimistic · no fill 29
+   S2 + F1 no flip                n   37 · WIN  35.1% · SL  62.2% · miss  2.7% · net/trade ₹ 12.54 best / ₹ 11.77 pessimistic
+   S2 + F2 ATR < 1.2              n   31 · WIN  35.5% · SL  61.3% · miss  3.2% · net/trade ₹ 11.09 best / ₹ 10.63 pessimistic
+   S2 + F3 09:30–14:30            n   40 · WIN  35.0% · SL  62.5% · miss  2.5% · net/trade ₹ 11.49 best / ₹ 10.77 pessimistic
+   S2 + F4 index candle agrees    n   35 · WIN  42.9% · SL  57.1% · miss  0.0% · net/trade ₹ 22.76 best / ₹ 22.46 pessimistic
+   S2 + F1+F2                     n   25 · WIN  32.0% · SL  64.0% · miss  4.0% · net/trade ₹  6.30 best / ₹  5.72 pessimistic
+   S2 + F1+F2+F3+F4               n   19 · WIN  31.6% · SL  68.4% · miss  0.0% · net/trade ₹  5.31 best / ₹  4.75 pessimistic
+   P1 + F1+F2                     n    7 · WIN  14.3% · SL  71.4% · miss 14.3% · net/trade ₹-12.44 best / ₹-12.67 pessimistic · no fill 18
+
+=== DEV ===
+ NIFTY
+   E0 owner (SL 5 / T 40)         n  626 · WIN   9.6% · SL  89.0% · miss  1.4% · net/trade ₹ -1.90 best / ₹ -2.94 pessimistic
+   S1 SL 1×pATR / T 40            n  626 · WIN  18.4% · SL  77.5% · miss  4.2% · net/trade ₹ -1.63 best / ₹ -2.52 pessimistic
+   S2 SL 1×pATR / T 3×SL          n  626 · WIN  22.8% · SL  75.4% · miss  1.8% · net/trade ₹ -1.80 best / ₹ -2.64 pessimistic
+   S3 SL 1.5×pATR / T 3×SL        n  626 · WIN  20.8% · SL  71.7% · miss  7.5% · net/trade ₹ -1.90 best / ₹ -2.90 pessimistic
+   P1 pullback limit + S2         n  303 · WIN  24.4% · SL  70.6% · miss  5.0% · net/trade ₹ -1.36 best / ₹ -2.11 pessimistic · no fill 323
+   S2 + F1 no flip                n  552 · WIN  23.0% · SL  75.0% · miss  2.0% · net/trade ₹ -1.63 best / ₹ -2.45 pessimistic
+   S2 + F2 ATR < 1.2              n  475 · WIN  20.8% · SL  76.8% · miss  2.3% · net/trade ₹ -2.43 best / ₹ -3.21 pessimistic
+   S2 + F3 09:30–14:30            n  595 · WIN  22.9% · SL  75.3% · miss  1.8% · net/trade ₹ -1.82 best / ₹ -2.67 pessimistic
+   S2 + F4 index candle agrees    n  480 · WIN  22.3% · SL  76.3% · miss  1.5% · net/trade ₹ -2.17 best / ₹ -2.97 pessimistic
+   S2 + F1+F2                     n  425 · WIN  21.4% · SL  76.0% · miss  2.6% · net/trade ₹ -2.18 best / ₹ -2.96 pessimistic
+   S2 + F1+F2+F3+F4               n  316 · WIN  20.9% · SL  76.9% · miss  2.2% · net/trade ₹ -2.43 best / ₹ -3.25 pessimistic
+   P1 + F1+F2                     n  221 · WIN  19.9% · SL  73.8% · miss  6.3% · net/trade ₹ -2.62 best / ₹ -3.25 pessimistic · no fill 204
+ SENSEX
+   E0 owner (SL 5 / T 40)         n  633 · WIN  12.6% · SL  87.4% · miss  0.0% · net/trade ₹ -3.14 best / ₹ -6.89 pessimistic
+   S1 SL 1×pATR / T 40            n  633 · WIN  40.3% · SL  59.6% · miss  0.2% · net/trade ₹ -5.68 best / ₹ -7.52 pessimistic
+   S2 SL 1×pATR / T 3×SL          n  633 · WIN  23.2% · SL  74.1% · miss  2.7% · net/trade ₹ -4.65 best / ₹ -7.20 pessimistic
+   S3 SL 1.5×pATR / T 3×SL        n  633 · WIN  19.6% · SL  69.4% · miss 11.1% · net/trade ₹ -5.88 best / ₹ -8.09 pessimistic
+   P1 pullback limit + S2         n  308 · WIN  17.5% · SL  76.3% · miss  6.2% · net/trade ₹-10.63 best / ₹-12.92 pessimistic · no fill 325
+   S2 + F1 no flip                n  570 · WIN  22.6% · SL  74.7% · miss  2.6% · net/trade ₹ -5.03 best / ₹ -7.58 pessimistic
+   S2 + F2 ATR < 1.2              n  496 · WIN  24.0% · SL  74.0% · miss  2.0% · net/trade ₹ -3.26 best / ₹ -5.42 pessimistic
+   S2 + F3 09:30–14:30            n  611 · WIN  22.6% · SL  74.6% · miss  2.8% · net/trade ₹ -5.15 best / ₹ -7.78 pessimistic
+   S2 + F4 index candle agrees    n  478 · WIN  24.1% · SL  73.0% · miss  2.9% · net/trade ₹ -3.02 best / ₹ -5.50 pessimistic
+   S2 + F1+F2                     n  452 · WIN  23.2% · SL  74.8% · miss  2.0% · net/trade ₹ -4.25 best / ₹ -6.41 pessimistic
+   S2 + F1+F2+F3+F4               n  336 · WIN  23.2% · SL  74.1% · miss  2.7% · net/trade ₹ -3.42 best / ₹ -5.54 pessimistic
+   P1 + F1+F2                     n  228 · WIN  18.4% · SL  75.9% · miss  5.7% · net/trade ₹ -8.04 best / ₹ -9.60 pessimistic · no fill 224
+
+=== VAL ===
+ NIFTY
+   E0 owner (SL 5 / T 40)         n  211 · WIN  11.8% · SL  88.2% · miss  0.0% · net/trade ₹ -1.24 best / ₹ -2.31 pessimistic
+   S1 SL 1×pATR / T 40            n  211 · WIN  25.6% · SL  71.6% · miss  2.8% · net/trade ₹  0.09 best / ₹ -0.99 pessimistic
+   S2 SL 1×pATR / T 3×SL          n  211 · WIN  26.1% · SL  72.0% · miss  1.9% · net/trade ₹ -1.30 best / ₹ -2.41 pessimistic
+   S3 SL 1.5×pATR / T 3×SL        n  211 · WIN  26.1% · SL  67.8% · miss  6.2% · net/trade ₹ -0.11 best / ₹ -0.94 pessimistic
+   P1 pullback limit + S2         n   99 · WIN  23.2% · SL  73.7% · miss  3.0% · net/trade ₹ -2.90 best / ₹ -4.12 pessimistic · no fill 112
+   S2 + F1 no flip                n  187 · WIN  24.1% · SL  73.8% · miss  2.1% · net/trade ₹ -2.22 best / ₹ -3.39 pessimistic
+   S2 + F2 ATR < 1.2              n  180 · WIN  25.0% · SL  72.8% · miss  2.2% · net/trade ₹ -2.16 best / ₹ -3.10 pessimistic
+   S2 + F3 09:30–14:30            n  201 · WIN  24.4% · SL  73.6% · miss  2.0% · net/trade ₹ -1.83 best / ₹ -2.98 pessimistic
+   S2 + F4 index candle agrees    n  159 · WIN  25.2% · SL  73.0% · miss  1.9% · net/trade ₹ -2.12 best / ₹ -3.41 pessimistic
+   S2 + F1+F2                     n  157 · WIN  22.3% · SL  75.2% · miss  2.5% · net/trade ₹ -3.50 best / ₹ -4.49 pessimistic
+   S2 + F1+F2+F3+F4               n  113 · WIN  20.4% · SL  77.0% · miss  2.7% · net/trade ₹ -4.51 best / ₹ -5.69 pessimistic
+   P1 + F1+F2                     n   80 · WIN  21.3% · SL  75.0% · miss  3.8% · net/trade ₹ -3.60 best / ₹ -4.85 pessimistic · no fill 77
+ SENSEX
+   E0 owner (SL 5 / T 40)         n  228 · WIN  12.3% · SL  87.7% · miss  0.0% · net/trade ₹ -3.71 best / ₹ -7.92 pessimistic
+   S1 SL 1×pATR / T 40            n  228 · WIN  47.4% · SL  52.6% · miss  0.0% · net/trade ₹ -5.63 best / ₹ -7.64 pessimistic
+   S2 SL 1×pATR / T 3×SL          n  228 · WIN  25.4% · SL  73.2% · miss  1.3% · net/trade ₹ -6.71 best / ₹ -9.88 pessimistic
+   S3 SL 1.5×pATR / T 3×SL        n  228 · WIN  24.1% · SL  65.4% · miss 10.5% · net/trade ₹  0.54 best / ₹ -2.58 pessimistic
+   P1 pullback limit + S2         n  117 · WIN  20.5% · SL  77.8% · miss  1.7% · net/trade ₹-13.15 best / ₹-16.06 pessimistic · no fill 111
+   S2 + F1 no flip                n  206 · WIN  25.2% · SL  73.8% · miss  1.0% · net/trade ₹ -8.03 best / ₹-11.07 pessimistic
+   S2 + F2 ATR < 1.2              n  206 · WIN  26.7% · SL  71.8% · miss  1.5% · net/trade ₹ -3.88 best / ₹ -6.86 pessimistic
+   S2 + F3 09:30–14:30            n  225 · WIN  24.9% · SL  73.8% · miss  1.3% · net/trade ₹ -7.46 best / ₹-10.67 pessimistic
+   S2 + F4 index candle agrees    n  172 · WIN  27.9% · SL  70.3% · miss  1.7% · net/trade ₹ -1.98 best / ₹ -4.96 pessimistic
+   S2 + F1+F2                     n  188 · WIN  26.1% · SL  72.9% · miss  1.1% · net/trade ₹ -5.85 best / ₹ -8.69 pessimistic
+   S2 + F1+F2+F3+F4               n  144 · WIN  27.1% · SL  71.5% · miss  1.4% · net/trade ₹ -3.57 best / ₹ -6.42 pessimistic
+   P1 + F1+F2                     n  100 · WIN  20.0% · SL  78.0% · miss  2.0% · net/trade ₹-13.75 best / ₹-16.23 pessimistic · no fill 88
+
+=== TEST (untouched) ===
+ NIFTY
+   E0 owner (SL 5 / T 40)         n  205 · WIN  11.7% · SL  85.9% · miss  2.4% · net/trade ₹ -0.78 best / ₹ -1.58 pessimistic
+   S1 SL 1×pATR / T 40            n  205 · WIN  15.6% · SL  81.0% · miss  3.4% · net/trade ₹ -1.99 best / ₹ -2.61 pessimistic
+   S2 SL 1×pATR / T 3×SL          n  205 · WIN  23.4% · SL  75.6% · miss  1.0% · net/trade ₹ -2.31 best / ₹ -2.86 pessimistic
+   S3 SL 1.5×pATR / T 3×SL        n  205 · WIN  23.4% · SL  71.7% · miss  4.9% · net/trade ₹ -1.62 best / ₹ -2.22 pessimistic
+   P1 pullback limit + S2         n   84 · WIN  15.5% · SL  82.1% · miss  2.4% · net/trade ₹ -3.67 best / ₹ -4.27 pessimistic · no fill 121
+   S2 + F1 no flip                n  189 · WIN  23.3% · SL  75.7% · miss  1.1% · net/trade ₹ -2.39 best / ₹ -2.94 pessimistic
+   S2 + F2 ATR < 1.2              n  164 · WIN  24.4% · SL  74.4% · miss  1.2% · net/trade ₹ -1.53 best / ₹ -1.96 pessimistic
+   S2 + F3 09:30–14:30            n  189 · WIN  22.2% · SL  76.7% · miss  1.1% · net/trade ₹ -2.70 best / ₹ -3.22 pessimistic
+   S2 + F4 index candle agrees    n  169 · WIN  23.7% · SL  75.1% · miss  1.2% · net/trade ₹ -2.08 best / ₹ -2.57 pessimistic
+   S2 + F1+F2                     n  149 · WIN  24.2% · SL  74.5% · miss  1.3% · net/trade ₹ -1.63 best / ₹ -2.05 pessimistic
+   S2 + F1+F2+F3+F4               n  120 · WIN  25.0% · SL  73.3% · miss  1.7% · net/trade ₹ -1.16 best / ₹ -1.47 pessimistic
+   P1 + F1+F2                     n   64 · WIN  14.1% · SL  84.4% · miss  1.6% · net/trade ₹ -4.21 best / ₹ -4.64 pessimistic · no fill 85
+ SENSEX
+   E0 owner (SL 5 / T 40)         n  224 · WIN  20.5% · SL  79.5% · miss  0.0% · net/trade ₹  0.50 best / ₹ -2.65 pessimistic
+   S1 SL 1×pATR / T 40            n  224 · WIN  46.9% · SL  53.1% · miss  0.0% · net/trade ₹  0.78 best / ₹ -0.29 pessimistic
+   S2 SL 1×pATR / T 3×SL          n  224 · WIN  31.3% · SL  67.0% · miss  1.8% · net/trade ₹  5.49 best / ₹  4.16 pessimistic
+   S3 SL 1.5×pATR / T 3×SL        n  224 · WIN  24.1% · SL  64.7% · miss 11.2% · net/trade ₹  6.56 best / ₹  4.53 pessimistic
+   P1 pullback limit + S2         n   81 · WIN  16.0% · SL  79.0% · miss  4.9% · net/trade ₹ -8.83 best / ₹-10.88 pessimistic · no fill 143
+   S2 + F1 no flip                n  199 · WIN  30.7% · SL  67.3% · miss  2.0% · net/trade ₹  4.45 best / ₹  3.09 pessimistic
+   S2 + F2 ATR < 1.2              n  178 · WIN  31.5% · SL  66.9% · miss  1.7% · net/trade ₹  5.80 best / ₹  4.65 pessimistic
+   S2 + F3 09:30–14:30            n  210 · WIN  31.0% · SL  67.6% · miss  1.4% · net/trade ₹  4.94 best / ₹  3.67 pessimistic
+   S2 + F4 index candle agrees    n  176 · WIN  34.7% · SL  64.2% · miss  1.1% · net/trade ₹  9.47 best / ₹  8.45 pessimistic
+   S2 + F1+F2                     n  155 · WIN  30.3% · SL  67.7% · miss  1.9% · net/trade ₹  3.72 best / ₹  2.51 pessimistic
+   S2 + F1+F2+F3+F4               n  127 · WIN  31.5% · SL  66.9% · miss  1.6% · net/trade ₹  4.69 best / ₹  3.60 pessimistic
+   P1 + F1+F2                     n   59 · WIN  18.6% · SL  76.3% · miss  5.1% · net/trade ₹ -6.75 best / ₹ -8.50 pessimistic · no fill 96
+
+premium ATR(5m) average over all signals: NIFTY ₹10.5 · SENSEX ₹33.1
