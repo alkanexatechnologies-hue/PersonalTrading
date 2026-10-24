@@ -9303,7 +9303,8 @@ async function cpDrain() {
 // 📵 Owner's Telegram list (2026-10-21): ONLY the 09:13 morning plan, the 09:14 opening heat, the hourly index summary and the
 // 15-min candle + best opportunity (NIFTY + SENSEX, only when there is one). Everything else is computed and shown on the
 // screens but not sent. Add a kind here to send it again.
-const TG_ALLOW = new Set<string>(["plan", "open913", "best", "oi15"]);
+// 2026-10-24 owner: also the trade follow-ups — TRADE GIVEN, TARGET 1 / 2, STOP LOSS / breakeven, TIME EXIT (NIFTY + SENSEX)
+const TG_ALLOW = new Set<string>(["plan", "open913", "best", "oi15", "trade"]);
 let _tgDropped = 0;
 const cpSend = (text: string, htmlReady = false, kind = "other") => { if (!TG_ALLOW.has(kind)) { _tgDropped++; return; } for (const part of TG.splitParts(text)) _cpQueue.push({ text: "🎖 <b>ProTrader</b>\n" + TG.emphasize(htmlReady ? part : TG.htmlify(CP.stripTags(part))), html: true }); cpDrain().catch(() => {}); try { fs.appendFileSync(path.join(process.cwd(), "data", "copilot-log.txt"), `\n[${new Date(Date.now() + 19800000).toISOString().slice(0, 19)}]\n${String(text).replace(/<[^>]+>/g, "")}\n`); } catch { /* best-effort */ } };
 const _published = (() => { try { return JSON.parse(fs.readFileSync(path.join(process.cwd(), "backend", "research", "published", "odds.json"), "utf8")); } catch { return null; } })();
@@ -9370,7 +9371,7 @@ async function copilotTick() {
           const prem = cpPremOf(d, sym, tr.side, tr.strike);
           const c15 = (d.chart?.candles || []).filter((c: any) => c.time + 900 <= nowSec), last15 = c15.length ? { time: c15[c15.length - 1].time + 900, close: c15[c15.length - 1].close } : null;
           const msgs = CP.stepTrade(tr, { spot: d.spot.price, prem, last15, nowSec, istMin });
-          for (const m of msgs) cpSend(m);
+          for (const m of msgs) cpSend(m, false, "trade");
           if ((tr.state as string) === "CLOSED") { _cp.closed.push(tr); _cp.trades[sym] = null; _cp.sent[`cool|${sym}`] = nowSec; }
           cpSave();
         }
@@ -9385,7 +9386,7 @@ async function copilotTick() {
             if (bad.length) { delete _cp.pending[sym]; cpSave(); cpNotGiven(d.name, pd.side === "bull" ? "CE" : "PE", pd.trigger, "INVALID PLAN"); console.log(`[tg-check] ${sym} ${pd.side} retest not given: ${bad.join("; ")}`); }
             if (t) {
               t.review = pd.review; t.entryKind = "RETEST"; _cp.trades[sym] = t; delete _cp.pending[sym]; cpSave();
-              cpSend(`📌 <b>TRADE GIVEN ON THE RETEST (review ${pd.review.grade}${pd.review.grade === "B" ? " — HALF SIZE" : ""})</b>\n5-min candle ${new Date((r.hit.time + 19800) * 1000).toISOString().slice(11, 16)} came back to ${Math.round(pd.side === "bull" ? r.hit.low : r.hit.high)} and closed ${Math.round(r.hit.close)} — ${pd.side === "bull" ? "above" : "below"} ${Math.round(pd.trigger)}. I will follow it to Target 1, Target 2, stop or 15:12.\n` + TG.tradeAlert(d, pd.side, "TRIGGERED", cpOdds(sym)), true);
+              cpSend(`📌 <b>TRADE GIVEN ON THE RETEST (review ${pd.review.grade}${pd.review.grade === "B" ? " — HALF SIZE" : ""})</b>\n5-min candle ${new Date((r.hit.time + 19800) * 1000).toISOString().slice(11, 16)} came back to ${Math.round(pd.side === "bull" ? r.hit.low : r.hit.high)} and closed ${Math.round(r.hit.close)} — ${pd.side === "bull" ? "above" : "below"} ${Math.round(pd.trigger)}. I will follow it to Target 1, Target 2, stop or 15:12.\n` + TG.tradeAlert(d, pd.side, "TRIGGERED", cpOdds(sym)), true, "trade");
             }
           } else if (r.expired || !pl || Math.round(pl.trigger) !== Math.round(pd.trigger) || istMin > 885) {
             delete _cp.pending[sym]; cpSave();
