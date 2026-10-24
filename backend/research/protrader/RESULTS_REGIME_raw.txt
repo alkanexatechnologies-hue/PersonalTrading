@@ -1,0 +1,221 @@
+REGIME STUDY · data 2024-10-01 → 2026-10-23 · 19400 evaluation points (15m closes 09:45–14:30)
+
+PT SIGNALS BY REGIME · LAST 15 SESSIONS
+  NIFTY
+    all PT signals                       38 signals · win  60.5% · stop  36.8% · option net 1.1%
+    in TRENDING_UP                        4 signals · win  75.0% · stop  25.0% · option net 14.8%
+    in TRENDING_DOWN                      2 signals · win  50.0% · stop  50.0% · option net -13.1%
+    in CHOPPY                             3 signals · win  66.7% · stop  33.3% · option net -0.8%
+    in TRANSITION                        20 signals · win  50.0% · stop  50.0% · option net -0.7%
+    in COMPRESSION                        3 signals · win  66.7% · stop   0.0% · option net -2.1%
+    in UNKNOWN_DATA                       6 signals · win  83.3% · stop  16.7% · option net 5.3%
+    GATE: CE in UP / PE in DOWN only      6 signals · win  66.7% · stop  33.3% · option net 5.5%
+    signals the gate turns into WAIT     32 signals · win  59.4% · stop  37.5% · option net 0.3%
+    CHOPPY removed only                  35 signals · win  60.0% · stop  37.1% · option net 1.3%
+      2026-10-05 09:25 CE WIN  · regime UNKNOWN_DATA → WAIT
+      2026-10-05 09:45 CE STOP · regime TRENDING_UP
+      2026-10-05 11:45 PE WIN  · regime TRANSITION → WAIT
+      2026-10-05 13:35 CE WIN  · regime TRANSITION → WAIT
+      2026-10-06 09:30 CE WIN  · regime UNKNOWN_DATA → WAIT
+      2026-10-06 09:45 CE WIN  · regime TRANSITION → WAIT
+      2026-10-06 12:35 CE TIME · regime COMPRESSION → WAIT
+      2026-10-06 13:35 CE WIN  · regime COMPRESSION → WAIT
+      2026-10-06 14:00 CE WIN  · regime COMPRESSION → WAIT
+      2026-10-07 12:45 PE WIN  · regime CHOPPY → WAIT
+      2026-10-09 09:20 CE WIN  · regime UNKNOWN_DATA → WAIT
+      2026-10-09 09:25 CE WIN  · regime UNKNOWN_DATA → WAIT
+      2026-10-09 12:50 CE WIN  · regime TRANSITION → WAIT
+      2026-10-12 09:50 PE STOP · regime TRANSITION → WAIT
+      2026-10-12 13:30 PE STOP · regime TRANSITION → WAIT
+      2026-10-12 14:10 PE WIN  · regime TRANSITION → WAIT
+      2026-10-13 09:20 CE WIN  · regime UNKNOWN_DATA → WAIT
+      2026-10-13 12:30 CE STOP · regime CHOPPY → WAIT
+      2026-10-13 13:40 CE WIN  · regime TRENDING_UP
+      2026-10-13 14:00 CE WIN  · regime TRENDING_UP
+      2026-10-13 14:05 CE WIN  · regime TRENDING_UP
+      2026-10-14 11:30 PE WIN  · regime TRANSITION → WAIT
+      2026-10-14 12:00 CE STOP · regime TRANSITION → WAIT
+      2026-10-14 12:55 PE WIN  · regime TRANSITION → WAIT
+      2026-10-16 10:05 CE WIN  · regime TRANSITION → WAIT
+      2026-10-16 13:30 CE STOP · regime TRANSITION → WAIT
+      2026-10-19 09:25 PE STOP · regime UNKNOWN_DATA → WAIT
+      2026-10-19 10:45 PE STOP · regime TRANSITION → WAIT
+      2026-10-19 11:35 PE WIN  · regime TRANSITION → WAIT
+      2026-10-19 13:25 PE STOP · regime TRENDING_DOWN
+      2026-10-19 14:25 PE WIN  · regime TRENDING_DOWN
+      2026-10-22 10:25 CE WIN  · regime TRANSITION → WAIT
+      2026-10-22 11:50 PE STOP · regime TRANSITION → WAIT
+      2026-10-22 12:55 CE STOP · regime TRANSITION → WAIT
+      2026-10-22 13:35 PE STOP · regime TRANSITION → WAIT
+      2026-10-22 14:20 PE STOP · regime TRANSITION → WAIT
+      2026-10-23 09:55 PE WIN  · regime CHOPPY → WAIT
+      2026-10-23 13:40 CE STOP · regime TRANSITION → WAIT
+  SENSEX
+    all PT signals                       44 signals · win  63.6% · stop  36.4% · option net 1.0%
+    in TRENDING_UP                        2 signals · win  50.0% · stop  50.0% · option net 3.2%
+    in TRENDING_DOWN                      5 signals · win  80.0% · stop  20.0% · option net 4.3%
+    in CHOPPY                             3 signals · win  33.3% · stop  66.7% · option net -21.3%
+    in TRANSITION                        25 signals · win  64.0% · stop  36.0% · option net 1.3%
+    in COMPRESSION                        1 signals · win   0.0% · stop 100.0% · option net -2.2%
+    in UNKNOWN_DATA                       8 signals · win  75.0% · stop  25.0% · option net 5.9%
+    GATE: CE in UP / PE in DOWN only      7 signals · win  71.4% · stop  28.6% · option net 4.0%
+    signals the gate turns into WAIT     37 signals · win  62.2% · stop  37.8% · option net 0.4%
+    CHOPPY removed only                  41 signals · win  65.9% · stop  34.1% · option net 2.6%
+      2026-10-01 09:50 PE STOP · regime CHOPPY → WAIT
+      2026-10-01 12:05 PE WIN  · regime TRANSITION → WAIT
+      2026-10-01 12:10 PE WIN  · regime TRANSITION → WAIT
+      2026-10-05 13:35 CE WIN  · regime TRANSITION → WAIT
+      2026-10-05 13:40 CE STOP · regime TRANSITION → WAIT
+      2026-10-06 09:35 CE WIN  · regime UNKNOWN_DATA → WAIT
+      2026-10-06 09:50 CE WIN  · regime TRANSITION → WAIT
+      2026-10-07 09:20 PE WIN  · regime UNKNOWN_DATA → WAIT
+      2026-10-07 11:00 CE WIN  · regime TRANSITION → WAIT
+      2026-10-07 12:00 CE STOP · regime TRANSITION → WAIT
+      2026-10-07 12:45 PE WIN  · regime TRANSITION → WAIT
+      2026-10-07 13:05 PE STOP · regime TRANSITION → WAIT
+      2026-10-08 09:20 PE WIN  · regime UNKNOWN_DATA → WAIT
+      2026-10-08 09:30 PE WIN  · regime UNKNOWN_DATA → WAIT
+      2026-10-09 12:50 CE WIN  · regime TRANSITION → WAIT
+      2026-10-12 09:35 PE WIN  · regime UNKNOWN_DATA → WAIT
+      2026-10-12 13:30 PE WIN  · regime TRENDING_DOWN
+      2026-10-12 14:15 PE WIN  · regime TRANSITION → WAIT
+      2026-10-13 09:20 CE WIN  · regime UNKNOWN_DATA → WAIT
+      2026-10-13 12:25 CE WIN  · regime CHOPPY → WAIT
+      2026-10-14 11:30 PE WIN  · regime TRANSITION → WAIT
+      2026-10-14 12:05 CE STOP · regime TRANSITION → WAIT
+      2026-10-14 12:55 PE WIN  · regime TRANSITION → WAIT
+      2026-10-14 13:00 PE WIN  · regime TRANSITION → WAIT
+      2026-10-14 13:10 PE STOP · regime TRANSITION → WAIT
+      2026-10-15 09:35 CE STOP · regime UNKNOWN_DATA → WAIT
+      2026-10-15 09:45 CE WIN  · regime TRENDING_UP
+      2026-10-16 13:30 CE STOP · regime TRANSITION → WAIT
+      2026-10-16 14:25 PE STOP · regime COMPRESSION → WAIT
+      2026-10-19 10:00 PE STOP · regime TRANSITION → WAIT
+      2026-10-19 10:35 PE WIN  · regime TRANSITION → WAIT
+      2026-10-19 11:35 PE WIN  · regime TRANSITION → WAIT
+      2026-10-19 12:00 PE WIN  · regime TRANSITION → WAIT
+      2026-10-19 12:35 PE WIN  · regime TRENDING_DOWN
+      2026-10-19 13:15 PE WIN  · regime TRENDING_DOWN
+      2026-10-19 13:30 PE STOP · regime TRENDING_DOWN
+      2026-10-21 09:40 CE STOP · regime TRENDING_UP
+      2026-10-21 11:45 PE WIN  · regime TRANSITION → WAIT
+      2026-10-21 11:55 PE WIN  · regime TRENDING_DOWN
+      2026-10-22 09:20 PE STOP · regime UNKNOWN_DATA → WAIT
+      2026-10-22 10:00 PE STOP · regime CHOPPY → WAIT
+      2026-10-22 10:30 CE STOP · regime TRANSITION → WAIT
+      2026-10-22 11:10 CE STOP · regime TRANSITION → WAIT
+      2026-10-22 12:00 PE WIN  · regime TRANSITION → WAIT
+
+PT SIGNALS BY REGIME · DEV
+  NIFTY
+    all PT signals                      626 signals · win  46.8% · stop  49.8% · option net -3.2%
+    in TRENDING_UP                       29 signals · win  51.7% · stop  44.8% · option net -0.8%
+    in TRENDING_DOWN                     31 signals · win  64.5% · stop  25.8% · option net 2.0%
+    in CHOPPY                           105 signals · win  45.7% · stop  50.5% · option net -3.6%
+    in TRANSITION                       344 signals · win  45.6% · stop  51.2% · option net -3.6%
+    in COMPRESSION                       55 signals · win  38.2% · stop  61.8% · option net -4.3%
+    in UNKNOWN_DATA                      62 signals · win  51.6% · stop  45.2% · option net -2.8%
+    GATE: CE in UP / PE in DOWN only     49 signals · win  63.3% · stop  28.6% · option net 1.6%
+    signals the gate turns into WAIT    577 signals · win  45.4% · stop  51.6% · option net -3.6%
+    CHOPPY removed only                 521 signals · win  47.0% · stop  49.7% · option net -3.1%
+  SENSEX
+    all PT signals                      633 signals · win  50.4% · stop  46.4% · option net -1.8%
+    in TRENDING_UP                       31 signals · win  67.7% · stop  29.0% · option net 0.1%
+    in TRENDING_DOWN                     23 signals · win  52.2% · stop  47.8% · option net -0.0%
+    in CHOPPY                           115 signals · win  48.7% · stop  48.7% · option net -0.7%
+    in TRANSITION                       361 signals · win  49.6% · stop  47.6% · option net -2.0%
+    in COMPRESSION                       49 signals · win  40.8% · stop  53.1% · option net -5.6%
+    in UNKNOWN_DATA                      54 signals · win  57.4% · stop  37.0% · option net -0.6%
+    GATE: CE in UP / PE in DOWN only     48 signals · win  58.3% · stop  39.6% · option net -1.5%
+    signals the gate turns into WAIT    585 signals · win  49.7% · stop  47.0% · option net -1.8%
+    CHOPPY removed only                 518 signals · win  50.8% · stop  45.9% · option net -2.0%
+
+PT SIGNALS BY REGIME · VAL
+  NIFTY
+    all PT signals                      211 signals · win  49.8% · stop  48.3% · option net -1.6%
+    in TRENDING_UP                        9 signals · win  44.4% · stop  55.6% · option net -12.0%
+    in TRENDING_DOWN                     14 signals · win  42.9% · stop  50.0% · option net -6.2%
+    in CHOPPY                            23 signals · win  52.2% · stop  47.8% · option net 1.9%
+    in TRANSITION                       133 signals · win  51.1% · stop  46.6% · option net -0.3%
+    in COMPRESSION                       17 signals · win  41.2% · stop  58.8% · option net -11.7%
+    in UNKNOWN_DATA                      15 signals · win  53.3% · stop  46.7% · option net 4.0%
+    GATE: CE in UP / PE in DOWN only     22 signals · win  45.5% · stop  50.0% · option net -8.3%
+    signals the gate turns into WAIT    189 signals · win  50.3% · stop  48.1% · option net -0.8%
+    CHOPPY removed only                 188 signals · win  49.5% · stop  48.4% · option net -2.0%
+  SENSEX
+    all PT signals                      228 signals · win  54.4% · stop  41.2% · option net -0.1%
+    in TRENDING_UP                       11 signals · win  63.6% · stop  27.3% · option net 2.0%
+    in TRENDING_DOWN                     20 signals · win  40.0% · stop  55.0% · option net -3.7%
+    in CHOPPY                            23 signals · win  52.2% · stop  34.8% · option net 4.2%
+    in TRANSITION                       151 signals · win  55.6% · stop  41.1% · option net -0.3%
+    in COMPRESSION                       19 signals · win  52.6% · stop  47.4% · option net -4.0%
+    in UNKNOWN_DATA                       4 signals · win  75.0% · stop  25.0% · option net 14.9%
+    GATE: CE in UP / PE in DOWN only     30 signals · win  46.7% · stop  46.7% · option net -3.7%
+    signals the gate turns into WAIT    198 signals · win  55.6% · stop  40.4% · option net 0.4%
+    CHOPPY removed only                 205 signals · win  54.6% · stop  42.0% · option net -0.6%
+
+PT SIGNALS BY REGIME · TEST (untouched)
+  NIFTY
+    all PT signals                      205 signals · win  52.7% · stop  44.4% · option net -0.4%
+    in TRENDING_UP                        8 signals · win  62.5% · stop  37.5% · option net 6.6%
+    in TRENDING_DOWN                      8 signals · win  25.0% · stop  62.5% · option net -8.4%
+    in CHOPPY                            30 signals · win  56.7% · stop  40.0% · option net 2.8%
+    in TRANSITION                       123 signals · win  51.2% · stop  46.3% · option net -1.2%
+    in COMPRESSION                       14 signals · win  50.0% · stop  42.9% · option net -0.8%
+    in UNKNOWN_DATA                      22 signals · win  63.6% · stop  36.4% · option net 0.3%
+    GATE: CE in UP / PE in DOWN only     15 signals · win  46.7% · stop  53.3% · option net -1.5%
+    signals the gate turns into WAIT    190 signals · win  53.2% · stop  43.7% · option net -0.3%
+    CHOPPY removed only                 175 signals · win  52.0% · stop  45.1% · option net -1.0%
+  SENSEX
+    all PT signals                      224 signals · win  60.3% · stop  36.2% · option net 0.3%
+    in TRENDING_UP                       11 signals · win  63.6% · stop  27.3% · option net 3.0%
+    in TRENDING_DOWN                     12 signals · win  58.3% · stop  33.3% · option net 6.4%
+    in CHOPPY                            28 signals · win  50.0% · stop  50.0% · option net -4.7%
+    in TRANSITION                       129 signals · win  62.0% · stop  34.1% · option net 0.5%
+    in COMPRESSION                       23 signals · win  56.5% · stop  43.5% · option net -0.2%
+    in UNKNOWN_DATA                      21 signals · win  66.7% · stop  28.6% · option net 1.6%
+    GATE: CE in UP / PE in DOWN only     21 signals · win  61.9% · stop  33.3% · option net 5.1%
+    signals the gate turns into WAIT    203 signals · win  60.1% · stop  36.5% · option net -0.2%
+    CHOPPY removed only                 196 signals · win  61.7% · stop  34.2% · option net 1.0%
+
+CLASSIFICATION · DEV · 11680 points · forward truth: TREND_UP 12.5% · TREND_DOWN 12.1% · CHOP 51.3%
+  BASELINE (EMA21)           trend calls 10789 · right  13.4% · false  86.6% (opposite 10.9%) · missed trends 49.7% of 2869 · chop calls 851 right 48.4% (then trend 27.7%) · run 5.83 · episodes 1253 detected 84.4% delay 0
+  FULL detector              trend calls 2683 · right  13.2% · false  86.8% (opposite 10.8%) · missed trends 87.7% of 2869 · chop calls 1618 right 51.2% (then trend 23.9%) · run 3.10 · episodes 1253 detected 40.7% delay 0
+  ablation − ER              trend calls 4083 · right  13.8% · false  86.2% (opposite 10.4%) · missed trends 80.4% of 2869 · chop calls 2702 right 50.5% (then trend 25.0%) · run 3.11 · episodes 1253 detected 49.9% delay 0
+  ablation − ADX             trend calls 3176 · right  12.9% · false  87.1% (opposite 10.9%) · missed trends 85.7% of 2869 · chop calls 3749 right 50.8% (then trend 24.9%) · run 2.35 · episodes 1253 detected 50.3% delay 0
+  ablation − slope           trend calls 3044 · right  12.7% · false  87.3% (opposite 11.1%) · missed trends 86.5% of 2869 · chop calls 1618 right 51.2% (then trend 23.9%) · run 2.84 · episodes 1253 detected 44.5% delay 0
+  ablation − VWAP crosses    trend calls 3039 · right  13.2% · false  86.8% (opposite 10.3%) · missed trends 86.1% of 2869 · chop calls 924 right 52.4% (then trend 23.8%) · run 3.34 · episodes 1253 detected 41.3% delay 0
+  ablation − compression     trend calls 2766 · right  12.9% · false  87.1% (opposite 11.1%) · missed trends 87.5% of 2869 · chop calls 1792 right 52.8% (then trend 22.7%) · run 3.13 · episodes 1253 detected 41.7% delay 0
+  ablation − premium         trend calls 3366 · right  13.4% · false  86.6% (opposite 10.5%) · missed trends 84.3% of 2869 · chop calls 1618 right 51.2% (then trend 23.9%) · run 3.62 · episodes 1253 detected 43.2% delay 0
+  label shares (FULL): CHOP 13.9% · UP 12.0% · DOWN 10.9% · COMP 6.2% · TRANS 56.6% · UNKNOWN 0.4%
+
+CLASSIFICATION · VAL · 3840 points · forward truth: TREND_UP 12.9% · TREND_DOWN 14.3% · CHOP 49.6%
+  BASELINE (EMA21)           trend calls 3594 · right  13.4% · false  86.6% (opposite 13.7%) · missed trends 53.7% of 1044 · chop calls 246 right 45.5% (then trend 28.5%) · run 6.03 · episodes 468 detected 81.2% delay 0
+  FULL detector              trend calls 1084 · right  11.6% · false  88.4% (opposite 10.3%) · missed trends 87.9% of 1044 · chop calls 368 right 45.4% (then trend 30.2%) · run 3.24 · episodes 468 detected 40.4% delay 0
+  ablation − ER              trend calls 1641 · right  12.2% · false  87.8% (opposite 11.8%) · missed trends 80.7% of 1044 · chop calls 543 right 47.0% (then trend 30.6%) · run 3.03 · episodes 468 detected 48.9% delay 0
+  ablation − ADX             trend calls 1191 · right  12.2% · false  87.8% (opposite 10.8%) · missed trends 86.1% of 1044 · chop calls 1195 right 45.5% (then trend 30.5%) · run 2.43 · episodes 468 detected 46.4% delay 0
+  ablation − slope           trend calls 1265 · right  11.2% · false  88.8% (opposite 11.2%) · missed trends 86.4% of 1044 · chop calls 368 right 45.4% (then trend 30.2%) · run 2.95 · episodes 468 detected 47.2% delay 0
+  ablation − VWAP crosses    trend calls 1262 · right  12.3% · false  87.7% (opposite 11.2%) · missed trends 85.2% of 1044 · chop calls 164 right 45.7% (then trend 28.0%) · run 3.65 · episodes 468 detected 41.0% delay 0
+  ablation − compression     trend calls 1108 · right  11.7% · false  88.3% (opposite 10.3%) · missed trends 87.5% of 1044 · chop calls 405 right 44.4% (then trend 31.1%) · run 3.35 · episodes 468 detected 41.2% delay 0
+  ablation − premium         trend calls 1236 · right  11.0% · false  89.0% (opposite 10.8%) · missed trends 87.0% of 1044 · chop calls 368 right 45.4% (then trend 30.2%) · run 3.67 · episodes 468 detected 42.1% delay 0
+  label shares (FULL): CHOP 9.6% · UP 10.3% · DOWN 18.0% · COMP 6.0% · TRANS 56.2% · UNKNOWN 0.0%
+
+CLASSIFICATION · TEST · 3880 points · forward truth: TREND_UP 10.8% · TREND_DOWN 15.1% · CHOP 49.3%
+  BASELINE (EMA21)           trend calls 3616 · right  12.6% · false  87.4% (opposite 12.9%) · missed trends 54.4% of 1002 · chop calls 264 right 48.1% (then trend 29.5%) · run 5.96 · episodes 433 detected 80.8% delay 0
+  FULL detector              trend calls 1035 · right  12.8% · false  87.2% (opposite 12.1%) · missed trends 86.8% of 1002 · chop calls 449 right 47.2% (then trend 24.1%) · run 3.23 · episodes 433 detected 39.0% delay 0
+  ablation − ER              trend calls 1540 · right  11.9% · false  88.1% (opposite 13.3%) · missed trends 81.7% of 1002 · chop calls 743 right 47.6% (then trend 25.8%) · run 3.04 · episodes 433 detected 48.7% delay 0
+  ablation − ADX             trend calls 1208 · right  13.2% · false  86.8% (opposite 12.4%) · missed trends 84.1% of 1002 · chop calls 1269 right 47.5% (then trend 26.2%) · run 2.40 · episodes 433 detected 48.0% delay 0
+  ablation − slope           trend calls 1176 · right  12.3% · false  87.7% (opposite 12.3%) · missed trends 85.5% of 1002 · chop calls 449 right 47.2% (then trend 24.1%) · run 2.92 · episodes 433 detected 43.6% delay 0
+  ablation − VWAP crosses    trend calls 1187 · right  12.0% · false  88.0% (opposite 11.4%) · missed trends 85.7% of 1002 · chop calls 201 right 48.8% (then trend 24.4%) · run 3.70 · episodes 433 detected 40.0% delay 0
+  ablation − compression     trend calls 1058 · right  12.7% · false  87.3% (opposite 11.8%) · missed trends 86.6% of 1002 · chop calls 471 right 47.1% (then trend 24.2%) · run 3.34 · episodes 433 detected 39.3% delay 0
+  ablation − premium         trend calls 1225 · right  12.9% · false  87.1% (opposite 12.0%) · missed trends 84.2% of 1002 · chop calls 449 right 47.2% (then trend 24.1%) · run 3.76 · episodes 433 detected 41.1% delay 0
+  label shares (FULL): CHOP 11.6% · UP 11.9% · DOWN 14.8% · COMP 4.6% · TRANS 57.1% · UNKNOWN 0.0%
+
+BY INDEX AND SESSION TYPE (FULL detector, all periods)
+  NIFTY                      trend calls 2429 · right  12.6% · false  87.4% (opposite 11.6%) · missed trends 87.7% of 2490 · chop calls 1170 right 49.1% (then trend 26.2%) · run 3.18 · episodes 1091 detected 40.6% delay 0
+  SENSEX                     trend calls 2373 · right  12.9% · false  87.1% (opposite 10.4%) · missed trends 87.4% of 2425 · chop calls 1265 right 50.0% (then trend 23.6%) · run 3.12 · episodes 1063 detected 40.0% delay 0
+  open 09:45–10:45           trend calls 1046 · right  13.7% · false  86.3% (opposite 9.9%) · missed trends 86.2% of 1039 · chop calls 730 right 50.8% (then trend 22.3%) · run 2.07 · episodes 245 detected 42.4% delay 0
+  mid 10:45–13:30            trend calls 2740 · right  12.4% · false  87.6% (opposite 11.0%) · missed trends 87.1% of 2634 · chop calls 1292 right 49.1% (then trend 26.0%) · run 2.86 · episodes 1436 detected 39.7% delay 0
+  late 13:30–14:30           trend calls 1016 · right  12.7% · false  87.3% (opposite 11.9%) · missed trends 89.6% of 1242 · chop calls 413 right 49.2% (then trend 25.7%) · run 2.51 · episodes 754 detected 37.7% delay 0
+  expiry days                trend calls  900 · right  14.8% · false  85.2% (opposite 11.4%) · missed trends 86.8% of 1005 · chop calls 533 right 51.8% (then trend 23.1%) · run 3.13 · episodes 442 detected 43.4% delay 0
+  other days                 trend calls 3902 · right  12.3% · false  87.7% (opposite 10.9%) · missed trends 87.8% of 3910 · chop calls 1902 right 49.0% (then trend 25.3%) · run 3.16 · episodes 1712 detected 39.5% delay 0

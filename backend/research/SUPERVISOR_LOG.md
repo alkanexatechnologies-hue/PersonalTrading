@@ -239,3 +239,17 @@ score is anti-calibrated (100 → 28.6%).
 - **Not stable across indices.**
 
 **Verdict:** no change to live logic. SENSEX forward-test candidate only.
+
+## 2026-10-25 · Market Regime Detector, research (`protrader/RESULTS_REGIME.md`)
+
+**Built:** a pure classifier (ER, ADX / ±DI, EMA slope / ATR, VWAP crosses, compression, premium agreement; configurable
+unvalidated thresholds) with 11 unit tests.
+
+**Validation:** 19,400 points, DEV / VAL / TEST.
+- Trend calls are right 12–13% vs a 12–13% base rate and the EMA21 baseline's 13%. Chop calls are right 45–51% vs a
+  50% base.
+- No feature adds value in the ablations.
+
+**PT regime gate:** DEV NIFTY 63% vs 47%, but VAL 46% vs 50% → not robust.
+
+**Verdict:** NOT VALIDATED. Research only; no live change.
