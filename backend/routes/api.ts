@@ -9381,9 +9381,17 @@ async function copilotTick() {
           const c5: any[] = await getCandlesCached(sym, "5m").catch(() => []) as any[];
           const r = CP.retestCheck(pd, c5, nowSec), pl = T.plans?.[pd.side];
           if (r.hit && pl && Math.round(pl.trigger) === Math.round(pd.trigger) && istMin <= 885) {
-            const bad = TC.planProblems(d, pd.side, { triggered: true });
-            const t: any = bad.length ? null : CP.openTrade(d, pd.side, nowSec);
-            if (bad.length) { delete _cp.pending[sym]; cpSave(); cpNotGiven(d.name, pd.side === "bull" ? "CE" : "PE", pd.trigger, "INVALID PLAN"); console.log(`[tg-check] ${sym} ${pd.side} retest not given: ${bad.join("; ")}`); }
+            const bad = TC.planProblems(d, pd.side, { triggered: true }), leg = pd.side === "bull" ? "CE" : "PE";
+            // ProTrader-approved 2026-10-24 (backtest #3, P2 + P5): no chasing (premium 10%+ above the trigger close) · no new trade in a fast market
+            const late = CP.chased(pd.premAtTrigger, cpPremOf(d, sym, leg, pd.strike ?? pl.strike));
+            const fast = CP.fastMarket((d.chart?.candles || []).filter((c: any) => c.time + 900 <= nowSec && new Date((c.time + 19800) * 1000).toISOString().slice(0, 10) === day), T.atr15);   // today's closed candles, as in the backtest
+            const why: CL.NotGiven["why"] | null = bad.length ? "INVALID PLAN" : late ? "LATE ENTRY" : fast ? "FAST MARKET" : null;
+            const t: any = why ? null : CP.openTrade(d, pd.side, nowSec);
+            if (why) {
+              delete _cp.pending[sym]; cpSave(); cpNotGiven(d.name, leg, pd.trigger, why);
+              console.log(`[tg-check] ${sym} ${pd.side} retest not given: ${why}${bad.length ? " — " + bad.join("; ") : ""}`);
+              cpSend(`⏹ <b>${d.name} ${leg} — NOT GIVEN at the retest</b>\n${why === "LATE ENTRY" ? "The premium ran 10%+ above its price at the trigger — ProTrader does not chase." : why === "FAST MARKET" ? "The last hour's candles are 1.5× normal size — stops get hit by noise; no new trade." : "The plan's numbers do not hold: " + bad.join("; ")}`, true, "trade");
+            }
             if (t) {
               t.review = pd.review; t.entryKind = "RETEST"; _cp.trades[sym] = t; delete _cp.pending[sym]; cpSave();
               cpSend(`📌 <b>TRADE GIVEN ON THE RETEST (review ${pd.review.grade}${pd.review.grade === "B" ? " — HALF SIZE" : ""})</b>\n5-min candle ${new Date((r.hit.time + 19800) * 1000).toISOString().slice(11, 16)} came back to ${Math.round(pd.side === "bull" ? r.hit.low : r.hit.high)} and closed ${Math.round(r.hit.close)} — ${pd.side === "bull" ? "above" : "below"} ${Math.round(pd.trigger)}. I will follow it to Target 1, Target 2, stop or 15:12.\n` + TG.tradeAlert(d, pd.side, "TRIGGERED", cpOdds(sym)), true, "trade");
@@ -9439,7 +9447,8 @@ async function copilotTick() {
             else if (free && rv && rv.grade !== "C" && !_cp.pending?.[sym]) {
               const c15 = (d.chart?.candles || []).filter((c: any) => c.time + 900 <= nowSec), from = c15.length ? c15[c15.length - 1].time + 900 : nowSec;
               _cp.pending = _cp.pending || {};
-              _cp.pending[sym] = { side, trigger: p.trigger, atr: T.atr15, from, until: from + 1800, review: { grade: rv.grade, score: rv.score, passed: rv.passed, failed: rv.failed } };
+              _cp.pending[sym] = { side, trigger: p.trigger, atr: T.atr15, from, until: from + 1800, review: { grade: rv.grade, score: rv.score, passed: rv.passed, failed: rv.failed },
+                strike: p.strike, premAtTrigger: cpPremOf(d, sym, side === "bull" ? "CE" : "PE", p.strike) ?? p.premNow ?? null };
               cpSave();
               cpSend(`🎯 <b>TRIGGERED — WAITING FOR THE RETEST</b> (ProTrader rule)\n${side === "bull" ? "CE" : "PE"} is given only if, by ${new Date((from + 1800 + 19800) * 1000).toISOString().slice(11, 16)}, a 5-min candle comes back to within ${Math.round(0.25 * T.atr15)} pts of <b>${Math.round(p.trigger)}</b> and closes ${side === "bull" ? "above" : "below"} it. No chasing.\n` + opp + rvH, true);
             }

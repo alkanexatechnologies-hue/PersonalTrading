@@ -127,3 +127,14 @@ export function retestCheck(p: { side: "bull" | "bear"; trigger: number; atr: nu
   const hit = closed.find((b) => (s > 0 ? b.low <= p.trigger + 0.25 * p.atr : b.high >= p.trigger - 0.25 * p.atr) && s * (b.close - p.trigger) > 0) || null;
   return { hit, expired: !hit && nowSec >= p.until + 300 };
 }
+
+// ---------------------------------------------------------------- entry gates (ProTrader-approved 2026-10-24, backtest #3: P2 + P5)
+/** P2 no chasing: on the retest, the premium must not be more than `max` (10%) above the premium at the trigger close. */
+export function chased(premAtTrigger: number | null | undefined, premNow: number | null | undefined, max = 0.10): boolean {
+  return premAtTrigger != null && premAtTrigger > 0 && premNow != null && premNow > (1 + max) * premAtTrigger;
+}
+/** P5 fast market: the last 4 CLOSED 15-min candles average ≥ `k` (1.5) × ATR15 → no new trade (stops get hit by noise). */
+export function fastMarket(closed15: { high: number; low: number }[], atr15: number, k = 1.5): boolean {
+  const prev = closed15.slice(-4);
+  return Number.isFinite(atr15) && atr15 > 0 && prev.length >= 3 && prev.reduce((a, c) => a + (c.high - c.low), 0) / prev.length >= k * atr15;
+}

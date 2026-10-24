@@ -30,3 +30,13 @@ test("retest entry: a closed 5-min candle back within 0.25 ATR of the broken lev
   assert.equal(r.hit, null); assert.equal(r.expired, true);
   assert.equal(retestCheck({ ...p, side: "bear", trigger: 100 }, [b(0, 92, 99, 95)], T0 + 300)!.hit!.close, 95);
 });
+
+test("entry gates (backtest #3, P2 + P5): no chasing above +10%, no trade in a fast market", async () => {
+  const { chased, fastMarket } = await import("./copilot");
+  assert.equal(chased(100, 110), false); assert.equal(chased(100, 110.5), true);
+  assert.equal(chased(null, 200), false, "no trigger premium recorded → no gate");
+  const c = (r: number) => ({ high: r, low: 0 });
+  assert.equal(fastMarket([c(90), c(95), c(95), c(100)], 60), true);   // avg 95 ≥ 1.5 × 60
+  assert.equal(fastMarket([c(50), c(60), c(70), c(80)], 60), false);   // avg 65
+  assert.equal(fastMarket([c(200), c(200)], 60), false, "needs 3 closed candles");
+});

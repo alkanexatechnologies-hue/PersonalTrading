@@ -113,3 +113,18 @@ of 4 cells.
   - NIFTY: 2-year −0.8% per trade; last 20 sessions +1.9%.
   - SENSEX: 2-year −2.8%; last 20 sessions −0.1%.
   - Both "in line with the long run".
+
+## 2026-10-24 · Phase-2 proposals from the 19–23 Oct audit — backtest #3 (`protrader/RESULTS3.md`)
+
+**Tested** (pre-registered, one change at a time vs the live co-pilot, real Dhan premiums 2024-10-01 → 2026-10-23,
+NIFTY + SENSEX, development / validation): wider stop, hard touch stop, no chasing, premium targets, time filter,
+fast-market skip, and no-chasing + fast-market together.
+
+**Verdict:**
+- **APPROVE P2 + P5 together:** at the retest, no trade if the premium is 10%+ above its price at the trigger close, or if
+  the last 4 closed 15-min candles of the day average ≥ 1.5 × ATR15. Better in all four cells, fewer stop losses, lower
+  drawdown. Implemented in `copilot.ts` (`chased`, `fastMarket`) + the co-pilot retest step; recorded as "not given"
+  (LATE ENTRY / FAST MARKET) with a Telegram note.
+- **REJECT** wider stop, hard touch stop, premium targets (half at +50%), time filter.
+
+**Still not proven profitable** — paper / minimum size.

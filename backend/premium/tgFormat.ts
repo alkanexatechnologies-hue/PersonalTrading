@@ -51,7 +51,7 @@ export interface CpCtx {
   livePrem?: number | null;   // the open trade's premium from the option chain
   warn?: WarnCtx;
 }
-const NOT_GIVEN_WHY: Record<string, string> = { "RANGE DAY": "range day — no new trades", "EXPIRY DAY": "expiry day — normal plans are not given", "NO RETEST": "no retest within 30 minutes — no chasing", "REVIEW C": "the review graded it C", CONFLICT: "plan conflict", "INVALID PLAN": "the plan's numbers did not hold" };
+const NOT_GIVEN_WHY: Record<string, string> = { "RANGE DAY": "range day — no new trades", "EXPIRY DAY": "expiry day — normal plans are not given", "NO RETEST": "no retest within 30 minutes — no chasing", "REVIEW C": "the review graded it C", CONFLICT: "plan conflict", "INVALID PLAN": "the plan's numbers did not hold", "LATE ENTRY": "premium ran 10%+ before the retest — no chasing", "FAST MARKET": "fast market — stops get hit by noise" };
 /** Given / waiting / not given — for a TRIGGERED plan; null when the plan has not triggered. */
 export function triggerStatus(d: any, side: "bull" | "bear", cp: CpCtx | undefined): { status: string; say: string } | null {
   const o = d?.trader?.radar?.[side], p = d?.trader?.plans?.[side]; if (o?.state !== "TRIGGERED" || !p) return null;

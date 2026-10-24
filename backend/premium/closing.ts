@@ -78,7 +78,7 @@ export function closingStatementMsg(o: { day: string; indices: { name: string; c
 }
 
 // ---------------------------------------------------------------- ProTrader DAILY REVIEW (sent with the 15:30 closing statement)
-export interface NotGiven { index: string; side: string; time: number; level: number | null; why: "NO RETEST" | "RANGE DAY" | "EXPIRY DAY" | "REVIEW C" | "CONFLICT" | "INVALID PLAN" }
+export interface NotGiven { index: string; side: string; time: number; level: number | null; why: "NO RETEST" | "RANGE DAY" | "EXPIRY DAY" | "REVIEW C" | "CONFLICT" | "INVALID PLAN" | "LATE ENTRY" | "FAST MARKET" }
 export interface SlCase { name: string; strike: number; side: string; openedAt: number; premPct: number | null; review?: { grade: string; failed: string[] } | null; rangeDay?: boolean; entryKind?: string | null }
 /** Why a stop loss happened, from facts recorded at the time (no guessing). */
 export function slReasons(c: SlCase): string[] {
