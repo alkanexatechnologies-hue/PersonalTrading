@@ -52,14 +52,14 @@ function tradePts(path: [number, number][], entry: number, stopPx: number, dir: 
   for (const [t, p] of path) { if (dir * (p - s) <= 0) return { win: false, stop: true, r: -1, tOut: t, stopAtr: d / a }; if (dir * (p - tg) >= 0) return { win: true, stop: false, r: pts / d, tOut: t, stopAtr: d / a }; }
   return { win: false, stop: false, r: path.length ? dir * (path[path.length - 1][1] - entry) / d : 0, tOut: path.length ? path[path.length - 1][0] : null, stopAtr: d / a };
 }
-interface Sig { ix: string; day: string; set: string; dir: number; tb: string; s0: boolean; s2: boolean; ss: boolean; fresh: boolean; m0: boolean; m0ce: boolean; m1: boolean; lvl: boolean; t: number; t1: Out; t2: Out; netPct: number | null; premRule: number | null; tp: Out; tpNet: number | null; p30: { win: boolean; net: number } | null; stopPts: number }
+interface Sig { ix: string; day: string; set: string; dir: number; tb: string; s0: boolean; s2: boolean; ss: boolean; cAtr: number; atrX: number; dayX: number | null; fresh: boolean; m0: boolean; m0ce: boolean; m1: boolean; lvl: boolean; t: number; t1: Out; t2: Out; netPct: number | null; premRule: number | null; tp: Out; tpNet: number | null; p30: { win: boolean; net: number } | null; stopPts: number }
 
 export function run(ix: "NIFTY" | "SENSEX", days: DayData[]) {
   const { step, lot } = IDX[ix], ds = days.filter((d) => d.spot.size >= 300), N = ds.length, d1 = Math.floor(N * 0.6), d2 = Math.floor(N * 0.8);
   const exp = expiryDays(ds, step), setOf = (i: number) => (i === d1 || i === d2 ? "PURGE" : i < d1 ? "DEV" : i < d2 ? "VAL" : "TEST");
   const sigs: Sig[] = [], base: { set: string; dir: number; tb: string; sb: number; win: boolean; winPts: boolean; sbP: number }[] = [], sessions: Record<string, number> = { DEV: 0, VAL: 0, TEST: 0, PURGE: 0 };
   let hist: Bar[] = [], prevLegs: Map<string, Bar[]> | null = null, prevWasExpiry = false, pd: { h: number; l: number; c: number } | null = null;
-  const ROUND = ix === "NIFTY" ? 100 : 500;
+  const ROUND = ix === "NIFTY" ? 100 : 500; const atrH: number[] = [], dayR: number[] = [];
   ds.forEach((d, di) => {
     const set = setOf(di); sessions[set]++;
     const mins = [...d.spot.entries()].sort((a, b) => a[0] - b[0]).filter(([t]) => mn(t) >= 555 && mn(t) < 930) as [number, number][];
@@ -74,7 +74,7 @@ export function run(ix: "NIFTY" | "SENSEX", days: DayData[]) {
     const pathFrom = (t0: number) => mins.filter(([t]) => t >= t0 && t < t0 + 3600);
     for (let i = 1; i < B.length; i++) {
       const g = off + i, tEnd = B[i].time + 300, m = mn(tEnd); if (m < 560 || m > 870 || g < 30) continue;
-      let a = 0; for (let j = g - 13; j <= g; j++) a += Math.max(all[j].high - all[j].low, Math.abs(all[j].high - all[j - 1].close), Math.abs(all[j].low - all[j - 1].close)); a /= 14;
+      let a = 0; for (let j = g - 13; j <= g; j++) a += Math.max(all[j].high - all[j].low, Math.abs(all[j].high - all[j - 1].close), Math.abs(all[j].low - all[j - 1].close)); a /= 14; atrH.push(a); if (atrH.length > 100) atrH.shift();
       const path = pathFrom(tEnd); if (path.length < 20 || set === "PURGE") continue;
       const tb = m < 630 ? "09:15-10:30" : m < 720 ? "10:30-12:00" : m < 810 ? "12:00-13:30" : "13:30-14:30", px = B[i].close;
       for (const dir of [1, -1]) { const o = trade(path, px, dir > 0 ? B[i].low : B[i].high, dir, a, 1), q = tradePts(path, px, dir > 0 ? B[i].low : B[i].high, dir, a, PTS[ix]); base.push({ set, dir, tb, sb: Math.min(12, Math.floor(o.stopAtr / 0.25)), win: o.win, winPts: q.win, sbP: Math.min(12, Math.floor(q.stopAtr * a / PTS[ix] / 0.25)) }); }
@@ -112,9 +112,10 @@ export function run(ix: "NIFTY" | "SENSEX", days: DayData[]) {
       if (e0 != null) { const m2 = legIx.get(key)!, stopT = t1.stop ? t1.tOut! : tEnd + 3600; let exitP: number | null = null, won = false;
         for (let t = tEnd; t < tEnd + 3600 && mn(t) < 930; t += 60) { const v = m2.get(t); if (v != null) exitP = v; if (v != null && v >= e0 + 30) { won = true; exitP = e0 + 30; break; } if (t >= stopT) break; }
         if (exitP != null) p30 = { win: won, net: exitP - e0 - COST(e0) - COST(exitP) - 40 / lot }; }
-      sigs.push({ ix, day: d.day, set, dir, tb, s0: fresh && s0, s2: fresh && s2, ss: fresh && ss, fresh, m0, m0ce, m1, lvl: lvlHit, t: tEnd, t1, t2, netPct: net != null && e0 ? (net / e0) * 100 : null, premRule, tp, tpNet, p30, stopPts: tp.stopAtr * a });
+      const dayHi = Math.max(...B.slice(0, i + 1).map((b) => b.high)), dayLo = Math.min(...B.slice(0, i + 1).map((b) => b.low)), avgDay = dayR.length >= 10 ? dayR.slice(-20).reduce((x, y) => x + y, 0) / Math.min(20, dayR.length) : null;
+      sigs.push({ ix, day: d.day, set, dir, tb, cAtr: (B[i].high - B[i].low) / a, atrX: a / (atrH.reduce((x, y) => x + y, 0) / atrH.length), dayX: avgDay ? (dayHi - dayLo) / avgDay : null, s0: fresh && s0, s2: fresh && s2, ss: fresh && ss, fresh, m0, m0ce, m1, lvl: lvlHit, t: tEnd, t1, t2, netPct: net != null && e0 ? (net / e0) * 100 : null, premRule, tp, tpNet, p30, stopPts: tp.stopAtr * a });
     }
-    hist = all.slice(-200); prevLegs = legBars; if (B.length) pd = { h: Math.max(...B.map((b) => b.high)), l: Math.min(...B.map((b) => b.low)), c: B[B.length - 1].close }; prevWasExpiry = exp.has(d.day);
+    hist = all.slice(-200); prevLegs = legBars; if (B.length) dayR.push(Math.max(...B.map((b) => b.high)) - Math.min(...B.map((b) => b.low))); if (B.length) pd = { h: Math.max(...B.map((b) => b.high)), l: Math.min(...B.map((b) => b.low)), c: B[B.length - 1].close }; prevWasExpiry = exp.has(d.day);
   });
   return { sigs, base, sessions };
 }
@@ -152,6 +153,42 @@ if (require.main === module) {
     linePts("index EMA21 break alone", fr); linePts("+ premium E9×E21 same candle", fr.filter((x) => x.s0));
     linePts("M0 premium PRICE×EMA21 same candle", xs.filter((x) => x.m0)); linePts("M1 both within 1 candle", xs.filter((x) => x.m1));
     linePts("M1 + from a level", xs.filter((x) => x.m1 && x.lvl)); linePts("M0 (CE-chart view) same candle", xs.filter((x) => x.m0ce));
+  }
+  // ---------------- ATR / VOLATILITY FILTERS (pre-registered; DEV selects, VAL confirms, TEST once) ----------------
+  {
+    const both = [...R.NIFTY.sigs, ...R.SENSEX.sigs];
+    const st = (xs: Sig[]) => { const n = xs.length, w = xs.filter((x) => x.t1.win).length; let bw = 0, bn = 0; for (const x of xs) { const v = bIx.get(`${x.set}|${x.dir}|${x.tb}|${Math.min(12, Math.floor(x.t1.stopAtr / 0.25))}`); if (v != null) { bw += v; bn++; } }
+      const nets = xs.filter((x) => x.netPct != null).map((x) => ({ day: x.day, v: x.netPct! })), wp = xs.filter((x) => x.tp.win).length;
+      return { n, win: n ? (w / n) * 100 : NaN, ci: wilson(w, n), base: bn ? (bw / bn) * 100 : NaN, net: nets.length ? nets.reduce((a, x) => a + x.v, 0) / nets.length : NaN, nci: boot(nets), pts: n ? (wp / n) * 100 : NaN }; };
+    const fmt = (s: any) => `n ${String(s.n).padStart(4)} · win ${f1(s.win)}% [${f1(s.ci[0])}–${f1(s.ci[1])}] vs random ${f1(s.base)}% (edge ${s.win - s.base >= 0 ? "+" : ""}${f1(s.win - s.base)}) · +30/100 pts ${f1(s.pts)}% · option net ${f1(s.net)}% [${f1(s.nci[0])}–${f1(s.nci[1])}]`;
+    const bases: [string, (x: Sig) => boolean][] = [["EMA21 break", (x) => x.fresh], ["M0 same candle", (x) => x.m0], ["M1 within 1", (x) => x.m1]];
+    const F: [string, (x: Sig) => boolean][] = [
+      ["(none)", () => true], ["V1 candle ≤ 1 ATR", (x) => x.cAtr <= 1], ["V1b candle > 1 ATR", (x) => x.cAtr > 1],
+      ["V2a ATR quiet < 0.8", (x) => x.atrX < 0.8], ["V2b ATR normal 0.8–1.2", (x) => x.atrX >= 0.8 && x.atrX < 1.2], ["V2c ATR expanding ≥ 1.2", (x) => x.atrX >= 1.2],
+      ["V3a quiet day < 0.6", (x) => x.dayX != null && x.dayX < 0.6], ["V3b wide day ≥ 1", (x) => x.dayX != null && x.dayX >= 1],
+      ["V4 stop ≤ 1 ATR", (x) => x.t1.stopAtr <= 1]];
+    console.log(`\nATR / VOLATILITY FILTERS (both indices; edge = win − random same stop)`);
+    const prom: { lab: string; b: (x: Sig) => boolean; f: (x: Sig) => boolean }[] = [];
+    for (const [bl, bf] of bases) for (const [fl, ff] of F) {
+      const xs = both.filter((x) => bf(x) && ff(x)), d = st(xs.filter((x) => x.set === "DEV")), v = st(xs.filter((x) => x.set === "VAL"));
+      const pr = fl !== "(none)" && d.n >= 100 && d.win - d.base >= 3;
+      if (pr) prom.push({ lab: `${bl} + ${fl}`, b: bf, f: ff });
+      console.log(`  ${(bl + " + " + fl).padEnd(38)} DEV ${fmt(d)}\n  ${"".padEnd(38)} VAL ${fmt(v)}${pr ? "  ← promising on DEV" : ""}`);
+    }
+    console.log(`\nPromising on DEV: ${prom.map((p) => p.lab).join(" · ") || "none"}`);
+    // combinations of the promising filters on the same base, then freeze the best that also holds on VAL
+    const cands: { lab: string; fn: (x: Sig) => boolean }[] = prom.map((p) => ({ lab: p.lab, fn: (x: Sig) => p.b(x) && p.f(x) }));
+    for (let i2 = 0; i2 < prom.length; i2++) for (let j2 = i2 + 1; j2 < prom.length; j2++) if (prom[i2].b === prom[j2].b) cands.push({ lab: `${prom[i2].lab} + ${prom[j2].lab.split(" + ")[1]}`, fn: (x) => prom[i2].b(x) && prom[i2].f(x) && prom[j2].f(x) });
+    const scored = cands.map((c) => { const xs = both.filter(c.fn); return { ...c, d: st(xs.filter((x) => x.set === "DEV")), v: st(xs.filter((x) => x.set === "VAL")), t: st(xs.filter((x) => x.set === "TEST")) }; }).filter((c) => c.d.n >= 100).sort((p, q) => (q.d.win - q.d.base) - (p.d.win - p.d.base));
+    for (const c of scored.slice(0, 8)) console.log(`  ${c.lab}\n     DEV ${fmt(c.d)}\n     VAL ${fmt(c.v)}`);
+    const frozen = scored.find((c) => c.v.n >= 50 && c.v.win - c.v.base > 0 && c.v.net > 0);
+    console.log(`\nFROZEN: ${frozen ? frozen.lab : "nothing held on VAL (edge > 0 and option net > 0, n ≥ 50)"}`);
+    if (frozen) { console.log(`  TEST ${fmt(frozen.t)}`); for (const ixn of ["NIFTY", "SENSEX"]) console.log(`  TEST ${ixn} ${fmt(st(R[ixn as "NIFTY"].sigs.filter((x) => x.set === "TEST" && frozen.fn(x))))}`); }
+    else for (const [bl, bf] of bases) console.log(`  TEST ${bl.padEnd(14)} ${fmt(st(both.filter((x) => x.set === "TEST" && bf(x))))}`);
+    // post-gate look (not a selection — the gate already failed on option net): the one filter that held on DEV and VAL
+    const best = (x: Sig) => x.m1 && x.cAtr <= 1;
+    console.log(`\nPOST-GATE LOOK · M1 + signal candle ≤ 1 ATR (held DEV + VAL on win %, failed on option net):`);
+    for (const set of ["DEV", "VAL", "TEST"]) for (const ixn of ["NIFTY", "SENSEX"] as const) console.log(`  ${set} ${ixn.padEnd(6)} ${fmt(st(R[ixn].sigs.filter((x) => x.set === set && best(x))))}`);
   }
   console.log(`Data ${FROM} → ${to}`);
   console.log(`\nOWNER'S EXAMPLES (SENSEX 23 Oct):`);

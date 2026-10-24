@@ -100,3 +100,46 @@ Script: `emaCrossStudy.ts`. Full output: `RESULTS_EMA_CROSS_raw.txt`. Research o
 - The win rate stays at about 46–49%, the same as random, and the option P&L is −1% to −2% per trade after costs.
 - Starting from a level does not help.
 - **No change to live logic.**
+
+## ATR / volatility filters (2026-10-25)
+
+**Filters (pre-registered):**
+- V1: signal candle ≤ 1 ATR (and > 1 ATR as the mirror)
+- V2: ATR vs its 100-candle mean, < 0.8 / 0.8–1.2 / ≥ 1.2
+- V3: day range so far vs the 20-day average, < 0.6 / ≥ 1
+- V4: stop ≤ 1 ATR
+
+These were applied to the EMA 21 break, M0 and M1. India VIX history is not in the research data.
+
+**Gate:** promising = DEV edge ≥ +3 points vs the same-stop random entry with n ≥ 100. Frozen = also VAL edge > 0,
+option net > 0 and n ≥ 50.
+
+**Results:**
+- **Promising on DEV:**
+  - M0 + quiet ATR
+  - M0 + wide day
+  - M1 + candle ≤ 1 ATR
+  - M1 + quiet ATR
+  - M1 + wide day
+  - M1 + stop ≤ 1 ATR (the same trades as candle ≤ 1 ATR)
+- **Only M1 + candle ≤ 1 ATR also held on VAL:** 52.8% → 55.2% vs 48.9% random. Its option net was still negative
+  (−1.6% / −1.0%), so **nothing was frozen**.
+- **Expanding ATR (≥ 1.2) is the worst:** M1 VAL 32.9%, M0 VAL 30.4%.
+- **Quiet ATR and wide-day filters reversed in VAL.**
+- **Combinations:** DEV up to 59% (n 106) but not held in VAL.
+
+**Post-gate look, M1 + candle ≤ 1 ATR** (win % vs random, option net):
+
+| | DEV | VAL | TEST |
+|---|---|---|---|
+| NIFTY | 52.0% vs 49.0% · −1.5% | 56.2% vs 48.9% · 0.0% | **57.1% vs 49.3% · −0.8%** (n 140) |
+| SENSEX | 53.6% vs 48.9% · −1.8% | 54.3% vs 48.9% · −1.9% | 45.8% vs 48.9% · −2.2% |
+
+**Verdict:**
+- ATR helps the **win rate** in one place only: NIFTY, both crosses within 1 candle, signal candle no bigger than
+  1 ATR. That is +3 to +8 points over random in all three periods, about 52–57% at 1:1.
+- It still does **not make money on options**: the stop (and so the 1:1 target) is small, about 15–20 NIFTY points,
+  and costs plus time decay take the gain.
+- SENSEX failed in TEST.
+- **No change to live logic.** Information only. A wider target for the same signal (e.g. 2:1) is a separate,
+  untested idea.

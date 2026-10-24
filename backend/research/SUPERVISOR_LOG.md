@@ -210,3 +210,13 @@ score is anti-calibrated (100 → 28.6%).
   and the option net is about 0 or negative.
 
 **Verdict:** NO EDGE. Information only; no change to live logic.
+
+## 2026-10-25 · ATR / volatility filters on the EMA 21 + premium cross (`RESULTS_EMA_CROSS.md`, last section)
+
+**Results:**
+- **Nothing frozen.** NIFTY M1 + signal candle ≤ 1 ATR wins 52–57% vs about 49% random in DEV / VAL / TEST, but the
+  option net after costs is −1.5% / 0.0% / −0.8%.
+- **SENSEX failed TEST.**
+- **Expanding ATR is the worst condition.**
+
+**Verdict:** no change to live logic. Information only.

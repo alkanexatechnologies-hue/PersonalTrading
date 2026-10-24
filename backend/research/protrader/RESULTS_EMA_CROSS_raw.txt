@@ -56,6 +56,101 @@ FIXED TARGET: index +30 pts NIFTY / +100 pts SENSEX, or premium +₹30, stop bey
   M1 both within 1 candle            n  1605 | INDEX +pts first 31.9% [29.7–34.2] · stop first 61.2% · random same stop 29.2% · median stop 50 pts | option net -2.3% [-3.0–-1.3] | PREMIUM +₹30 first 43.8% [41.4–46.2] · net ₹-12.6/unit
   M1 + from a level                  n   368 | INDEX +pts first 33.2% [28.5–38.1] · stop first 60.3% · random same stop 30.4% · median stop 56 pts | option net -2.3% [-4.2–-0.5] | PREMIUM +₹30 first 43.8% [38.8–48.9] · net ₹-16.8/unit
   M0 (CE-chart view) same candle     n  1016 | INDEX +pts first 35.0% [32.2–38.0] · stop first 58.2% · random same stop 30.3% · median stop 56 pts | option net -1.0% [-2.5–0.2] | PREMIUM +₹30 first 45.3% [42.2–48.3] · net ₹-11.6/unit
+
+ATR / VOLATILITY FILTERS (both indices; edge = win − random same stop)
+  EMA21 break + (none)                   DEV n 4173 · win 47.7% [46.2–49.2] vs random 47.7% (edge +0.0) · +30/100 pts 29.4% · option net -2.0% [-2.8–-1.2]
+                                         VAL n 1319 · win 46.6% [43.9–49.3] vs random 48.2% (edge -1.5) · +30/100 pts 35.2% · option net -1.9% [-2.8–-1.0]
+  EMA21 break + V1 candle ≤ 1 ATR        DEV n 2124 · win 48.7% [46.6–50.9] vs random 49.0% (edge -0.3) · +30/100 pts 22.6% · option net -2.5% [-3.0–-1.8]
+                                         VAL n  659 · win 49.9% [46.1–53.7] vs random 48.9% (edge +1.0) · +30/100 pts 30.5% · option net -1.4% [-2.3–-0.5]
+  EMA21 break + V1b candle > 1 ATR       DEV n 2049 · win 46.7% [44.5–48.8] vs random 46.2% (edge +0.4) · +30/100 pts 36.4% · option net -1.4% [-2.5–-0.5]
+                                         VAL n  660 · win 43.3% [39.6–47.1] vs random 47.3% (edge -3.9) · +30/100 pts 39.8% · option net -2.4% [-4.0–-0.7]
+  EMA21 break + V2a ATR quiet < 0.8      DEV n 1674 · win 48.1% [45.8–50.5] vs random 48.2% (edge -0.0) · +30/100 pts 21.6% · option net -2.7% [-3.8–-1.6]
+                                         VAL n  536 · win 45.5% [41.4–49.8] vs random 48.2% (edge -2.6) · +30/100 pts 30.4% · option net -2.2% [-3.3–-1.0]
+  EMA21 break + V2b ATR normal 0.8–1.2   DEV n 1659 · win 47.2% [44.8–49.6] vs random 47.5% (edge -0.3) · +30/100 pts 29.7% · option net -1.8% [-2.8–-0.5]
+                                         VAL n  579 · win 50.3% [46.2–54.3] vs random 48.1% (edge +2.2) · +30/100 pts 37.7% · option net -1.1% [-2.9–1.0]
+  EMA21 break + V2c ATR expanding ≥ 1.2  DEV n  840 · win 47.9% [44.5–51.2] vs random 47.2% (edge +0.7) · +30/100 pts 44.2% · option net -0.8% [-3.0–1.1]
+                                         VAL n  204 · win 39.2% [32.8–46.1] vs random 48.5% (edge -9.2) · +30/100 pts 40.7% · option net -3.2% [-5.4–-0.7]
+  EMA21 break + V3a quiet day < 0.6      DEV n 1984 · win 46.8% [44.6–49.0] vs random 47.6% (edge -0.7) · +30/100 pts 26.8% · option net -2.5% [-3.5–-1.0]
+                                         VAL n  772 · win 46.9% [43.4–50.4] vs random 48.4% (edge -1.5) · +30/100 pts 31.9% · option net -1.8% [-2.8–-0.9]
+  EMA21 break + V3b wide day ≥ 1         DEV n  438 · win 47.7% [43.1–52.4] vs random 47.7% (edge -0.0) · +30/100 pts 37.0% · option net -1.3% [-3.3–0.8]
+                                         VAL n  173 · win 46.8% [39.5–54.2] vs random 47.7% (edge -0.9) · +30/100 pts 38.7% · option net -1.9% [-5.7–2.1]
+  EMA21 break + V4 stop ≤ 1 ATR          DEV n 2386 · win 49.1% [47.1–51.1] vs random 48.9% (edge +0.1) · +30/100 pts 23.3% · option net -2.3% [-3.0–-1.6]
+                                         VAL n  766 · win 49.9% [46.3–53.4] vs random 48.8% (edge +1.0) · +30/100 pts 31.3% · option net -1.1% [-2.2–-0.2]
+  M0 same candle + (none)                DEV n 1306 · win 48.1% [45.4–50.8] vs random 46.7% (edge +1.4) · +30/100 pts 35.6% · option net -1.6% [-3.2–-0.4]
+                                         VAL n  437 · win 43.9% [39.4–48.6] vs random 47.6% (edge -3.7) · +30/100 pts 36.6% · option net -2.1% [-3.9–0.5]
+  M0 same candle + V1 candle ≤ 1 ATR     DEV n  438 · win 50.0% [45.3–54.7] vs random 48.9% (edge +1.1) · +30/100 pts 26.0% · option net -2.2% [-3.2–-1.2]
+                                         VAL n  145 · win 50.3% [42.3–58.4] vs random 48.9% (edge +1.4) · +30/100 pts 34.5% · option net -1.5% [-3.1–-0.0]
+  M0 same candle + V1b candle > 1 ATR    DEV n  868 · win 47.1% [43.8–50.4] vs random 45.5% (edge +1.6) · +30/100 pts 40.4% · option net -1.3% [-2.9–0.8]
+                                         VAL n  292 · win 40.8% [35.3–46.5] vs random 46.8% (edge -6.0) · +30/100 pts 37.7% · option net -2.3% [-5.1–1.1]
+  M0 same candle + V2a ATR quiet < 0.8   DEV n  476 · win 51.3% [46.8–55.7] vs random 47.5% (edge +3.7) · +30/100 pts 28.6% · option net -1.1% [-2.3–-0.0]
+                                         VAL n  190 · win 41.1% [34.3–48.2] vs random 47.8% (edge -6.8) · +30/100 pts 31.1% · option net -2.6% [-4.5–-0.8]  ← promising on DEV
+  M0 same candle + V2b ATR normal 0.8–1.2 DEV n  546 · win 48.4% [44.2–52.5] vs random 46.6% (edge +1.8) · +30/100 pts 36.4% · option net -1.9% [-3.5–-0.1]
+                                         VAL n  201 · win 49.8% [42.9–56.6] vs random 47.4% (edge +2.4) · +30/100 pts 41.3% · option net -1.0% [-4.4–2.9]
+  M0 same candle + V2c ATR expanding ≥ 1.2 DEV n  284 · win 42.3% [36.6–48.1] vs random 45.7% (edge -3.4) · +30/100 pts 45.8% · option net -1.9% [-6.2–1.6]
+                                         VAL n   46 · win 30.4% [19.1–44.8] vs random 47.5% (edge -17.1) · +30/100 pts 39.1% · option net -4.5% [-11.1–3.4]
+  M0 same candle + V3a quiet day < 0.6   DEV n  487 · win 46.2% [41.8–50.6] vs random 46.3% (edge -0.1) · +30/100 pts 33.9% · option net -1.7% [-3.2–0.4]
+                                         VAL n  218 · win 41.3% [35.0–47.9] vs random 47.9% (edge -6.6) · +30/100 pts 30.7% · option net -2.6% [-4.6–-0.5]
+  M0 same candle + V3b wide day ≥ 1      DEV n  187 · win 52.4% [45.3–59.4] vs random 46.9% (edge +5.5) · +30/100 pts 46.5% · option net -0.3% [-4.6–3.6]
+                                         VAL n   80 · win 47.5% [36.9–58.3] vs random 46.9% (edge +0.6) · +30/100 pts 43.8% · option net -1.8% [-8.0–5.8]  ← promising on DEV
+  M0 same candle + V4 stop ≤ 1 ATR       DEV n  517 · win 50.3% [46.0–54.6] vs random 48.8% (edge +1.5) · +30/100 pts 26.7% · option net -1.9% [-3.3–-0.8]
+                                         VAL n  181 · win 50.8% [43.6–58.0] vs random 48.8% (edge +2.1) · +30/100 pts 35.4% · option net -1.1% [-2.3–0.2]
+  M1 within 1 + (none)                   DEV n 1942 · win 48.8% [46.6–51.0] vs random 47.2% (edge +1.6) · +30/100 pts 33.5% · option net -1.9% [-3.1–-0.6]
+                                         VAL n  680 · win 47.2% [43.5–51.0] vs random 47.9% (edge -0.7) · +30/100 pts 35.9% · option net -2.0% [-3.6–-0.2]
+  M1 within 1 + V1 candle ≤ 1 ATR        DEV n  790 · win 52.8% [49.3–56.2] vs random 48.9% (edge +3.8) · +30/100 pts 25.4% · option net -1.6% [-2.4–-0.9]
+                                         VAL n  277 · win 55.2% [49.3–61.0] vs random 48.9% (edge +6.3) · +30/100 pts 33.6% · option net -1.0% [-2.3–0.3]  ← promising on DEV
+  M1 within 1 + V1b candle > 1 ATR       DEV n 1152 · win 46.1% [43.2–49.0] vs random 45.8% (edge +0.3) · +30/100 pts 39.0% · option net -2.0% [-3.8–-0.2]
+                                         VAL n  403 · win 41.7% [37.0–46.6] vs random 47.1% (edge -5.4) · +30/100 pts 37.5% · option net -2.7% [-5.4–0.8]
+  M1 within 1 + V2a ATR quiet < 0.8      DEV n  726 · win 51.7% [48.0–55.3] vs random 47.7% (edge +3.9) · +30/100 pts 26.9% · option net -1.6% [-2.7–-0.7]
+                                         VAL n  300 · win 44.3% [38.8–50.0] vs random 48.1% (edge -3.7) · +30/100 pts 29.3% · option net -2.1% [-3.5–-0.4]  ← promising on DEV
+  M1 within 1 + V2b ATR normal 0.8–1.2   DEV n  803 · win 48.9% [45.5–52.4] vs random 47.2% (edge +1.8) · +30/100 pts 34.0% · option net -2.0% [-3.3–-0.6]
+                                         VAL n  304 · win 53.6% [48.0–59.1] vs random 47.8% (edge +5.8) · +30/100 pts 42.8% · option net -0.7% [-3.2–1.8]
+  M1 within 1 + V2c ATR expanding ≥ 1.2  DEV n  413 · win 43.6% [38.9–48.4] vs random 46.2% (edge -2.6) · +30/100 pts 44.1% · option net -2.0% [-5.4–1.4]
+                                         VAL n   76 · win 32.9% [23.4–44.1] vs random 47.8% (edge -14.9) · +30/100 pts 34.2% · option net -6.6% [-13.0–0.4]
+  M1 within 1 + V3a quiet day < 0.6      DEV n  767 · win 49.7% [46.1–53.2] vs random 46.9% (edge +2.8) · +30/100 pts 31.9% · option net -0.9% [-2.1–0.5]
+                                         VAL n  363 · win 45.5% [40.4–50.6] vs random 48.2% (edge -2.7) · +30/100 pts 29.8% · option net -2.2% [-3.7–-0.6]
+  M1 within 1 + V3b wide day ≥ 1         DEV n  250 · win 53.2% [47.0–59.3] vs random 47.2% (edge +6.0) · +30/100 pts 46.0% · option net -0.9% [-4.1–2.4]
+                                         VAL n  114 · win 44.7% [35.9–53.9] vs random 47.3% (edge -2.5) · +30/100 pts 40.4% · option net -3.5% [-8.9–2.1]  ← promising on DEV
+  M1 within 1 + V4 stop ≤ 1 ATR          DEV n  914 · win 52.6% [49.4–55.8] vs random 48.9% (edge +3.8) · +30/100 pts 26.1% · option net -1.6% [-2.6–-0.7]
+                                         VAL n  337 · win 54.6% [49.3–59.8] vs random 48.8% (edge +5.8) · +30/100 pts 33.5% · option net -0.8% [-1.9–0.2]  ← promising on DEV
+
+Promising on DEV: M0 same candle + V2a ATR quiet < 0.8 · M0 same candle + V3b wide day ≥ 1 · M1 within 1 + V1 candle ≤ 1 ATR · M1 within 1 + V2a ATR quiet < 0.8 · M1 within 1 + V3b wide day ≥ 1 · M1 within 1 + V4 stop ≤ 1 ATR
+  M1 within 1 + V3b wide day ≥ 1 + V4 stop ≤ 1 ATR
+     DEV n  106 · win 59.4% [49.9–68.3] vs random 49.0% (edge +10.4) · +30/100 pts 39.6% · option net 0.8% [-1.3–3.1]
+     VAL n   42 · win 47.6% [33.4–62.3] vs random 49.1% (edge -1.5) · +30/100 pts 28.6% · option net -1.9% [-5.5–2.0]
+  M1 within 1 + V1 candle ≤ 1 ATR + V2a ATR quiet < 0.8
+     DEV n  312 · win 57.1% [51.5–62.4] vs random 49.1% (edge +8.0) · +30/100 pts 24.4% · option net -0.9% [-1.9–-0.1]
+     VAL n  134 · win 51.5% [43.1–59.8] vs random 48.7% (edge +2.8) · +30/100 pts 27.6% · option net -1.0% [-2.2–0.5]
+  M1 within 1 + V2a ATR quiet < 0.8 + V4 stop ≤ 1 ATR
+     DEV n  366 · win 55.5% [50.3–60.5] vs random 49.0% (edge +6.5) · +30/100 pts 23.5% · option net -1.3% [-2.1–-0.3]
+     VAL n  162 · win 48.8% [41.2–56.4] vs random 48.7% (edge +0.1) · +30/100 pts 27.2% · option net -1.0% [-2.2–0.5]
+  M1 within 1 + V3b wide day ≥ 1
+     DEV n  250 · win 53.2% [47.0–59.3] vs random 47.2% (edge +6.0) · +30/100 pts 46.0% · option net -0.9% [-4.1–2.4]
+     VAL n  114 · win 44.7% [35.9–53.9] vs random 47.3% (edge -2.5) · +30/100 pts 40.4% · option net -3.5% [-8.9–2.1]
+  M0 same candle + V3b wide day ≥ 1
+     DEV n  187 · win 52.4% [45.3–59.4] vs random 46.9% (edge +5.5) · +30/100 pts 46.5% · option net -0.3% [-4.6–3.6]
+     VAL n   80 · win 47.5% [36.9–58.3] vs random 46.9% (edge +0.6) · +30/100 pts 43.8% · option net -1.8% [-8.0–5.8]
+  M1 within 1 + V2a ATR quiet < 0.8
+     DEV n  726 · win 51.7% [48.0–55.3] vs random 47.7% (edge +3.9) · +30/100 pts 26.9% · option net -1.6% [-2.7–-0.7]
+     VAL n  300 · win 44.3% [38.8–50.0] vs random 48.1% (edge -3.7) · +30/100 pts 29.3% · option net -2.1% [-3.5–-0.4]
+  M1 within 1 + V1 candle ≤ 1 ATR
+     DEV n  790 · win 52.8% [49.3–56.2] vs random 48.9% (edge +3.8) · +30/100 pts 25.4% · option net -1.6% [-2.4–-0.9]
+     VAL n  277 · win 55.2% [49.3–61.0] vs random 48.9% (edge +6.3) · +30/100 pts 33.6% · option net -1.0% [-2.3–0.3]
+  M1 within 1 + V1 candle ≤ 1 ATR + V4 stop ≤ 1 ATR
+     DEV n  790 · win 52.8% [49.3–56.2] vs random 48.9% (edge +3.8) · +30/100 pts 25.4% · option net -1.6% [-2.4–-0.9]
+     VAL n  277 · win 55.2% [49.3–61.0] vs random 48.9% (edge +6.3) · +30/100 pts 33.6% · option net -1.0% [-2.3–0.3]
+
+FROZEN: nothing held on VAL (edge > 0 and option net > 0, n ≥ 50)
+  TEST EMA21 break    n 1310 · win 46.9% [44.3–49.7] vs random 48.7% (edge -1.7) · +30/100 pts 25.0% · option net -2.2% [-3.1–-1.2]
+  TEST M0 same candle n  439 · win 46.2% [41.6–50.9] vs random 48.3% (edge -2.0) · +30/100 pts 27.3% · option net -1.5% [-3.3–0.5]
+  TEST M1 within 1    n  653 · win 45.8% [42.0–49.6] vs random 48.4% (edge -2.6) · +30/100 pts 26.8% · option net -2.0% [-3.3–-0.3]
+
+POST-GATE LOOK · M1 + signal candle ≤ 1 ATR (held DEV + VAL on win %, failed on option net):
+  DEV NIFTY  n  415 · win 52.0% [47.2–56.8] vs random 49.0% (edge +3.1) · +30/100 pts 27.5% · option net -1.5% [-2.6–-0.5]
+  DEV SENSEX n  375 · win 53.6% [48.5–58.6] vs random 48.9% (edge +4.7) · +30/100 pts 23.2% · option net -1.8% [-2.9–-0.8]
+  VAL NIFTY  n  137 · win 56.2% [47.8–64.2] vs random 48.9% (edge +7.3) · +30/100 pts 35.8% · option net 0.0% [-1.6–1.5]
+  VAL SENSEX n  140 · win 54.3% [46.0–62.3] vs random 48.9% (edge +5.3) · +30/100 pts 31.4% · option net -1.9% [-3.5–-0.7]
+  TEST NIFTY  n  140 · win 57.1% [48.9–65.0] vs random 49.3% (edge +7.9) · +30/100 pts 25.0% · option net -0.8% [-1.9–0.5]
+  TEST SENSEX n  142 · win 45.8% [37.8–54.0] vs random 48.9% (edge -3.1) · +30/100 pts 22.5% · option net -2.2% [-3.4–-0.7]
 Data 2024-10-01 → 2026-10-23
 
 OWNER'S EXAMPLES (SENSEX 23 Oct):
