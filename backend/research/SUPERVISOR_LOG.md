@@ -230,3 +230,12 @@ score is anti-calibrated (100 → 28.6%).
 - **SENSEX fails.**
 
 **Verdict:** no change to live logic. Forward-test candidate only.
+
+## 2026-10-25 · PT: premium EMA 9 × EMA 21 trigger with the index already past EMA 21 (owner's 19 Oct example)
+
+**Results:**
+- **SENSEX:** 50 / 54 / 60% vs about 49% random; option net about 0.
+- **NIFTY:** 47 / 50 / 53%; no DEV edge.
+- **Not stable across indices.**
+
+**Verdict:** no change to live logic. SENSEX forward-test candidate only.

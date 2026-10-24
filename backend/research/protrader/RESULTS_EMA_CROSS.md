@@ -170,3 +170,31 @@ option net > 0 and n ≥ 50.
 
 **Verdict:** no change to live logic. NIFTY "M1 + small candle + 8-pt buffer" is a forward-test candidate, not
 proven.
+
+## PT: premium EMA 9 × EMA 21 as the trigger, index already on that side of EMA 21 (owner's 19 Oct example, 2026-10-25)
+
+**The example (NIFTY, 19 Oct):**
+- NIFTY was below EMA 21 from before 11:20.
+- The ATM PE premium's EMA 9 crossed above its EMA 21: 23000 PE at 11:30, 22950 PE at 11:35, 22900 PE (the owner's
+  screen) at 12:00.
+- NIFTY then fell 22,995 → 22,875 by 13:30.
+- The study's signal was the 11:35 candle (PE): 1:1 target hit, +30 pts hit, option +28.9% net.
+
+| Win % at 1:1 vs random (DEV / VAL / TEST) | NIFTY | SENSEX |
+|---|---|---|
+| PT | 46.8 / 49.8 / 52.7 (edge −1.4 / +1.3 / +3.8) | 50.4 / 54.4 / **60.3** (edge +2.0 / +5.6 / +11.3) |
+| PT + candle ≤ 1 ATR | 45.7 / 47.7 / 52.7 | 53.5 / 55.4 / **62.8** |
+| PT + 8 / 26-pt buffer | 47.4 / 50.2 / 53.0 | 50.3 / 54.5 / 60.2 |
+
+**Option net:**
+- **SENSEX PT:** −1.8% / −0.1% / +0.3%.
+- **NIFTY PT:** −3.2% / −1.6% / −0.4%.
+
+**Frequency:** about 2 per session per index.
+
+**Verdict:**
+- **SENSEX:** a consistent and growing win-rate edge across all three periods (+2 → +6 → +11 points), but the option P&L
+  is about breakeven.
+- **NIFTY:** no edge in DEV.
+- **Not stable across indices.** The previous rule (M1 + small candle) worked on NIFTY, not SENSEX; this one is the
+  reverse, which is a warning sign of noise. No change to live logic. Forward-test candidate for SENSEX only.

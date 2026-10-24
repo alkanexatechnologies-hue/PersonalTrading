@@ -52,7 +52,7 @@ function tradePts(path: [number, number][], entry: number, stopPx: number, dir: 
   for (const [t, p] of path) { if (dir * (p - s) <= 0) return { win: false, stop: true, r: -1, tOut: t, stopAtr: d / a }; if (dir * (p - tg) >= 0) return { win: true, stop: false, r: pts / d, tOut: t, stopAtr: d / a }; }
   return { win: false, stop: false, r: path.length ? dir * (path[path.length - 1][1] - entry) / d : 0, tOut: path.length ? path[path.length - 1][0] : null, stopAtr: d / a };
 }
-interface Sig { ix: string; day: string; set: string; dir: number; tb: string; s0: boolean; s2: boolean; ss: boolean; b8a: boolean; b8b: boolean; dist: number; cAtr: number; atrX: number; dayX: number | null; fresh: boolean; m0: boolean; m0ce: boolean; m1: boolean; lvl: boolean; t: number; t1: Out; t2: Out; netPct: number | null; premRule: number | null; tp: Out; tpNet: number | null; p30: { win: boolean; net: number } | null; stopPts: number }
+interface Sig { ix: string; day: string; set: string; dir: number; tb: string; s0: boolean; s2: boolean; ss: boolean; pt: boolean; b8a: boolean; b8b: boolean; dist: number; cAtr: number; atrX: number; dayX: number | null; fresh: boolean; m0: boolean; m0ce: boolean; m1: boolean; lvl: boolean; t: number; t1: Out; t2: Out; netPct: number | null; premRule: number | null; tp: Out; tpNet: number | null; p30: { win: boolean; net: number } | null; stopPts: number }
 
 export function run(ix: "NIFTY" | "SENSEX", days: DayData[]) {
   const { step, lot } = IDX[ix], ds = days.filter((d) => d.spot.size >= 300), N = ds.length, d1 = Math.floor(N * 0.6), d2 = Math.floor(N * 0.8);
@@ -88,8 +88,12 @@ export function run(ix: "NIFTY" | "SENSEX", days: DayData[]) {
       for (let k = 0; k <= 3 && g - k >= 1; k++) { const xk = xI(g - k); if (xk) { age = k; cdir = xk; break; } }
       let b8b = false;
       if (age >= 0) { let okSide = true, first = -1; for (let q = g - age; q <= g; q++) { const dq = cdir * (all[q].close - e21[q]); if (dq <= 0) okSide = false; if (first < 0 && dq >= BUF) first = q; } b8b = okSide && first === g; }
-      if (!xNow && !late && !b8b) continue;
-      const up = (xNow || xPrev || cdir) > 0, fresh = xNow !== 0;
+      // PT (owner 2026-10-25, 19 Oct example): the index already on one side of EMA 21 (trend) and the ATM option of that
+      // side (PE below / CE above) has its premium EMA 9 cross ABOVE its EMA 21 on this candle — the premium is the trigger.
+      const side0 = px < e21[g] ? -1 : 1, po = premEma(`${Math.round(px / step) * step}${side0 > 0 ? "CE" : "PE"}`), jj = po.times.get(B[i].time);
+      const pTrig = !xNow && jj != null && jj >= 21 && po.e9[jj - 1] <= po.e21[jj - 1] && po.e9[jj] > po.e21[jj];
+      if (!xNow && !late && !b8b && !pTrig) continue;
+      const up = pTrig && !late && !b8b ? side0 > 0 : (xNow || xPrev || cdir) > 0, fresh = xNow !== 0;
       const dir = up ? 1 : -1, atm = Math.round(px / step) * step, key = `${atm}${dir > 0 ? "CE" : "PE"}`, pe = premEma(key), j = pe.times.get(B[i].time);
       const cross = (q: number) => q >= 1 && pe.e9[q - 1] <= pe.e21[q - 1] && pe.e9[q] > pe.e21[q];
       const ok = j != null && j >= 21;
@@ -120,7 +124,7 @@ export function run(ix: "NIFTY" | "SENSEX", days: DayData[]) {
         for (let t = tEnd; t < tEnd + 3600 && mn(t) < 930; t += 60) { const v = m2.get(t); if (v != null) exitP = v; if (v != null && v >= e0 + 30) { won = true; exitP = e0 + 30; break; } if (t >= stopT) break; }
         if (exitP != null) p30 = { win: won, net: exitP - e0 - COST(e0) - COST(exitP) - 40 / lot }; }
       const dayHi = Math.max(...B.slice(0, i + 1).map((b) => b.high)), dayLo = Math.min(...B.slice(0, i + 1).map((b) => b.low)), avgDay = dayR.length >= 10 ? dayR.slice(-20).reduce((x, y) => x + y, 0) / Math.min(20, dayR.length) : null;
-      sigs.push({ ix, day: d.day, set, dir, tb, b8a: fresh && dir * (px - e21[g]) >= BUF, b8b, dist: dir * (px - e21[g]), cAtr: (B[i].high - B[i].low) / a, atrX: a / (atrH.reduce((x, y) => x + y, 0) / atrH.length), dayX: avgDay ? (dayHi - dayLo) / avgDay : null, s0: fresh && s0, s2: fresh && s2, ss: fresh && ss, fresh, m0, m0ce, m1, lvl: lvlHit, t: tEnd, t1, t2, netPct: net != null && e0 ? (net / e0) * 100 : null, premRule, tp, tpNet, p30, stopPts: tp.stopAtr * a });
+      sigs.push({ ix, day: d.day, set, dir, tb, pt: pTrig && dir === side0, b8a: fresh && dir * (px - e21[g]) >= BUF, b8b, dist: dir * (px - e21[g]), cAtr: (B[i].high - B[i].low) / a, atrX: a / (atrH.reduce((x, y) => x + y, 0) / atrH.length), dayX: avgDay ? (dayHi - dayLo) / avgDay : null, s0: fresh && s0, s2: fresh && s2, ss: fresh && ss, fresh, m0, m0ce, m1, lvl: lvlHit, t: tEnd, t1, t2, netPct: net != null && e0 ? (net / e0) * 100 : null, premRule, tp, tpNet, p30, stopPts: tp.stopAtr * a });
     }
     hist = all.slice(-200); prevLegs = legBars; if (B.length) dayR.push(Math.max(...B.map((b) => b.high)) - Math.min(...B.map((b) => b.low))); if (B.length) pd = { h: Math.max(...B.map((b) => b.high)), l: Math.min(...B.map((b) => b.low)), c: B[B.length - 1].close }; prevWasExpiry = exp.has(d.day);
   });
@@ -174,6 +178,7 @@ if (require.main === module) {
     const B8: [string, (x: Sig) => boolean][] = [["EMA21 break (no buffer)", (x) => x.fresh], ["B8a cross candle ≥ buffer", (x) => x.b8a], ["B8a miss (cross candle < buffer)", (x) => x.fresh && !x.b8a],
       ["B8b first close ≥ buffer (≤3 candles)", (x) => x.b8b], ["B8b + candle ≤ 1 ATR", (x) => x.b8b && x.cAtr <= 1], ["M1 + candle ≤ 1 ATR (earlier best)", (x) => x.m1 && x.cAtr <= 1],
       ["M1 + candle ≤ 1 ATR + buffer", (x) => x.m1 && x.cAtr <= 1 && x.dist >= (x.ix === "NIFTY" ? 8 : 26)]];
+    B8.push(["PT premium E9×E21 trigger, index on the side", (x) => x.pt], ["PT + candle ≤ 1 ATR", (x) => x.pt && x.cAtr <= 1], ["PT + index ≥ buffer past EMA21", (x) => x.pt && x.dist >= (x.ix === "NIFTY" ? 8 : 26)], ["PT + buffer + candle ≤ 1 ATR", (x) => x.pt && x.cAtr <= 1 && x.dist >= (x.ix === "NIFTY" ? 8 : 26)]);
     for (const [bl, bf] of B8) { console.log(`  ${bl}`); for (const set of ["DEV", "VAL", "TEST"]) for (const ixn of ["NIFTY", "SENSEX"] as const) console.log(`    ${set.padEnd(4)} ${ixn.padEnd(6)} ${fmt(st(R[ixn].sigs.filter((x) => x.set === set && bf(x))))}`); }
     const F: [string, (x: Sig) => boolean][] = [
       ["(none)", () => true], ["V1 candle ≤ 1 ATR", (x) => x.cAtr <= 1], ["V1b candle > 1 ATR", (x) => x.cAtr > 1],
@@ -204,6 +209,9 @@ if (require.main === module) {
     for (const set of ["DEV", "VAL", "TEST"]) for (const ixn of ["NIFTY", "SENSEX"] as const) console.log(`  ${set} ${ixn.padEnd(6)} ${fmt(st(R[ixn].sigs.filter((x) => x.set === set && best(x))))}`);
   }
   console.log(`Data ${FROM} → ${to}`);
+  console.log(`\nOWNER'S 19 OCT EXAMPLE (NIFTY, PT signals 11:00–12:30):`);
+  for (const x of R.NIFTY.sigs.filter((x) => x.day === "2026-10-19" && x.pt)) { const t0 = new Date((x.t - 300 + 19800) * 1000).toISOString().slice(11, 16); if (t0 < "11:00" || t0 > "12:30") continue;
+    console.log(`  ${t0} ${x.dir > 0 ? "CE" : "PE"} · ${Math.round(x.dist)} pts past EMA21 · candle ${x.cAtr.toFixed(2)} ATR → 1:1 ${x.t1.win ? "TARGET" : x.t1.stop ? "STOP" : "TIME"} (stop ${Math.round(x.stopPts)} pts) · +30 pts ${x.tp.win ? "TARGET" : x.tp.stop ? "STOP" : "TIME"} · option net ${x.netPct == null ? "—" : x.netPct.toFixed(1) + "%"}`); }
   console.log(`\nOWNER'S EXAMPLES (SENSEX 23 Oct):`);
   for (const x of R.SENSEX.sigs.filter((x) => x.day === "2026-10-23")) console.log(`  ${new Date((x.t - 300 + 19800) * 1000).toISOString().slice(11, 16)} ${x.dir > 0 ? "UP" : "DOWN"} fresh ${x.fresh} M0 ${x.m0} M1 ${x.m1} level ${x.lvl} → 1:1 ${x.t1.win ? "TARGET" : x.t1.stop ? "STOP" : "TIME"} (stop ${Math.round(x.stopPts)} pts) · +100 pts ${x.tp.win ? "TARGET" : x.tp.stop ? "STOP" : "TIME"} · option net ${x.netPct == null ? "—" : x.netPct.toFixed(1) + "%"}`);
   for (const set of ["DEV", "VAL", "TEST"]) {
