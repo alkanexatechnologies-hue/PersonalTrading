@@ -71,10 +71,28 @@ export function toWatchAction(action: TraderAction): WatchAction {
   }
 }
 
+/** A setup whose own levels contradict it is never shown as ready (24 Oct test: 9 of 26 rows were already past their
+ * invalidation, 5 had it on the wrong side of the trigger, 2 had trigger = invalidation — 5 still said BREAKOUT READY).
+ * Returns why, or null when the levels are consistent. Pure → unit-tested. */
+export function levelProblem(bias: WatchRow["bias"], price: number | null, trigger: number | null, invalidation: number | null): string | null {
+  if (trigger == null || invalidation == null || (bias !== "Bullish" && bias !== "Bearish")) return null;
+  const up = bias === "Bullish";
+  if (trigger === invalidation) return `trigger = invalidation (${invalidation}) — no room for a stop`;
+  if (up ? invalidation > trigger : invalidation < trigger) return `invalidation ${invalidation} is on the wrong side of the trigger ${trigger} for a ${bias.toLowerCase()} setup`;
+  if (price != null && (up ? price <= invalidation : price >= invalidation)) return `price ${price} is already past the invalidation ${invalidation} — the setup is void`;
+  return null;
+}
+
 export function toWatchRow(r: LiquidityStatusResult): WatchRow {
   const dataState: WatchDataState = r.freshness.oiStale || r.freshness.liveFeedStale ? "STALE" : "OK";
   const stage = toWatchStage(r.moveStage, r.traderAction, r.liquidityFlowScore.score);
-  const action = toWatchAction(r.traderAction);
+  const bad = levelProblem(r.directionBias, r.spot, r.trigger?.level ?? null, r.invalidation?.level ?? null);
+  const action = bad ? "WATCH" : toWatchAction(r.traderAction);
+  if (bad) return {
+    symbol: r.symbol, name: r.name, score: r.liquidityFlowScore.score, bias: r.directionBias, stage, price: r.spot,
+    trigger: r.trigger?.level ?? null, invalidation: r.invalidation?.level ?? null, action, dataState,
+    note: `No setup — ${bad}.`,
+  };
   return {
     symbol: r.symbol,
     name: r.name,

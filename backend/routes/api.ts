@@ -94,6 +94,7 @@ import { candidateDates } from "../sentiment/nseParticipantOi";
 import { loadFiiStats, indexFlows } from "../sentiment/nseFiiStats";
 import * as EYE from "../premium/marketEye";
 import * as TG from "../premium/tgFormat";
+import * as TC from "../premium/tradeCheck";
 import { Decision } from "../decision/types";
 import { runHtf as runTestLabHtf } from "../testlab/htfRunner";
 import { abcComparison as htfAbc, timingDiagnostic as htfTiming, perCandleAudit as htfPerCandle } from "../testlab/htfAudit";
@@ -9319,6 +9320,17 @@ function cpOdds(sym: string): string | undefined {
 }
 /** ProTrader daily review: remember every trigger that was shown but NOT given, and why. */
 const cpNotGiven = (index: string, side: string, level: number | null, why: CL.NotGiven["why"]) => { _cp.notGiven = _cp.notGiven || []; _cp.notGiven.push({ index, side, time: Math.floor(Date.now() / 1000), level: level != null ? Math.round(level) : null, why }); cpSave(); };
+/** A strike's live premium: the ranking row, else the option chain (19–23 Oct: a strike that left the ranking showed "₹—"
+ *  and its exit premium was saved as null, so the trade could not be scored). */
+const cpPremOf = (d: any, sym: string, side: string, strike: number): number | null =>
+  (d?.ranking || []).find((x: any) => x.side === side && x.strike === strike)?.ltp
+  ?? (() => { const row = (_pcLastChain.get(`${sym}:0`)?.v?.strikes || []).find((r: any) => r.strike === strike); return row ? (side === "CE" ? row.ceLtp : row.peLtp) ?? null : null; })();
+/** Everything the ⭐ message needs to say what really happened on this index (pending retest, not given, closed trades). */
+const cpCtx = async (d: any, sym: string, day: string): Promise<TG.CpCtx> => {
+  const tr = _cp.trades?.[sym], vix: any = await cached(`india-vix`, 15_000, () => getIndiaVix()).catch(() => null);
+  return { pending: _cp.pending?.[sym] ?? null, notGiven: _cp.notGiven || [], closed: _cp.closed || [], livePrem: tr && tr.state !== "CLOSED" ? cpPremOf(d, sym, tr.side, tr.strike) : null,
+    warn: { vix: vix?.available ? { value: vix.value, changePct: vix.changePct } : null, day } };
+};
 /** Co-pilot trades closed today below their entry premium (discipline check: 2 losses = stop). */
 const cpLossesToday = () => (_cp.closed || []).filter((t: any) => t.entryPrem != null && t.exitPrem != null && (t.t1Prem != null ? 0.5 * (t.t1Prem - t.entryPrem) + 0.5 * (t.exitPrem - t.entryPrem) : t.exitPrem - t.entryPrem) < 0).length;
 /** Backtest record of break candles (backend/research/levelBreaks) quoted in each break alert. */
@@ -9344,7 +9356,7 @@ async function copilotTick() {
     }
     if (istMin >= 555 && istMin <= 916) {
       _cpTick++;
-      const syms = _cpTick % 2 && istMin % 15 !== 0 ? ["^NSEI"] : ["^NSEI", "^BSESN", "^NSEBANK"];
+      const syms = _cpTick % 2 && istMin % 15 !== 0 ? ["^NSEI"] : ["^NSEI", "^BSESN"];   // owner: trade calls for NIFTY + SENSEX only
       for (const sym of syms) {
         const d: any = await pay(sym).catch(() => null); if (!d?.available || !d.trader || d.trader.error || d.dataStatus !== "LIVE") continue;
         const T = d.trader, tracked = sym === "^NSEI" || sym === "^BSESN";
@@ -9355,7 +9367,7 @@ async function copilotTick() {
         // follow the open trade
         const tr: CP.CoTrade | null = _cp.trades[sym] || null;
         if (tr && tr.state !== "CLOSED") {
-          const prem = (d.ranking || []).find((x: any) => x.side === tr.side && x.strike === tr.strike)?.ltp ?? null;
+          const prem = cpPremOf(d, sym, tr.side, tr.strike);
           const c15 = (d.chart?.candles || []).filter((c: any) => c.time + 900 <= nowSec), last15 = c15.length ? { time: c15[c15.length - 1].time + 900, close: c15[c15.length - 1].close } : null;
           const msgs = CP.stepTrade(tr, { spot: d.spot.price, prem, last15, nowSec, istMin });
           for (const m of msgs) cpSend(m);
@@ -9368,7 +9380,9 @@ async function copilotTick() {
           const c5: any[] = await getCandlesCached(sym, "5m").catch(() => []) as any[];
           const r = CP.retestCheck(pd, c5, nowSec), pl = T.plans?.[pd.side];
           if (r.hit && pl && Math.round(pl.trigger) === Math.round(pd.trigger) && istMin <= 885) {
-            const t: any = CP.openTrade(d, pd.side, nowSec);
+            const bad = TC.planProblems(d, pd.side, { triggered: true });
+            const t: any = bad.length ? null : CP.openTrade(d, pd.side, nowSec);
+            if (bad.length) { delete _cp.pending[sym]; cpSave(); cpNotGiven(d.name, pd.side === "bull" ? "CE" : "PE", pd.trigger, "INVALID PLAN"); console.log(`[tg-check] ${sym} ${pd.side} retest not given: ${bad.join("; ")}`); }
             if (t) {
               t.review = pd.review; t.entryKind = "RETEST"; _cp.trades[sym] = t; delete _cp.pending[sym]; cpSave();
               cpSend(`📌 <b>TRADE GIVEN ON THE RETEST (review ${pd.review.grade}${pd.review.grade === "B" ? " — HALF SIZE" : ""})</b>\n5-min candle ${new Date((r.hit.time + 19800) * 1000).toISOString().slice(11, 16)} came back to ${Math.round(pd.side === "bull" ? r.hit.low : r.hit.high)} and closed ${Math.round(r.hit.close)} — ${pd.side === "bull" ? "above" : "below"} ${Math.round(pd.trigger)}. I will follow it to Target 1, Target 2, stop or 15:12.\n` + TG.tradeAlert(d, pd.side, "TRIGGERED", cpOdds(sym)), true);
@@ -9415,8 +9429,9 @@ async function copilotTick() {
             const rv = TRV.reviewTrade(d, side, { istMin, eye, lossesToday: cpLossesToday() });
             const rvH = rv ? TG.SPLIT + TRV.reviewHtml(rv) : "";
             const free = tracked && !(_cp.trades[sym] && _cp.trades[sym].state !== "CLOSED") && nowSec - (_cp.sent[`cool|${sym}`] || 0) > 15 * 60;
-            const opp = TG.tradeAlert(d, side, "TRIGGERED", cpOdds(sym));
-            if (free && T.rangeDay) (cpNotGiven(d.name, side === "bull" ? "CE" : "PE", p.trigger, "RANGE DAY"), cpSend(`⚠️ <b>RANGE DAY — shown, not given</b> (${T.rangeDay.why}; no new trades after ${T.rangeDay.at})\n` + opp + rvH, true));
+            const opp = TG.tradeAlert(d, side, "TRIGGERED", cpOdds(sym)), bad = TC.planProblems(d, side, { triggered: true });
+            if (free && bad.length) { cpNotGiven(d.name, side === "bull" ? "CE" : "PE", p.trigger, "INVALID PLAN"); console.log(`[tg-check] ${sym} ${side} trigger not given: ${bad.join("; ")}`); }
+            else if (free && T.rangeDay) (cpNotGiven(d.name, side === "bull" ? "CE" : "PE", p.trigger, "RANGE DAY"), cpSend(`⚠️ <b>RANGE DAY — shown, not given</b> (${T.rangeDay.why}; no new trades after ${T.rangeDay.at})\n` + opp + rvH, true));
             // ProTrader-approved 2026-10-18 (backtest #2, ~2 yrs real premiums): no trade on the index's own EXPIRY DAY, and the
             // trade is given only on a RETEST of the broken level (5-min close holding beyond it) within 30 minutes
             else if (free && rv && rv.grade !== "C" && d.expiry && d.expiry === day) (cpNotGiven(d.name, side === "bull" ? "CE" : "PE", p.trigger, "EXPIRY DAY"), cpSend(`⚠️ <b>EXPIRY DAY — plan trigger shown, not given</b> (normal plan lost ~8.5%/trade on expiry over 2 yrs). Today's expiry trades come from 🎲 EXPIRY MODE (paper / min size).\n` + opp + rvH, true));
@@ -9452,7 +9467,7 @@ async function copilotTick() {
         const d: any = await pay(sym).catch(() => null); if (!d?.available) continue;
         const eye = await eyeFor(sym, { price: d.spot.price, changePct: d.spot.changePct, high: d.spot.high, low: d.spot.low }).catch(() => null);
         const zh = await zeroHeroPayload({ symbol: sym }).catch(() => null);
-        items.push({ d, trade: _cp.trades[sym] || null, eye, zh: zh?.available ? zh : null });
+        items.push({ d, trade: _cp.trades[sym] || null, eye, zh: zh?.available ? zh : null, cp: await cpCtx(d, sym, day) });
       }
       // per index, in order: 🕯 the 15-min candle that just closed, then ⭐ the best opportunity (senior trader's call)
       for (const it of items) {
@@ -9731,7 +9746,7 @@ router.get("/telegram/preview", requirePermission("oiAnalysis"), async (_req: Re
     const summary = rangeSummaryMessage(await summaryRows(), `${new Date(Date.now() + 19800000).toISOString().slice(11, 16)} IST (preview)`);
     const best = [] as any[];
     for (const d of pays as any[]) {
-      const it = { d, trade: (_cp.trades || {})[d.symbol] || null, eye: await eyeFor(d.symbol, { price: d.spot.price, changePct: d.spot.changePct, high: d.spot.high, low: d.spot.low }).catch(() => null), zh: null };
+      const it = { d, trade: (_cp.trades || {})[d.symbol] || null, eye: await eyeFor(d.symbol, { price: d.spot.price, changePct: d.spot.changePct, high: d.spot.high, low: d.spot.low }).catch(() => null), zh: null, cp: await cpCtx(d, d.symbol, new Date(Date.now() + 19800000).toISOString().slice(0, 10)) };
       best.push({ symbol: d.symbol, wouldSend: TG.hasOpportunity(d, it.trade), candle: TG.candleMsg(d, it.eye), best: TG.bestOpportunityMsg([it]) });
     }
     const hot: string[] = [], oi: string[] = [];
@@ -9755,7 +9770,7 @@ router.post("/copilot/update-now", requirePermission("oiAnalysis"), async (req: 
     if (!d?.available) return res.json({ ok: false, error: d?.error || "unavailable" });
     const zh = await zeroHeroPayload({ symbol: sym }).catch(() => null);
     const eye = await eyeFor(sym, { price: d.spot.price, changePct: d.spot.changePct, high: d.spot.high, low: d.spot.low }).catch(() => null);
-    const text = String(req.query.kind) === "best" ? TG.bestOpportunityMsg([{ d, trade: (_cp.trades || {})[sym] || null, eye, zh: zh?.available ? zh : null }]) : TG.fullReadMsg(d, (_cp.trades || {})[sym] || null, eye, zh?.available ? zh : null, cpOdds(sym));
+    const text = String(req.query.kind) === "best" ? TG.bestOpportunityMsg([{ d, trade: (_cp.trades || {})[sym] || null, eye, zh: zh?.available ? zh : null, cp: await cpCtx(d, sym, new Date(Date.now() + 19800000).toISOString().slice(0, 10)) }]) : TG.fullReadMsg(d, (_cp.trades || {})[sym] || null, eye, zh?.available ? zh : null, cpOdds(sym));
     cpSend(text, true); res.json({ ok: true, text: text.replace(/<[^>]+>/g, "") });
   } catch (e: any) { res.json({ ok: false, error: e?.message || "failed" }); }
 });

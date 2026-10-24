@@ -1,4 +1,5 @@
 import { oiHtml, wallReviewHtml } from "./oiFlow";
+import { planProblems, realisticRisk, marketWarnings, WarnCtx } from "./tradeCheck";
 // ============================ Telegram message design (HTML; every dynamic value escaped) ============================
 // 15-minute "Best Opportunity" (NIFTY + SENSEX in one message) · 30-minute full read per index · event alerts.
 // Advisory only — the arbiter and risk gates decide trades.
@@ -41,11 +42,30 @@ export function hasOpportunity(d: any, trade: any | null): boolean {
   if (b.kind === "TRADE") return true;
   return b.kind === "PLAN" && b.o.state !== "IDLE" && !d?.trader?.rangeDay;
 }
-function bestBlock(d: any, trade: any | null, eye: any | null, zh: any | null): string {
+/** The co-pilot's real state for an index, so the message says what actually happened to a trigger (Telegram carries only
+ *  this message during the day — 19–23 Oct it said "TAKE" for triggers that were never given). */
+export interface CpCtx {
+  pending?: { side: "bull" | "bear"; trigger: number; until: number } | null;
+  notGiven?: { index: string; side: string; level: number | null; time: number; why: string }[];
+  closed?: any[];
+  livePrem?: number | null;   // the open trade's premium from the option chain
+  warn?: WarnCtx;
+}
+const NOT_GIVEN_WHY: Record<string, string> = { "RANGE DAY": "range day — no new trades", "EXPIRY DAY": "expiry day — normal plans are not given", "NO RETEST": "no retest within 30 minutes — no chasing", "REVIEW C": "the review graded it C", CONFLICT: "plan conflict", "INVALID PLAN": "the plan's numbers did not hold" };
+/** Given / waiting / not given — for a TRIGGERED plan; null when the plan has not triggered. */
+export function triggerStatus(d: any, side: "bull" | "bear", cp: CpCtx | undefined): { status: string; say: string } | null {
+  const o = d?.trader?.radar?.[side], p = d?.trader?.plans?.[side]; if (o?.state !== "TRIGGERED" || !p) return null;
+  const leg = side === "bull" ? "CE" : "PE";
+  if (cp?.pending && cp.pending.side === side) return { status: "NOT GIVEN YET — waiting for the retest", say: `Not a trade yet. ${leg} is given only if, by ${hm(cp.pending.until)}, a 5-min candle comes back to ${n0(cp.pending.trigger)} and closes ${side === "bull" ? "above" : "below"} it. Do not chase.` };
+  const ng = (cp?.notGiven || []).slice().reverse().find((x) => x.index === d.name && x.side === leg && (x.level == null || Math.abs(x.level - (p.trigger ?? p.entry)) <= 1));
+  if (ng) return { status: "NOT GIVEN", say: `No trade — ${NOT_GIVEN_WHY[ng.why] ?? ng.why} (${hm(ng.time)}).` };
+  return { status: "TRIGGERED — under review, not given yet", say: "Not a trade until the plan confirms it — wait for the next update." };
+}
+function bestBlock(d: any, trade: any | null, eye: any | null, zh: any | null, cp?: CpCtx): string {
   const b = bestFor(d, trade), T = d?.trader, L: string[] = [priceLine(d)];
   if (!b) L.push("  data unavailable");
   else if (b.kind === "TRADE") {
-    const t = b.trade, prem = (d.ranking || []).find((x: any) => x.side === t.side && x.strike === t.strike)?.ltp ?? null;
+    const t = b.trade, prem = cp?.livePrem ?? (d.ranking || []).find((x: any) => x.side === t.side && x.strike === t.strike)?.ltp ?? null;
     const pnl = prem != null && t.entryPrem != null ? Math.round(((prem / t.entryPrem) - 1) * 100) : null;
     L.push(`  📌 <b>OPEN TRADE</b> ${t.strike} ${t.side} · entry ₹${n0(t.entryPrem)} → now <b>₹${n0(prem)}</b>${pnl != null ? ` (${pnl >= 0 ? "+" : ""}${pnl}%)` : ""}`);
     L.push(`  🎯 T1 ${n0(t.t1)}${t.t2 ? ` · T2 ${n0(t.t2)}` : ""} · 🛑 ${t.state === "T1" ? `breakeven ${n0(t.entrySpot)} (T1 done)` : `15-min close ${t.side === "CE" ? "below" : "above"} ${n0(t.stop)}`}`);
@@ -54,11 +74,13 @@ function bestBlock(d: any, trade: any | null, eye: any | null, zh: any | null): 
     const tag = o.state === "TRIGGERED" ? "✅ TRIGGERED" : o.state === "ARMED" ? "⏳ ARMED — wait for the close" : o.state === "APPROACHING" ? "👀 APPROACHING" : "· watching";
     L.push(`Status: <b>${tag}</b>`);
     if (T?.rangeDay) L.push(`⚠️ <b>RANGE DAY</b> — ${esc(T.rangeDay.why)}: shown for information, no new trade.`);
-    L.push(...planBlock(d, side));
+    const ts = triggerStatus(d, side, cp);
+    L.push(...planBlock(d, side, { status: ts?.status ?? null, warn: cp?.warn }));
     const rv = T?.review?.[side], why: string[] = rv?.reasoning || [];
     const dec = why[why.length - 1], wrong = why.find((x: string) => /^Wrong if/.test(x));
     if (T?.rangeDay) L.push(`🧠 <b>Senior trader:</b> NO NEW TRADE — the range-day rule decides today (both sides of the first-hour range broke). Watch only; trade again tomorrow.`);
-    else if (dec) L.push(`🧠 <b>Senior trader:</b> ${esc(dec.replace(/^Decision:\s*/, ""))}`);
+    else if (ts) L.push(`🧠 <b>Senior trader:</b> ${esc(ts.say)}`);
+    else if (dec) L.push(`🧠 <b>Senior trader:</b> ${esc(dec.replace(/^Decision:\s*/, "").replace(/^(TAKE[^.]*)/, "if it triggers: $1"))}`);
     if (wrong) L.push(`⚠️ ${esc(wrong)}`);
   } else {
     const P = T?.plans, nt = P?.noTrade;
@@ -68,6 +90,11 @@ function bestBlock(d: any, trade: any | null, eye: any | null, zh: any | null): 
     if (nt && d.spot?.price >= nt.from && d.spot?.price <= nt.to) L.push(`<i>Price is in the no-trade zone ${n0(nt.from)}–${n0(nt.to)}: the middle pays nobody — wait for a side to break.</i>`);
   }
   void eye;
+  // today's finished trades on this index — the result is never left to guess (19 Oct: a Target-2 trade was scored "➖")
+  for (const t of (cp?.closed || []).filter((x: any) => x.index === d.symbol)) {
+    const pc = t.entryPrem && t.exitPrem != null ? ` (${t.exitPrem >= t.entryPrem ? "+" : ""}${Math.round((t.exitPrem / t.entryPrem - 1) * 100)}%)` : "";
+    L.push(`📒 Today: ${t.strike} ${t.side} · ${esc(t.exitWhy)}${/\d\d:\d\d/.test(String(t.exitWhy)) ? "" : ` at ${hm(t.closedAt)}`} · ₹${n0(t.entryPrem)} → ₹${n0(t.exitPrem)}${pc}`);
+  }
   if (zh?.isExpiry) {
     const open = (zh.zhTrades || []).find((t: any) => t.state !== "CLOSED"), trig = (zh.sides || []).find((x: any) => x.trigger?.state === "TRIGGERED");
     L.push(open ? `  🎲 Zero-hero #${open.n} ${open.strike} ${open.side} · entry ₹${n0(open.entryPrem)} · now ₹${n0(open.livePrem)} · T1 ₹${n0(open.t1Prem)}`
@@ -77,9 +104,9 @@ function bestBlock(d: any, trade: any | null, eye: any | null, zh: any | null): 
   return L.join("\n");
 }
 /** 15-minute message: the best opportunity on NIFTY and SENSEX, together. */
-export function bestOpportunityMsg(items: { d: any; trade: any | null; eye: any | null; zh: any | null }[]): string {
+export function bestOpportunityMsg(items: { d: any; trade: any | null; eye: any | null; zh: any | null; cp?: CpCtx }[]): string {
   const t = hm(Math.floor(Date.now() / 1000));
-  return items.filter((x) => x.d?.available).map((x) => [`⭐ <b>BEST OPPORTUNITY · ${esc(short(x.d.name))}</b> · ${t}`, bestBlock(x.d, x.trade, x.eye, x.zh)].join("\n")).join(SPLIT);
+  return items.filter((x) => x.d?.available).map((x) => [`⭐ <b>BEST OPPORTUNITY · ${esc(short(x.d.name))}</b> · ${t}`, bestBlock(x.d, x.trade, x.eye, x.zh, x.cp)].join("\n")).join(SPLIT);
 }
 /** 30-minute message: the full read of one index. */
 export function fullReadMsg(d: any, trade: any | null, eye: any | null, zh: any | null, odds?: string): string {
@@ -199,9 +226,12 @@ export function tradeAlert(d: any, side: "bull" | "bear", state: string, odds?: 
 const RISKW: Record<string, string> = { LOW: "LOW RISK", MEDIUM: "MED RISK", HIGH: "HIGH RISK", FAR: "FAR" };
 const pad = (v: string, n: number, right = false) => (right ? v.padStart(n) : v.padEnd(n));
 /** One plan exactly like the screen card: risk, start, buy, review + chips, Start/Stop/Target table, R:R. */
-export function planBlock(d: any, side: "bull" | "bear", o: { candle?: boolean } = {}): string[] {
+export function planBlock(d: any, side: "bull" | "bear", o: { candle?: boolean; status?: string | null; warn?: WarnCtx } = {}): string[] {
   const T = d?.trader, p = T?.plans?.[side], ce = side === "bull", leg = ce ? "CE" : "PE", idx = short(d?.name);
   if (!p) return [`${ce ? "🟢" : "🔴"} <b>${ce ? "BULL" : "BEAR"} PLAN</b> — no level ${ce ? "above" : "below"} the price`];
+  // impossible numbers are never presented as a trade (19–23 Oct: stop = start, T1 = T2, T1 already passed …)
+  const triggered = T?.radar?.[side]?.state === "TRIGGERED", bad = planProblems(d, side, { triggered });
+  if (bad.length) return [`${ce ? "🟢" : "🔴"} <b>${esc(idx)} · ${ce ? "BULL" : "BEAR"} PLAN</b> · <b>⛔ NOT A TRADE</b>`, "The plan's numbers do not hold right now:", ...bad.map((x) => `• ${esc(x)}`), "Watching only — no entry until the plan refreshes with valid levels."];
   const expired = p.premNow != null && p.premNow < 1;
   const rk = p.triggerRisk?.risk, L: string[] = [];
   L.push(`${ce ? "🟢" : "🔴"} <b>${esc(idx)} · ${ce ? "BULL" : "BEAR"} PLAN</b>${rk ? ` · <b>${esc(RISKW[rk] ?? rk)}</b>` : ""}`);
@@ -209,7 +239,13 @@ export function planBlock(d: any, side: "bull" | "bear", o: { candle?: boolean }
   L.push(`Buy <b>${p.strike ?? "—"} ${leg}</b> ${expired ? "(premium at the open)" : p.premNow != null ? `(now ₹${n0(p.premNow)})` : ""}`);
   if (p.premPos && !expired) L.push(p.premPos.danger ? `<b>${esc(p.premPos.text)}</b>` : `Premium ${esc(p.premPos.text)}`);
   const rv = T?.review?.[side];
-  if (rv) { const rs = reviewShort(rv); if (T?.rangeDay) rs[0] = rs[0].replace(/→ <b>[^<]*<\/b>/, "→ <b>WATCH ONLY — range day</b>"); L.push(...rs); }   // the approved range-day rule outranks the review grade
+  if (rv) {
+    const rs = reviewShort(rv);
+    if (T?.rangeDay) rs[0] = rs[0].replace(/→ <b>[^<]*<\/b>/, "→ <b>WATCH ONLY — range day</b>");   // the approved range-day rule outranks the review grade
+    else if (o.status) rs[0] = rs[0].replace(/→ <b>[^<]*<\/b>/, `→ <b>${esc(o.status)}</b>`);   // what really happened to this trigger (given / waiting / not given)
+    else if (!triggered) rs[0] = rs[0].replace(/→ <b>([^<]*)<\/b>/, "→ if it triggers: <b>$1</b>");
+    L.push(...rs);
+  }
   const pr = (v: number | null | undefined) => (expired || v == null || !Number.isFinite(v) ? "—" : `₹${n0(v)}`);
   const row = (lbl: string, lvl: number, pv: number | null | undefined, pts: string) => `${pad(lbl, 9)}${pad(n0(lvl), 7, true)}${pad(pr(pv), 7, true)}${pad(pts, 7, true)}`;
   const d1 = (lvl: number) => `${(ce ? lvl - p.entry : p.entry - lvl) >= 0 ? "+" : "−"}${n0(Math.abs(lvl - p.entry))}`;
@@ -218,6 +254,9 @@ export function planBlock(d: any, side: "bull" | "bear", o: { candle?: boolean }
   if (p.t2 != null) tbl.push(row("Target 2", p.t2, p.premAtT2, d1(p.t2)));
   L.push(`<pre>${tbl.join("\n")}</pre>`);
   L.push(`Reward : risk <b>1 : ${esc(p.rr ?? "—")}</b> · exit by 15:12`);
+  const rr = realisticRisk(d, side);
+  if (rr) L.push(`🛑 Real risk: the stop is a 15-min CLOSE — index ${rr.stopPts} pts to the stop, and the candle can run ~${rr.worstPts - rr.stopPts} more before it closes → plan for up to <b>~${rr.worstPts} pts</b> against you`);
+  for (const w of marketWarnings(d, side, o.warn || {})) L.push(`⚠️ ${esc(w)}`);
   if (o.candle) { const c5 = candleShort(T?.candles?.m5); if (c5) L.push(`🕯 ${c5}`); }
   return L;
 }

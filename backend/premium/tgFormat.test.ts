@@ -65,7 +65,7 @@ test("plan board: screen layout, monospace table untouched by bold, lowest-risk 
   (x.trader as any).levels = [{ price: 22950, label: "OI put wall", risk: { risk: "MEDIUM", bounce: true } }, { price: 23100, label: "R1", risk: { risk: "LOW" } }];
   (x.trader as any).review = { bull: { grade: "B", score: 66, verdict: "TAKE SMALL — half size", checks: [{ ok: true, label: "trend" }, { ok: false, label: "15-min close" }] } };
   const m = emphasize(planBoardMsg(x));
-  assert.match(m, /NIFTY — TRADE PLAN/); assert.match(m, /Review B<\/b> 66% → <b>TAKE SMALL/); assert.match(m, /✓ 1 passed · ✗ 1 failed: 15-min close/);
+  assert.match(m, /NIFTY — TRADE PLAN/); assert.match(m, /Review B<\/b> 66% → if it triggers: <b>TAKE SMALL/);   // not triggered yet → never a bare TAKE assert.match(m, /✓ 1 passed · ✗ 1 failed: 15-min close/);
   const pre = m.match(/<pre>([\s\S]*?)<\/pre>/)![1];
   assert.ok(!/<b>/.test(pre), "no tags inside <pre>"); assert.match(pre, /Target 2\s+23,200\s+₹190\s+\+140/);
   assert.match(m, /NO-TRADE ZONE<\/b> 22,890 – 23,060\n170 pts wide \(4\.3 × ATR\)/);

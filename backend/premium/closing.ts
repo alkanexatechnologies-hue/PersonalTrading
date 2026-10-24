@@ -21,14 +21,17 @@ export function gradeTrade(t: ReviewTrade) {
   const premPct = premPts != null && e ? (premPts / e) * 100 : null;
   const dir = t.side === "CE" ? 1 : -1;
   const idxPts = closed && t.entrySpot != null && t.exitSpot != null ? dir * (t.exitSpot - t.entrySpot) : null;
-  const result: "SUCCESS" | "FAILED" | "FLAT" | "OPEN" | "NO PRICE" = !closed ? "OPEN" : premPts == null ? "NO PRICE" : premPts > 0 ? "SUCCESS" : premPts < 0 ? "FAILED" : "FLAT";
+  // no premium recorded (19 Oct: a Target-2 trade, +677 index pts, was scored "➖") → grade it on the index instead, labelled
+  const why0 = String(t.exitWhy || ""), byIndex = premPts == null && closed && (idxPts != null || /TARGET/i.test(why0));
+  const idxResult = /TARGET|T1|T2/i.test(why0) || (idxPts != null && idxPts > 0) ? "SUCCESS" : /STOP/i.test(why0) || (idxPts != null && idxPts < 0) ? "FAILED" : "FLAT";
+  const result: "SUCCESS" | "FAILED" | "FLAT" | "OPEN" | "NO PRICE" = !closed ? "OPEN" : premPts != null ? (premPts > 0 ? "SUCCESS" : premPts < 0 ? "FAILED" : "FLAT") : byIndex ? idxResult : "NO PRICE";
   const why = String(t.exitWhy || "");
   const lesson = result !== "FAILED" ? null
     : /STOP|SL/i.test(why) ? "the move reversed through the stop — the setup failed"
     : /TIME/i.test(why) ? "the move never came — time decay took the premium"
     : /RESET|51/i.test(why) ? "zero-hero lost half and had no fresh reason to hold"
     : "closed below the entry premium";
-  return { ...t, premPts: premPts == null ? null : r1(premPts), premPct: premPct == null ? null : r(premPct), idxPts: idxPts == null ? null : r1(idxPts), result, lesson };
+  return { ...t, premPts: premPts == null ? null : r1(premPts), premPct: premPct == null ? null : r(premPct), idxPts: idxPts == null ? null : r1(idxPts), result, lesson, basis: (byIndex ? "index" : "premium") as "index" | "premium" };
 }
 export type Graded = ReturnType<typeof gradeTrade>;
 
@@ -57,7 +60,7 @@ export function closingStatementMsg(o: { day: string; indices: { name: string; c
   if (!o.graded.length) L.push("  No trade was given or recorded today — nothing to score.");
   o.graded.forEach((g, i) => {
     const icon = g.result === "SUCCESS" ? "✅" : g.result === "FAILED" ? "❌" : g.result === "OPEN" ? "⏳" : "➖";
-    const pts = g.premPts == null ? "—" : `${g.premPts >= 0 ? "+" : ""}${g.premPts} pts (${g.premPct != null && g.premPct >= 0 ? "+" : ""}${g.premPct ?? "—"}%)`;
+    const pts = g.premPts == null ? (g.basis === "index" ? "graded on the index (premium not recorded)" : "—") : `${g.premPts >= 0 ? "+" : ""}${g.premPts} pts (${g.premPct != null && g.premPct >= 0 ? "+" : ""}${g.premPct ?? "—"}%)`;
     L.push(`${icon} <b>#${i + 1} ${esc(g.name.replace(" 50", ""))} ${g.strike} ${g.side}</b> · ${esc(g.source)} · ${hm(g.openedAt)}→${g.closedAt ? hm(g.closedAt) : "open"}`);
     L.push(`    Premium ₹${n0(g.entryPrem)} → ₹${n0(g.exitPrem)}${g.t1Prem != null ? ` (half at T1 ₹${n0(g.t1Prem)})` : ""} = <b>${pts}</b>${g.idxPts != null ? ` · index ${g.idxPts >= 0 ? "+" : ""}${g.idxPts} pts` : ""} · ${esc(g.exitWhy || g.state)}`);
   });
@@ -75,7 +78,7 @@ export function closingStatementMsg(o: { day: string; indices: { name: string; c
 }
 
 // ---------------------------------------------------------------- ProTrader DAILY REVIEW (sent with the 15:30 closing statement)
-export interface NotGiven { index: string; side: string; time: number; level: number | null; why: "NO RETEST" | "RANGE DAY" | "EXPIRY DAY" | "REVIEW C" | "CONFLICT" }
+export interface NotGiven { index: string; side: string; time: number; level: number | null; why: "NO RETEST" | "RANGE DAY" | "EXPIRY DAY" | "REVIEW C" | "CONFLICT" | "INVALID PLAN" }
 export interface SlCase { name: string; strike: number; side: string; openedAt: number; premPct: number | null; review?: { grade: string; failed: string[] } | null; rangeDay?: boolean; entryKind?: string | null }
 /** Why a stop loss happened, from facts recorded at the time (no guessing). */
 export function slReasons(c: SlCase): string[] {
