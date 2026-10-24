@@ -52,13 +52,14 @@ function tradePts(path: [number, number][], entry: number, stopPx: number, dir: 
   for (const [t, p] of path) { if (dir * (p - s) <= 0) return { win: false, stop: true, r: -1, tOut: t, stopAtr: d / a }; if (dir * (p - tg) >= 0) return { win: true, stop: false, r: pts / d, tOut: t, stopAtr: d / a }; }
   return { win: false, stop: false, r: path.length ? dir * (path[path.length - 1][1] - entry) / d : 0, tOut: path.length ? path[path.length - 1][0] : null, stopAtr: d / a };
 }
-interface Sig { ix: string; day: string; set: string; dir: number; tb: string; s0: boolean; s2: boolean; ss: boolean; t1: Out; t2: Out; netPct: number | null; premRule: number | null; tp: Out; tpNet: number | null; p30: { win: boolean; net: number } | null; stopPts: number }
+interface Sig { ix: string; day: string; set: string; dir: number; tb: string; s0: boolean; s2: boolean; ss: boolean; fresh: boolean; m0: boolean; m0ce: boolean; m1: boolean; lvl: boolean; t: number; t1: Out; t2: Out; netPct: number | null; premRule: number | null; tp: Out; tpNet: number | null; p30: { win: boolean; net: number } | null; stopPts: number }
 
 export function run(ix: "NIFTY" | "SENSEX", days: DayData[]) {
   const { step, lot } = IDX[ix], ds = days.filter((d) => d.spot.size >= 300), N = ds.length, d1 = Math.floor(N * 0.6), d2 = Math.floor(N * 0.8);
   const exp = expiryDays(ds, step), setOf = (i: number) => (i === d1 || i === d2 ? "PURGE" : i < d1 ? "DEV" : i < d2 ? "VAL" : "TEST");
   const sigs: Sig[] = [], base: { set: string; dir: number; tb: string; sb: number; win: boolean; winPts: boolean; sbP: number }[] = [], sessions: Record<string, number> = { DEV: 0, VAL: 0, TEST: 0, PURGE: 0 };
-  let hist: Bar[] = [], prevLegs: Map<string, Bar[]> | null = null, prevWasExpiry = false;
+  let hist: Bar[] = [], prevLegs: Map<string, Bar[]> | null = null, prevWasExpiry = false, pd: { h: number; l: number; c: number } | null = null;
+  const ROUND = ix === "NIFTY" ? 100 : 500;
   ds.forEach((d, di) => {
     const set = setOf(di); sessions[set]++;
     const mins = [...d.spot.entries()].sort((a, b) => a[0] - b[0]).filter(([t]) => mn(t) >= 555 && mn(t) < 930) as [number, number][];
@@ -67,9 +68,9 @@ export function run(ix: "NIFTY" | "SENSEX", days: DayData[]) {
     const legBars = new Map<string, Bar[]>(); for (const [k, arr] of d.legs) legBars.set(k, bars5(arr.map((x: Min) => [x.t, x.c] as [number, number])));
     const legIx = new Map<string, Map<number, number>>(); for (const [k, arr] of d.legs) legIx.set(k, new Map(arr.map((x: Min) => [x.t, x.c])));
     const premAt = (k: string, t: number) => { const m = legIx.get(k); if (!m) return null; for (let j = 0; j < 4; j++) { const v = m.get(t - 60 - j * 60); if (v != null) return v; } return null; };
-    const emaCache = new Map<string, { times: Map<number, number>; e9: number[]; e21: number[] }>();
+    const emaCache = new Map<string, { times: Map<number, number>; e9: number[]; e21: number[]; c: number[] }>();
     const premEma = (k: string) => { if (emaCache.has(k)) return emaCache.get(k)!; const today = legBars.get(k) || [], prev = !prevWasExpiry && prevLegs?.get(k) || [];
-      const ser = prev.concat(today), c = ser.map((b) => b.close), o = { times: new Map(ser.map((b, j) => [b.time, j])), e9: emaSeries(c, 9), e21: emaSeries(c, 21) }; emaCache.set(k, o); return o; };
+      const ser = prev.concat(today), c = ser.map((b) => b.close), o = { times: new Map(ser.map((b, j) => [b.time, j])), e9: emaSeries(c, 9), e21: emaSeries(c, 21), c }; emaCache.set(k, o); return o; };
     const pathFrom = (t0: number) => mins.filter(([t]) => t >= t0 && t < t0 + 3600);
     for (let i = 1; i < B.length; i++) {
       const g = off + i, tEnd = B[i].time + 300, m = mn(tEnd); if (m < 560 || m > 870 || g < 30) continue;
@@ -77,10 +78,25 @@ export function run(ix: "NIFTY" | "SENSEX", days: DayData[]) {
       const path = pathFrom(tEnd); if (path.length < 20 || set === "PURGE") continue;
       const tb = m < 630 ? "09:15-10:30" : m < 720 ? "10:30-12:00" : m < 810 ? "12:00-13:30" : "13:30-14:30", px = B[i].close;
       for (const dir of [1, -1]) { const o = trade(path, px, dir > 0 ? B[i].low : B[i].high, dir, a, 1), q = tradePts(path, px, dir > 0 ? B[i].low : B[i].high, dir, a, PTS[ix]); base.push({ set, dir, tb, sb: Math.min(12, Math.floor(o.stopAtr / 0.25)), win: o.win, winPts: q.win, sbP: Math.min(12, Math.floor(q.stopAtr * a / PTS[ix] / 0.25)) }); }
-      const up = all[g - 1].close <= e21[g - 1] && px > e21[g], dn = all[g - 1].close >= e21[g - 1] && px < e21[g]; if (!up && !dn) continue;
+      // index EMA 21 cross on this candle (fresh) or on the previous one with the index still on the new side (late, M1 only)
+      const xI = (q: number) => (all[q - 1].close <= e21[q - 1] && all[q].close > e21[q] ? 1 : all[q - 1].close >= e21[q - 1] && all[q].close < e21[q] ? -1 : 0);
+      const xNow = xI(g), xPrev = xI(g - 1), late = !xNow && xPrev !== 0 && (xPrev > 0 ? px > e21[g] : px < e21[g]);
+      if (!xNow && !late) continue;
+      const up = (xNow || xPrev) > 0, fresh = xNow !== 0;
       const dir = up ? 1 : -1, atm = Math.round(px / step) * step, key = `${atm}${dir > 0 ? "CE" : "PE"}`, pe = premEma(key), j = pe.times.get(B[i].time);
       const cross = (q: number) => q >= 1 && pe.e9[q - 1] <= pe.e21[q - 1] && pe.e9[q] > pe.e21[q];
       const ok = j != null && j >= 21;
+      // premium PRICE vs its own EMA 21 (what the owner's charts show): trade side (CE for up, PE for down) crosses up
+      const pX = (o: { e21: number[]; c: number[] }, q: number, sgn: number) => q >= 1 && (sgn > 0 ? o.c[q - 1] <= o.e21[q - 1] && o.c[q] > o.e21[q] : o.c[q - 1] >= o.e21[q - 1] && o.c[q] < o.e21[q]);
+      const pNow = ok && pX(pe, j!, 1), pPrev = ok && pX(pe, j! - 1, 1) && pe.c[j!] > pe.e21[j!];
+      const m0 = fresh && pNow, m1 = (fresh && (pNow || pPrev)) || (late && pNow);
+      const ce = premEma(`${atm}CE`), jc = ce.times.get(B[i].time), m0ce = fresh && jc != null && jc >= 21 && pX(ce, jc, dir);
+      // move starting at a level: the last 12 candles' extreme within 0.3 ATR of PDL/PDH, PDC, ORB, the day's earlier low/high, a round number
+      const w12 = all.slice(Math.max(0, g - 11), g + 1), ext = dir > 0 ? Math.min(...w12.map((b) => b.low)) : Math.max(...w12.map((b) => b.high));
+      const before = B.slice(0, Math.max(0, i - 11)), orb = B.filter((b) => mn(b.time) < 570);
+      const lv = [pd?.c, dir > 0 ? pd?.l : pd?.h, orb.length && i - 11 > 2 ? (dir > 0 ? Math.min(...orb.map((b) => b.low)) : Math.max(...orb.map((b) => b.high))) : null,
+        before.length ? (dir > 0 ? Math.min(...before.map((b) => b.low)) : Math.max(...before.map((b) => b.high))) : null, Math.round(ext / ROUND) * ROUND].filter((x): x is number => x != null && isFinite(x));
+      const lvlHit = lv.some((L) => Math.abs(ext - L) <= 0.3 * a);
       const s0 = ok && cross(j!), s2 = ok && (cross(j!) || cross(j! - 1) || cross(j! - 2)), ss = ok && pe.e9[j!] > pe.e21[j!];
       const t1 = trade(path, px, dir > 0 ? B[i].low : B[i].high, dir, a, 1), t2 = trade(path, px, dir > 0 ? B[i].low : B[i].high, dir, a, 2);
       const e0 = premAt(key, tEnd), e1 = t1.tOut != null ? premAt(key, t1.tOut + 60) : null;
@@ -96,9 +112,9 @@ export function run(ix: "NIFTY" | "SENSEX", days: DayData[]) {
       if (e0 != null) { const m2 = legIx.get(key)!, stopT = t1.stop ? t1.tOut! : tEnd + 3600; let exitP: number | null = null, won = false;
         for (let t = tEnd; t < tEnd + 3600 && mn(t) < 930; t += 60) { const v = m2.get(t); if (v != null) exitP = v; if (v != null && v >= e0 + 30) { won = true; exitP = e0 + 30; break; } if (t >= stopT) break; }
         if (exitP != null) p30 = { win: won, net: exitP - e0 - COST(e0) - COST(exitP) - 40 / lot }; }
-      sigs.push({ ix, day: d.day, set, dir, tb, s0, s2, ss, t1, t2, netPct: net != null && e0 ? (net / e0) * 100 : null, premRule, tp, tpNet, p30, stopPts: tp.stopAtr * a });
+      sigs.push({ ix, day: d.day, set, dir, tb, s0: fresh && s0, s2: fresh && s2, ss: fresh && ss, fresh, m0, m0ce, m1, lvl: lvlHit, t: tEnd, t1, t2, netPct: net != null && e0 ? (net / e0) * 100 : null, premRule, tp, tpNet, p30, stopPts: tp.stopAtr * a });
     }
-    hist = all.slice(-200); prevLegs = legBars; prevWasExpiry = exp.has(d.day);
+    hist = all.slice(-200); prevLegs = legBars; if (B.length) pd = { h: Math.max(...B.map((b) => b.high)), l: Math.min(...B.map((b) => b.low)), c: B[B.length - 1].close }; prevWasExpiry = exp.has(d.day);
   });
   return { sigs, base, sessions };
 }
@@ -131,20 +147,26 @@ if (require.main === module) {
   };
   console.log(`\nFIXED TARGET: index +${PTS.NIFTY} pts NIFTY / +${PTS.SENSEX} pts SENSEX, or premium +₹30, stop beyond the signal candle, 60 min`);
   for (const set of ["DEV", "VAL", "TEST", "ALL"]) for (const ix of ["NIFTY", "SENSEX"] as const) {
-    const xs = R[ix].sigs.filter((x) => set === "ALL" || x.set === set);
+    const xs = R[ix].sigs.filter((x) => set === "ALL" || x.set === set), fr = xs.filter((x) => x.fresh);
     console.log(` ${set} ${ix}`);
-    linePts("index EMA21 break alone", xs); linePts("+ premium cross same candle", xs.filter((x) => x.s0)); linePts("+ premium EMA9 above EMA21", xs.filter((x) => x.ss));
+    linePts("index EMA21 break alone", fr); linePts("+ premium E9×E21 same candle", fr.filter((x) => x.s0));
+    linePts("M0 premium PRICE×EMA21 same candle", xs.filter((x) => x.m0)); linePts("M1 both within 1 candle", xs.filter((x) => x.m1));
+    linePts("M1 + from a level", xs.filter((x) => x.m1 && x.lvl)); linePts("M0 (CE-chart view) same candle", xs.filter((x) => x.m0ce));
   }
   console.log(`Data ${FROM} → ${to}`);
+  console.log(`\nOWNER'S EXAMPLES (SENSEX 23 Oct):`);
+  for (const x of R.SENSEX.sigs.filter((x) => x.day === "2026-10-23")) console.log(`  ${new Date((x.t - 300 + 19800) * 1000).toISOString().slice(11, 16)} ${x.dir > 0 ? "UP" : "DOWN"} fresh ${x.fresh} M0 ${x.m0} M1 ${x.m1} level ${x.lvl} → 1:1 ${x.t1.win ? "TARGET" : x.t1.stop ? "STOP" : "TIME"} (stop ${Math.round(x.stopPts)} pts) · +100 pts ${x.tp.win ? "TARGET" : x.tp.stop ? "STOP" : "TIME"} · option net ${x.netPct == null ? "—" : x.netPct.toFixed(1) + "%"}`);
   for (const set of ["DEV", "VAL", "TEST"]) {
     console.log(`\n${set}  (sessions: NIFTY ${R.NIFTY.sessions[set]}, SENSEX ${R.SENSEX.sessions[set]})`);
     for (const ix of ["NIFTY", "SENSEX", "BOTH"] as const) {
-      const all = ix === "BOTH" ? [...R.NIFTY.sigs, ...R.SENSEX.sigs] : R[ix].sigs, sess = ix === "BOTH" ? R.NIFTY.sessions[set] + R.SENSEX.sessions[set] : R[ix].sessions[set], xs = all.filter((x) => x.set === set);
+      const all = ix === "BOTH" ? [...R.NIFTY.sigs, ...R.SENSEX.sigs] : R[ix].sigs, sess = ix === "BOTH" ? R.NIFTY.sessions[set] + R.SENSEX.sessions[set] : R[ix].sessions[set], xs = all.filter((x) => x.set === set && x.fresh), xa = all.filter((x) => x.set === set);
       console.log(` ${ix}`);
       line("B0 index EMA21 break alone", xs, sess);
       line("S0 + premium cross same candle", xs.filter((x) => x.s0), sess);
       line("S2 + premium cross ≤ 2 candles", xs.filter((x) => x.s2), sess);
       line("SS + premium EMA9 above EMA21", xs.filter((x) => x.ss), sess);
+      line("M0 prem PRICE×EMA21 same candle", xa.filter((x) => x.m0), sess); line("M1 both within 1 candle", xa.filter((x) => x.m1), sess);
+      line("M1 + from a level", xa.filter((x) => x.m1 && x.lvl), sess); line("M0 CE-chart view (CE ↑/↓)", xa.filter((x) => x.m0ce), sess);
       if (ix === "BOTH") for (const dir of [1, -1]) line(`  S0 ${dir > 0 ? "break UP (CE)" : "break DOWN (PE)"}`, xs.filter((x) => x.s0 && x.dir === dir), sess);
     }
   }
