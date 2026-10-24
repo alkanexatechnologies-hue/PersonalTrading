@@ -45,3 +45,26 @@ Script: `emaCrossStudy.ts`. Full output: `RESULTS_EMA_CROSS_raw.txt`. Research o
   stable, and the option P&L is about zero or negative after costs.
 - "Premium EMA 9 above EMA 21" adds +0 to +6 points and still loses after costs.
 - **No change to live logic.**
+
+## Fixed 30-point target (owner: "only 30 points")
+
+**Setup:** index +30 pts NIFTY / +100 pts SENSEX (the same % move), or premium +₹30. Stop beyond the signal candle
+(median 13–20 pts NIFTY, so the target is about 1.5–2.3× the stop); 60 min.
+
+| NIFTY, all periods | n | +30 pts first | Random, same stop | Option net | Premium +₹30 first (net per unit) |
+|---|---|---|---|---|---|
+| EMA 21 break alone | 3,424 | 30.1% | 29.5% | −2.6% | 17.2% (−₹2.8) |
+| + premium cross same candle | 78 | **47.4%** [36.7–58.4] | 33.6% | +0.8% [−4.0, 6.1] | 32.1% (+₹1.4) |
+| + premium EMA 9 above EMA 21 | 509 | 35.8% | 29.8% | −0.5% | 19.8% (−₹2.2) |
+
+**Same-candle rule by period (NIFTY, +30 first):** DEV 51.1% (47) → VAL 36.4% (22, = random) → TEST 55.6% (9).
+
+**SENSEX:**
+- **+100 pts first:** 38.3% (60) vs random 33.1%.
+- **Premium +₹30:** reached more often (51.7%) because SENSEX premiums are larger, but the net is −₹23.5 per unit: the
+  losers are bigger.
+
+**Verdict:**
+- **NIFTY 30 pts:** the same-candle rule wins about 47% vs 34% random. That is better than random, but it fell to
+  random in VAL, and the option P&L is about breakeven after costs (Δ ≈ 0.5, so 30 index pts ≈ ₹15 of premium).
+- **Not a proven edge.** Information only; no change to live logic.

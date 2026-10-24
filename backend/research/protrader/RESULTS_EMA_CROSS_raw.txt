@@ -1,3 +1,37 @@
+
+FIXED TARGET: index +30 pts NIFTY / +100 pts SENSEX, or premium +₹30, stop beyond the signal candle, 60 min
+ DEV NIFTY
+  index EMA21 break alone            n  2086 | INDEX +pts first 29.4% [27.5–31.4] · stop first 62.7% · random same stop 29.6% · median stop 13 pts | option net -2.8% [-4.9–-1.5] | PREMIUM +₹30 first 15.8% [14.3–17.4] · net ₹-3.1/unit
+  + premium cross same candle        n    47 | INDEX +pts first 51.1% [37.2–64.7] · stop first 40.4% · random same stop 33.1% · median stop 20 pts | option net 2.2% [-4.3–10.0] | PREMIUM +₹30 first 31.9% [20.4–46.2] · net ₹1.6/unit
+  + premium EMA9 above EMA21         n   298 | INDEX +pts first 38.6% [33.2–44.2] · stop first 56.0% · random same stop 29.7% · median stop 14 pts | option net 0.4% [-1.7–2.5] | PREMIUM +₹30 first 21.1% [16.9–26.1] · net ₹-1.5/unit
+ DEV SENSEX
+  index EMA21 break alone            n  2087 | INDEX +pts first 29.3% [27.4–31.3] · stop first 63.7% · random same stop 27.8% · median stop 42 pts | option net -1.5% [-2.3–-0.5] | PREMIUM +₹30 first 40.4% [38.4–42.6] · net ₹-9.8/unit
+  + premium cross same candle        n    44 | INDEX +pts first 50.0% [35.8–64.2] · stop first 29.5% · random same stop 32.7% · median stop 65 pts | option net 1.7% [-3.9–7.1] | PREMIUM +₹30 first 61.4% [46.6–74.3] · net ₹-21.2/unit
+  + premium EMA9 above EMA21         n   289 | INDEX +pts first 32.9% [27.7–38.5] · stop first 59.2% · random same stop 26.4% · median stop 39 pts | option net -0.7% [-2.0–1.3] | PREMIUM +₹30 first 43.9% [38.3–49.7] · net ₹-11.9/unit
+ VAL NIFTY
+  index EMA21 break alone            n   659 | INDEX +pts first 36.6% [33.0–40.3] · stop first 60.4% · random same stop 34.0% · median stop 17 pts | option net -1.7% [-3.0–-0.3] | PREMIUM +₹30 first 24.4% [21.3–27.9] · net ₹-2.4/unit
+  + premium cross same candle        n    22 | INDEX +pts first 36.4% [19.7–57.0] · stop first 59.1% · random same stop 36.3% · median stop 24 pts | option net -5.0% [-13.5–0.7] | PREMIUM +₹30 first 22.7% [10.1–43.4] · net ₹-4.2/unit
+  + premium EMA9 above EMA21         n   114 | INDEX +pts first 38.6% [30.2–47.8] · stop first 58.8% · random same stop 34.4% · median stop 17 pts | option net -1.0% [-3.7–1.4] | PREMIUM +₹30 first 23.7% [16.8–32.3] · net ₹-2.9/unit
+ VAL SENSEX
+  index EMA21 break alone            n   660 | INDEX +pts first 33.8% [30.3–37.5] · stop first 63.6% · random same stop 33.1% · median stop 56 pts | option net -1.8% [-3.3–-0.5] | PREMIUM +₹30 first 46.2% [42.4–50.0] · net ₹-12.3/unit
+  + premium cross same candle        n    10 | INDEX +pts first 0.0% [-0.0–27.8] · stop first 100.0% · random same stop 38.0% · median stop 72 pts | option net -15.0% [-23.0–-8.9] | PREMIUM +₹30 first 30.0% [10.8–60.3] · net ₹-35.4/unit
+  + premium EMA9 above EMA21         n    80 | INDEX +pts first 31.3% [22.2–42.1] · stop first 68.8% · random same stop 33.4% · median stop 57 pts | option net -3.7% [-7.4–0.0] | PREMIUM +₹30 first 46.3% [35.7–57.1] · net ₹-15.0/unit
+ TEST NIFTY
+  index EMA21 break alone            n   679 | INDEX +pts first 25.8% [22.6–29.2] · stop first 66.1% · random same stop 24.9% · median stop 11 pts | option net -3.2% [-4.8–-1.4] | PREMIUM +₹30 first 14.7% [12.3–17.6] · net ₹-2.2/unit
+  + premium cross same candle        n     9 | INDEX +pts first 55.6% [26.7–81.1] · stop first 33.3% · random same stop 30.4% · median stop 19 pts | option net 7.0% [-3.2–17.8] | PREMIUM +₹30 first 55.6% [26.7–81.1] · net ₹13.7/unit
+  + premium EMA9 above EMA21         n    97 | INDEX +pts first 23.7% [16.4–33.1] · stop first 66.0% · random same stop 24.8% · median stop 10 pts | option net -2.8% [-5.9–-0.1] | PREMIUM +₹30 first 11.3% [6.5–19.2] · net ₹-3.5/unit
+ TEST SENSEX
+  index EMA21 break alone            n   631 | INDEX +pts first 24.2% [21.1–27.7] · stop first 67.7% · random same stop 24.0% · median stop 37 pts | option net -1.6% [-3.0–-0.0] | PREMIUM +₹30 first 36.0% [32.3–39.8] · net ₹-10.7/unit
+  + premium cross same candle        n     6 | INDEX +pts first 16.7% [3.0–56.4] · stop first 83.3% · random same stop 26.2% · median stop 34 pts | option net -4.9% [-11.9–5.4] | PREMIUM +₹30 first 16.7% [3.0–56.4] · net ₹-20.0/unit
+  + premium EMA9 above EMA21         n    83 | INDEX +pts first 19.3% [12.2–29.0] · stop first 71.1% · random same stop 21.9% · median stop 32 pts | option net -2.2% [-4.2–0.0] | PREMIUM +₹30 first 31.3% [22.4–41.9] · net ₹-14.0/unit
+ ALL NIFTY
+  index EMA21 break alone            n  3424 | INDEX +pts first 30.1% [28.6–31.6] · stop first 62.9% · random same stop 29.5% · median stop 13 pts | option net -2.6% [-3.8–-2.2] | PREMIUM +₹30 first 17.2% [16.0–18.5] · net ₹-2.8/unit
+  + premium cross same candle        n    78 | INDEX +pts first 47.4% [36.7–58.4] · stop first 44.9% · random same stop 33.6% · median stop 20 pts | option net 0.8% [-4.0–6.1] | PREMIUM +₹30 first 32.1% [22.7–43.0] · net ₹1.4/unit
+  + premium EMA9 above EMA21         n   509 | INDEX +pts first 35.8% [31.7–40.0] · stop first 58.5% · random same stop 29.8% · median stop 13 pts | option net -0.5% [-1.8–1.2] | PREMIUM +₹30 first 19.8% [16.6–23.5] · net ₹-2.2/unit
+ ALL SENSEX
+  index EMA21 break alone            n  3378 | INDEX +pts first 29.2% [27.7–30.8] · stop first 64.4% · random same stop 28.2% · median stop 43 pts | option net -1.6% [-2.5–-0.9] | PREMIUM +₹30 first 40.7% [39.1–42.4] · net ₹-10.4/unit
+  + premium cross same candle        n    60 | INDEX +pts first 38.3% [27.1–51.0] · stop first 46.7% · random same stop 33.1% · median stop 59 pts | option net -1.8% [-6.4–2.7] | PREMIUM +₹30 first 51.7% [39.3–63.8] · net ₹-23.5/unit
+  + premium EMA9 above EMA21         n   452 | INDEX +pts first 30.1% [26.0–34.5] · stop first 63.1% · random same stop 26.9% · median stop 39 pts | option net -1.5% [-2.4–-0.1] | PREMIUM +₹30 first 42.0% [37.6–46.6] · net ₹-12.9/unit
 Data 2024-10-01 → 2026-10-23
 
 DEV  (sessions: NIFTY 292, SENSEX 292)
