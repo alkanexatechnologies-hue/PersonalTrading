@@ -1,0 +1,12 @@
+NIFTY: sessions 501 (2024-10-14 → 2026-10-23), dropped (<300 spot minutes) 2
+  sessions with < 370 index minutes: 0
+  ATM option present at 5-min closes 09:30–14:30: CE 100.0% · PE 100.0% · CE OI 100.0% · CE IV 99.8% (of 30060)
+  detected expiry days 102: by weekday Thu 43, Wed 2, Tue 52, Mon 5
+BANKNIFTY: sessions 501 (2024-10-14 → 2026-10-23), dropped (<300 spot minutes) 2
+  sessions with < 370 index minutes: 0
+  ATM option present at 5-min closes 09:30–14:30: CE 100.0% · PE 100.0% · CE OI 100.0% · CE IV 100.0% (of 30060)
+  detected expiry days 40: by weekday Tue 18, Wed 5, Mon 8, Thu 8, Fri 1
+SENSEX: sessions 501 (2024-10-14 → 2026-10-23), dropped (<300 spot minutes) 2
+  sessions with < 370 index minutes: 0
+  ATM option present at 5-min closes 09:30–14:30: CE 100.0% · PE 100.0% · CE OI 100.0% · CE IV 100.0% (of 30060)
+  detected expiry days 102: by weekday Fri 10, Thu 53, Tue 34, Wed 5
