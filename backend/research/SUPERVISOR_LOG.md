@@ -142,3 +142,15 @@ fast-market skip, and no-chasing + fast-market together.
 - **90% is not reachable honestly:** a 0.25-ATR target gives about 80% right with negative avg R.
 - **No change to live logic.** Keep the label as information only. Next: premium confirmation, and OI at the level once
   the 1-min OI log has 60+ sessions.
+
+## 2026-10-24 · Candle-level breakdown / breakup for the fake-move label (`RESULTS_FAKE_MOVE.md` §3)
+
+**Tested:** previous candle H/L, higher-TF candle H/L and day high/low as levels, on 5m and 15m, both as fake (reclaim)
+and as break (two closes beyond).
+
+**Verdict:**
+- **NO IMPROVEMENT.** Fake is equal to or below the live levels. Break is within about ±3 points of the same-stop
+  baseline; the few validation gains are absent in development.
+- **No change to live logic.**
+- **Side-by-spot quirk noted:** accepted breaks are almost never reported, and the "Swing High" wording is wrong. This
+  is a display fix only.

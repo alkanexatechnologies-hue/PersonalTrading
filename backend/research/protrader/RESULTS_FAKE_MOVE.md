@@ -50,3 +50,40 @@ Every index, timeframe and direction tops out at about 80–83% right with the s
 - premium confirmation (the CE / PE premium makes a higher high on the reclaim)
 - OI behaviour at the swept level, using the 1-min OI log once it has 60+ sessions
 - using the label as a *trap warning* against breakdown / breakout trades rather than as an entry
+
+## Study #3: candle levels for breakdown / breakup (`fakeMoveStudy3.ts`, owner's idea)
+
+The same detector was given the high / low of a reference candle instead of the swing / PDH / ORB levels:
+- **C1:** the previous candle of the same timeframe
+- **C2:** the last completed higher-TF candle (15m for the 5m chart, 1h for the 15m chart)
+- **C3:** the day's running high / low
+
+Each break was scored two ways:
+- **FAKE:** break, then a close back; trade the reclaim.
+- **BREAK:** two closes beyond the level; trade the break.
+
+Validation right % vs the same-stop baseline:
+
+| | NIFTY 5m | NIFTY 15m | SENSEX 5m | SENSEX 15m |
+|---|---|---|---|---|
+| FAKE-DOWN, live levels | 56.0 / 56.0 | 40.2 / 41.1 | 54.7 / 55.5 | 39.6 / 42.1 |
+| FAKE-DOWN, prev candle | 53.5 / 53.7 | 40.2 / 41.0 | 53.1 / 53.5 | 40.0 / 41.6 |
+| FAKE-DOWN, higher-TF candle | 53.7 / 55.0 | 39.9 / 41.1 | 52.4 / 54.4 | 39.4 / 42.5 |
+| FAKE-UP, prev candle | 58.5 / 60.4 | 51.4 / 54.3 | 58.0 / 59.8 | 49.9 / 53.7 |
+| BREAK-DOWN, prev candle | 46.5 / 45.6 | 44.8 / 42.0 | 43.8 / 44.6 | 44.4 / 41.3 |
+| BREAK-UP, prev candle | 37.6 / 38.6 | 32.1 / 32.1 | 38.0 / 37.7 | 33.3 / 32.4 |
+
+**Results:**
+- **FAKE on candle levels** is equal to or slightly worse than the live levels: −0.5 to −5 points vs baseline, in both
+  development and validation.
+- **BREAK** is within about ±3 points of baseline in most cells. A few validation cells are higher, e.g. the 15-min
+  day-low break-down at 56.3 vs 44.8 (n = 176). None of them hold in development (42.4 vs 42.9), so they reflect the
+  falling market of the validation months, not the signal.
+- **avg R is not usable for BREAK:** the 2-bar stop is often tiny, so a few trades produce very large R values.
+
+**Verdict:** candle levels do not improve the indicator. No change to live logic.
+
+**Detector finding, display only:** the live screen sets a level's side from where the spot is
+(`api.ts` `side: p >= spot ? …`). Once price closes beyond a level, that level switches sides, so the detector's
+BREAKOUT / BREAKDOWN ACCEPTED states can practically never fire. This is also why the badge read "closed below
+Swing **High**". Fixing it means using the level's role: highs are resistance, lows are support.
