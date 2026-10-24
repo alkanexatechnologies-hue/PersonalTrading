@@ -130,13 +130,13 @@
   }
   const emaArr = (xs, n) => { const k = 2 / (n + 1); let v = null; return xs.map((x) => (v = v == null ? x : x * k + v * (1 - k))); };
   function otShell() {
-    const ot = X.ot, sym = MC.sym, step = STEP[sym] || 50, atm = MC.lastData?.optionChain?.atmStrike;
+    const ot = X.ot, sym = MC.sym, step = STEP[sym] || 50, atm = ot.replay ? ot.rinfo?.atm ?? null : MC.lastData?.optionChain?.atmStrike;
     const chips = [-2, -1, 0, 1, 2].map((o) => { const k = atm != null ? atm + o * step : null; return `<button type="button" role="tab" data-mcx-strike="${k}" class="${k === ot.strike ? "on" : ""}" aria-selected="${k === ot.strike}" title="${k ?? ""} · ${o === 0 ? "at the money" : o > 0 ? "CE OTM · PE ITM" : "CE ITM · PE OTM"}" ${k == null ? "disabled" : ""}>${o === 0 ? "ATM" : (o > 0 ? "+" : "−") + Math.abs(o)}</button>`; }).join("");
-    const exps = (ot.expiries.length ? ot.expiries : [ot.expiry].filter(Boolean)).slice(0, 4).map((e) => `<button type="button" role="tab" data-mcx-exp="${e}" class="${e === ot.expiry ? "on" : ""}" aria-selected="${e === ot.expiry}">${new Date(e + "T00:00:00Z").toUTCString().slice(5, 11)}</button>`).join("");
+    const exps = ot.replay ? `<span class="mcx-chip mcx-rp" title="${esc(ot.rinfo?.available ? `${ot.rinfo.source}${ot.rinfo.prevJoined ? ` · EMAs warmed with ${ot.rinfo.prevJoined}` : ""}${ot.rinfo.prevSkipped ? ` · previous session ${ot.rinfo.prevSkipped} not joined` : ""} · strikes recorded that day: ${(ot.rinfo.strikes || []).join(", ")}` : ot.rinfo?.message || "loading the session's premiums…")}">↺ Replay ${esc(new Date(ot.replay + "T00:00:00Z").toUTCString().slice(5, 11))} · ${ot.rinfo?.available ? esc(ot.rinfo.index) + " nearest expiry" : ot.rinfo ? "no data" : "loading…"}</span>` : (ot.expiries.length ? ot.expiries : [ot.expiry].filter(Boolean)).slice(0, 4).map((e) => `<button type="button" role="tab" data-mcx-exp="${e}" class="${e === ot.expiry ? "on" : ""}" aria-selected="${e === ot.expiry}">${new Date(e + "T00:00:00Z").toUTCString().slice(5, 11)}</button>`).join("");
     const sides = [["ce", "CE", "g"], ["pe", "PE", "r"], ["both", "Both", ""]].map(([k, l, c]) => `<button type="button" data-mcx-side="${k}" class="${ot.side === k ? "on " + c : ""}" aria-pressed="${ot.side === k}">${l}</button>`).join("");
     const tfs = `<span class="mcx-chip" title="CE / PE follow the main chart's timeframe">${ot.tf === "D" ? "1D" : ot.tf === 60 ? "1h" : ot.tf + "m"} · synced</span>`;
     const o = ot.strike != null && atm != null ? (ot.strike - atm) / step : 0;
-    const money = o === 0 ? `At the money · spot ${f0(MC.lastData?.spot)}` : `${o > 0 ? `CE ${o} OTM · PE ${o} ITM` : `CE ${-o} ITM · PE ${-o} OTM`} · ${Math.abs(ot.strike - (MC.lastData?.spot || 0)).toFixed(0)} pts from spot`;
+    const money = ot.replay ? `${o === 0 ? "At the money" : o > 0 ? `CE ${o} OTM · PE ${o} ITM` : `CE ${-o} ITM · PE ${-o} OTM`} at the ${esc(ot.replay)} close` : o === 0 ? `At the money · spot ${f0(MC.lastData?.spot)}` : `${o > 0 ? `CE ${o} OTM · PE ${o} ITM` : `CE ${-o} ITM · PE ${-o} OTM`} · ${Math.abs(ot.strike - (MC.lastData?.spot || 0)).toFixed(0)} pts from spot`;
     const card = (side) => `<div class="mcx-opt" data-side="${side}" ${ot.side !== "both" && ot.side !== side.toLowerCase() ? "hidden" : ""}><div class="mcx-opt-hd" id="mcx-ot-hd-${side}">—</div><div class="mcx-opt-chart" id="mcx-ot-ch-${side}"></div><p class="mcx-note" id="mcx-ot-nt-${side}" hidden></p></div>`;
     const html = `<div class="mcx-row"><h2 class="mcx-h" title="Pullback zone = the premium's break level (BIOS) ± the main chart's zone (±${typeof mcZoneHalf === "function" ? mcZoneHalf(sym) : 10} pts) × Δ · candles after 15:30 are dropped">Options</h2><div class="mcx-seg" role="tablist" aria-label="Expiry">${exps}</div><div class="mcx-seg" role="group" aria-label="Calls, puts or both" style="margin-left:auto">${sides}</div></div>
       <div class="mcx-otf" role="group" aria-label="Option filters"><div class="mcx-step" title="${esc(money)}"><button type="button" data-mcx-step="-1" aria-label="Lower strike">−</button><span>${ot.strike ?? "—"}</span><button type="button" data-mcx-step="1" aria-label="Higher strike">+</button></div>
@@ -152,7 +152,18 @@
   async function loadOt() {
     const ot = X.ot, sym = MC.sym, d = MC.lastData; if (!d) return;
     ot.tf = ({ "5m": 5, "15m": 15, "30m": 30, "60m": 60, "1d": "D" })[MC.tf] || 5;   // one timing for all three charts
-    if (ot.sym !== sym) { ot.sym = sym; ot.strike = null; ot.expiry = null; ot.expiries = []; ot.data = {}; }
+    const rd = MC.replayDate || null;
+    if (ot.sym !== sym || ot.replay !== rd) { ot.sym = sym; ot.replay = rd; ot.rinfo = null; ot.strike = null; ot.expiry = null; ot.expiries = []; ot.data = {}; }
+    if (rd) {   // ↺ Replay date → that session's real premiums (Dhan rolling option, ATM±3), never live candles
+      ot.expiry = `R:${rd}`;
+      const key = `${sym}|${ot.strike}|${ot.expiry}|${ot.tf}`; if (ot.strike != null && ot.data[key]) { otShell(); drawOt(); return; }
+      otShell();
+      const r = await get(`/api/replay-premium?symbol=${encodeURIComponent(sym)}&date=${rd}&interval=${ot.tf}${ot.strike != null ? `&strike=${ot.strike}` : ""}`, 120000);
+      if (MC.replayDate !== rd || MC.sym !== sym) return;   // the date / index changed while loading
+      ot.rinfo = r || { available: false, message: "replay premiums not loaded" };
+      if (r?.available) { if (ot.strike == null) ot.strike = r.strike; ot.data[`${sym}|${ot.strike}|${ot.expiry}|${ot.tf}`] = { ce: r.ce, pe: r.pe, st: r.st, at: Date.now() }; }
+      otShell(); drawOt(); return;
+    }
     if (ot.strike == null) ot.strike = d.optionChain?.atmStrike ?? null;
     if (!ot.expiry) ot.expiry = d.oi?.expiry || null;
     if (!ot.expiries.length) { const c = await get(`/api/oi-chain?symbol=${encodeURIComponent(sym)}`); if (c?.expiries) ot.expiries = c.expiries; }
@@ -168,7 +179,8 @@
     drawOt();
   }
   function drawOt() {
-    const ot = X.ot, key = `${MC.sym}|${ot.strike}|${ot.expiry}|${ot.tf}`, D = ot.data[key]; if (!D) return;
+    const ot = X.ot, key = `${MC.sym}|${ot.strike}|${ot.expiry}|${ot.tf}`, D = ot.data[key];
+    if (!D) { if (ot.replay && ot.rinfo && !ot.rinfo.available) for (const side of ["CE", "PE"]) { const hd = $(`mcx-ot-hd-${side}`); if (hd) hd.innerHTML = `<b>↺ ${esc(ot.replay)} ${side}</b> <span class="mcx-mu">— ${esc(ot.rinfo.message || "no premium data")}</span>`; } return; }
     const wrow = X.walls[MC.sym]?.rows?.find((r) => r.strike === ot.strike), zh = typeof mcZoneHalf === "function" ? mcZoneHalf(MC.sym) : 10;
     for (const side of ["CE", "PE"]) {
       const C = ot.charts[side], src = side === "CE" ? D.ce : D.pe, S = D.st?.[side.toLowerCase()];

@@ -224,6 +224,7 @@ import { computeOpeningRange, detectOrbBreakout } from "../orb/OpeningRangeBreak
 import { evaluateOrb, DEFAULT_ORB_CONFIG, OrbInputs, OrbDirection } from "../strategies/orbStrategy";
 import { getOrbActive, setOrbActive } from "../strategies/orbActive";
 import { evaluateVwapEma, vwapEmaConfigFor, VwapEmaInputs, VeDirection, InstrumentContext } from "../strategies/vwapEmaStrategy";
+import { replayPremium } from "../data/replayPremium";
 import { LIQUIDITY_CONFIG, NOT_DEFINED } from "../liquidity/liquidityConfig";
 import { buildLiquidityLevels, nearestLevel } from "../liquidity/liquidityLevels";
 import { detectLiquidity, atr14Of, entryAfterSweepConcept } from "../liquidity/sweepDetector";
@@ -8421,6 +8422,56 @@ router.get("/option-candles", async (req: Request, res: Response) => {
 //   SWP  = latest premium swing point.
 // Timeframe-aware (uses the requested interval's candles). Nothing is fabricated:
 // missing values are null. No existing API/engine is modified.
+/** Premium structure (R1/R2/S1/S2, BIOS, swings) from the EXISTING structure engine run on PREMIUM candles — shared by
+ *  /option-structure (live) and /replay-premium (a past session). */
+function premiumStructure(candles: any[]) {
+  const r2n = (n: number) => Math.round(n * 100) / 100;
+  const ms = detectMarketStructure(candles, 3, vwap(candles));
+  const cur = candles[candles.length - 1].close;
+  const swings = ms.swingPoints.map((p: any) => ({ type: p.type, price: r2n(p.price), time: candles[p.index]?.time ?? null }));
+  const highs = swings.filter((s) => s.type === "HH" || s.type === "LH").map((s) => s.price);
+  const lows = swings.filter((s) => s.type === "HL" || s.type === "LL").map((s) => s.price);
+  const above = [...new Set(highs.filter((p) => p > cur))].sort((a, b) => a - b);
+  const below = [...new Set(lows.filter((p) => p < cur))].sort((a, b) => b - a);
+  const lastBos = ms.bosEvents.length ? ms.bosEvents[ms.bosEvents.length - 1] : null;
+  return {
+    available: true,
+    current: r2n(cur),
+    r1: above[0] ?? null, r2: above[1] ?? null,
+    s1: below[0] ?? null, s2: below[1] ?? null,
+    swp: swings.length ? swings[swings.length - 1].price : null,
+    support: below[0] ?? null,
+    resistance: above[0] ?? null,
+    bios: lastBos ? {
+      price: r2n(lastBos.level),
+      time: candles[lastBos.breakIndex]?.time ?? lastBos.breakTime ?? null,
+      direction: lastBos.direction === "Bullish" ? "BULLISH" : "BEARISH",
+      stage: lastBos.stage,
+    } : null,
+    structure: ms.currentStructure,
+    swings: swings.slice(-8),
+  };
+}
+
+// ---- MARKET COMMAND REPLAY: a past session's real premiums (Dhan rolling option, ATM±3) for the CE / PE charts ----
+// /api/replay-premium?symbol=^BSESN&date=2026-10-23&interval=5[&strike=73100] → { ce:{candles}, pe:{candles}, st:{ce,pe}, atm, strikes }
+const _replayPrem = new Map<string, { at: number; v: any }>();
+router.get("/replay-premium", async (req: Request, res: Response) => {
+  const sym = String(req.query.symbol || ""), date = String(req.query.date || "");
+  const interval = String(req.query.interval) === "D" ? 60 : Math.max(1, Math.min(60, Number(req.query.interval) || 5));
+  const strike = req.query.strike != null && req.query.strike !== "" ? Number(req.query.strike) : null;
+  const key = `${sym}|${date}|${strike ?? "atm"}|${interval}`, hit = _replayPrem.get(key);
+  if (hit && Date.now() - hit.at < 10 * 60_000) return res.json(hit.v);
+  try {
+    const r: any = await replayPremium(sym, date, strike != null && Number.isFinite(strike) ? strike : null, interval);
+    if (r.available) r.st = { ce: r.ce.candles.length >= 10 ? premiumStructure(r.ce.candles) : { available: false, reason: "not enough premium candles" },
+      pe: r.pe.candles.length >= 10 ? premiumStructure(r.pe.candles) : { available: false, reason: "not enough premium candles" } };
+    if (String(req.query.interval) === "D") r.note = "1D is shown as 1-hour candles in replay (one session)";
+    _replayPrem.set(key, { at: Date.now(), v: r }); if (_replayPrem.size > 200) _replayPrem.delete(_replayPrem.keys().next().value!);
+    res.json(r);
+  } catch (e: any) { res.status(502).json({ available: false, message: e?.message || "replay premium failed" }); }
+});
+
 router.get("/option-structure", async (req: Request, res: Response) => {
   const provider = getProvider();
   if (provider.name !== "dhan") return res.json({ available: false, message: "Option structure needs the Dhan feed." });
@@ -8431,7 +8482,6 @@ router.get("/option-structure", async (req: Request, res: Response) => {
   const interval: number | "D" = String(req.query.interval) === "D" ? "D" : Math.max(1, Math.min(60, Number(req.query.interval) || 15));
   if (!underlying || !expiry || !Number.isFinite(strike)) return res.status(400).json({ error: "symbol, strike, expiry required" });
 
-  const r2n = (n: number) => Math.round(n * 100) / 100;
   const buildSide = async (type: "CE" | "PE") => {
     try {
       const now = Math.floor(Date.now() / 1000);
@@ -8444,32 +8494,7 @@ router.get("/option-structure", async (req: Request, res: Response) => {
         candles = await optionChartCandles(dhanOpt.securityId, dhanOpt.exchangeSegment, interval, start, now);
       }
       if (!candles || candles.length < 10) return { available: false, reason: interval === "D" ? "fewer than 10 trading days of this contract" : "not enough premium candles" };
-      // EXISTING structure engine, run on the PREMIUM candles.
-      const ms = detectMarketStructure(candles, 3, vwap(candles));
-      const cur = candles[candles.length - 1].close;
-      const swings = ms.swingPoints.map((p: any) => ({ type: p.type, price: r2n(p.price), time: candles[p.index]?.time ?? null }));
-      const highs = swings.filter((s) => s.type === "HH" || s.type === "LH").map((s) => s.price);
-      const lows = swings.filter((s) => s.type === "HL" || s.type === "LL").map((s) => s.price);
-      const above = [...new Set(highs.filter((p) => p > cur))].sort((a, b) => a - b);
-      const below = [...new Set(lows.filter((p) => p < cur))].sort((a, b) => b - a);
-      const lastBos = ms.bosEvents.length ? ms.bosEvents[ms.bosEvents.length - 1] : null;
-      return {
-        available: true,
-        current: r2n(cur),
-        r1: above[0] ?? null, r2: above[1] ?? null,
-        s1: below[0] ?? null, s2: below[1] ?? null,
-        swp: swings.length ? swings[swings.length - 1].price : null,
-        support: below[0] ?? null,
-        resistance: above[0] ?? null,
-        bios: lastBos ? {
-          price: r2n(lastBos.level),
-          time: candles[lastBos.breakIndex]?.time ?? lastBos.breakTime ?? null,
-          direction: lastBos.direction === "Bullish" ? "BULLISH" : "BEARISH",
-          stage: lastBos.stage,
-        } : null,
-        structure: ms.currentStructure,
-        swings: swings.slice(-8),
-      };
+      return premiumStructure(candles);
     } catch (e: any) { return { available: false, reason: e?.message || "structure failed" }; }
   };
 
