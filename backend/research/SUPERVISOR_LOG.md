@@ -220,3 +220,13 @@ score is anti-calibrated (100 → 28.6%).
 - **Expanding ATR is the worst condition.**
 
 **Verdict:** no change to live logic. Information only.
+
+## 2026-10-25 · Owner's 8-point buffer beyond EMA 21 (`RESULTS_EMA_CROSS.md`, last section)
+
+**Results:**
+- **The buffer alone hurts** (−1 to −4 points vs random).
+- **NIFTY M1 + candle ≤ 1 ATR + buffer:** 54 / 56 / 64% vs about 49%. Built after TEST of the base had been seen, so
+  TEST is not untouched. Small n; option net about breakeven.
+- **SENSEX fails.**
+
+**Verdict:** no change to live logic. Forward-test candidate only.

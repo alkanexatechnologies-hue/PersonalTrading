@@ -52,7 +52,7 @@ function tradePts(path: [number, number][], entry: number, stopPx: number, dir: 
   for (const [t, p] of path) { if (dir * (p - s) <= 0) return { win: false, stop: true, r: -1, tOut: t, stopAtr: d / a }; if (dir * (p - tg) >= 0) return { win: true, stop: false, r: pts / d, tOut: t, stopAtr: d / a }; }
   return { win: false, stop: false, r: path.length ? dir * (path[path.length - 1][1] - entry) / d : 0, tOut: path.length ? path[path.length - 1][0] : null, stopAtr: d / a };
 }
-interface Sig { ix: string; day: string; set: string; dir: number; tb: string; s0: boolean; s2: boolean; ss: boolean; cAtr: number; atrX: number; dayX: number | null; fresh: boolean; m0: boolean; m0ce: boolean; m1: boolean; lvl: boolean; t: number; t1: Out; t2: Out; netPct: number | null; premRule: number | null; tp: Out; tpNet: number | null; p30: { win: boolean; net: number } | null; stopPts: number }
+interface Sig { ix: string; day: string; set: string; dir: number; tb: string; s0: boolean; s2: boolean; ss: boolean; b8a: boolean; b8b: boolean; dist: number; cAtr: number; atrX: number; dayX: number | null; fresh: boolean; m0: boolean; m0ce: boolean; m1: boolean; lvl: boolean; t: number; t1: Out; t2: Out; netPct: number | null; premRule: number | null; tp: Out; tpNet: number | null; p30: { win: boolean; net: number } | null; stopPts: number }
 
 export function run(ix: "NIFTY" | "SENSEX", days: DayData[]) {
   const { step, lot } = IDX[ix], ds = days.filter((d) => d.spot.size >= 300), N = ds.length, d1 = Math.floor(N * 0.6), d2 = Math.floor(N * 0.8);
@@ -81,8 +81,15 @@ export function run(ix: "NIFTY" | "SENSEX", days: DayData[]) {
       // index EMA 21 cross on this candle (fresh) or on the previous one with the index still on the new side (late, M1 only)
       const xI = (q: number) => (all[q - 1].close <= e21[q - 1] && all[q].close > e21[q] ? 1 : all[q - 1].close >= e21[q - 1] && all[q].close < e21[q] ? -1 : 0);
       const xNow = xI(g), xPrev = xI(g - 1), late = !xNow && xPrev !== 0 && (xPrev > 0 ? px > e21[g] : px < e21[g]);
-      if (!xNow && !late) continue;
-      const up = (xNow || xPrev) > 0, fresh = xNow !== 0;
+      // BUFFER (owner 2026-10-25: "the candle should be 8 points up from its support"): NIFTY 8 pts, SENSEX 26 pts (same %).
+      // B8a = the crossing candle closes ≥ BUF beyond EMA 21. B8b = the FIRST close ≥ BUF beyond EMA 21 within 3 candles of
+      // the cross, the index staying on the new side throughout (entry on that candle).
+      const BUF = ix === "NIFTY" ? 8 : 26; let age = -1, cdir = 0;
+      for (let k = 0; k <= 3 && g - k >= 1; k++) { const xk = xI(g - k); if (xk) { age = k; cdir = xk; break; } }
+      let b8b = false;
+      if (age >= 0) { let okSide = true, first = -1; for (let q = g - age; q <= g; q++) { const dq = cdir * (all[q].close - e21[q]); if (dq <= 0) okSide = false; if (first < 0 && dq >= BUF) first = q; } b8b = okSide && first === g; }
+      if (!xNow && !late && !b8b) continue;
+      const up = (xNow || xPrev || cdir) > 0, fresh = xNow !== 0;
       const dir = up ? 1 : -1, atm = Math.round(px / step) * step, key = `${atm}${dir > 0 ? "CE" : "PE"}`, pe = premEma(key), j = pe.times.get(B[i].time);
       const cross = (q: number) => q >= 1 && pe.e9[q - 1] <= pe.e21[q - 1] && pe.e9[q] > pe.e21[q];
       const ok = j != null && j >= 21;
@@ -113,7 +120,7 @@ export function run(ix: "NIFTY" | "SENSEX", days: DayData[]) {
         for (let t = tEnd; t < tEnd + 3600 && mn(t) < 930; t += 60) { const v = m2.get(t); if (v != null) exitP = v; if (v != null && v >= e0 + 30) { won = true; exitP = e0 + 30; break; } if (t >= stopT) break; }
         if (exitP != null) p30 = { win: won, net: exitP - e0 - COST(e0) - COST(exitP) - 40 / lot }; }
       const dayHi = Math.max(...B.slice(0, i + 1).map((b) => b.high)), dayLo = Math.min(...B.slice(0, i + 1).map((b) => b.low)), avgDay = dayR.length >= 10 ? dayR.slice(-20).reduce((x, y) => x + y, 0) / Math.min(20, dayR.length) : null;
-      sigs.push({ ix, day: d.day, set, dir, tb, cAtr: (B[i].high - B[i].low) / a, atrX: a / (atrH.reduce((x, y) => x + y, 0) / atrH.length), dayX: avgDay ? (dayHi - dayLo) / avgDay : null, s0: fresh && s0, s2: fresh && s2, ss: fresh && ss, fresh, m0, m0ce, m1, lvl: lvlHit, t: tEnd, t1, t2, netPct: net != null && e0 ? (net / e0) * 100 : null, premRule, tp, tpNet, p30, stopPts: tp.stopAtr * a });
+      sigs.push({ ix, day: d.day, set, dir, tb, b8a: fresh && dir * (px - e21[g]) >= BUF, b8b, dist: dir * (px - e21[g]), cAtr: (B[i].high - B[i].low) / a, atrX: a / (atrH.reduce((x, y) => x + y, 0) / atrH.length), dayX: avgDay ? (dayHi - dayLo) / avgDay : null, s0: fresh && s0, s2: fresh && s2, ss: fresh && ss, fresh, m0, m0ce, m1, lvl: lvlHit, t: tEnd, t1, t2, netPct: net != null && e0 ? (net / e0) * 100 : null, premRule, tp, tpNet, p30, stopPts: tp.stopAtr * a });
     }
     hist = all.slice(-200); prevLegs = legBars; if (B.length) dayR.push(Math.max(...B.map((b) => b.high)) - Math.min(...B.map((b) => b.low))); if (B.length) pd = { h: Math.max(...B.map((b) => b.high)), l: Math.min(...B.map((b) => b.low)), c: B[B.length - 1].close }; prevWasExpiry = exp.has(d.day);
   });
@@ -162,6 +169,12 @@ if (require.main === module) {
       return { n, win: n ? (w / n) * 100 : NaN, ci: wilson(w, n), base: bn ? (bw / bn) * 100 : NaN, net: nets.length ? nets.reduce((a, x) => a + x.v, 0) / nets.length : NaN, nci: boot(nets), pts: n ? (wp / n) * 100 : NaN }; };
     const fmt = (s: any) => `n ${String(s.n).padStart(4)} · win ${f1(s.win)}% [${f1(s.ci[0])}–${f1(s.ci[1])}] vs random ${f1(s.base)}% (edge ${s.win - s.base >= 0 ? "+" : ""}${f1(s.win - s.base)}) · +30/100 pts ${f1(s.pts)}% · option net ${f1(s.net)}% [${f1(s.nci[0])}–${f1(s.nci[1])}]`;
     const bases: [string, (x: Sig) => boolean][] = [["EMA21 break", (x) => x.fresh], ["M0 same candle", (x) => x.m0], ["M1 within 1", (x) => x.m1]];
+    // ---- owner's 8-point buffer ----
+    console.log(`\nBUFFER: close ≥ 8 pts (NIFTY) / 26 pts (SENSEX) beyond EMA 21`);
+    const B8: [string, (x: Sig) => boolean][] = [["EMA21 break (no buffer)", (x) => x.fresh], ["B8a cross candle ≥ buffer", (x) => x.b8a], ["B8a miss (cross candle < buffer)", (x) => x.fresh && !x.b8a],
+      ["B8b first close ≥ buffer (≤3 candles)", (x) => x.b8b], ["B8b + candle ≤ 1 ATR", (x) => x.b8b && x.cAtr <= 1], ["M1 + candle ≤ 1 ATR (earlier best)", (x) => x.m1 && x.cAtr <= 1],
+      ["M1 + candle ≤ 1 ATR + buffer", (x) => x.m1 && x.cAtr <= 1 && x.dist >= (x.ix === "NIFTY" ? 8 : 26)]];
+    for (const [bl, bf] of B8) { console.log(`  ${bl}`); for (const set of ["DEV", "VAL", "TEST"]) for (const ixn of ["NIFTY", "SENSEX"] as const) console.log(`    ${set.padEnd(4)} ${ixn.padEnd(6)} ${fmt(st(R[ixn].sigs.filter((x) => x.set === set && bf(x))))}`); }
     const F: [string, (x: Sig) => boolean][] = [
       ["(none)", () => true], ["V1 candle ≤ 1 ATR", (x) => x.cAtr <= 1], ["V1b candle > 1 ATR", (x) => x.cAtr > 1],
       ["V2a ATR quiet < 0.8", (x) => x.atrX < 0.8], ["V2b ATR normal 0.8–1.2", (x) => x.atrX >= 0.8 && x.atrX < 1.2], ["V2c ATR expanding ≥ 1.2", (x) => x.atrX >= 1.2],

@@ -143,3 +143,30 @@ option net > 0 and n ≥ 50.
 - SENSEX failed in TEST.
 - **No change to live logic.** Information only. A wider target for the same signal (e.g. 2:1) is a separate,
   untested idea.
+
+## The owner's 8-point buffer (2026-10-25)
+
+**Rule:** the candle must close at least 8 pts beyond EMA 21 (NIFTY; 26 pts SENSEX, the same %).
+- **B8a:** the crossing candle itself closes beyond the buffer, else no trade.
+- **B8b:** the first close beyond the buffer within 3 candles of the cross.
+
+| Win % at 1:1 vs random (DEV / VAL / TEST) | NIFTY | SENSEX |
+|---|---|---|
+| EMA 21 break, no buffer | 47.4 / 47.3 / 47.7 (random about 48) | 48.0 / 45.9 / 46.1 |
+| B8a, cross candle ≥ buffer | **44.2 / 45.5 / 47.2** (edge −2) | 45.3 / 43.2 / 46.0 (edge −1 to −4) |
+| B8b, first close ≥ buffer | 45.3 / 47.9 / 46.3 | 44.7 / 44.6 / 46.2 |
+| M1 + candle ≤ 1 ATR (earlier best) | 52.0 / 56.2 / 57.1 | 53.6 / 54.3 / 45.8 |
+| **M1 + candle ≤ 1 ATR + buffer** | **54.4 / 56.4 / 64.2** (n 228 / 94 / 67) | 52.3 / 54.4 / 44.8 |
+
+**Results:**
+- **The buffer on its own makes the EMA 21 break worse** (−1 to −4 points vs random). A candle that closes far past
+  EMA 21 is usually a big candle, so the stop is wide and the move is already stretched. Crosses that close within the
+  buffer do slightly better (about 49%).
+- **On top of "M1 + small candle", NIFTY improves:** 54–64% vs about 49% random. Caveat: this combination was built
+  after the TEST result of M1 + small candle had been seen, so its TEST figure is not untouched evidence. Samples are
+  small (67 in TEST).
+- **SENSEX fails TEST again.**
+- **Option net is about breakeven** (−1.1% / +0.6% / −0.3%).
+
+**Verdict:** no change to live logic. NIFTY "M1 + small candle + 8-pt buffer" is a forward-test candidate, not
+proven.
