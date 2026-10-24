@@ -9318,7 +9318,7 @@ async function cpDrain() {
 // 15-min candle + best opportunity (NIFTY + SENSEX, only when there is one). Everything else is computed and shown on the
 // screens but not sent. Add a kind here to send it again.
 // 2026-10-24 owner: also the trade follow-ups — TRADE GIVEN, TARGET 1 / 2, STOP LOSS / breakeven, TIME EXIT (NIFTY + SENSEX)
-const TG_ALLOW = new Set<string>(["plan", "open913", "best", "oi15", "trade"]);
+const TG_ALLOW = new Set<string>(["plan", "open913", "best", "oi15", "trade", "paper"]);
 let _tgDropped = 0;
 const cpSend = (text: string, htmlReady = false, kind = "other") => { if (!TG_ALLOW.has(kind)) { _tgDropped++; return; } for (const part of TG.splitParts(text)) _cpQueue.push({ text: "🎖 <b>ProTrader</b>\n" + TG.emphasize(htmlReady ? part : TG.htmlify(CP.stripTags(part))), html: true }); cpDrain().catch(() => {}); try { fs.appendFileSync(path.join(process.cwd(), "data", "copilot-log.txt"), `\n[${new Date(Date.now() + 19800000).toISOString().slice(0, 19)}]\n${String(text).replace(/<[^>]+>/g, "")}\n`); } catch { /* best-effort */ } };
 const _published = (() => { try { return JSON.parse(fs.readFileSync(path.join(process.cwd(), "backend", "research", "published", "odds.json"), "utf8")); } catch { return null; } })();
@@ -9567,6 +9567,8 @@ async function copilotTick() {
         .then(() => ptScript("openingStudy.ts", [])).then((o) => console.log("[protrader] opening study", o.trim().slice(-160)))   // next-day map odds incl. today
         .then(() => ptScript("tripleStudy.ts", [])).then((o) => console.log("[protrader] 3x study", o.split("\n").filter((l) => /sessions\)/.test(l)).join(" | ").slice(0, 200)))   // 3x potential odds
         .then(() => ptScript("premiumBounceStudy.ts", [])).then((o) => console.log("[protrader] premium bounce study", o.split("\n").filter((l) => /bounces/.test(l)).join(" | ").slice(0, 300)))   // hot-premium rating odds
+        // 📝 paper test of the fake-up rule (RESULTS_FAKE_MOVE.md §5) on today's data — same code as the backtest, paper only
+        .then(() => { const outF = path.join(process.cwd(), "data", "paper-fakeup.json"); return ptScript("fakeUpPaper.ts", [outF]).then(() => { try { cpSend(JSON.parse(fs.readFileSync(outF, "utf8")).html, true, "paper"); } catch { /* best-effort */ } }); })
         .catch((e) => console.log("[protrader] data refresh failed", e?.message));
     }
     // 🎖 Friday 16:05 weekly re-check of the live logic on the refreshed data (reports drift; proposes, never changes logic)

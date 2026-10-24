@@ -124,7 +124,7 @@ export function run(days: DayData[], tf: 5 | 15, step: number) {
         const r1 = ft && dir * (nx.close - (dir > 0 ? lo4 : hi4)) > 0 ? score1to1(pathFrom(nx.time + tf * 60), nx.close, dir > 0 ? lo4 : hi4, dir, a) : null;
         const atm = Math.round(px / step) * step, side = dir > 0 ? "CE" : "PE";
         const prem = (r: Res | null, tIn: number) => { if (!r || r.tOut == null) return null; const a0 = leg(atm, side, tIn), a1 = leg(atm, side, r.tOut + 60); return a0 && a1 && a0.c > 0 ? ((a1.c - a0.c) / a0.c) * 100 : null; };
-        ev.push({ set, src: s, dir, f, r0, r1, day: d.day, p0: prem(r0, tEnd), p1: r1 ? prem(r1, nx.time + tf * 60) : null });
+        ev.push({ set, src: s, dir, f, r0, r1, day: d.day, t: tEnd, lvl, px, stop: dir > 0 ? lo4 : hi4, atr: a, atm, premIn: leg(atm, side, tEnd)?.c ?? null, p0: prem(r0, tEnd), p1: r1 ? prem(r1, nx.time + tf * 60) : null });
       }
     }
     hist5 = hist5.concat(B5).slice(-400); histT = histT.concat(B).slice(-400); past15.push(barsN(mins, 15));
