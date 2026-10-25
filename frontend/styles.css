@@ -7990,6 +7990,16 @@ body.mcx-oi #panel-marketcommand .mc2-main, body.mcx-oi #mcx-dec, body.mcx-oi #m
 .mcx-tab.active { background: #11151c; border-color: #1e2530; border-bottom-color: #4ea1ff; color: #fff; }
 .mcx-tape { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1px; background: #1e2530; border: 1px solid #1e2530; border-radius: 8px; overflow: hidden; margin-bottom: 6px; }
 .mcx-tape:empty, .mcx-dec:empty, .mcx-levels:empty, .mcx-ot:empty, .mcx-crude:empty { display: none; }
+/* C4 card (owner's tested rule) */
+.mcx-c4 { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.mcx-c4 .mcx-row { gap: 8px; align-items: center; flex-wrap: wrap; }
+.mcx-c4 .mcx-row .mcx-badge { margin-left: auto; }
+.mcx-c4-sig { border: 1px solid #5a4313; background: #1b1508; border-radius: 8px; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; }
+.mcx-c4-grid { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-variant-numeric: tabular-nums; }
+.mcx-c4-grid span { color: #9aa3b0; }
+.mcx-c4-grid b { text-align: right; overflow-wrap: anywhere; }
+.mcx-c4-rec { display: flex; flex-direction: column; gap: 2px; border-top: 1px solid #1e2530; padding-top: 6px; color: #c9d0da; }
+.mcx-c4-ft { margin: 0; font-size: 11px; color: #6f7a88; }
 /* crude oil card (Brent USD + MCX ₹) */
 .mcx-crude-card { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 10px; border: 1px solid #3a3220; background: linear-gradient(160deg, #1a160e 0%, #0e0d0a 70%); color: #d9d2c0; }
 .mcx-crude-hd { display: flex; flex-direction: column; gap: 2px; }

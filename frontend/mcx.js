@@ -19,7 +19,7 @@
   const set = (node, html) => { if (node && node.__mcx !== html) { node.innerHTML = html; node.__mcx = html; } };   // no flicker: write only on change
   const mcOn = () => $("panel-marketcommand")?.classList.contains("active") && !document.hidden;
 
-  const X = { c5: {}, view: "mc", plan: "bull", tab: "levels", seen: null, pc: {}, desk: null, hour: null, pos: {}, sent: null, walls: {}, ot: { strike: null, side: "both", tf: 5, expiry: null, expiries: [], sym: null, data: {}, charts: {} }, wb: { win: "15", data: null, sym: null }, err: {} };
+  const X = { c5: {}, view: "mc", plan: "bull", tab: "levels", seen: null, pc: {}, desk: null, hour: null, pos: {}, sent: null, walls: {}, c4: {}, ot: { strike: null, side: "both", tf: 5, expiry: null, expiries: [], sym: null, data: {}, charts: {} }, wb: { win: "15", data: null, sym: null }, err: {} };
   window.__mcx = X;   // read-only handle for diagnosis in the browser console
   const get = async (url, ms) => { try { const d = await fetchJSON(url, ms || 25000); if (d && (d.error || d.disabled)) X.err[url.split("?")[0]] = d.error || "disabled"; return d; } catch (e) { X.err[url.split("?")[0]] = String((e && e.message) || e); return null; } };
 
@@ -32,6 +32,9 @@
     if (due("desk", 60_000)) J(get("/api/index-desk").then((d) => { if (d && d.rows) { X.desk = d; X.deskAt = now; } }));
     if (due("hour", 120_000)) J(get("/api/hour-outlook").then((d) => { if (d && d.outlook) { X.hour = d; X.hourAt = now; } }));
     if (due("pos" + sym, 300_000)) J(get(`/api/positioning?symbol=${enc}`).then((d) => { if (d && d.ok) { X.pos[sym] = d; X["pos" + sym + "At"] = now; } }));
+    // C4 (tested on NIFTY + SENSEX only); on a ↺ replay date the same check runs for that session
+    const c4k = sym + (MC.replayDate || "");
+    if ((sym === "^NSEI" || sym === "^BSESN") && due("c4" + c4k, 30_000)) J(get(`/api/c4-live?symbol=${enc}${MC.replayDate ? `&date=${MC.replayDate}` : ""}`, 60000).then((d) => { if (d) { X.c4[c4k] = d; X["c4" + c4k + "At"] = now; } }));
     if (due("crude", 60_000)) J(get("/api/crude-move", 40000).then((d) => { if (d && d.available) { X.crude = d; X.crudeAt = now; } }));
     if (due("sent", 300_000)) J(get("/api/market-sentiment-brief").then((d) => { if (d && d.india) { X.sent = d; X.sentAt = now; } }));
     if (MC.tf !== "5m" && due("c5" + sym, 60_000)) J(get(`/api/candles/${enc}?interval=5m`).then((d) => { if (d && Array.isArray(d.candles) && d.candles.length) { X.c5[sym] = d.candles; X["c5" + sym + "At"] = now; } }));   // 5m reaction on the ladder
@@ -61,6 +64,28 @@
       cell("Sector lean", sent?.india?.lean || "—", idx.filter((x) => x.label !== "NIFTY").slice(0, 2).map((x) => `${x.label} ${chg(x.changePct)}`).join(" · "), /BEAR/.test(sent?.india?.lean || "") ? "mcx-dn" : /BULL/.test(sent?.india?.lean || "") ? "mcx-up" : ""),
       cell("Global cues", us.length ? (us.reduce((a, x) => a + (x.changePct || 0), 0) >= 0 ? "POSITIVE" : "NEGATIVE") : "—", us.slice(0, 2).map((x) => `${x.label} ${chg(x.changePct)}`).join(" · "), us.length ? (us.reduce((a, x) => a + (x.changePct || 0), 0) >= 0 ? "mcx-up" : "mcx-dn") : ""),
     ].join(""));
+  }
+
+  // ------------------------------------------------------------ C4 card + its main-chart marks (information only)
+  function renderC4() {
+    const host = $("mcx-c4"); if (!host) return;
+    const sym = MC.sym, ok = sym === "^NSEI" || sym === "^BSESN", c = ok ? X.c4[sym + (MC.replayDate || "")] : null;
+    const marks = c && c.signals ? c.signals.map((s) => ({ time: s.barTime, position: "aboveBar", color: "#f59e0b", shape: "arrowDown", text: "C4 PE", snap: true })) : [];
+    const msig = JSON.stringify(marks);
+    if (MC._c4Sig !== msig) { MC._c4Sig = msig; MC._c4Marks = marks; if (typeof mcDrawLevelRays === "function") try { mcDrawLevelRays(); } catch (e) { /* chart not ready */ } }
+    if (!ok) { set(host, `<div class="mcx-c4"><div class="mcx-row"><h2 class="mcx-h">C4 · Fake-up → PE</h2></div><p class="mcx-note">C4 is tested on NIFTY and SENSEX only.</p></div>`); return; }
+    if (!c) { set(host, `<div class="mcx-c4"><div class="mcx-row"><h2 class="mcx-h">C4 · Fake-up → PE</h2></div><p class="mcx-note">loading…</p></div>`); return; }
+    const R = c.record || {}, ix = R[c.index] || {}, a = R.all || {}, sg = c.signals || [], last = sg[sg.length - 1], w = (c.watch || [])[c.watch.length - 1];
+    const badge = last ? `<span class="mcx-badge pe">▼ C4 ${hm(last.t)}</span>` : `<span class="mcx-badge wait">${c.available ? "No C4 signal" : "unavailable"}</span>`;
+    const row = (s) => `<div class="mcx-c4-sig"><div class="mcx-row"><b>${hm(s.t)}</b><span>Buy <b>${esc(s.pe || `${s.atm} PE`)}</b>${s.premIn != null ? ` @ ₹${f2(s.premIn)}` : ""}</span></div>
+      <div class="mcx-c4-grid"><span>Fake-up at</span><b>${f0(s.level)}</b><span>Entry (index)</span><b>${f0(s.entryIdx)}</b><span>Stop (index)</span><b class="mcx-dn">${f0(s.stopIdx)}</b><span>Target 1:1</span><b class="mcx-up">${f0(s.targetIdx)}</b><span>Exit by</span><b>${hm(s.t + 3600)}</b><span>Call writing</span><b>CE OI ${amt(s.ceOi1 - s.ceOi0)} · CE ${f2(s.ce0)}→${f2(s.ce1)}</b></div></div>`;
+    const body = sg.length ? sg.slice().reverse().map(row).join("") : `<p class="mcx-note">${esc(c.reason || (c.live ? "No C4 signal yet today — checked at every 5-min close." : "No C4 signal in this session."))}</p>`;
+    const watch = w ? `<p class="mcx-note" title="A fake-up at your S/R level that did not pass every C4 condition — not a signal">${hm(w.t)} fake-up at ${f0(w.level)} — ${esc(w.reason)} (not C4)</p>` : "";
+    const pp = c.paper?.board ? `Live paper: ${esc(JSON.stringify(c.paper.board).slice(0, 80))}` : "Live paper record: starts 26 Oct 2026";
+    set(host, `<div class="mcx-c4"><div class="mcx-row"><h2 class="mcx-h" title="Fake-up confirmed at your S/R level + call writing (ATM CE OI up, CE premium down) + level touched 30 min earlier → buy the ATM PE; stop above the 4-candle high, target 1:1, 60 minutes">C4 · Fake-up → PE</h2>${badge}</div>
+      ${body}${watch}
+      <div class="mcx-c4-rec" title="${esc(`${R.period} · ${R.source}. ${R.caveat}`)}"><span>Tested 2 yrs (${esc(c.index)}): <b>${ix.trades ?? "—"}</b> trades · <b>${ix.winPct ?? "—"}%</b> win · <b class="mcx-up">₹${ix.net ?? "—"}</b>/trade (₹${ix.netCons ?? "—"} conservative)</span><span>Both indices: ${a.trades} trades · ${a.winPct}% · PF ${a.pf}</span><span>${pp}</span></div>
+      <p class="mcx-c4-ft">Positive result, not a proven edge · levels from sessions up to ${esc(c.priorTo || "—")} · advisory only</p></div>`);
   }
 
   // ------------------------------------------------------------ crude oil card: Brent (USD) + MCX ₹, last 4 h, next-hour history (information only)
@@ -371,6 +396,7 @@
     try { renderTape(d); } catch (e) { console.warn("[mcx] tape", e); }
     try { renderDecision(d); } catch (e) { console.warn("[mcx] decision", e); }
     try { renderLevels(d); } catch (e) { console.warn("[mcx] levels", e); }
+    try { renderC4(); } catch (e) { console.warn("[mcx] c4", e); }
     try { renderCrude(); } catch (e) { console.warn("[mcx] crude", e); }
     try { otShell(); } catch (e) { console.warn("[mcx] option terminal", e); }
     try { fitFrame(); } catch (e) { console.warn("[mcx] frame", e); }
@@ -389,7 +415,7 @@
   // MC.lastData changes on every Market Command refresh → re-render from it (cheap); the slower sources refresh on their own clocks
   function onMcData() {
     if (typeof MC === "undefined" || !MC.lastData) return;
-    if (MC.lastData !== X.seen) { const first = !X.seen, symChanged = X.seen && X.seen.symbol !== MC.lastData.symbol; X.seen = MC.lastData; renderAll(); if ((first || symChanged) && mcOn()) refreshSlow(true); if (X.view === "mc" && mcOn()) loadOt(); }
+    if (MC.lastData !== X.seen) { const first = !X.seen, symChanged = X.seen && X.seen.symbol !== MC.lastData.symbol, rd = MC.replayDate || null, rdChanged = !first && X.seenRd !== rd; X.seen = MC.lastData; X.seenRd = rd; renderAll(); if ((first || symChanged || rdChanged) && mcOn()) refreshSlow(true); if (X.view === "mc" && mcOn()) loadOt(); }
   }
   window.addEventListener("mc:data", onMcData);   // fired by app.js the moment new Market Command data lands
   setInterval(onMcData, 1500);                     // fallback

@@ -10399,9 +10399,12 @@ function mcDrawLevelRays() {
     + rows.map((r) => `<div class="mc-lvltag ${r.cls}${r.near ? " near" : ""}" style="top:${r.ty}px;right:${host.clientWidth - plotW + 6}px">${r.text}</div>`).join("");
   // candle markers (BOS / swing / breakout marks) as small tags above / below their candle
   const cmap = new Map((MC._candles || []).map((c) => [c.time, c]));
-  const mk = (MC._ovMarkers || []).map((m) => {
-    let x = null; try { x = MC.chart.timeScale().timeToCoordinate(m.time); } catch {}
-    const c = cmap.get(m.time); if (x == null || !c || x < 0 || x > plotW) return "";
+  // C4 marks (mcx.js, owner-approved 2026-10-25) sit on the candle that CONTAINS their 5-min bar, on any timeframe
+  const snapC = (t) => { const cs = MC._candles || []; let lo = 0, hi = cs.length - 1, r = null; while (lo <= hi) { const k = (lo + hi) >> 1; if (cs[k].time <= t) { r = cs[k]; lo = k + 1; } else hi = k - 1; } return r; };
+  const mk = [...(MC._ovMarkers || []), ...(MC._c4Marks || [])].map((m) => {
+    const c = m.snap ? snapC(m.time) : cmap.get(m.time);
+    let x = null; try { x = c ? MC.chart.timeScale().timeToCoordinate(c.time) : null; } catch {}
+    if (x == null || !c || x < 0 || x > plotW) return "";
     const up = m.position === "belowBar", y = Y(up ? c.low : c.high); if (y == null) return "";
     const glyph = m.shape === "arrowUp" ? "▲" : m.shape === "arrowDown" ? "▼" : m.shape === "circle" ? "●" : "■";
     return `<div class="mc-cmark ${up ? "below" : "above"}" style="left:${Math.round(x)}px;top:${Math.round(up ? y + 3 : y - 3)}px;color:${m.color || "#94a3b8"}"><b>${glyph}</b><span>${mcEscText(m.text || "")}</span></div>`;

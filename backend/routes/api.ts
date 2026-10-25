@@ -85,6 +85,7 @@ import * as RR from "../sentiment/resultsReview";
 import * as LM from "../premium/levelMemory";
 import * as OWN from "../premium/ownerLevels";
 import * as CRUDE from "../sentiment/crudeMove";
+import * as C4F from "../premium/c4Feed";
 import * as NDM from "../premium/nextDayMap";
 import * as PBNC from "../premium/premiumBounce";
 import * as POS from "../sentiment/positioning";
@@ -322,7 +323,7 @@ if (AUDIT_ENABLED) {
 // live even while scanners churn. Everything else stays LOW (the default).
 // The Option Premium Prediction Center (and its zero-hero / Market Eye / calculator / level-memory sections) is a focus
 // screen too: at LOW priority its quote + option-chain calls queued behind the background scans in market hours.
-const HIGH_PRIORITY_API = /^\/(market-command|crude-move|market-analysis|option-candles|option-structure|mc-summary|premium-center|premium-calc|zero-hero-live|market-eye|level-memory|next-day-map|positioning|triple-potential)\b/;
+const HIGH_PRIORITY_API = /^\/(market-command|crude-move|c4-live|market-analysis|option-candles|option-structure|mc-summary|premium-center|premium-calc|zero-hero-live|market-eye|level-memory|next-day-map|positioning|triple-potential)\b/;
 router.use((req: Request, _res: Response, next: NextFunction) => {
   if (HIGH_PRIORITY_API.test(req.path)) withDhanPriority("high", async () => next());
   else next();
@@ -8237,6 +8238,16 @@ router.get("/crude-move", requirePermission("oiAnalysis"), async (_req: Request,
   try { res.json(await cachedSwr("crude-move", 60_000, 15 * 60_000, () => CRUDE.brentCard())); }
   catch (e: any) { res.json({ available: false, reason: e?.message || "crude data unavailable" }); }
 });
+// C4 (owner's tested rule: fake-up at owner S/R + call writing → ATM PE) for Market Command — information only.
+// ?date=YYYY-MM-DD replays a past session with the same code (verification). Cached 30 s per index/day.
+router.get("/c4-live", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  const sym = String(req.query.symbol || "^NSEI"), date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : null;
+  const expiryFor = (day: string) => cached(`c4-exp:${sym}`, 30 * 60_000, async () => { const def = findSymbolDef(sym); const ch: any = def ? await dhanChainForExpiry(def, 0) : null; return (ch?.expiries || []) as string[]; })
+    .then((list) => list.find((e) => e >= day) ?? null).catch(() => null);
+  try { res.json(await cached(`c4-live:${sym}:${date || "today"}`, 30_000, () => C4F.c4For(sym, date, expiryFor))); }
+  catch (e: any) { res.json({ available: false, symbol: sym, reason: e?.message || "C4 unavailable", signals: [], watch: [], record: C4F.C4_RECORD }); }
+});
+
 // ---- KEEP-WARM: Market Command + Option Terminal data for NIFTY and SENSEX ----
 // The first person to open Market Command after a restart (or after the caches expired) used to wait 4–8 s for sentiment,
 // positioning, premium-center and the option terminal's premium candles. This job computes them in the background with the

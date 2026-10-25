@@ -312,3 +312,12 @@ positive. 1 of 6 criteria pass.
 **Live paper records:** none yet (the test starts 2026-10-26).
 
 **Verdict:** CONTINUE PAPER TESTING. Not a proven edge.
+
+## 2026-10-25 · C4 shown live on Market Command (owner's request) — display only, rule unchanged
+- **What:** `premium/c4Live.ts` evaluates the unchanged C4 rule at each closed 5-min candle (NIFTY, SENSEX); `/api/c4-live`;
+  a C4 card under Key Levels; an amber "▼ C4 PE" mark on the main chart (owner approved this one main-chart addition).
+- **Rule parity:** `c4Live.test.ts` replays 120 real sessions per index; the live scan fires on exactly the research
+  signals (39 NIFTY, 44 SENSEX: same candle, level, entry, stop). Live-feed spot check: NIFTY 21 Oct 09:55, 22 Oct 11:50,
+  SENSEX 21 Oct 10:05 reproduced; 23 Oct none (as research).
+- **Not a logic change:** no entry, exit, plan or co-pilot behaviour changed; the card states the tested record and
+  "positive result, not a proven edge". Verdict on C4 itself still waits for 30 live paper signals (from 26 Oct).
