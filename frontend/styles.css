@@ -8207,6 +8207,20 @@ body.gc-fullwidth .watchlist, body.gc-fullwidth #cockpit-strip, body.gc-fullwidt
 body.gc-fullwidth #tabs, body.gc-fullwidth #tab-flow-wrap { display: none !important; }
 body.gc-fullwidth .content { padding-left: 0; padding-right: 0; }
 .gc-tl > div.gz-mute:empty { min-width: 0; }
+/* TradingView-style charts: legend, expand, bigger premium charts */
+.gc-chart, .gc-och { position: relative; }
+.gc-leg { position: absolute; left: 8px; top: 6px; right: 72px; z-index: 3; pointer-events: none; font: 12px/1.45 -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif; color: #d1d4dc; text-shadow: 0 0 3px #131722; }
+.gc-leg b { color: #fff; margin-right: 4px; } .gc-leg .lk { color: #787b86; margin: 0 2px 0 4px; } .gc-leg .up { color: #26a69a; } .gc-leg .dn { color: #ef5350; }
+.gc-leg .e9 { color: #2962ff; } .gc-leg .e21 { color: #f7a21b; margin-left: 6px; }
+.gc-chartcol, .gc-ot { background: #131722; border-color: #2a2e39; }
+.gc-otc { border-color: #2a2e39; background: #131722; }
+.gc-och { height: 260px; }
+.gc-exp { float: right; margin-left: 6px; width: 32px; height: 28px; border-radius: 4px; border: 1px solid #2a2e39; background: #1e222d; color: #d1d4dc; font-size: 15px; cursor: pointer; }
+.gc-exp:hover { background: #2a2e39; }
+.gc-full { position: fixed !important; inset: 0; z-index: 9999; display: flex !important; flex-direction: column; border-radius: 0 !important; margin: 0 !important; padding: 8px; background: #131722 !important; }
+.gc-full .gc-och, .gc-full .gc-chart { flex: 1; height: auto !important; min-height: 0; }
+.gc-full #gc-timeline { display: none; }
+body.gc-has-full { overflow: hidden; }
 /* tablet: chart full width, options + right side by side */
 @media (max-width: 1279px) {
   .gc-main { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }

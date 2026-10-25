@@ -5,6 +5,7 @@
 import { Router, Request, Response } from "express";
 import { goldContracts, optionExpiries, underlyingFuture, frontFuture, strikesFor, atmStrike, optionAt, goldSession, goldLevels, levelPlan, expiryInfo, GOLD_SPEC, GoldUnd } from "../gold/goldEngine";
 import { goldBars, comexGold, goldEnabled, goldBreaker } from "../gold/goldFeed";
+import { premiumStructure } from "../premium/premiumStructure";
 
 const router = Router();
 const istToday = () => new Date(Date.now() + 19800000).toISOString().slice(0, 10);
@@ -53,9 +54,14 @@ router.get("/option", async (req: Request, res: Response) => {
     for (const side of ["CE", "PE"] as const) {
       const o = optionAt(rows, und, expiry, strike, side);
       if (!o) { out[side] = { available: false, error: `${und} ${strike} ${side} ${expiry} not listed` }; continue; }
-      const b = await goldBars(o.securityId, "OPTFUT", tf, 5, 30_000);
+      const b0 = await goldBars(o.securityId, "OPTFUT", tf, 5, 30_000);
+      // the last 2 sessions only: older bars of a strike that was deep in / out of the money then are thin and distort the chart
+      const days = [...new Set(b0.v.map((x) => new Date((x.time + 19800) * 1000).toISOString().slice(0, 10)))].sort().slice(-2);
+      const b = { ...b0, v: b0.v.filter((x) => days.includes(new Date((x.time + 19800) * 1000).toISOString().slice(0, 10))) };
       const last = b.v.length ? b.v[b.v.length - 1] : null;
-      out[side] = { available: b.v.length > 0, name: o.name, securityId: o.securityId, bars: b.v, last: last?.close ?? null, oi: last?.oi ?? null, costPerLot: last ? Math.round(last.close * GOLD_SPEC[und].mult) : null, stale: b.stale };
+      // premium support / resistance: the same structure engine as Market Command's option terminal, on this premium
+      const st = b.v.length >= 10 ? premiumStructure(b.v as any) : { available: false, reason: "not enough premium candles" };
+      out[side] = { available: b.v.length > 0, name: o.name, securityId: o.securityId, bars: b.v, last: last?.close ?? null, oi: last?.oi ?? null, costPerLot: last ? Math.round(last.close * GOLD_SPEC[und].mult) : null, stale: b.stale, st };
     }
     res.json(out);
   } catch (e: any) { res.json({ available: false, error: e?.message || "gold option data unavailable", breaker: goldBreaker() }); }

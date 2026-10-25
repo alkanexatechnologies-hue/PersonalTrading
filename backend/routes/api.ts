@@ -86,6 +86,7 @@ import * as LM from "../premium/levelMemory";
 import * as OWN from "../premium/ownerLevels";
 import * as CRUDE from "../sentiment/crudeMove";
 import goldRouter from "./gold";
+import { premiumStructure } from "../premium/premiumStructure";
 import * as C4F from "../premium/c4Feed";
 import * as NDM from "../premium/nextDayMap";
 import * as PBNC from "../premium/premiumBounce";
@@ -8499,36 +8500,7 @@ router.get("/option-candles", async (req: Request, res: Response) => {
 //   SWP  = latest premium swing point.
 // Timeframe-aware (uses the requested interval's candles). Nothing is fabricated:
 // missing values are null. No existing API/engine is modified.
-/** Premium structure (R1/R2/S1/S2, BIOS, swings) from the EXISTING structure engine run on PREMIUM candles — shared by
- *  /option-structure (live) and /replay-premium (a past session). */
-function premiumStructure(candles: any[]) {
-  const r2n = (n: number) => Math.round(n * 100) / 100;
-  const ms = detectMarketStructure(candles, 3, vwap(candles));
-  const cur = candles[candles.length - 1].close;
-  const swings = ms.swingPoints.map((p: any) => ({ type: p.type, price: r2n(p.price), time: candles[p.index]?.time ?? null }));
-  const highs = swings.filter((s) => s.type === "HH" || s.type === "LH").map((s) => s.price);
-  const lows = swings.filter((s) => s.type === "HL" || s.type === "LL").map((s) => s.price);
-  const above = [...new Set(highs.filter((p) => p > cur))].sort((a, b) => a - b);
-  const below = [...new Set(lows.filter((p) => p < cur))].sort((a, b) => b - a);
-  const lastBos = ms.bosEvents.length ? ms.bosEvents[ms.bosEvents.length - 1] : null;
-  return {
-    available: true,
-    current: r2n(cur),
-    r1: above[0] ?? null, r2: above[1] ?? null,
-    s1: below[0] ?? null, s2: below[1] ?? null,
-    swp: swings.length ? swings[swings.length - 1].price : null,
-    support: below[0] ?? null,
-    resistance: above[0] ?? null,
-    bios: lastBos ? {
-      price: r2n(lastBos.level),
-      time: candles[lastBos.breakIndex]?.time ?? lastBos.breakTime ?? null,
-      direction: lastBos.direction === "Bullish" ? "BULLISH" : "BEARISH",
-      stage: lastBos.stage,
-    } : null,
-    structure: ms.currentStructure,
-    swings: swings.slice(-8),
-  };
-}
+// premiumStructure() lives in premium/premiumStructure.ts (shared with the Gold Desk's option column).
 
 // ---- MARKET COMMAND REPLAY: a past session's real premiums (Dhan rolling option, ATM±3) for the CE / PE charts ----
 // /api/replay-premium?symbol=^BSESN&date=2026-10-23&interval=5[&strike=73100] → { ce:{candles}, pe:{candles}, st:{ce,pe}, atm, strikes }

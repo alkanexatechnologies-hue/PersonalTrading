@@ -78,21 +78,52 @@
   }
 
   // ------------------------------------------------------------ main futures chart
-  function chartOf(id, h) {
+  // TradingView-style chart: TV dark theme, crosshair snapped to candles with price / time labels, volume pane, OHLC legend
+  // (top-left, follows the crosshair), opens on the latest bars with the price scale fitted to what is visible.
+  const TV = { bg: "#131722", grid: "#1e222d", text: "#d1d4dc", border: "#2a2e39", up: "#26a69a", down: "#ef5350" };
+  function chartOf(id, title, compact) {
     const host = $(id); if (!host || typeof LightweightCharts === "undefined") return null;
-    if (G.charts[id] && G.charts[id].host === host) return G.charts[id];
-    const ch = LightweightCharts.createChart(host, { autoSize: true, layout: { background: { color: "#0b0e14" }, textColor: "#9aa3b0", fontSize: 11 }, grid: { vertLines: { color: "#141a23" }, horzLines: { color: "#141a23" } },
-      rightPriceScale: { borderColor: "#1e2530" }, timeScale: { borderColor: "#1e2530", timeVisible: true, secondsVisible: false }, crosshair: { mode: 0 } });
-    const c = ch.addCandlestickSeries({ upColor: "#089981", downColor: "#F23645", wickUpColor: "#089981", wickDownColor: "#F23645", borderVisible: false });
-    const e9 = ch.addLineSeries({ color: "#4ea1ff", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-    const e21 = ch.addLineSeries({ color: "#f5c542", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-    G.charts[id] = { ch, c, e9, e21, host, lines: [], key: null }; return G.charts[id];
+    if (G.charts[id] && G.charts[id].host === host) { G.charts[id].title = title || G.charts[id].title; return G.charts[id]; }
+    const ch = LightweightCharts.createChart(host, { autoSize: true,
+      layout: { background: { type: "solid", color: TV.bg }, textColor: TV.text, fontSize: 11, fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif" },
+      grid: { vertLines: { color: TV.grid }, horzLines: { color: TV.grid } },
+      crosshair: { mode: 1, vertLine: { color: "#758696", width: 1, style: 3, labelBackgroundColor: TV.border }, horzLine: { color: "#758696", width: 1, style: 3, labelBackgroundColor: TV.border } },
+      rightPriceScale: { borderColor: TV.border, scaleMargins: { top: 0.12, bottom: 0.22 } },
+      timeScale: { borderColor: TV.border, timeVisible: true, secondsVisible: false, rightOffset: 6, barSpacing: 7, minBarSpacing: 2 },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false }, handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true } });
+    const c = ch.addCandlestickSeries({ upColor: TV.up, downColor: TV.down, borderUpColor: TV.up, borderDownColor: TV.down, wickUpColor: TV.up, wickDownColor: TV.down, priceLineColor: "#787b86", priceLineStyle: 2 });
+    const e9 = ch.addLineSeries({ color: "#2962ff", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+    const e21 = ch.addLineSeries({ color: "#f7a21b", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+    const vol = ch.addHistogramSeries({ priceFormat: { type: "volume" }, priceScaleId: "", lastValueVisible: false, priceLineVisible: false });
+    vol.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+    const leg = document.createElement("div"); leg.className = "gc-leg"; host.appendChild(leg);
+    const C = { ch, c, e9, e21, vol, host, leg, lines: [], key: null, title: title || "", rows: new Map(), compact: !!compact };
+    ch.subscribeCrosshairMove((p) => { const r = p && p.time != null ? C.rows.get(p.time) : null; legend(C, r || C.lastRow); });
+    G.charts[id] = C; return C;
+  }
+  function legend(C, r) {
+    if (!r) { C.leg.innerHTML = `<b>${esc(C.title)}</b>`; return; }
+    const ch = r.prev ? r.close - r.prev : r.close - r.open, pct = (r.prev || r.open) ? (ch / (r.prev || r.open)) * 100 : 0, cls = ch >= 0 ? "up" : "dn";
+    // small premium charts: one line (TradingView's compact legend); full OHLC when expanded
+    if (C.compact && !C.host.closest(".gc-full")) { C.leg.innerHTML = `<span class="lk">O</span><span class="${cls}">${f2(r.open)}</span> <span class="lk">H</span><span class="${cls}">${f2(r.high)}</span> <span class="lk">L</span><span class="${cls}">${f2(r.low)}</span> <span class="lk">C</span><span class="${cls}">${f2(r.close)}</span> <span class="${cls}">${sg(pct, 2)}%</span>`; return; }
+    C.leg.innerHTML = `<b>${esc(C.title)}</b> <span class="lk">O</span><span class="${cls}">${f2(r.open)}</span> <span class="lk">H</span><span class="${cls}">${f2(r.high)}</span> <span class="lk">L</span><span class="${cls}">${f2(r.low)}</span> <span class="lk">C</span><span class="${cls}">${f2(r.close)} ${sg(ch, 2)} (${sg(pct, 2)}%)</span>`
+      + `<br><span class="e9">EMA 9 ${f2(r.e9)}</span> <span class="e21">EMA 21 ${f2(r.e21)}</span>${r.vol ? ` <span class="lk">Vol</span> ${f0(r.vol)}` : ""}${r.oi != null ? ` <span class="lk">OI</span> ${f0(r.oi)}` : ""}`;
   }
   function drawSeries(C, bars, fitKey) {
     const cs = bars.map((b) => ({ time: b.time + IST, open: b.open, high: b.high, low: b.low, close: b.close }));
     C.c.setData(cs); const cl = cs.map((b) => b.close), a = ema(cl, 9), b = ema(cl, 21);
     C.e9.setData(cs.map((x, i) => ({ time: x.time, value: a[i] }))); C.e21.setData(cs.map((x, i) => ({ time: x.time, value: b[i] })));
-    if (C.key !== fitKey) { C.key = fitKey; const n = cs.length; if (n > 120) C.ch.timeScale().setVisibleLogicalRange({ from: n - 120, to: n + 3 }); else C.ch.timeScale().fitContent(); }
+    C.vol.setData(bars.map((x) => ({ time: x.time + IST, value: x.volume || 0, color: x.close >= x.open ? "rgba(38,166,154,.45)" : "rgba(239,83,80,.45)" })));
+    C.rows = new Map(cs.map((x, i) => [x.time, { ...x, prev: i ? cs[i - 1].close : null, e9: a[i], e21: b[i], vol: bars[i].volume, oi: bars[i].oi }]));
+    C.lastRow = cs.length ? C.rows.get(cs[cs.length - 1].time) : null; legend(C, C.lastRow);
+    // first draw of this series: show the latest ~90 bars (today's session), price scale fitted to them, as TradingView opens
+    if (C.key !== fitKey) { C.key = fitKey; showLatest(C); }
+  }
+  /** TradingView-like default view: the latest bars (more when the chart is expanded), price scale fitted to them. */
+  function showLatest(C) {
+    const n = C.rows.size, full = !!C.host.closest(".gc-full"), k = full ? 160 : C.compact ? 70 : 110, w = C.host.clientWidth || 600;
+    C.ch.timeScale().applyOptions({ barSpacing: Math.max(3, Math.min(14, (w - 70) / (k + 6))) });
+    C.ch.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - k), to: n + 6 }); C.c.priceScale().applyOptions({ autoScale: true });
   }
   function setLines(C, specs) {
     const sig = JSON.stringify(specs.map((s) => [s.price.toFixed(2), s.title]));
@@ -103,10 +134,10 @@
   function renderChart() {
     const d = G.d; if (!d) return;
     const tfL = { 5: "5m", 15: "15m", 60: "1h" }[G.tf], f = d.fut;
-    set($("gc-chart-hd"), `<b class="gc-sym">${esc(f.name)}</b><span class="mcx-note">₹ per 10 g · ${tfL} · MCX · lot ${esc(d.spec.grams)} (₹${d.spec.mult} per ₹1)</span>
+    set($("gc-chart-hd"), `<button type="button" class="gc-exp" data-gc-expand="gc-chartcol" aria-label="Expand chart" title="Expand (Esc to close)">⤢</button><b class="gc-sym">${esc(f.name)}</b><span class="mcx-note">₹ per 10 g · ${tfL} · MCX · lot ${esc(d.spec.grams)} (₹${d.spec.mult} per ₹1)</span>
       <b class="gc-px">₹${f0(f.last)}</b><span class="${(f.chg ?? 0) >= 0 ? "mcx-up" : "mcx-dn"}">${sg(f.chg)} (${sg(f.chgPct, 2)}%)</span>
       <span class="mcx-note">${f.lastTime ? `last bar ${hm(f.lastTime)} IST` : ""}${f.stale ? " · <b class='mcx-dn'>STALE</b>" : ""}</span>`);
-    const C = chartOf("gc-chart"); if (!C || !f.bars.length) return;
+    const C = chartOf("gc-chart", `${f.name} · ${tfL} · MCX`); if (!C || !f.bars.length) return;
     drawSeries(C, f.bars, `${G.und}|${G.tf}`);
     const lo = Math.min(...f.bars.slice(-150).map((b) => b.low)), hi = Math.max(...f.bars.slice(-150).map((b) => b.high)), pad = (hi - lo) * 0.25, inView = (p) => p >= lo - pad && p <= hi + pad;
     const specs = d.levels.filter((l) => inView(l.price)).map((l) => ({ price: l.price, color: l.kind === "R" ? "#ef5350" : "#26a69a", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: l.label }));
@@ -146,9 +177,21 @@
       if (!S || !S.available) { set(hd, `<b>${G.und} ${f0(G.strike)} ${side}</b> <span class="mcx-note">${esc(S?.error || G.oErr || "loading…")}</span>`); continue; }
       const cl = S.bars.map((b) => b.close), a = ema(cl, 9), b = ema(cl, 21), n = cl.length - 1, up = n >= 0 && cl[n] > a[n] && a[n] > b[n];
       const oi0 = S.bars.length > 12 ? S.bars[S.bars.length - 13].oi : null;
-      set(hd, `<b>${G.und} ${f0(G.strike)} ${side}</b> <b class="${side === "CE" ? "mcx-up" : "mcx-dn"}">₹${f2(S.last)}</b> <span>× ${o.mult} = <b>${inr(S.costPerLot)}</b>/lot</span>
-        <span class="mcx-note">${up ? "Bullish" : "not bullish"} · E9 ${f2(a[n])} · E21 ${f2(b[n])} · OI ${f0(S.oi)}${oi0 != null && S.oi != null ? ` (${sg(S.oi - oi0)} 1h)` : ""}${S.stale ? " · STALE" : ""}</span>`);
-      const C = chartOf(`gc-${side.toLowerCase()}`); if (C && S.bars.length) drawSeries(C, S.bars, o.key + side);
+      set(hd, `<button type="button" class="gc-exp" data-gc-expand="gc-${side.toLowerCase()}-box" aria-label="Expand ${side} chart" title="Expand (Esc to close)">⤢</button><b>${G.und} ${f0(G.strike)} ${side}</b> <b class="${side === "CE" ? "mcx-up" : "mcx-dn"}">₹${f2(S.last)}</b> <span>× ${o.mult} = <b>${inr(S.costPerLot)}</b>/lot</span>
+        <span class="mcx-note">${up ? "Bullish" : "not bullish"} · E9 ${f2(a[n])} · E21 ${f2(b[n])} · OI ${f0(S.oi)}${oi0 != null && S.oi != null ? ` (${sg(S.oi - oi0)} 1h)` : ""}${S.stale ? " · STALE" : ""}</span>
+        <span class="gc-sr mcx-note"></span>`);
+      const C = chartOf(`gc-${side.toLowerCase()}`, `${G.und} ${f0(G.strike)} ${side} · ${G.tf}m · MCX`, true); if (C && S.bars.length) {
+        drawSeries(C, S.bars, o.key + side);
+        // premium support / resistance (same engine as Market Command): R2 · R1 · S1 · S2 and the pullback zone around the
+        // latest break in the premium's structure (BIOS ± ¼ of the premium's 14-bar ATR)
+        const T = S.st || {}, br = S.bars, tr = br.slice(1).map((x, k) => Math.max(x.high - x.low, Math.abs(x.high - br[k].close), Math.abs(x.low - br[k].close))).slice(-14);
+        const atr = tr.length ? tr.reduce((p, q) => p + q, 0) / tr.length : 0, half = Math.max(0.5, Math.round(atr * 0.25 * 10) / 10), bios = T.bios ? T.bios.price : null;
+        const specs = [["r2", "#F23645", "R2"], ["r1", "#F23645", "R1"], ["s1", "#089981", "S1"], ["s2", "#089981", "S2"]].filter(([k]) => T[k] != null).map(([k, color, title]) => ({ price: T[k], color, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title }));
+        if (bios != null) specs.push({ price: bios + half, color: "rgba(239,68,68,.85)", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: "PB zone" }, { price: bios - half, color: "rgba(239,68,68,.85)", lineWidth: 1, lineStyle: 0, axisLabelVisible: false, title: "" });
+        setLines(C, specs);
+        const sr = `${T.structure ? `structure ${T.structure}` : "structure —"} · R1 ${f2(T.r1)} · S1 ${f2(T.s1)}${bios != null ? ` · BIOS ${T.bios.direction === "BULLISH" ? "▲" : "▼"} ${f2(bios)} · pullback zone ${f2(bios - half)} – ${f2(bios + half)}` : " · no break in premium structure yet"}`;
+        if (hd) { hd.title = sr; const n2 = hd.querySelector(".gc-sr"); if (n2) n2.textContent = `R1 ${f2(T.r1)} · S1 ${f2(T.s1)}`; }
+      }
     }
   }
 
@@ -211,6 +254,20 @@
     else if (ds.gcStep) { const st = G.d?.options.strikes || [], i = st.indexOf(G.strike) + Number(ds.gcStep); if (st[i] != null) { G.strike = st[i]; renderOt(); loadOpt(true); } }
     else if (ds.gcSide) { G.side = ds.gcSide; renderOt(); }
     else if (ds.gcLots) { G.lots = Number(ds.gcLots); renderTicket(); }
+  });
+  // ⤢ expand a chart to full screen (Esc or ⤢ again to close); re-frame once the chart has its new size
+  const reframe = (box) => [60, 250, 600].forEach((ms) => setTimeout(() => Object.values(G.charts).forEach((C) => { if (box.contains(C.host)) { showLatest(C); legend(C, C.lastRow); } }), ms));
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest("#panel-goldcommand [data-gc-expand]"); if (!b) return;
+    const box = b.closest(".gc-otc, .gc-chartcol"); if (!box) return;
+    const on = !box.classList.contains("gc-full"); document.querySelectorAll("#panel-goldcommand .gc-full").forEach((x) => x.classList.remove("gc-full")); box.classList.toggle("gc-full", on);
+    document.body.classList.toggle("gc-has-full", on);
+    reframe(box);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return; const box = document.querySelector("#panel-goldcommand .gc-full"); if (!box) return;
+    box.classList.remove("gc-full"); document.body.classList.remove("gc-has-full");
+    reframe(box);
   });
   document.addEventListener("input", (e) => { if (e.target && e.target.id === "gc-prem") { G.prem = e.target.value; renderTicket(); } });
 
