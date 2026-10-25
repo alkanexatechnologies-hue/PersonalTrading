@@ -95,6 +95,15 @@
     add(lv.weakSupport?.strike, "S", `OI put wall ${amt(lv.weakSupport?.oi).replace("+", "")}`, "S");
     add(lv.strongSupport?.strike, "Strong S", `OI put wall ${amt(lv.strongSupport?.oi).replace("+", "")}`, "S");
     add(lv.pdh, "PDH", "previous day high", "R"); add(lv.pdl, "PDL", "previous day low", "S");
+    if (s != null) add(lv.pdc, "PDC", "previous day close", lv.pdc > s ? "R" : "S");
+    if (s != null) { add(lv.orbHigh, "First-15 H", "09:15–09:30 high", lv.orbHigh > s ? "R" : "S"); add(lv.orbLow, "First-15 L", "09:15–09:30 low", lv.orbLow > s ? "R" : "S"); }
+    // owner S/R: turn clusters / flip zones of the previous 5 sessions — the 3 nearest above and below spot
+    if (s != null && Array.isArray(lv.ownerLevels)) {
+      const ow = lv.ownerLevels.filter((x) => x && isFinite(x.price)), srName = (k) => (k === "PA FLIP" ? "S/R flip" : k === "PA 3+ touches" ? "S/R 3+" : "S/R");
+      const why = (x) => `${String(x.label || "").replace(/^PA /, "")} · price turned here in the last 5 sessions`;
+      for (const x of ow.filter((x) => x.price > s).sort((a, b) => a.price - b.price).slice(0, 3)) add(x.price, srName(x.kind), why(x), "R");
+      for (const x of ow.filter((x) => x.price <= s).sort((a, b) => b.price - a.price).slice(0, 3)) add(x.price, srName(x.kind), why(x), "S");
+    }
     const fm = d.fakeMove15m?.level ?? d.fakeMove5m?.level, zh = typeof mcZoneHalf === "function" ? mcZoneHalf(sym) : 10;
     if (fm != null) rows.push({ p: fm, label: "Pullback", why: `${f0(fm - zh)} – ${f0(fm + zh)} (±${zh}) · chart`, kind: "R" });
     if (d.bos?.price != null) add(d.bos.price, `BOS ${d.bos.direction === "BULLISH" ? "▲" : "▼"}`, `${d.bos.stage || ""} · chart`, d.bos.direction === "BULLISH" ? "S" : "R");

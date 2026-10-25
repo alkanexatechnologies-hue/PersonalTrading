@@ -11,16 +11,9 @@ import { barsOf } from "./premiumBacktest2";
 import { FROM, latestRawDay } from "./dataRange";
 
 const mn = (t: number) => Math.floor(((t + 19800) % 86400) / 60);
-/** Owner-style levels: clusters (within 0.2·ATR15) of confirmed 15-min swings from the previous 5 sessions. */
-export function priceActionLevels(prev15: any[], a15: number): MemLevel[] {
-  const sw = confirmedSwings(prev15 as any, 2).sort((a, b) => a.price - b.price), cl: { p: number[]; hi: number; lo: number }[] = [];
-  for (const s of sw) { const c = cl[cl.length - 1]; if (c && s.price - c.p[c.p.length - 1] <= 0.2 * a15) { c.p.push(s.price); s.kind === "HIGH" ? c.hi++ : c.lo++; } else cl.push({ p: [s.price], hi: s.kind === "HIGH" ? 1 : 0, lo: s.kind === "LOW" ? 1 : 0 }); }
-  return cl.filter((c) => c.p.length >= 2).map((c) => {
-    const price = Math.round((c.p.reduce((a, x) => a + x, 0) / c.p.length) * 100) / 100;
-    const kind = c.hi && c.lo ? "PA FLIP" : c.p.length >= 3 ? "PA 3+ touches" : "PA 2 touches";
-    return { price, kind, label: `${kind} (${c.hi}H/${c.lo}L)` };
-  });
-}
+// priceActionLevels now lives in premium/ownerLevels.ts (same code) so Market Command can show the levels; re-exported here.
+import { priceActionLevels } from "../../premium/ownerLevels";
+export { priceActionLevels };
 if (require.main === module) {
   const days = assemble(FROM, latestRawDay()).days.filter((d) => d.spot.size >= 300);
   const mins = days.map((d) => [...d.spot.entries()].sort((a, b) => a[0] - b[0]).filter(([t]) => mn(t) >= 555 && mn(t) < 930) as [number, number][]);

@@ -83,6 +83,7 @@ import * as EXP from "../premium/expiryMode";
 import * as PCALC from "../premium/premiumCalc";
 import * as RR from "../sentiment/resultsReview";
 import * as LM from "../premium/levelMemory";
+import * as OWN from "../premium/ownerLevels";
 import * as NDM from "../premium/nextDayMap";
 import * as PBNC from "../premium/premiumBounce";
 import * as POS from "../sentiment/positioning";
@@ -3719,7 +3720,8 @@ async function buildOiCommand(def: SymbolDef): Promise<any> {
       const strongResistance = oiLvl(above[0], "CE"), weakResistance = oiLvl(above[1], "CE");
       const strongSupport = oiLvl(below[0], "PE"), weakSupport = oiLvl(below[1], "PE");
       // Opening 15-min high/low (first 15m bar today) + previous-day high/low.
-      let orbHigh: number | null = null, orbLow: number | null = null, pdh: number | null = null, pdl: number | null = null;
+      let orbHigh: number | null = null, orbLow: number | null = null, pdh: number | null = null, pdl: number | null = null, pdc: number | null = null;
+      let ownerLevels: { price: number; kind: string; label: string }[] = [];
       const istDayOf = istDateOfSec;
       const istMinOf = (t: number) => { const d = new Date((t + 19800) * 1000); return d.getUTCHours() * 60 + d.getUTCMinutes(); };
       if (c15arr.length) {
@@ -3741,8 +3743,10 @@ async function buildOiCommand(def: SymbolDef): Promise<any> {
             if (istDayOf(daily[i].time) < todayIso) { prev = daily[i]; break; }
           }
         }
-        if (prev) { pdh = Math.round(prev.high * 100) / 100; pdl = Math.round(prev.low * 100) / 100; }
+        if (prev) { pdh = Math.round(prev.high * 100) / 100; pdl = Math.round(prev.low * 100) / 100; pdc = Math.round(prev.close * 100) / 100; }
       } catch { /* PDH/PDL optional */ }
+      // owner S/R (15-min turn clusters / flip zones of the 5 sessions before today) — information only, for the level ladder
+      try { if (c15arr.length) ownerLevels = OWN.ownerLevelsFor(c15arr as any, istDayOf(c15arr[c15arr.length - 1].time)); } catch { /* optional */ }
       // Groww-style volume indicator (more active on a breakout). Built from
       // the 5m underlying candles; returns available:false for index feeds
       // that carry no volume so the UI shows N/A rather than a flat bar.
@@ -3774,7 +3778,7 @@ async function buildOiCommand(def: SymbolDef): Promise<any> {
         },
         tracker: { signalPrice: Math.round(signalPrice * 100) / 100, currentPrice: Math.round(spot * 100) / 100, currentMove: rawMove, favMove: Math.round(favMove * 100) / 100, expLow, expHigh, captured: Math.round(captured), pending: Math.round(pending), capturedPct },
         management: { entry: r0(ltp), targetLo: tgtLo, targetHi: tgtHi, stopLoss: sl, profitZone, dangerLo, dangerHi, invalidation, support, resistance, status, statusCls },
-        levels: { strongResistance, weakResistance, strongSupport, weakSupport, orbHigh, orbLow, pdh, pdl },
+        levels: { strongResistance, weakResistance, strongSupport, weakSupport, orbHigh, orbLow, pdh, pdl, pdc, ownerLevels },
         volume: oiVol,
         moveRead: oc.moveRead, hasBaseline: oc.hasBaseline, baselineNote: oc.baselineNote,
         futBuildup: oi.futBuildup ?? null, pcr: oi.pcr ?? null, maxPain: oi.maxPain ?? null,
