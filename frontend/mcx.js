@@ -66,6 +66,32 @@
     ].join(""));
   }
 
+  // ------------------------------------------------------------ Plan Levels on the main chart (owner, 2026-10-25)
+  // The same price lines as the Premium Prediction chart (premiumcenter.js ppcLevelLines — one shared builder): ladder levels
+  // with buyer risk, BULL / BEAR starts · stops · targets, plus the unbroken Buyer / Seller trendlines' current value.
+  // Today's plan only: hidden on a ↺ replay date. Redrawn only when the lines change.
+  function drawPlanLevels() {
+    const cs = MC.candleSeries, T = X.pc[MC.sym]?.trader, on = $("mc-tog-planlv")?.checked !== false && !MC.replayDate && !MC.lastData?.historical;
+    if (X.plSeries !== cs) { X.plSeries = cs; X.plLines = []; X.plSig = null; }   // the chart was rebuilt: its lines went with it
+    let specs = [];
+    if (on && cs && T && !T.error && typeof ppcLevelLines === "function") {
+      const c = (MC._candles || []).slice(-120); if (c.length) {
+        const lo = Math.min(...c.map((x) => x.low)), hi = Math.max(...c.map((x) => x.high)), pad = (T.atr15 || 0) * 1.5, inView = (p) => p >= lo - pad && p <= hi + pad;
+        specs = ppcLevelLines(T, { levels: true, plan: true, inView });
+        for (const tl of T.lines || []) {
+          if (tl.broken || !tl.end) continue; const v = tl.projection?.[0]?.value ?? tl.end.price; if (!inView(v)) continue;
+          specs.push({ price: v, color: tl.kind === "SELLER" ? "#f23645" : "#089981", lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title: `${tl.kind === "SELLER" ? "Seller" : "Buyer"} TL${tl.minor ? " (minor)" : ""}` });
+        }
+      }
+    }
+    const sig = JSON.stringify(specs.map((x) => [x.price.toFixed(2), x.title, x.color]));
+    if (sig === X.plSig) return; X.plSig = sig;
+    for (const l of X.plLines || []) { try { cs.removePriceLine(l); } catch (e) { /* already gone */ } }
+    X.plLines = []; if (!cs) return;
+    for (const spec of specs) { try { X.plLines.push(cs.createPriceLine(spec)); } catch (e) { /* bad value */ } }
+  }
+  document.addEventListener("change", (e) => { if (e.target && e.target.id === "mc-tog-planlv") drawPlanLevels(); });
+
   // ------------------------------------------------------------ C4 card + its main-chart marks (information only)
   function renderC4() {
     const host = $("mcx-c4"); if (!host) return;
@@ -396,6 +422,7 @@
     try { renderTape(d); } catch (e) { console.warn("[mcx] tape", e); }
     try { renderDecision(d); } catch (e) { console.warn("[mcx] decision", e); }
     try { renderLevels(d); } catch (e) { console.warn("[mcx] levels", e); }
+    try { drawPlanLevels(); } catch (e) { console.warn("[mcx] plan levels", e); }
     try { renderC4(); } catch (e) { console.warn("[mcx] c4", e); }
     try { renderCrude(); } catch (e) { console.warn("[mcx] crude", e); }
     try { otShell(); } catch (e) { console.warn("[mcx] option terminal", e); }

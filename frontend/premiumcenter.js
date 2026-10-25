@@ -336,6 +336,38 @@ function ppcMkTV(id) {
     handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
   });
 }
+/** The trader view's level + plan price lines (ladder levels with buyer risk, BULL/BEAR starts, stops, targets).
+ *  Shared by this chart and Market Command (mcx.js) so both mark levels identically. Returns createPriceLine specs. */
+function ppcLevelLines(T, opt) {
+  const out = [], inView = opt.inView || (() => true); if (!T || T.error) return out;
+  const kindCol = { "PREV DAY": "#b2b5be", TODAY: "#90caf9", WEEK: "#ce93d8", PIVOT: "#80deea", TRENDLINE: "#ffd54f", OI: "#ffab91" };
+  const short = (l) => l.replace("Prev day ", "PD ").replace("Prev week ", "PW ").replace("Prev close", "PDC").replace("Today ", "Day ").replace(" pivot", "").replace(/OI call wall.*/, "Call wall").replace(/OI put wall.*/, "Put wall").replace(/Major call OI.*/, "Major call").replace(/Major put OI.*/, "Major put").replace(" trendline", " TL");
+  const tol = 0.1 * (T.atr15 || 1), names = {};
+  if (opt.levels) {
+    // one label per price: levels within 0.1·ATR merge ("PD high/PDC"); a level that IS a plan line is named on the plan line
+    const planPx = opt.plan && T.plans ? [T.plans.bull, T.plans.bear].filter(Boolean).flatMap((p) => [p.trigger, p.entry, p.stop, p.t1, p.t2]).filter((x) => x != null) : [];
+    const groups = [];
+    for (const v of (T.levels || []).filter((v) => inView(v.price) && v.kind !== "TRENDLINE")) { const g = groups.find((g) => Math.abs(g.price - v.price) <= tol); if (g) g.items.push(v); else groups.push({ price: v.price, items: [v] }); }
+    for (const g of groups) {
+      const lbl = g.items.map((v) => short(v.label)).join("/"), star = g.items.length > 1 || g.items.some((v) => v.confluence);
+      if (planPx.some((x) => Math.abs(x - g.price) <= tol)) { names[g.price.toFixed(2)] = lbl; continue; }
+      const rk = g.items.map((v) => v.risk).find(Boolean), rc = rk ? PPC_RISK[rk.risk] : null;
+      out.push({ price: g.price, color: rc ? rc.col : kindCol[g.items[0].kind] || "#787b86", lineWidth: star ? 2 : 1, lineStyle: 2, axisLabelVisible: true, title: (star ? "★ " : "") + lbl + (rc && rk.risk !== "FAR" ? ` · ${rc.short}` : "") });
+    }
+  }
+  if (opt.plan && T.plans) {
+    const nameAt = (px) => { const k = Object.keys(names).find((x) => Math.abs(Number(x) - px) <= tol); return k ? ` · ${names[k]}` : ""; };
+    for (const [p, col, nm] of [[T.plans.bull, TVC.ce, "BULL"], [T.plans.bear, TVC.pe, "BEAR"]]) {
+      if (!p) continue;
+      out.push({ price: p.entry, color: col, lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: `${nm} STARTS${p.triggerRisk && p.triggerRisk.risk !== "FAR" ? " · " + PPC_RISK[p.triggerRisk.risk].short : ""}` });
+      out.push({ price: p.trigger, color: col + "99", lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: `level${nameAt(p.trigger)}` });
+      out.push({ price: p.stop, color: "#f23645", lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: `${nm} STOP` });
+      out.push({ price: p.t1, color: "#089981", lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: `${nm} T1${nameAt(p.t1)}` });
+      if (p.t2 != null && inView(p.t2)) out.push({ price: p.t2, color: "#089981", lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: `${nm} T2${nameAt(p.t2)}` });
+    }
+  }
+  return out;
+}
 function ppcRenderTV(layerToggle) {
   const d = PPC.d, T = d?.trader, cs = d?.chart?.candles || []; if (!d) return;
   const id = "ppc-ch-spot", key = `${PPC.sym}|${d.interval}`;
@@ -367,31 +399,9 @@ function ppcRenderTV(layerToggle) {
   // levels (ladder) — only those inside the visible price neighbourhood
   const lo = Math.min(...cs.slice(-120).map((c) => c.low)), hi = Math.max(...cs.slice(-120).map((c) => c.high)), pad = (T?.atr15 || 0) * 1.5;
   const inView = (p) => p >= lo - pad && p <= hi + pad;
-  const kindCol = { "PREV DAY": "#b2b5be", TODAY: "#90caf9", WEEK: "#ce93d8", PIVOT: "#80deea", TRENDLINE: "#ffd54f", OI: "#ffab91" };
-  const short = (l) => l.replace("Prev day ", "PD ").replace("Prev week ", "PW ").replace("Prev close", "PDC").replace("Today ", "Day ").replace(" pivot", "").replace(/OI call wall.*/, "Call wall").replace(/OI put wall.*/, "Put wall").replace(/Major call OI.*/, "Major call").replace(/Major put OI.*/, "Major put").replace(" trendline", " TL");
-  if (L.levels && T && !T.error) {
-    // one label per price: levels within 0.1·ATR merge ("PD high/PDC"); a level that IS a plan line is named on the plan line
-    const tol = 0.1 * (T.atr15 || 1), planPx = L.plan && T.plans ? [T.plans.bull, T.plans.bear].filter(Boolean).flatMap((p) => [p.trigger, p.entry, p.stop, p.t1, p.t2]).filter((x) => x != null) : [];
-    const groups = [];
-    for (const v of (T.levels || []).filter((v) => inView(v.price) && v.kind !== "TRENDLINE")) { const g = groups.find((g) => Math.abs(g.price - v.price) <= tol); if (g) g.items.push(v); else groups.push({ price: v.price, items: [v] }); }
-    for (const g of groups) {
-      const lbl = g.items.map((v) => short(v.label)).join("/"), star = g.items.length > 1 || g.items.some((v) => v.confluence);
-      if (planPx.some((x) => Math.abs(x - g.price) <= tol)) { PPC._planNames = PPC._planNames || {}; PPC._planNames[g.price.toFixed(2)] = lbl; continue; }
-      const rk = g.items.map((v) => v.risk).find(Boolean), rc = rk ? PPC_RISK[rk.risk] : null;
-      s.createPriceLine({ price: g.price, color: rc ? rc.col : kindCol[g.items[0].kind] || "#787b86", lineWidth: star ? 2 : 1, lineStyle: 2, axisLabelVisible: true, title: (star ? "★ " : "") + lbl + (rc && rk.risk !== "FAR" ? ` · ${rc.short}` : "") });
-    }
-  }
-  // the plan: triggers, stops, targets, no-trade zone
+  for (const spec of ppcLevelLines(T, { levels: L.levels, plan: L.plan, inView })) s.createPriceLine(spec);
+  // the no-trade zone
   if (L.plan && T?.plans) {
-    for (const [p, col, nm] of [[T.plans.bull, TVC.ce, "BULL"], [T.plans.bear, TVC.pe, "BEAR"]]) {
-      if (!p) continue;
-      s.createPriceLine({ price: p.entry, color: col, lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: `${nm} STARTS${p.triggerRisk && p.triggerRisk.risk !== "FAR" ? " · " + PPC_RISK[p.triggerRisk.risk].short : ""}` });
-      const nameAt = (px) => { const tol = 0.1 * (T.atr15 || 1), k = Object.keys(PPC._planNames || {}).find((x) => Math.abs(Number(x) - px) <= tol); return k ? ` · ${PPC._planNames[k]}` : ""; };
-      s.createPriceLine({ price: p.trigger, color: col + "99", lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: `level${nameAt(p.trigger)}` });
-      s.createPriceLine({ price: p.stop, color: "#f23645", lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: `${nm} STOP` });
-      s.createPriceLine({ price: p.t1, color: "#089981", lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: `${nm} T1${nameAt(p.t1)}` });
-      if (p.t2 != null && inView(p.t2)) s.createPriceLine({ price: p.t2, color: "#089981", lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: `${nm} T2${nameAt(p.t2)}` });
-    }
     if (T.plans.noTrade) {
       const nt = T.plans.noTrade, zone = ch.addBaselineSeries({ baseValue: { type: "price", price: nt.from }, topFillColor1: "rgba(247,201,72,.07)", topFillColor2: "rgba(247,201,72,.07)", topLineColor: "rgba(0,0,0,0)", bottomFillColor1: "rgba(0,0,0,0)", bottomFillColor2: "rgba(0,0,0,0)", bottomLineColor: "rgba(0,0,0,0)", priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
       zone.setData([...cs, ...fut.map((t) => ({ time: t }))].map((c) => ({ time: ppcT(c.time), value: nt.to })));
