@@ -7985,6 +7985,8 @@ async function loadMarketCommandOnce(chartOnly = false) {
       return;
     }
     MC.lastData = d;
+    // tell the Market Command panels (mcx.js) at once instead of waiting for their 1.5-s poll
+    try { window.dispatchEvent(new Event("mc:data")); } catch { /* old browser: the poll still catches it */ }
     // Chart session-date badge — which date this chart represents (live or replay).
     const _de = el("mc-chart-date");
     if (_de) {

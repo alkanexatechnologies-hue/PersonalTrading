@@ -27,18 +27,20 @@
   async function refreshSlow(force) {
     const sym = (typeof MC !== "undefined" && MC.sym) || "^NSEI", enc = encodeURIComponent(sym);
     const now = Date.now(), due = (k, ms) => force || !X[k + "At"] || now - X[k + "At"] > ms;
-    const jobs = [];
-    if (due("pc" + sym, 60_000)) jobs.push(get(`/api/premium-center?symbol=${enc}&interval=15m`, 40000).then((d) => { if (d && d.available) { X.pc[sym] = d; X["pc" + sym + "At"] = now; } }));
-    if (due("desk", 60_000)) jobs.push(get("/api/index-desk").then((d) => { if (d && d.rows) { X.desk = d; X.deskAt = now; } }));
-    if (due("hour", 120_000)) jobs.push(get("/api/hour-outlook").then((d) => { if (d && d.outlook) { X.hour = d; X.hourAt = now; } }));
-    if (due("pos" + sym, 300_000)) jobs.push(get(`/api/positioning?symbol=${enc}`).then((d) => { if (d && d.ok) { X.pos[sym] = d; X["pos" + sym + "At"] = now; } }));
-    if (due("crude", 60_000)) jobs.push(get("/api/crude-move", 40000).then((d) => { if (d && d.available) { X.crude = d; X.crudeAt = now; } }));
-    if (due("sent", 300_000)) jobs.push(get("/api/market-sentiment-brief").then((d) => { if (d && d.india) { X.sent = d; X.sentAt = now; } }));
-    if (MC.tf !== "5m" && due("c5" + sym, 60_000)) jobs.push(get(`/api/candles/${enc}?interval=5m`).then((d) => { if (d && Array.isArray(d.candles) && d.candles.length) { X.c5[sym] = d.candles; X["c5" + sym + "At"] = now; } }));   // 5m reaction on the ladder
-    if (due("walls" + sym, 60_000)) jobs.push(get(`/api/oi-walls?symbol=${enc}`).then((d) => { if (d && d.available) { X.walls[sym] = d; X["walls" + sym + "At"] = now; } }));
+    const jobs = [], J = (p) => jobs.push(p.then(paintSoon));   // each source paints as soon as it arrives, not after the slowest
+    if (due("pc" + sym, 60_000)) J(get(`/api/premium-center?symbol=${enc}&interval=15m`, 40000).then((d) => { if (d && d.available) { X.pc[sym] = d; X["pc" + sym + "At"] = now; } }));
+    if (due("desk", 60_000)) J(get("/api/index-desk").then((d) => { if (d && d.rows) { X.desk = d; X.deskAt = now; } }));
+    if (due("hour", 120_000)) J(get("/api/hour-outlook").then((d) => { if (d && d.outlook) { X.hour = d; X.hourAt = now; } }));
+    if (due("pos" + sym, 300_000)) J(get(`/api/positioning?symbol=${enc}`).then((d) => { if (d && d.ok) { X.pos[sym] = d; X["pos" + sym + "At"] = now; } }));
+    if (due("crude", 60_000)) J(get("/api/crude-move", 40000).then((d) => { if (d && d.available) { X.crude = d; X.crudeAt = now; } }));
+    if (due("sent", 300_000)) J(get("/api/market-sentiment-brief").then((d) => { if (d && d.india) { X.sent = d; X.sentAt = now; } }));
+    if (MC.tf !== "5m" && due("c5" + sym, 60_000)) J(get(`/api/candles/${enc}?interval=5m`).then((d) => { if (d && Array.isArray(d.candles) && d.candles.length) { X.c5[sym] = d.candles; X["c5" + sym + "At"] = now; } }));   // 5m reaction on the ladder
+    if (due("walls" + sym, 60_000)) J(get(`/api/oi-walls?symbol=${enc}`).then((d) => { if (d && d.available) { X.walls[sym] = d; X["walls" + sym + "At"] = now; } }));
     await Promise.all(jobs);
-    renderAll();
   }
+  // one render per animation frame however many sources land together
+  let _paint = 0;
+  function paintSoon() { if (_paint) return; _paint = requestAnimationFrame(() => { _paint = 0; renderAll(); }); }
 
   // ------------------------------------------------------------ market tape
   function renderTape(d) {
@@ -204,7 +206,8 @@
     }
     if (ot.strike == null) ot.strike = d.optionChain?.atmStrike ?? null;
     if (!ot.expiry) ot.expiry = d.oi?.expiry || null;
-    if (!ot.expiries.length) { const c = await get(`/api/oi-chain?symbol=${encodeURIComponent(sym)}`); if (c?.expiries) ot.expiries = c.expiries; }
+    // the expiry chips load in parallel — the option chain is rate-limited by Dhan (~1 s) and the candles do not need it
+    if (!ot.expiries.length && !ot.expLoading) { ot.expLoading = true; get(`/api/oi-chain?symbol=${encodeURIComponent(sym)}`).then((c) => { ot.expLoading = false; if (c?.expiries && MC.sym === sym) { ot.expiries = c.expiries; otShell(); drawOt(); } }); }
     otShell();
     if (ot.strike == null || !ot.expiry) return;
     const key = `${sym}|${ot.strike}|${ot.expiry}|${ot.tf}`, enc = encodeURIComponent(sym);
@@ -384,10 +387,13 @@
     else if (t.dataset.wbWin) { X.wb.win = t.dataset.wbWin; wallRender(); }
   });
   // MC.lastData changes on every Market Command refresh → re-render from it (cheap); the slower sources refresh on their own clocks
-  setInterval(() => {
+  function onMcData() {
     if (typeof MC === "undefined" || !MC.lastData) return;
     if (MC.lastData !== X.seen) { const first = !X.seen, symChanged = X.seen && X.seen.symbol !== MC.lastData.symbol; X.seen = MC.lastData; renderAll(); if ((first || symChanged) && mcOn()) refreshSlow(true); if (X.view === "mc" && mcOn()) loadOt(); }
-  }, 1500);
+  }
+  window.addEventListener("mc:data", onMcData);   // fired by app.js the moment new Market Command data lands
+  setInterval(onMcData, 1500);                     // fallback
+
   setInterval(() => { if (mcOn()) refreshSlow(false); if ($("oia-wallbuilder") && !$("oia-wallbuilder").hidden && (mcOn() || $("panel-oianalysis")?.classList.contains("active"))) wallLoad(); }, 30000);
   setInterval(() => { if (mcOn() && X.view === "mc") loadOt(); }, 60000);
   window.mcxRestoreOia = () => { if (X.view === "oi") setView("mc"); restoreOia(); };

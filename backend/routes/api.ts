@@ -442,6 +442,14 @@ async function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>): Prom
   // see the failure instead of treating minutes-old bars as live.
   return withTimeout(run, 18_000, key);
 }
+/** Stale-while-revalidate for DISPLAY-ONLY context (sentiment, positioning, crude): a value older than `ttlMs` but younger than
+ *  `staleMs` is returned at once while one background refresh runs, so a screen never waits on a cold recompute. Never
+ *  use it for candles, quotes or trade decisions (those must fail rather than show old data — see cached()). */
+async function cachedSwr<T>(key: string, ttlMs: number, staleMs: number, fn: () => Promise<T>): Promise<T> {
+  const hit = _cache.get(key), age = hit ? Date.now() - hit.ts : Infinity;
+  if (hit && age >= ttlMs && age < staleMs) { cached(key, ttlMs, fn).catch(() => { /* keep the last value */ }); return hit.v as T; }
+  return cached(key, ttlMs, fn);
+}
 // Read-only peek at an already-warm cache entry (no fetch). Used by the Trader
 // Specific Strategies block on the oi-command hot path so it adds ZERO extra
 // Groww calls there - it reuses data other screens/polls already fetched, and
@@ -3423,23 +3431,25 @@ async function scanMindBestCase() {
 // 1h/1d signal alignment; classify each for intraday vs options with reasons.
 // NEXT-1-HOUR OUTLOOK for the F&O indices — chart-style read (EMA21/EMA50/VWAP/
 // RSI + ADX) → direction call + expected range + key levels. Cached 60s.
+/** The next-hour outlook for the F&O indices (shared by /hour-outlook and the Market Command keep-warm job). */
+async function hourOutlookBuild() {
+  const defs = DEFAULT_SYMBOLS.filter((d) => d.type === "index" && d.fno).slice(0, 4);
+  const out: any[] = [];
+  for (const def of defs) {
+    try {
+      const [c15, c60] = await Promise.all([
+        getCandlesCached(def.symbol, "15m"),
+        getCandlesCached(def.symbol, "60m"),
+      ]);
+      const o = computeHourOutlook(def.symbol, def.name, c15 as any, c60 as any);
+      if (o) out.push(o);
+    } catch (e) { console.error(`[api] skipped ${def.symbol}:`, e instanceof Error ? e.message : e); }
+  }
+  return { generatedAt: Math.floor(Date.now() / 1000), marketOpen: isTradingTimeIST(), outlook: out, disclaimer: DISCLAIMER };
+}
 router.get("/hour-outlook", async (_req: Request, res: Response) => {
   try {
-    const data = await cached("hour-outlook", 60_000, async () => {
-      const defs = DEFAULT_SYMBOLS.filter((d) => d.type === "index" && d.fno).slice(0, 4);
-      const out: any[] = [];
-      for (const def of defs) {
-        try {
-          const [c15, c60] = await Promise.all([
-            getCandlesCached(def.symbol, "15m"),
-            getCandlesCached(def.symbol, "60m"),
-          ]);
-          const o = computeHourOutlook(def.symbol, def.name, c15 as any, c60 as any);
-          if (o) out.push(o);
-        } catch (e) { console.error(`[api] skipped ${def.symbol}:`, e instanceof Error ? e.message : e); }
-      }
-      return { generatedAt: Math.floor(Date.now() / 1000), marketOpen: isTradingTimeIST(), outlook: out, disclaimer: DISCLAIMER };
-    });
+    const data = await cached("hour-outlook", 60_000, hourOutlookBuild);
     res.json(data);
   } catch (e: any) {
     res.status(502).json({ error: e?.message || "hour-outlook failed" });
@@ -8224,9 +8234,45 @@ function lmZoneFor(name: string, price: number, width: number) {
 }
 // Crude oil for Market Command: Brent (USD) card + MCX ₹ price, latest price, last 4 trading hours, next-hour history (information only).
 router.get("/crude-move", requirePermission("oiAnalysis"), async (_req: Request, res: Response) => {
-  try { res.json(await cached("crude-move", 60_000, () => CRUDE.brentCard())); }
+  try { res.json(await cachedSwr("crude-move", 60_000, 15 * 60_000, () => CRUDE.brentCard())); }
   catch (e: any) { res.json({ available: false, reason: e?.message || "crude data unavailable" }); }
 });
+// ---- KEEP-WARM: Market Command + Option Terminal data for NIFTY and SENSEX ----
+// The first person to open Market Command after a restart (or after the caches expired) used to wait 4–8 s for sentiment,
+// positioning, premium-center and the option terminal's premium candles. This job computes them in the background with the
+// SAME cached() keys the screens use, so a screen request is a cache hit. While a screen is open its own polls already keep
+// these keys fresh, so the job then costs nothing extra (cached() de-duplicates). Trading time: every 50 s; otherwise every
+// 10 min (nothing changes, it only keeps the display-only values young). MC_KEEP_WARM=off disables it.
+let _mcWarmBusy = false, _mcWarmAt = 0;
+async function mcKeepWarm(): Promise<void> {
+  if (_mcWarmBusy || process.env.MC_KEEP_WARM === "off" || getProvider().name !== "dhan") return;
+  const ist = new Date(Date.now() + 19800000), m = ist.getUTCHours() * 60 + ist.getUTCMinutes(), wk = ist.getUTCDay() > 0 && ist.getUTCDay() < 6;
+  const busyTime = isTradingTimeIST() || (wk && m >= 540 && m < 555);       // trading hours + the 09:00–09:15 pre-open
+  if (!busyTime && Date.now() - _mcWarmAt < 10 * 60_000) return;
+  _mcWarmBusy = true; _mcWarmAt = Date.now();
+  try {
+    await cachedSwr("sentiment-brief", 60_000, 15 * 60_000, () => buildSentimentBrief()).catch(() => null);
+    await cachedSwr("crude-move", 60_000, 15 * 60_000, () => CRUDE.brentCard()).catch(() => null);
+    await cached("hour-outlook", 60_000, hourOutlookBuild).catch(() => null);
+    for (const sym of ["^NSEI", "^BSESN"]) {
+      await cachedSwr(`positioning:${sym}`, 60_000, 15 * 60_000, () => positioningFor(sym)).catch(() => null);
+      const pc: any = await premiumCenterPayload({ symbol: sym, interval: "15m", _screen: true }).catch(() => null);
+      // the option terminal's default view: ATM CE / PE of the nearest expiry, 5-min premium candles
+      const def = findSymbolDef(sym), spot = pc?.spot?.price, step = pc?.step || (sym === "^BSESN" ? 100 : 50), expiry = pc?.expiry;
+      if (!def?.nseSymbol || !spot || !expiry) continue;
+      const und = def.nseSymbol.toUpperCase(), atm = Math.round(spot / step) * step, now = Math.floor(Date.now() / 1000);
+      for (const type of ["CE", "PE"] as const) {
+        const o = await lookupDhanOption(und, type, atm, expiry).catch(() => null);
+        if (o) await optionChartCandles(o.securityId, o.exchangeSegment, 5, now - 5 * 86400, now).catch(() => null);
+      }
+    }
+  } finally { _mcWarmBusy = false; }
+}
+const _mcWarmTimer = setInterval(() => { mcKeepWarm().catch(() => {}); }, 50_000);
+if (typeof (_mcWarmTimer as any).unref === "function") (_mcWarmTimer as any).unref();
+const _mcWarmBoot = setTimeout(() => { mcKeepWarm().catch(() => {}); }, 20_000);   // after boot, once Dhan is validated
+if (typeof (_mcWarmBoot as any).unref === "function") (_mcWarmBoot as any).unref();
+
 router.get("/level-memory", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
   try {
     const sym = String(req.query.symbol || "^NSEI"), meta = LM_IDX[sym]; if (!meta) return res.json({ ok: false, error: "NIFTY / SENSEX only" });
@@ -8270,7 +8316,7 @@ async function positioningFor(sym: string) {
     perIndexFii: und === "SENSEX" ? null : flows.find((f: any) => f.index === und) ? { asOf: fsDays[fsDays.length - 1]?.date ?? null, ...flows.find((f: any) => f.index === und) } : null };
 }
 router.get("/positioning", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
-  try { const sym = String(req.query.symbol || "^NSEI"); res.json(await cached(`positioning:${sym}`, 60_000, () => positioningFor(sym))); } catch (e: any) { res.json({ ok: false, error: e?.message || "positioning failed" }); }
+  try { const sym = String(req.query.symbol || "^NSEI"); res.json(await cachedSwr(`positioning:${sym}`, 60_000, 15 * 60_000, () => positioningFor(sym))); } catch (e: any) { res.json({ ok: false, error: e?.message || "positioning failed" }); }
 });
 // ===================== 🎖 ProTrader NEXT-DAY MAP: opening odds, first 5 min, 09:30 stand, rejection / bounce (informational) =====================
 const NDM_DIR = path.join(process.cwd(), "data", "research-nextday");
@@ -8384,7 +8430,12 @@ router.get("/zero-hero-live", requirePermission("oiAnalysis"), async (req: Reque
 /** Option premium candles for a chart: `interval` minutes, or "D" = Dhan 60-min candles of the last 60 days grouped
  *  into IST trading days (real data; a contract only has the days it has existed). */
 async function optionChartCandles(secId: string, seg: string, interval: number | "D", start: number, now: number) {
-  if (interval !== "D") return dhanOptionCandles(secId, start, now, interval, seg);
+  // 20-s shared cache: the option terminal's CE / PE charts and /option-structure ask for the same series at the same time;
+  // without it every screen open queued 3–6 identical Dhan chart calls (4–5 s on a cold or busy Dhan queue).
+  if (interval !== "D") {
+    const all = await cached(`optc:${secId}:${seg}:${interval}`, 20_000, () => { const t = Math.floor(Date.now() / 1000); return dhanOptionCandles(secId, t - 5 * 24 * 3600, t, interval, seg); });
+    return all.filter((c) => c.time >= start && c.time <= now);
+  }
   const h = await dhanOptionCandles(secId, now - 60 * 86400, now, 60, seg), days = new Map<number, any>();
   for (const c of h) {
     const m = Math.floor(((c.time + 19800) % 86400) / 60); if (m < 555 || m >= 930) continue;
@@ -10719,7 +10770,7 @@ router.get("/oi-walls", requirePermission("oiAnalysis"), async (req: Request, re
   } catch (e: any) { res.status(500).json({ available: false, error: e?.message || "wall builder failed" }); }
 });
 router.get("/market-sentiment-brief", requirePermission("oiAnalysis"), async (_req: Request, res: Response) => {
-  try { res.json(await cached("sentiment-brief", 60_000, () => buildSentimentBrief())); }
+  try { res.json(await cachedSwr("sentiment-brief", 60_000, 15 * 60_000, () => buildSentimentBrief())); }
   catch (e: any) { res.json({ error: e?.message || "sentiment brief failed" }); }
 });
 router.get("/premarket/timeline", async (_req: Request, res: Response) => {
