@@ -32,6 +32,7 @@
     if (due("desk", 60_000)) jobs.push(get("/api/index-desk").then((d) => { if (d && d.rows) { X.desk = d; X.deskAt = now; } }));
     if (due("hour", 120_000)) jobs.push(get("/api/hour-outlook").then((d) => { if (d && d.outlook) { X.hour = d; X.hourAt = now; } }));
     if (due("pos" + sym, 300_000)) jobs.push(get(`/api/positioning?symbol=${enc}`).then((d) => { if (d && d.ok) { X.pos[sym] = d; X["pos" + sym + "At"] = now; } }));
+    if (due("crude", 60_000)) jobs.push(get("/api/crude-move", 40000).then((d) => { if (d && d.available) { X.crude = d; X.crudeAt = now; } }));
     if (due("sent", 300_000)) jobs.push(get("/api/market-sentiment-brief").then((d) => { if (d && d.india) { X.sent = d; X.sentAt = now; } }));
     if (MC.tf !== "5m" && due("c5" + sym, 60_000)) jobs.push(get(`/api/candles/${enc}?interval=5m`).then((d) => { if (d && Array.isArray(d.candles) && d.candles.length) { X.c5[sym] = d.candles; X["c5" + sym + "At"] = now; } }));   // 5m reaction on the ladder
     if (due("walls" + sym, 60_000)) jobs.push(get(`/api/oi-walls?symbol=${enc}`).then((d) => { if (d && d.available) { X.walls[sym] = d; X["walls" + sym + "At"] = now; } }));
@@ -58,6 +59,34 @@
       cell("Sector lean", sent?.india?.lean || "—", idx.filter((x) => x.label !== "NIFTY").slice(0, 2).map((x) => `${x.label} ${chg(x.changePct)}`).join(" · "), /BEAR/.test(sent?.india?.lean || "") ? "mcx-dn" : /BULL/.test(sent?.india?.lean || "") ? "mcx-up" : ""),
       cell("Global cues", us.length ? (us.reduce((a, x) => a + (x.changePct || 0), 0) >= 0 ? "POSITIVE" : "NEGATIVE") : "—", us.slice(0, 2).map((x) => `${x.label} ${chg(x.changePct)}`).join(" · "), us.length ? (us.reduce((a, x) => a + (x.changePct || 0), 0) >= 0 ? "mcx-up" : "mcx-dn") : ""),
     ].join(""));
+  }
+
+  // ------------------------------------------------------------ crude oil card: Brent (USD) + MCX ₹, last 4 h, next-hour history (information only)
+  function renderCrude() {
+    const c = X.crude, host = $("mcx-crude"); if (!host) return;
+    if (!c || !c.price) { set(host, ""); return; }
+    const m = c.last4h, t = c.trend, nh = c.nextHour, d2 = (x) => (x == null ? "—" : Number(x).toFixed(2)), sp = (x) => (x == null ? "—" : `${x >= 0 ? "+" : "−"}${Math.abs(x).toFixed(2)}`);
+    const pc = (x) => (x == null ? "—" : `${x >= 0 ? "+" : "−"}${Math.abs(x).toFixed(1)}%`), cls = (x) => (x == null ? "" : x >= 0 ? "mcx-up" : "mcx-dn");
+    // 1-month sparkline (daily closes)
+    const pts = c.spark || [], W = 300, H = 56; let path = "", area = "";
+    if (pts.length > 1) { const lo = Math.min(...pts.map((p) => p[1])), hi = Math.max(...pts.map((p) => p[1])), t0 = pts[0][0], t1 = pts[pts.length - 1][0];
+      const xy = pts.map((p) => [((p[0] - t0) / (t1 - t0 || 1)) * W, H - 4 - ((p[1] - lo) / (hi - lo || 1)) * (H - 8)]);
+      path = xy.map((q, i) => `${i ? "L" : "M"}${q[0].toFixed(1)},${q[1].toFixed(1)}`).join(""); area = `${path}L${W},${H}L0,${H}Z`; }
+    const dm = (ts) => new Date((ts + IST) * 1000).toLocaleDateString("en-IN", { day: "2-digit", month: "short", timeZone: "UTC" });
+    const ticks = pts.length > 1 ? [0, Math.floor(pts.length / 2), pts.length - 1].map((k) => `<span>${dm(pts[k][0])}</span>`).join("") : "";
+    const hours = m ? m.hourly.map((h) => `<span class="${cls(h.change)}" title="hour ending ${hm(h.end)}">${hm(h.end)} ${sp(h.change)}</span>`).join("") : "";
+    set(host, `<div class="mcx-crude-card" aria-label="Brent crude oil">
+      <div class="mcx-crude-hd"><span class="mcx-crude-t">BRENT CRUDE OIL</span><span class="mcx-crude-u">per barrel · USD${c.live ? " · live" : ` · last ${hm(c.priceTs)}`}</span></div>
+      <div class="mcx-crude-px"><span class="cur">$</span>${d2(c.price)}</div>
+      <div class="mcx-crude-chg"><span>${sp(c.change)}</span><span class="chip ${cls(c.changePct)}">${c.changePct >= 0 ? "▲" : "▼"} ${pc(c.changePct).replace("%", "")}%</span>${c.mcx ? `<span class="mcx" title="${esc(c.mcx.contract)}">MCX ₹${f0(c.mcx.price)}</span>` : ""}</div>
+      ${path ? `<svg class="mcx-crude-sp" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true"><path d="${area}" fill="rgba(229,192,106,.10)"/><path d="${path}" fill="none" stroke="#e5c06a" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg><div class="mcx-crude-ticks">${ticks}</div>` : ""}
+      <div class="mcx-crude-st"><div><span>52W HIGH</span><b>$${d2(c.high52)}</b></div><div><span>52W LOW</span><b>$${d2(c.low52)}</b></div><div><span>YTD</span><b class="${cls(c.ytdPct)}">${pc(c.ytdPct)}</b></div><div><span>1M</span><b class="${cls(c.m1Pct)}">${pc(c.m1Pct)}</b></div></div>
+      ${m ? `<div class="mcx-crude-4h"><div class="mcx-row"><span class="lbl">Last 4 trading hours</span><b class="${cls(m.change)}">${sp(m.change)} (${pc(m.changePct)})</b><span class="tr ${t.state === "UP" ? "mcx-up" : t.state === "DOWN" ? "mcx-dn" : ""}" title="5-min EMA9 ${d2(t.ema9)} · EMA21 ${d2(t.ema21)}">${esc(t.state)}</span></div>
+        <div class="hrs">${hours}</div><div class="rng">${hm(m.from)}–${hm(m.to)} IST · high $${d2(m.high)} · low $${d2(m.low)}</div></div>` : ""}
+      <div class="mcx-crude-nh" title="${esc(nh ? `When the ${nh.condition}, the next hour closed higher ${nh.upPct}% / lower ${nh.downPct}% of ${nh.n} hours over ${nh.days} days (avg ${sp(nh.avgMove)} $). All hours: higher ${nh.baseUpPct}% of ${nh.baseN}.` : "")}">${nh
+        ? `<span class="lbl">Next hour (history)</span><span class="mcx-up">▲ ${nh.upPct}%</span><span class="mcx-dn">▼ ${nh.downPct}%</span><span class="base">all hours ▲ ${nh.baseUpPct}% · n ${nh.n}</span>`
+        : `<span class="lbl">Next hour</span><span class="base">too few similar hours — no estimate</span>`}</div>
+      <p class="mcx-crude-ft">History of similar 4-hour moves, not a forecast · ${esc(c.source || "")}</p></div>`);
   }
 
   // ------------------------------------------------------------ decision row: live signal · bias · trade plan
@@ -339,6 +368,7 @@
     try { renderTape(d); } catch (e) { console.warn("[mcx] tape", e); }
     try { renderDecision(d); } catch (e) { console.warn("[mcx] decision", e); }
     try { renderLevels(d); } catch (e) { console.warn("[mcx] levels", e); }
+    try { renderCrude(); } catch (e) { console.warn("[mcx] crude", e); }
     try { otShell(); } catch (e) { console.warn("[mcx] option terminal", e); }
     try { fitFrame(); } catch (e) { console.warn("[mcx] frame", e); }
   }

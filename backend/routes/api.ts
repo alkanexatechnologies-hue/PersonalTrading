@@ -84,6 +84,7 @@ import * as PCALC from "../premium/premiumCalc";
 import * as RR from "../sentiment/resultsReview";
 import * as LM from "../premium/levelMemory";
 import * as OWN from "../premium/ownerLevels";
+import * as CRUDE from "../sentiment/crudeMove";
 import * as NDM from "../premium/nextDayMap";
 import * as PBNC from "../premium/premiumBounce";
 import * as POS from "../sentiment/positioning";
@@ -321,7 +322,7 @@ if (AUDIT_ENABLED) {
 // live even while scanners churn. Everything else stays LOW (the default).
 // The Option Premium Prediction Center (and its zero-hero / Market Eye / calculator / level-memory sections) is a focus
 // screen too: at LOW priority its quote + option-chain calls queued behind the background scans in market hours.
-const HIGH_PRIORITY_API = /^\/(market-command|market-analysis|option-candles|option-structure|mc-summary|premium-center|premium-calc|zero-hero-live|market-eye|level-memory|next-day-map|positioning|triple-potential)\b/;
+const HIGH_PRIORITY_API = /^\/(market-command|crude-move|market-analysis|option-candles|option-structure|mc-summary|premium-center|premium-calc|zero-hero-live|market-eye|level-memory|next-day-map|positioning|triple-potential)\b/;
 router.use((req: Request, _res: Response, next: NextFunction) => {
   if (HIGH_PRIORITY_API.test(req.path)) withDhanPriority("high", async () => next());
   else next();
@@ -8221,6 +8222,11 @@ function lmZoneFor(name: string, price: number, width: number) {
   const ev = lmHistory(name), days = [...new Set(ev.map((e) => e.day))].sort(), last = new Set(days.slice(-60));
   return LM.zones(ev.filter((e) => last.has(e.day) && Math.abs(e.price - price) <= width), width)[0] ?? null;
 }
+// Crude oil for Market Command: Brent (USD) card + MCX ₹ price, latest price, last 4 trading hours, next-hour history (information only).
+router.get("/crude-move", requirePermission("oiAnalysis"), async (_req: Request, res: Response) => {
+  try { res.json(await cached("crude-move", 60_000, () => CRUDE.brentCard())); }
+  catch (e: any) { res.json({ available: false, reason: e?.message || "crude data unavailable" }); }
+});
 router.get("/level-memory", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
   try {
     const sym = String(req.query.symbol || "^NSEI"), meta = LM_IDX[sym]; if (!meta) return res.json({ ok: false, error: "NIFTY / SENSEX only" });
