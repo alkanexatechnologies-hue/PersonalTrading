@@ -85,6 +85,7 @@ import * as RR from "../sentiment/resultsReview";
 import * as LM from "../premium/levelMemory";
 import * as OWN from "../premium/ownerLevels";
 import * as CRUDE from "../sentiment/crudeMove";
+import goldRouter from "./gold";
 import * as C4F from "../premium/c4Feed";
 import * as NDM from "../premium/nextDayMap";
 import * as PBNC from "../premium/premiumBounce";
@@ -364,6 +365,10 @@ router.use((req: Request, res: Response, next: NextFunction) => {
   countRequest(screen || "other:" + (req.path.split("/")[1] || ""), false);
   next();
 });
+
+// ---- Gold Desk (MCX GOLDM / GOLD): its own router, mounted after the auth + Data Control gates. Isolated from the
+// Indian market screens (low Dhan priority, own throttle + circuit breaker + cache — backend/gold/goldFeed.ts).
+router.use("/gold", requirePermission("oiAnalysis"), goldRouter);
 router.get("/data-control", (_req: Request, res: Response) => { res.json(dataControlStatus()); });
 router.post("/data-control", requireAdmin, (req: Request, res: Response) => {
   const b = req.body || {};

@@ -756,7 +756,7 @@ function startLiveTicker() {
     // Paused on the Market Command full-screen: the watchlist/index-strip it feeds
     // are hidden there, so this would be a DUPLICATE Dhan quotes poll. Market
     // Command runs its own minimal command + index-card polls instead.
-    if (document.body.classList.contains("mc-fullwidth")) return;
+    if (document.body.classList.contains("mc-fullwidth") || document.body.classList.contains("gc-fullwidth")) return;   // Gold Command shows no NSE quotes
     if (!isMarketOpen() || liveTickBusy) return; // static when closed; skip if a fetch is still running
     const wl = (state.symbols || []).map((s) => s.symbol);
     const syms = [...new Set([...wl, ...(state.oppSymbols || [])])];
@@ -1014,7 +1014,7 @@ async function loadWatchlistScan() {
 // Full-screen trading views hide the watchlist sidebar. Its 60s refresh fires ~20
 // slow per-stock /api/signal calls that occupy all 6 browser connections for
 // 20–30s, so those screens' own live refreshes time out and keep showing old data.
-const TRADING_FULLSCREEN = ["mc-fullwidth", "ot-fullwidth", "te-fullwidth", "oia-fullwidth", "mcs-fullwidth", "ma-fullwidth", "lqa-fullwidth", "pm-fullwidth"];
+const TRADING_FULLSCREEN = ["mc-fullwidth", "ot-fullwidth", "te-fullwidth", "oia-fullwidth", "mcs-fullwidth", "ma-fullwidth", "lqa-fullwidth", "pm-fullwidth", "gc-fullwidth"];
 // First-load watchlist work waits while a full-screen screen (watchlist hidden) is open, so it
 // doesn't compete with that screen's first load for Dhan and browser connections.
 function whenWatchlistVisible(fn) { if (onTradingFullscreen()) setTimeout(() => whenWatchlistVisible(fn), 10000); else fn(); }
@@ -1925,6 +1925,8 @@ function switchTab(name) {
   // Market Command takes the full width: hide the watchlist sidebar so the
   // right column (Intraday Assistance / Option Chain / Market View) gets more space.
   document.body.classList.toggle("mc-fullwidth", name === "marketcommand");
+  // Gold Command (Gold Desk) is full-screen too: no NSE watchlist / strips, and their Indian-data polls pause while it is open.
+  document.body.classList.toggle("gc-fullwidth", name === "goldcommand");
   if (name === "marketcommand") {
     initMarketCommand(); startMarketCommandLive(); startIndexNewsLive();
     if (MC.chart) setTimeout(() => { const c = el("mc-chart-container"); if (c) MC.chart.applyOptions({ width: c.clientWidth }); try { mcFitPanes(); } catch {} }, 60);
@@ -2001,6 +2003,10 @@ function switchTab(name) {
 // Per-desk mobile bottom-nav layouts (4 quick tabs + Watchlist + More is too many;
 // we use 3 mode tabs + Watchlist + More so the watchlist stays reachable on phones).
 const MODE_NAV = {
+  gold: [
+    { nav: "goldcommand", ico: "🪙", lbl: "Gold" },
+    { nav: "more", ico: "☰", lbl: "More" },
+  ],
   marketcommand: [
     { nav: "marketcommand", ico: "⚡", lbl: "Command" },
     { nav: "watchlist", ico: "📋", lbl: "List" },
@@ -2081,8 +2087,8 @@ function setupMobileNav() {
 
 // ---------- desk mode (Option Trading vs Stock Swing Trading) ----------
 const MODE_KEY = "nsa_mode";
-const VALID_MODES = ["premarket", "marketcommand", "option", "stockOption", "swing", "dhanbacktest", "aipaper"];
-const MODE_FIRST = { premarket: "premarket", marketcommand: "marketcommand", option: "oicommand", stockOption: "toppicks", swing: "news", dhanbacktest: "dhanbacktest", aipaper: "aipdash" };
+const VALID_MODES = ["premarket", "marketcommand", "option", "stockOption", "swing", "dhanbacktest", "aipaper", "gold"];
+const MODE_FIRST = { premarket: "premarket", marketcommand: "marketcommand", option: "oicommand", stockOption: "toppicks", swing: "news", dhanbacktest: "dhanbacktest", aipaper: "aipdash", gold: "goldcommand" };
 const MODE_TABS = {
   // Market Sentiment desk: opens on the read-only sentiment screen, with the
   // Market Command / Option Terminal / Trade Execution siblings reachable from it.
@@ -2100,6 +2106,8 @@ const MODE_TABS = {
   // screen (reuses #panel-paper). Each tab is additionally permission-gated per
   // screen via SCREEN_PERMISSION_MAP + applyMode (server-enforced too).
   aipaper: ["aipdash", "aipanalysis", "aipsignals", "paper", "aipreview", "aipperf", "aipvalid"],
+  // Gold Desk: MCX gold only (gold.js, /api/gold/*) — kept apart from the Indian market screens.
+  gold: ["goldcommand"],
 };
 
 // Per-screen permission gate for AI Paper Desk tabs. A non-admin user only sees
@@ -16621,7 +16629,7 @@ const DC_ROUTE_OWNER = {
   "market-sentiment-brief": "marketcommand", "oi-command": "oicommand", "top-picks": "toppicks", "option-top-pick": "toppicks",
   "liquidity-status": "liquiditystatus", "oi-analysis": "oianalysis", "oi-chain": "oianalysis", "premarket": "premarket",
   "today-movers": "todaymovers", "bull-rank": "bullrank", "big-move": "bigmove", "testlab": "testlab", "move-timing": "movetiming",
-  "backtest-dhan": "dhanbacktest", "liquidity-analysis": "liquidityanalysis", "setup-signals": "mcsummary", "premium-center": "premiumcenter", "zero-hero-live": "premiumcenter", "market-eye": "premiumcenter", "btsd": "premiumcenter", "setup-test-log": "mcsummary", "strategy-replay": "stratreplay", "qa": "strategylab", "ai-paper": "aip",
+  "gold": "goldcommand", "backtest-dhan": "dhanbacktest", "liquidity-analysis": "liquidityanalysis", "setup-signals": "mcsummary", "premium-center": "premiumcenter", "zero-hero-live": "premiumcenter", "market-eye": "premiumcenter", "btsd": "premiumcenter", "setup-test-log": "mcsummary", "strategy-replay": "stratreplay", "qa": "strategylab", "ai-paper": "aip",
 };
 function dcActiveTab() {
   const t = document.querySelector("#tabs .tab.active");

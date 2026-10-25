@@ -7,7 +7,7 @@
          under the home indicator. Android ignores it harmlessly. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>BC Data Status</title>
-    <link rel="stylesheet" href="styles.css?v=20261025-pl1" />
+    <link rel="stylesheet" href="styles.css?v=20261025-g2" />
     <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   </head>
   <body class="oi-focus">
@@ -191,6 +191,12 @@
             <span class="mg-t">AI Paper Desk</span>
             <span class="mg-d">Dashboard · AI Market Analysis · AI Signals &amp; Insights · AI Paper Trading · Trade Review · Performance · Validation &amp; Learning — reads the engines, never overrides them</span>
             <button type="button" class="mg-cta">Open AI Paper Desk →</button>
+          </article>
+          <article class="mg-btn mg-gold" data-mode="gold" role="button" tabindex="0">
+            <span class="mg-ico">🪙</span>
+            <span class="mg-t">Gold Desk</span>
+            <span class="mg-d">MCX Gold Command: GOLDM / GOLD futures chart + levels · option premium (CE / PE) · trade ticket · IST timings · COMEX — runs separately from the Indian market screens</span>
+            <button type="button" class="mg-cta">Open Gold Desk →</button>
           </article>
         </div>
         <button type="button" id="mg-close" class="mg-close hidden">✕ Close</button>
@@ -491,6 +497,7 @@
           <button class="tab" data-tab="testlab" data-group="dhanbacktest">🧪 Universal Indicator Lab</button>
           <button class="tab tab-primary" data-tab="premarket" data-group="marketcommand">📊 Market Sentiment</button>
           <button class="tab tab-primary" data-tab="marketcommand" data-group="marketcommand">⚡ Market Command</button>
+          <button class="tab tab-primary" data-tab="goldcommand" data-group="gold">🪙 Gold Command</button>
           <button class="tab tab-primary" data-tab="marketanalysis" data-group="marketcommand">📊 Market Analysis</button>
           <button class="tab tab-primary" data-tab="optionterminal" data-group="marketcommand">📈 Option Terminal</button>
           <button class="tab tab-primary" data-tab="premiumcenter" data-group="marketcommand">🎯 Premium Prediction</button>
@@ -2443,6 +2450,33 @@
         </div><!-- /panel-movetiming -->
 
         <!-- ================= TAB: Backtest (Dhan historical data) ================= -->
+        <!-- ===== GOLD COMMAND (gold.js): MCX GOLDM / GOLD — same layout as Market Command, isolated data (/api/gold/*) ===== -->
+        <div class="tab-panel" id="panel-goldcommand">
+          <div class="gc-wrap">
+            <div class="gc-head" id="gc-head"></div>
+            <div class="gc-dec" id="gc-dec"></div>
+            <div class="gc-main">
+              <section class="gc-chartcol" aria-label="Gold futures chart">
+                <div class="gc-chart-hd" id="gc-chart-hd"></div>
+                <div id="gc-timeline"></div>
+                <div class="gc-chart" id="gc-chart"></div>
+              </section>
+              <section class="gc-ot" aria-label="Gold option premium">
+                <div id="gc-ot-hd"></div>
+                <div class="gc-otc" id="gc-ce-box"><div class="gc-oth" id="gc-ce-hd"></div><div class="gc-och" id="gc-ce"></div></div>
+                <div class="gc-otc" id="gc-pe-box"><div class="gc-oth" id="gc-pe-hd"></div><div class="gc-och" id="gc-pe"></div></div>
+              </section>
+              <aside class="gc-right" aria-label="Gold trade ticket and levels">
+                <section class="gc-ticket" id="gc-ticket" aria-label="Option trade ticket"></section>
+                <section class="gc-card mcx-levels" id="gc-levels" aria-label="Key levels"></section>
+                <section class="gc-card" id="gc-times" aria-label="Trade timings IST"></section>
+                <section class="gc-comex" id="gc-comex" aria-label="COMEX gold"></section>
+              </aside>
+            </div>
+            <p class="mcx-note gc-foot">MCX data from Dhan (low priority, own throttle — never slows the Indian market screens) · COMEX and USD/INR from the global-markets feed · advisory only, no orders are placed.</p>
+          </div>
+        </div>
+
         <div class="tab-panel" id="panel-dhanbacktest">
           <div class="card">
             <div class="card-head">
@@ -2599,12 +2633,13 @@
         <div id="dc-body" class="dc-body">Loading…</div>
       </div>
     </div>
-    <script src="app.js?v=20261025-pl1"></script>
+    <script src="app.js?v=20261025-g2"></script>
     <script src="mcsummary.js?v=20261012-dh1"></script>
     <script src="premiumcenter.js?v=20261025-pl1"></script>
     <script src="oimonitor.js?v=20261024-mcx1"></script>
     <script src="liquidity.js?v=20261007-lqa7"></script>
     <script src="levelReaction.js?v=20261025-lr1"></script>
     <script src="mcx.js?v=20261025-pl1"></script>
+    <script src="gold.js?v=20261025-g2"></script>
   </body>
 </html>

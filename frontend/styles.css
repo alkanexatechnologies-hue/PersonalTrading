@@ -8138,3 +8138,88 @@ body.mc-fullwidth #panel-marketcommand .mc2-right { width: 300px; }
 #panel-marketcommand .mc2-main > .mcx-ot { flex-basis: clamp(300px, 24vw, 430px); }
 body.mc-fullwidth #panel-marketcommand .mc2-right { width: 260px; }
 @media (max-width: 1200px) { body.mc-fullwidth #panel-marketcommand .mc2-right { width: 240px; } #panel-marketcommand .mc2-main > .mcx-ot { flex-basis: 290px; } }
+
+/* ================= GOLD DESK — Gold Command (gold.js) · same look as Market Command, own layout ================= */
+.mg-gold { border-color: rgba(229,192,106,0.35); }
+.mg-gold:hover { border-color: #e5c06a; }
+.mg-gold .mg-t { color: #e9c46a; }
+.mg-gold .mg-cta { border-color: rgba(229,192,106,0.5); color: #e9c46a; }
+#panel-goldcommand { background: #0b0e14; color: #d1d4dc; }
+.gc-wrap { display: flex; flex-direction: column; gap: 8px; padding: 8px; max-width: 1920px; margin: 0 auto; }
+.gc-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.gc-title { display: flex; align-items: center; gap: 8px; }
+.gc-title b { display: block; font-size: 17px; color: #fff; } .gc-title small { display: block; font-size: 11px; color: #9aa3b0; }
+.gc-ico { font-size: 22px; }
+.gc-head .mcx-seg button { min-height: 34px; padding: 1px 12px; font-size: 13px; }
+.gc-btn { min-height: 36px; padding: 0 14px; border-radius: 6px; border: 1px solid #3b82f6; background: #1d4ed8; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; }
+.gc-clock { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; padding: 4px 10px; border-radius: 6px; border: 1px solid #2a3346; background: #0e1320; color: #9aa3b0; font-size: 12px; }
+.gc-clock b { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 15px; color: #fff; }
+.gc-clock.on { border-color: #136e5c; background: #0c2420; color: #4ade80; }
+.gc-dec { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr); gap: 8px; }
+.gc-p { margin: 0; font-size: 12.5px; line-height: 1.45; }
+.gc-chip { padding: 1px 6px; border: 1px solid #2a3346; border-radius: 4px; font-size: 12px; }
+.gc-err { color: #ff9aa0; }
+.gc-main { display: grid; grid-template-columns: minmax(0, 1fr) 360px 300px; gap: 8px; align-items: start; }
+.gc-chartcol, .gc-ot { background: #11151c; border: 1px solid #1e2530; border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.gc-chart-hd { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.gc-sym { font-size: 16px; color: #fff; } .gc-px { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 20px; color: #e9c46a; }
+.gc-chart { height: 460px; min-height: 260px; }
+.gc-tl { position: relative; display: flex; height: 20px; border-radius: 4px; overflow: hidden; background: #0b0e14; }
+.gc-tl > div { color: #e6e9ef; font-size: 10px; font-weight: 700; line-height: 20px; text-align: center; white-space: nowrap; overflow: hidden; border-right: 1px solid #0b0e14; }
+.gc-tl > i { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 4px #fff; }
+.gz-good { background: #1f5136; } .gz-mute { background: #1a2029; } .gz-blue { background: #1e3a5f; } .gz-bad { background: #5a1f24; }
+.gc-tlx { position: relative; height: 14px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: #8a93a6; }
+.gc-tlx span { position: absolute; transform: translateX(-50%); } .gc-tlx span:first-child { transform: none; } .gc-tlx span:last-child { transform: translateX(-100%); }
+.gc-otbar { justify-content: space-between; }
+.gc-step { display: flex; align-items: center; gap: 4px; }
+.gc-step button { width: 32px; height: 32px; border-radius: 5px; border: 1px solid #2a3346; background: #0e1320; color: #fff; font-size: 16px; cursor: pointer; }
+.gc-step button:disabled { opacity: .35; cursor: default; }
+.gc-step b { min-width: 70px; text-align: center; font-family: 'JetBrains Mono', ui-monospace, monospace; }
+.gc-warn { margin: 0; padding: 6px 8px; border-radius: 6px; border: 1px solid #7a2a31; background: #2a1215; color: #ffc2c6; font-size: 12px; }
+.gc-otc { border: 1px solid #1e2530; border-radius: 6px; overflow: hidden; }
+.gc-oth { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; padding: 4px 6px; font-size: 12px; }
+.gc-och { height: 210px; }
+.gc-right { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.gc-ticket { border: 1px solid #5a4313; border-radius: 8px; padding: 8px 10px; background: #15120a; display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
+.gc-gold { color: #e5c06a !important; }
+.gc-expb { margin-left: auto; font-size: 11px; font-weight: 800; padding: 1px 6px; border-radius: 3px; color: #f5c542; border: 1px solid #8a6a1a; }
+.gc-expb.near { color: #ff9aa0; border-color: #7a2a31; }
+.gc-tk-in { display: flex; align-items: center; gap: 8px; } .gc-tk-in label { color: #9aa3b0; white-space: nowrap; }
+.gc-tk-in input { flex: 1; min-width: 0; height: 38px; box-sizing: border-box; border-radius: 5px; border: 1px solid #2a3346; background: #0b0e14; color: #fff; padding: 0 8px; font-size: 16px; font-family: 'JetBrains Mono', ui-monospace, monospace; }
+.gc-lots { display: flex; gap: 4px; }
+.gc-lots button { flex: 1; min-height: 36px; border-radius: 5px; border: 1px solid #2a3346; background: #0b0e14; color: #c9d0da; font-size: 14px; font-weight: 700; cursor: pointer; }
+.gc-lots button.on { border-color: #8a6a1a; background: #2a210a; color: #e5c06a; }
+.gc-tk-g { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; font-variant-numeric: tabular-nums; }
+.gc-tk-g div { display: flex; flex-direction: column; } .gc-tk-g span { color: #9aa3b0; } .gc-tk-g b { font-size: 15px; color: #fff; }
+.gc-card { background: #11151c; border: 1px solid #1e2530; border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+.gc-tw { display: flex; gap: 6px; align-items: baseline; font-size: 12px; }
+.gc-tw b { width: 96px; flex: none; font-family: 'JetBrains Mono', ui-monospace, monospace; color: #fff; } .gc-tw span { flex: 1; min-width: 0; }
+.gc-tw em { font-style: normal; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 3px; border: 1px solid; }
+.gc-tw em.ok { color: #4ade80; border-color: #136e5c; } .gc-tw em.warn { color: #f5c542; border-color: #8a6a1a; } .gc-tw em.bad { color: #ff9aa0; border-color: #7a2a31; } .gc-tw em.mu { color: #9aa3b0; border-color: #2a3346; }
+.gc-comex:empty { display: none; }
+.gc-comex { border: 1px solid #3a3220; border-radius: 10px; padding: 10px 12px; background: linear-gradient(160deg, #1a160e 0%, #0e0d0a 70%); display: flex; flex-direction: column; gap: 4px; }
+.gc-cx-t { font-size: 12px; letter-spacing: .22em; color: #e5c06a; font-weight: 600; } .gc-cx-u { font-size: 12px; color: #8f8670; }
+.gc-cx-p { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 28px; color: #e9c46a; }
+.gc-cx-g { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; font-size: 12px; } .gc-cx-g div { display: flex; flex-direction: column; } .gc-cx-g span { color: #8f8670; } .gc-cx-g b { color: #ece6d6; }
+.gc-foot { padding: 0 2px 8px; }
+/* full-screen like Market Command: no NSE watchlist, index strip, news / opportunity bars or tab bar */
+body.gc-fullwidth .watchlist, body.gc-fullwidth #cockpit-strip, body.gc-fullwidth #opp-bar, body.gc-fullwidth #index-strip,
+body.gc-fullwidth #tabs, body.gc-fullwidth #tab-flow-wrap { display: none !important; }
+body.gc-fullwidth .content { padding-left: 0; padding-right: 0; }
+.gc-tl > div.gz-mute:empty { min-width: 0; }
+/* tablet: chart full width, options + right side by side */
+@media (max-width: 1279px) {
+  .gc-main { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .gc-chartcol { grid-column: 1 / -1; }
+  .gc-dec { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .gc-dec .gc-c3 { grid-column: 1 / -1; }
+  .gc-chart { height: 400px; }
+}
+/* mobile: one column, the decision first, charts stacked */
+@media (max-width: 767px) {
+  .gc-wrap { padding: 6px; }
+  .gc-main, .gc-dec { grid-template-columns: minmax(0, 1fr); } .gc-dec .gc-c3 { grid-column: auto; }
+  .gc-clock { margin-left: 0; width: 100%; align-items: flex-start; box-sizing: border-box; }
+  .gc-chart { height: 320px; } .gc-och { height: 200px; }
+  .gc-head .mcx-seg { flex-wrap: wrap; }
+  .gc-tl > div { font-size: 9px; }
+}
