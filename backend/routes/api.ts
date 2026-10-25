@@ -85,7 +85,7 @@ import * as RR from "../sentiment/resultsReview";
 import * as LM from "../premium/levelMemory";
 import * as OWN from "../premium/ownerLevels";
 import * as CRUDE from "../sentiment/crudeMove";
-import goldRouter from "./gold";
+import { mcxDeskRouter } from "./mcxDesk";
 import { premiumStructure } from "../premium/premiumStructure";
 import * as C4F from "../premium/c4Feed";
 import * as NDM from "../premium/nextDayMap";
@@ -367,9 +367,11 @@ router.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-// ---- Gold Desk (MCX GOLDM / GOLD): its own router, mounted after the auth + Data Control gates. Isolated from the
-// Indian market screens (low Dhan priority, own throttle + circuit breaker + cache — backend/gold/goldFeed.ts).
-router.use("/gold", requirePermission("oiAnalysis"), goldRouter);
+// ---- MCX desks — Gold (GOLDM / GOLD) and Crude Oil (CRUDEOILM / CRUDEOIL): one router each, mounted after the auth +
+// Data Control gates. Isolated from the Indian market screens (low Dhan priority, one shared MCX throttle + circuit
+// breaker + cache — backend/mcx/mcxFeed.ts).
+router.use("/gold", requirePermission("oiAnalysis"), mcxDeskRouter("GOLD"));
+router.use("/crude", requirePermission("oiAnalysis"), mcxDeskRouter("CRUDE"));
 router.get("/data-control", (_req: Request, res: Response) => { res.json(dataControlStatus()); });
 router.post("/data-control", requireAdmin, (req: Request, res: Response) => {
   const b = req.body || {};

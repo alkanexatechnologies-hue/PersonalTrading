@@ -8144,7 +8144,11 @@ body.mc-fullwidth #panel-marketcommand .mc2-right { width: 260px; }
 .mg-gold:hover { border-color: #e5c06a; }
 .mg-gold .mg-t { color: #e9c46a; }
 .mg-gold .mg-cta { border-color: rgba(229,192,106,0.5); color: #e9c46a; }
-#panel-goldcommand { background: #0b0e14; color: #d1d4dc; }
+#panel-goldcommand, #panel-crudecommand { background: #0b0e14; color: #d1d4dc; }
+.mg-crude { border-color: rgba(96,165,250,0.35); }
+.mg-crude:hover { border-color: #60a5fa; }
+.mg-crude .mg-t { color: #93c5fd; }
+.mg-crude .mg-cta { border-color: rgba(96,165,250,0.5); color: #93c5fd; }
 .gc-wrap { display: flex; flex-direction: column; gap: 8px; padding: 8px; max-width: 1920px; margin: 0 auto; }
 .gc-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .gc-title { display: flex; align-items: center; gap: 8px; }

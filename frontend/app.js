@@ -1925,8 +1925,8 @@ function switchTab(name) {
   // Market Command takes the full width: hide the watchlist sidebar so the
   // right column (Intraday Assistance / Option Chain / Market View) gets more space.
   document.body.classList.toggle("mc-fullwidth", name === "marketcommand");
-  // Gold Command (Gold Desk) is full-screen too: no NSE watchlist / strips, and their Indian-data polls pause while it is open.
-  document.body.classList.toggle("gc-fullwidth", name === "goldcommand");
+  // The MCX desks (Gold / Crude Oil Command) are full-screen too: no NSE watchlist / strips, and their Indian-data polls pause.
+  document.body.classList.toggle("gc-fullwidth", name === "goldcommand" || name === "crudecommand");
   if (name === "marketcommand") {
     initMarketCommand(); startMarketCommandLive(); startIndexNewsLive();
     if (MC.chart) setTimeout(() => { const c = el("mc-chart-container"); if (c) MC.chart.applyOptions({ width: c.clientWidth }); try { mcFitPanes(); } catch {} }, 60);
@@ -2005,6 +2005,10 @@ function switchTab(name) {
 const MODE_NAV = {
   gold: [
     { nav: "goldcommand", ico: "🪙", lbl: "Gold" },
+    { nav: "more", ico: "☰", lbl: "More" },
+  ],
+  crude: [
+    { nav: "crudecommand", ico: "🛢️", lbl: "Crude" },
     { nav: "more", ico: "☰", lbl: "More" },
   ],
   marketcommand: [
@@ -2087,8 +2091,8 @@ function setupMobileNav() {
 
 // ---------- desk mode (Option Trading vs Stock Swing Trading) ----------
 const MODE_KEY = "nsa_mode";
-const VALID_MODES = ["premarket", "marketcommand", "option", "stockOption", "swing", "dhanbacktest", "aipaper", "gold"];
-const MODE_FIRST = { premarket: "premarket", marketcommand: "marketcommand", option: "oicommand", stockOption: "toppicks", swing: "news", dhanbacktest: "dhanbacktest", aipaper: "aipdash", gold: "goldcommand" };
+const VALID_MODES = ["premarket", "marketcommand", "option", "stockOption", "swing", "dhanbacktest", "aipaper", "gold", "crude"];
+const MODE_FIRST = { premarket: "premarket", marketcommand: "marketcommand", option: "oicommand", stockOption: "toppicks", swing: "news", dhanbacktest: "dhanbacktest", aipaper: "aipdash", gold: "goldcommand", crude: "crudecommand" };
 const MODE_TABS = {
   // Market Sentiment desk: opens on the read-only sentiment screen, with the
   // Market Command / Option Terminal / Trade Execution siblings reachable from it.
@@ -2108,6 +2112,8 @@ const MODE_TABS = {
   aipaper: ["aipdash", "aipanalysis", "aipsignals", "paper", "aipreview", "aipperf", "aipvalid"],
   // Gold Desk: MCX gold only (gold.js, /api/gold/*) — kept apart from the Indian market screens.
   gold: ["goldcommand"],
+  // Crude Oil Desk: MCX crude only (same screen as the Gold Desk, /api/crude/*).
+  crude: ["crudecommand"],
 };
 
 // Per-screen permission gate for AI Paper Desk tabs. A non-admin user only sees
@@ -16629,7 +16635,7 @@ const DC_ROUTE_OWNER = {
   "market-sentiment-brief": "marketcommand", "oi-command": "oicommand", "top-picks": "toppicks", "option-top-pick": "toppicks",
   "liquidity-status": "liquiditystatus", "oi-analysis": "oianalysis", "oi-chain": "oianalysis", "premarket": "premarket",
   "today-movers": "todaymovers", "bull-rank": "bullrank", "big-move": "bigmove", "testlab": "testlab", "move-timing": "movetiming",
-  "gold": "goldcommand", "backtest-dhan": "dhanbacktest", "liquidity-analysis": "liquidityanalysis", "setup-signals": "mcsummary", "premium-center": "premiumcenter", "zero-hero-live": "premiumcenter", "market-eye": "premiumcenter", "btsd": "premiumcenter", "setup-test-log": "mcsummary", "strategy-replay": "stratreplay", "qa": "strategylab", "ai-paper": "aip",
+  "gold": "goldcommand", "crude": "crudecommand", "backtest-dhan": "dhanbacktest", "liquidity-analysis": "liquidityanalysis", "setup-signals": "mcsummary", "premium-center": "premiumcenter", "zero-hero-live": "premiumcenter", "market-eye": "premiumcenter", "btsd": "premiumcenter", "setup-test-log": "mcsummary", "strategy-replay": "stratreplay", "qa": "strategylab", "ai-paper": "aip",
 };
 function dcActiveTab() {
   const t = document.querySelector("#tabs .tab.active");

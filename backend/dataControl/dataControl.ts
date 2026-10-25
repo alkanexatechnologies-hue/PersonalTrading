@@ -22,6 +22,7 @@ export const DC_SCREENS: DcItem[] = [
   { key: "oianalysis", label: "🔬 OI Analysis", group: "Trading" },
   { key: "oicommand", label: "🎯 Trader Dashboard", group: "Trading" },
   { key: "goldcommand", label: "🪙 Gold Command (MCX)", group: "Trading", note: "MCX GOLDM / GOLD futures + options — isolated: low Dhan priority, own throttle, never slows the Indian screens" },
+  { key: "crudecommand", label: "🛢️ Crude Oil Command (MCX)", group: "Trading", note: "MCX CRUDEOILM / CRUDEOIL futures + options — isolated like the Gold desk (shares its throttle)" },
   { key: "premarket", label: "📊 Market Sentiment (09:10)", group: "Market" },
   { key: "news", label: "📰 Market News (tab, ticker, MC index news)", group: "Market" },
   { key: "earlymoves", label: "⚡ Early Moves (tab + header alert)", group: "Market", note: "Scans every F&O stock — heavy" },
