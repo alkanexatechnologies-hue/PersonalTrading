@@ -86,6 +86,7 @@ import * as LM from "../premium/levelMemory";
 import * as OWN from "../premium/ownerLevels";
 import * as CRUDE from "../sentiment/crudeMove";
 import { mcxDeskRouter } from "./mcxDesk";
+import { syncKeyConfigured, syncKeyValid } from "../auth/syncKey";
 import { premiumStructure } from "../premium/premiumStructure";
 import * as C4F from "../premium/c4Feed";
 import * as NDM from "../premium/nextDayMap";
@@ -337,7 +338,7 @@ router.use((req: Request, _res: Response, next: NextFunction) => {
 // was reachable with zero authentication regardless of what the dashboard
 // showed. This is a single-user local gate (see auth/session.ts), not
 // multi-tenant auth.
-const PUBLIC_API_PATHS = new Set(["/login", "/session", "/logout"]);
+const PUBLIC_API_PATHS = new Set(["/login", "/session", "/logout", "/dhan/sync"]);   // /dhan/sync checks its own key (auth/syncKey.ts)
 function bearerToken(req: Request): string | undefined {
   const header = req.headers.authorization || "";
   const m = /^Bearer\s+(.+)$/i.exec(header);
@@ -6798,6 +6799,23 @@ router.post("/dhan/test", requireAdmin, async (req: Request, res: Response) => {
     res.status(502).json({ ok: false, error: e?.message || "test failed" });
   }
 });
+// Mac → Render Dhan-token hand-over with the machine sync key (auth/syncKey.ts) instead of the daily-rotating admin
+// password. Can only set + test the Dhan market-data token. 404 unless NSA_SYNC_KEY is configured on this server.
+router.post("/dhan/sync", async (req: Request, res: Response) => {
+  if (!syncKeyConfigured()) return res.status(404).json({ error: "Not found" });
+  const v = syncKeyValid(req.get("x-nsa-sync-key") || undefined);
+  if (!v.ok) { logAuditEvent({ type: "DHAN_CREDENTIAL_UPDATED", userId: "system", username: "sync-key", mode: "admin", provider: "dhan", result: "failure" }); return res.status(403).json({ ok: false, error: v.reason }); }
+  const b = req.body || {};
+  if (typeof b.accessToken !== "string" || !/^[\w-]+\.[\w-]+\.[\w-]+$/.test(b.accessToken)) return res.status(400).json({ ok: false, error: "accessToken (JWT) required" });
+  const next = saveDhanConfig({ accessToken: b.accessToken, clientId: typeof b.clientId === "string" ? b.clientId : undefined });
+  if (dhanConfigured(next)) { try { setFeedFlags({ dhan: true }); } catch { /* best-effort */ } }
+  dhanRenewState.lastError = null; dhanRenewState.retryAfter = null;
+  const t = await testDhanConnection().catch((e: any) => ({ ok: false, error: e?.message }));
+  recordConnectionTest("dhan", !!t.ok);
+  logAuditEvent({ type: "DHAN_CREDENTIAL_UPDATED", userId: "system", username: "sync-key", mode: "admin", provider: "dhan", result: t.ok ? "success" : "failure" });
+  console.log(`[dhan-sync] token received from the Mac via sync key; test ${t.ok ? "OK" : "FAILED"}`);
+  res.json({ ok: true, configured: dhanConfigured(next), tested: !!t.ok });
+});
 router.post("/dhan/disconnect", requireAdmin, (req: Request, res: Response) => {
   disconnectDhan();
   setFeedFlags({ dhan: false });
@@ -10516,7 +10534,7 @@ async function maybeRenewDhanToken(force = false): Promise<void> {
 }
 // Render address + admin login: env NSA_RENDER_URL / NSA_RENDER_USER / NSA_RENDER_PASS / NSA_RENDER_MODE,
 // else the desktop pull settings in ~/.nsa-pull.env (NSA_URL / NSA_USER / NSA_PASS / NSA_MODE).
-function renderLogin(): { url: string; user: string; pass: string; mode: string } | null {
+function renderLogin(): { url: string; user: string; pass: string; mode: string; key: string } | null {
   const env: Record<string, string> = {};
   try {
     for (const ln of fs.readFileSync(path.join(require("os").homedir(), ".nsa-pull.env"), "utf8").split("\n")) {
@@ -10524,12 +10542,25 @@ function renderLogin(): { url: string; user: string; pass: string; mode: string 
     }
   } catch { /* no file */ }
   const url = (process.env.NSA_RENDER_URL || env.NSA_URL || "").replace(/\/$/, "");
-  const pass = process.env.NSA_RENDER_PASS || env.NSA_PASS || "";
-  if (!url || !pass || /YOUR-APP/.test(url) || process.env.RENDER_EXTERNAL_URL) return null;
-  return { url, user: process.env.NSA_RENDER_USER || env.NSA_USER || "admin", pass, mode: process.env.NSA_RENDER_MODE || env.NSA_MODE || "admin" };
+  const pass = process.env.NSA_RENDER_PASS || env.NSA_PASS || "", key = process.env.NSA_SYNC_KEY || env.NSA_SYNC_KEY || "";
+  if (!url || (!pass && !key) || /YOUR-APP/.test(url) || process.env.RENDER_EXTERNAL_URL) return null;
+  return { url, user: process.env.NSA_RENDER_USER || env.NSA_USER || "admin", pass, mode: process.env.NSA_RENDER_MODE || env.NSA_MODE || "admin", key };
 }
 async function pushDhanTokenToRender(token: string, clientId: string | null): Promise<string> {
-  const r = renderLogin(); if (!r) return "not synced (set NSA_PASS in ~/.nsa-pull.env to sync Render)";
+  const r = renderLogin(); if (!r) return "not synced (set NSA_SYNC_KEY in ~/.nsa-pull.env to sync Render)";
+  if (r.key) {   // machine sync key: unaffected by Render's daily admin-password rotation
+    for (let i = 0; i < 3; i++) {
+      try {
+        const res = await fetch(`${r.url}/api/dhan/sync`, { method: "POST", headers: { "Content-Type": "application/json", "X-NSA-Sync-Key": r.key }, body: JSON.stringify({ accessToken: token, clientId }) });
+        if (res.status === 404) break;   // Render has no NSA_SYNC_KEY yet → try the admin login below
+        const j: any = await res.json().catch(() => ({}));
+        if (res.status === 403) return `not synced (Render refused the sync key: ${j?.error || "invalid"})`;
+        if (j?.ok) return j.tested ? "synced and tested (sync key)" : "synced (sync key; Render test call failed)";
+      } catch { /* Render waking up */ }
+      await new Promise((res) => setTimeout(res, 20_000));
+    }
+    if (!r.pass) return "not synced (Render did not accept the sync key — set NSA_SYNC_KEY on Render)";
+  }
   const go = (p: string, body: any, tok?: string) => fetch(`${r.url}${p}`, { method: "POST", headers: { "Content-Type": "application/json", ...(tok ? { Authorization: `Bearer ${tok}` } : {}) }, body: JSON.stringify(body), signal: AbortSignal.timeout(90_000) });
   for (let i = 0; i < 3; i++) {   // a sleeping free Render service needs ~1 min to wake
     try {
@@ -10543,6 +10574,11 @@ async function pushDhanTokenToRender(token: string, clientId: string | null): Pr
   }
   return "not synced (Render did not respond)";
 }
+router.post("/dhan/push-render", requireAdmin, async (_req: Request, res: Response) => {
+  const cfg = loadDhanConfig(); if (!cfg.accessToken) return res.json({ ok: false, result: "no Dhan token on this machine" });
+  const result = await pushDhanTokenToRender(cfg.accessToken, cfg.clientId || null); dhanRenewState.renderSync = result;
+  res.json({ ok: /^synced/.test(result), result });
+});
 router.post("/dhan/renew-now", requireAdmin, async (_req: Request, res: Response) => {
   await maybeRenewDhanToken(true);
   res.json({ ...dhanRenewState, tokenExpiresAt: jwtExp(loadDhanConfig().accessToken) ? new Date(jwtExp(loadDhanConfig().accessToken)! * 1000).toISOString() : null });
