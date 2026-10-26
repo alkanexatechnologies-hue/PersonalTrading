@@ -101,7 +101,9 @@ test("note: at 30 signals it says the rule is ready for the verdict", () => {
 const hasData = fs.existsSync(RAW_DIRS.NIFTY) && fs.readdirSync(RAW_DIRS.NIFTY).some((f) => f.startsWith("2026-10"));
 test("replay: reproduces the 21 Oct NIFTY 09:55 signal, and later days do not change it (no look-ahead)", { skip: !hasData && "no research data" }, async () => {
   const { assemble } = await import("../nifty20/data");
-  const days = assemble("2026-09-01", "2026-10-23").days;   // raw files are month chunks: cut by day after loading
+  // raw files are month chunks named <from>_<latest download>: load up to the latest downloaded day, then cut by day
+  const { latestRawDay } = await import("./dataRange");
+  const days = assemble("2026-09-01", latestRawDay()).days.filter((d) => d.day <= "2026-10-23");
   const find = (to: string) => run(days.filter((d) => d.day <= to), 5, 50).ev.filter((e: any) => isPaperSignal(e, "2026-10-21") && e.day === "2026-10-21").map((e: any) => toSignal("NIFTY", e));
   const upTo21 = find("2026-10-21"), upTo23 = find("2026-10-23");
   assert.ok(upTo21.some((s) => s.time === "09:55" && s.level === 23053 && s.strike === "23050 PE"), "the 09:55 signal");

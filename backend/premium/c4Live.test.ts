@@ -7,13 +7,15 @@ import { assemble, DayData } from "../research/nifty20/data";
 import { assembleIndex } from "../research/multiIndex/data";
 import { run } from "../research/protrader/fakeMoveGrid";
 import { isPaperSignal } from "../research/protrader/fakeUpPaperCore";
+import { latestRawDay } from "../research/protrader/dataRange";
 
 // PARITY: on real past sessions the live scan must fire on exactly the candles where the research C4 rule
 // (isPaperSignal on fakeMoveGrid.run) fired — same time, level, entry and stop. Skipped when the research cache is absent.
 const HAVE = fs.existsSync(path.join(process.cwd(), "data", "research-nifty20", "raw1m"));
 for (const [ix, step] of [["NIFTY", 50], ["SENSEX", 100]] as const) {
   test(`c4Scan matches the research C4 rule on real ${ix} sessions`, { skip: !HAVE && "no research cache", timeout: 600_000 }, () => {
-    const raw: DayData[] = ix === "NIFTY" ? assemble("2026-05-01", "2026-10-23").days : assembleIndex("SENSEX", "2026-05-01", "2026-10-23");
+    // month chunks are named <from>_<latest download>: load up to the latest downloaded day, then keep a fixed window
+    const to = latestRawDay(), raw: DayData[] = (ix === "NIFTY" ? assemble("2026-05-01", to).days : assembleIndex("SENSEX", "2026-05-01", to)).filter((d) => d.day <= "2026-10-23");
     const ds = raw.filter((d) => d.spot.size >= 300);
     const research = run(ds, 5, step).ev.filter((e: any) => isPaperSignal(e, "2000-01-01"));
     const toDay = (d: DayData): C4Day => ({ day: d.day, mins: [...d.spot.entries()] });
@@ -25,7 +27,7 @@ for (const [ix, step] of [["NIFTY", 50], ["SENSEX", 100]] as const) {
     }
     const key = (day: string, t: number, lvl: number, px: number) => `${day}|${t}|${Math.round(lvl)}|${px.toFixed(2)}`;
     const a = research.map((e: any) => key(e.day, e.t, e.lvl, e.px)).sort(), b = live.map((s) => key(s.day, s.t, s.level, s.entryIdx)).sort();
-    assert.ok(a.length >= 10, `expected a real sample, got ${a.length}`);
+    assert.ok(a.length >= 30, `expected the full May–Oct sample, got ${a.length}`);
     assert.deepEqual(b, a);
     // same stop: research stop = 4-bar high, distance at least 0.25 ATR
     for (const s of live) { const e = research.find((x: any) => x.day === s.day && x.t === s.t)!; assert.equal(s.stopIdx.toFixed(4), (s.entryIdx + Math.max(e.stop - e.px, 0.25 * e.atr)).toFixed(4)); }
