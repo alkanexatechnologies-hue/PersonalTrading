@@ -8261,10 +8261,14 @@ router.get("/c4-live", requirePermission("oiAnalysis"), async (req: Request, res
 // positioning, premium-center and the option terminal's premium candles. This job computes them in the background with the
 // SAME cached() keys the screens use, so a screen request is a cache hit. While a screen is open its own polls already keep
 // these keys fresh, so the job then costs nothing extra (cached() de-duplicates). Trading time: every 50 s; otherwise every
-// 10 min (nothing changes, it only keeps the display-only values young). MC_KEEP_WARM=off disables it.
+// 10 min (nothing changes, it only keeps the display-only values young). MC_KEEP_WARM=off disables it; on Render it is off
+// unless MC_KEEP_WARM=on (see mcKeepWarm).
 let _mcWarmBusy = false, _mcWarmAt = 0;
 async function mcKeepWarm(): Promise<void> {
   if (_mcWarmBusy || process.env.MC_KEEP_WARM === "off" || getProvider().name !== "dhan") return;
+  // Not on Render by default: its small instance (½ CPU) was kept so busy by this job right after each start that the
+  // /health check timed out and Render restarted the service in a loop (logins got empty replies). MC_KEEP_WARM=on re-enables.
+  if (process.env.RENDER && process.env.MC_KEEP_WARM !== "on") return;
   const ist = new Date(Date.now() + 19800000), m = ist.getUTCHours() * 60 + ist.getUTCMinutes(), wk = ist.getUTCDay() > 0 && ist.getUTCDay() < 6;
   const busyTime = isTradingTimeIST() || (wk && m >= 540 && m < 555);       // trading hours + the 09:00–09:15 pre-open
   if (!busyTime && Date.now() - _mcWarmAt < 10 * 60_000) return;
