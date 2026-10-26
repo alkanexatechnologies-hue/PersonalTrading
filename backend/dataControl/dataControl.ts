@@ -7,6 +7,7 @@
 
 import fs from "fs";
 import path from "path";
+import { dataFile } from "../config/dataDir";
 
 export interface DcItem { key: string; label: string; group: string; note?: string; important?: boolean; }
 
@@ -63,7 +64,9 @@ export const DC_JOBS: DcItem[] = [
   { key: "arbiterObserver", label: "Decision ledger observer (every 30s, no extra Dhan calls)", group: "Background" },
 ];
 
-const FILE = path.join(process.cwd(), "data", "data-control.json");
+// On DATA_DIR (Render's persistent disk; <cwd>/data locally) so the switches survive a redeploy — in <cwd>/data on Render
+// every deploy reset all screens and jobs to ON (extra Dhan / CPU load right after each push).
+const FILE = dataFile("data-control.json");
 interface DcState { screens: Record<string, boolean>; jobs: Record<string, boolean>; updatedAt: number | null; }
 let state: DcState = load();
 
