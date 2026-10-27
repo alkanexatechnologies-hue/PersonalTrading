@@ -8350,3 +8350,29 @@ textarea.lrn-in { width: 100%; box-sizing: border-box; resize: vertical; min-hei
 @media (max-width: 1100px) { .lrn-g3 { grid-template-columns: 1fr 1fr; } .lrn-span2 { grid-column: span 2; } }
 @media (max-width: 900px) { .lrn-top, .lrn-g2 { grid-template-columns: 1fr; } .lrn-chart { height: 300px; } }
 @media (max-width: 640px) { .lrn-g3, .lrn-words { grid-template-columns: 1fr; } .lrn-span2 { grid-column: auto; } .lrn-mood { flex-direction: column; } .lrn-mood div { border-right: 0; border-bottom: 1px solid #0b0e14; } .lrn-chart { height: 260px; } .lrn-kc { grid-template-columns: 1fr; } }
+/* Learning charts: TradingView original dark theme (Groww's NIFTY chart is TradingView) */
+.lrn-tvcard { background: #131722; border-color: #2a2e39; padding: 0; overflow: hidden; }
+.lrn-tvbar { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 1px solid #2a2e39; background: #131722; flex-wrap: wrap; }
+.lrn-tvbar > b { color: #d1d4dc; font-size: 13px; font-weight: 700; }
+.lrn-tvtf { display: inline-flex; gap: 2px; } .lrn-tvtf button { background: none; border: 0; color: #787b86; font: inherit; font-size: 13px; font-weight: 600; padding: 4px 8px; border-radius: 4px; cursor: pointer; min-height: 32px; }
+.lrn-tvtf button:hover { background: #2a2e39; color: #d1d4dc; } .lrn-tvtf button.on { color: #2962ff; background: rgba(41,98,255,.12); }
+.lrn-tvsub { color: #787b86; font-size: 12px; margin-left: auto; }
+.lrn-tvfs { background: none; border: 1px solid #2a2e39; color: #d1d4dc; border-radius: 4px; width: 34px; height: 32px; cursor: pointer; font-size: 15px; } .lrn-tvfs:hover { background: #2a2e39; }
+.lrn-tvcard .lrn-chart { height: 440px; }
+.lrn-tvcard .lrn-legend { padding: 6px 10px 8px; border-top: 1px solid #2a2e39; }
+.lrn-tvleg { position: absolute; top: 6px; left: 8px; z-index: 3; pointer-events: none; font-size: 12px; color: #d1d4dc; line-height: 1.55; text-shadow: 0 0 3px #131722; }
+.lrn-tvsym b { font-weight: 600; } .lrn-tvsym { color: #d1d4dc; }
+.lrn-tvdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #089981; margin-left: 4px; vertical-align: middle; }
+.lrn-tvohlc { color: #787b86; } .lrn-tvohlc i { font-style: normal; color: var(--c, #d1d4dc); margin: 0 6px 0 2px; font-variant-numeric: tabular-nums; }
+.lrn-full { position: fixed !important; inset: 0; z-index: 9999; border-radius: 0; display: flex; flex-direction: column; }
+.lrn-full .lrn-chart { flex: 1; height: auto !important; min-height: 0; }
+body.lrn-fullbody { overflow: hidden; }
+@media (max-width: 900px) { .lrn-tvcard .lrn-chart { height: 360px; } }
+@media (max-width: 640px) { .lrn-tvcard .lrn-chart { height: 320px; } .lrn-tvsub { display: none; } .lrn-tvleg { font-size: 11px; } }
+/* Learning: previous trades (auto-saved) */
+.lrn-plist { margin-top: 8px; max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.lrn-prow { display: flex; border: 1px solid #2a3443; border-radius: 8px; background: #0b0e14; overflow: hidden; }
+.lrn-prow.on { border-color: #4f8cff; background: #14203a; }
+.lrn-pgo { flex: 1; display: grid; grid-template-columns: 62px 1fr auto; gap: 8px; align-items: center; background: none; border: 0; color: #d7dde8; font: inherit; font-size: 13px; text-align: left; padding: 7px 10px; cursor: pointer; min-height: 48px; }
+.lrn-pgo:hover { background: #161d29; } .lrn-pd { color: #8a94a3; font-size: 12px; line-height: 1.3; } .lrn-pd b { color: #fff; font-size: 13px; } .lrn-pm b { color: #fff; }
+.lrn-px { background: none; border: 0; border-left: 1px solid #2a3443; color: #8a94a3; width: 44px; font-size: 18px; cursor: pointer; } .lrn-px:hover { color: #ef5350; }

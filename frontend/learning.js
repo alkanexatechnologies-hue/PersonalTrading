@@ -38,21 +38,17 @@
       <div class="lrn-h"><b>✍️ Write your trade in your own words</b><span>premium, time, SL, targets</span></div>
       <textarea id="lrn-text" class="lrn-in" rows="3" placeholder="e.g. BUY Nifty 22750 PE above 50, SL 37, target 78 95 105, time 10:07"></textarea>
       <div class="lrn-row">
+        <label class="lrn-hint" for="lrn-date">Trade date</label><input type="date" class="lrn-in" id="lrn-date">
+        <label class="lrn-hint" for="lrn-index">Index</label><select class="lrn-in" id="lrn-index"><option>NIFTY</option><option>SENSEX</option></select>
         <button type="button" class="lrn-btn" id="lrn-go">Teach me this trade</button>
-        <button type="button" class="lrn-btn g" id="lrn-save">Save</button>
-        <span class="lrn-hint">Write it however you like, e.g. "Sensex 81500 CE at 120 sl 95 tgt 150 at 11:20". Date and index come from the right if you leave them out.</span>
       </div>
+      <p class="lrn-hint" style="margin:6px 0 0">Write it however you like, e.g. "Sensex 81500 CE at 120 sl 95 tgt 150 at 11:20". If the text has no date or index, the boxes above are used. Every trade you study is <b>saved automatically</b>. 🔒 Today's trades open after 3:30 PM.</p>
       <div class="lrn-got" id="lrn-got"></div>
     </div>
     <div class="lrn-card">
-      <div class="lrn-h"><b>📅 Date filter</b><span>saved trades</span></div>
-      <div class="lrn-row" style="margin-top:0">
-        <input type="date" class="lrn-in" id="lrn-date" aria-label="Date">
-        <select class="lrn-in" id="lrn-index" aria-label="Index"><option>NIFTY</option><option>SENSEX</option></select>
-        <select class="lrn-in" id="lrn-days" aria-label="Dates with saved trades"><option value="">Saved dates…</option></select>
-      </div>
-      <div id="lrn-saved" class="lrn-saved"></div>
-      <p class="lrn-hint" style="margin:8px 0 0">🔒 Today's trades open after 3:30 PM, because the full day's data is needed. Past dates work any time.</p>
+      <div class="lrn-h"><b>📒 Previous trades</b><span id="lrn-pcount">click one to open it again</span></div>
+      <select class="lrn-in" id="lrn-days" aria-label="Filter by date" style="width:100%"><option value="">All dates</option></select>
+      <div id="lrn-saved" class="lrn-plist" role="list"></div>
     </div>
   </div>
   <div id="lrn-msg"></div>
@@ -63,8 +59,8 @@
       <span class="lrn-hint">Change the timeframe. The charts, the markings and the explanations below all change with it.</span>
     </div>
     <div class="lrn-g2">
-      <div class="lrn-card"><div class="lrn-h"><b id="lrn-t1">Index</b><span>what the index was doing</span></div><div class="lrn-chart" id="lrn-cI"></div><div class="lrn-legend" id="lrn-lgI"></div></div>
-      <div class="lrn-card"><div class="lrn-h"><b id="lrn-t2">Premium</b><span>where your entry came from</span></div><div class="lrn-chart" id="lrn-cP"></div><div class="lrn-legend" id="lrn-lgP"></div></div>
+      <div class="lrn-card lrn-tvcard" id="lrn-wI"><div class="lrn-tvbar"><b id="lrn-t1">Index</b><span class="lrn-tvtf" role="group" aria-label="Interval"><button type="button" data-n="3" class="on">3m</button><button type="button" data-n="5">5m</button><button type="button" data-n="15">15m</button></span><span class="lrn-tvsub">what the index was doing</span><button type="button" class="lrn-tvfs" data-lrn-fs="lrn-wI" title="Full screen" aria-label="Full screen">⤢</button></div><div class="lrn-chart" id="lrn-cI"></div><div class="lrn-legend" id="lrn-lgI"></div></div>
+      <div class="lrn-card lrn-tvcard" id="lrn-wP"><div class="lrn-tvbar"><b id="lrn-t2">Premium</b><span class="lrn-tvtf" role="group" aria-label="Interval"><button type="button" data-n="3" class="on">3m</button><button type="button" data-n="5">5m</button><button type="button" data-n="15">15m</button></span><span class="lrn-tvsub">where your entry came from</span><button type="button" class="lrn-tvfs" data-lrn-fs="lrn-wP" title="Full screen" aria-label="Full screen">⤢</button></div><div class="lrn-chart" id="lrn-cP"></div><div class="lrn-legend" id="lrn-lgP"></div></div>
     </div>
     <div class="lrn-note" id="lrn-note"></div>
     <h3 class="lrn-sec">🕯 Major important candles <span id="lrn-kch"></span></h3>
@@ -147,14 +143,21 @@
   function body() { return { text: $("lrn-text").value, date: $("lrn-date").value, index: $("lrn-index").value }; }
   function schedParse() { clearTimeout(parseT); parseT = setTimeout(async () => { if (!$("lrn-text").value.trim()) return showGot(null); try { const j = await api("parse", { method: "POST", body: JSON.stringify(body()) }); showGot(j.parsed, j.error); } catch { /* preview only */ } }, 350); }
   const canon = (t) => `${t.date} ${t.index} ${t.strike} ${t.side} buy ${t.how} ${t.price}${t.sl != null ? ` SL ${t.sl}` : ""}${t.targets?.length ? ` target ${t.targets.join(" ")}` : ""} time ${t.time}`;
+  const dmy = (d) => { const [y, m, dd] = d.split("-"); return `${Number(dd)} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][Number(m) - 1]} ${y.slice(2)}`; };
   async function loadSaved() {
-    const box = $("lrn-saved"), date = $("lrn-date").value;
+    const box = $("lrn-saved"), sel = $("lrn-days"), keep = sel.value;
     try {
-      const j = await api(`trades?date=${encodeURIComponent(date)}`);
-      const sel = $("lrn-days"); sel.innerHTML = `<option value="">Saved dates (${(j.days || []).length})…</option>` + (j.days || []).map((d) => `<option value="${d}">${d}</option>`).join("");
-      const list = j.trades || [];
-      box.innerHTML = list.length ? list.map((s) => `<span class="lrn-chip" data-id="${s.id}" title="${esc(s.text)}"><button type="button" class="lrn-chipgo" data-lrn-open="${s.id}">${s.trade.time} · ${s.trade.index === "NIFTY" ? "" : "SENSEX "}${s.trade.strike} ${s.trade.side} · ${s.trade.how} ${s.trade.price}</button><button type="button" class="lrn-chipx" data-lrn-del="${s.id}" aria-label="Delete">×</button></span>`).join("")
-        : `<span class="lrn-hint">No saved trades on ${date}.</span>`;
+      const j = await api(`trades?date=${encodeURIComponent(keep)}`), days = j.days || [], total = Object.values(j.counts || {}).reduce((a, b) => a + b, 0);
+      sel.innerHTML = `<option value="">All dates (${total})</option>` + days.map((d) => `<option value="${d}">${dmy(d)} (${(j.counts || {})[d] || 0})</option>`).join("");
+      sel.value = days.includes(keep) ? keep : "";
+      const list = j.trades || [], cur = L.r && L.r.savedId;
+      $("lrn-pcount").textContent = `${list.length} trade${list.length === 1 ? "" : "s"} · click one to open it again`;
+      box.innerHTML = list.length ? list.map((s) => { const t = s.trade, r = s.result, st = r ? r.status : "not studied yet", cls = !r ? "mid" : /SL/.test(st) ? "bad" : /TARGET|T\d HIT/.test(st) ? "ok" : "mid";
+        return `<div class="lrn-prow${s.id === cur ? " on" : ""}" role="listitem"><button type="button" class="lrn-pgo" data-lrn-open="${s.id}" title="${esc(s.text)}">
+          <span class="lrn-pd">${dmy(t.date)}<br><b>${t.time}</b></span>
+          <span class="lrn-pm"><b>${t.index === "NIFTY" ? "NIFTY" : "SENSEX"} ${t.strike} ${t.side}</b><br><span class="lrn-hint">${t.how} ${t.price}${t.sl != null ? ` · SL ${t.sl}` : ""}${t.targets.length ? ` · T ${t.targets.join("/")}` : ""}</span></span>
+          <span class="lrn-badge ${cls}">${esc(st)}</span></button><button type="button" class="lrn-px" data-lrn-del="${s.id}" aria-label="Delete this trade" title="Delete">×</button></div>`; }).join("")
+        : `<p class="lrn-hint">No trades yet. Write one on the left and press <b>Teach me this trade</b>: it is saved here automatically.</p>`;
       L.saved = list;
     } catch (e) { box.innerHTML = `<span class="lrn-hint">${esc(e.message)}</span>`; }
   }
@@ -167,8 +170,8 @@
       const j = await api("analyze", { method: "POST", body: JSON.stringify(b) });
       showGot(j.parsed, j.available ? null : j.error);
       if (!j.available) { msg(j.locked ? `🔒 ${esc(j.error)}` : `⚠️ ${esc(j.error || "Could not analyse this trade.")}`, j.locked ? "info" : "warn"); $("lrn-body").hidden = true; return; }
-      if (j.trade.date !== $("lrn-date").value) { $("lrn-date").value = j.trade.date; loadSaved(); }
-      L.r = j; L.hl = null; msg(""); $("lrn-body").hidden = false; render();
+      if (j.trade.date !== $("lrn-date").value) $("lrn-date").value = j.trade.date;
+      L.r = j; L.hl = null; msg(""); $("lrn-body").hidden = false; render(); loadSaved();   // saved automatically on the server
     } catch (e) { msg(`⚠️ ${esc(e.message || "Learning failed")}`, "warn"); }
     finally { L.busy = false; $("lrn-go").disabled = false; }
   }
@@ -209,30 +212,59 @@
     $("lrn-lesson").innerHTML = `<b>🧠 Main lesson:</b> ${r.lesson}`;
   }
 
-  // ------------------------------------------------------------------ charts (Lightweight Charts, TradingView look)
-  function mkChart(el) {
+  // ------------------------------------------------------------------ charts: TradingView's own library + its original dark theme
+  // (Groww's NIFTY chart is TradingView too): O H L C legend top-left that follows the crosshair, dashed crosshair with
+  // price / time labels, symbol watermark, volume pane under the premium, interval buttons and full screen in the header.
+  const TV = { bg: "#131722", grid: "rgba(42,46,57,0.6)", text: "#d1d4dc", mute: "#787b86", border: "#2a2e39", up: "#089981", down: "#f23645", cross: "#9598a1", label: "#363a45" };
+  const px2 = (v) => (v == null ? "—" : Number(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+  const vol = (v) => (v >= 1e7 ? (v / 1e7).toFixed(2) + " Cr" : v >= 1e5 ? (v / 1e5).toFixed(2) + " L" : v >= 1e3 ? (v / 1e3).toFixed(1) + " K" : String(Math.round(v)));
+  function mkChart(el, withVol) {
     if (!window.LightweightCharts) { el.innerHTML = '<p class="lrn-hint">Chart library not loaded.</p>'; return null; }
-    const ch = LightweightCharts.createChart(el, { autoSize: true, layout: { background: { color: "#0b0e14" }, textColor: "#8a94a3", fontSize: 11 },
-      grid: { vertLines: { color: "#161b24" }, horzLines: { color: "#161b24" } }, rightPriceScale: { borderColor: "#1e2530" },
-      timeScale: { borderColor: "#1e2530", timeVisible: true, secondsVisible: false, rightOffset: 4 }, crosshair: { mode: 0 } });
-    const s = ch.addCandlestickSeries({ upColor: "#26a69a", downColor: "#ef5350", borderVisible: false, wickUpColor: "#26a69a", wickDownColor: "#ef5350" });
-    return { ch, s, lines: [] };
+    const LC = window.LightweightCharts, dash = { color: TV.cross, width: 1, style: 3, labelBackgroundColor: TV.label };
+    const ch = LC.createChart(el, { autoSize: true,
+      layout: { background: { type: "solid", color: TV.bg }, textColor: TV.text, fontSize: 12, fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif" },
+      grid: { vertLines: { color: TV.grid }, horzLines: { color: TV.grid } },
+      crosshair: { mode: LC.CrosshairMode ? LC.CrosshairMode.Normal : 0, vertLine: dash, horzLine: dash },
+      rightPriceScale: { borderColor: TV.border, scaleMargins: { top: 0.12, bottom: withVol ? 0.12 : 0.08 } },
+      timeScale: { borderColor: TV.border, timeVisible: true, secondsVisible: false, rightOffset: 6, barSpacing: 8, minBarSpacing: 2 },
+      watermark: { visible: true, fontSize: 40, horzAlign: "center", vertAlign: "center", color: "rgba(120,123,134,0.13)", text: "" },
+      localization: { priceFormatter: (p) => px2(p) } });
+    const s = ch.addCandlestickSeries({ upColor: TV.up, downColor: TV.down, borderVisible: false, wickUpColor: TV.up, wickDownColor: TV.down, priceLineVisible: true, lastValueVisible: true });
+    let v = null;
+    if (withVol) { v = ch.addHistogramSeries({ priceFormat: { type: "volume" }, priceScaleId: "vol", lastValueVisible: false, priceLineVisible: false }); ch.priceScale("vol").applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } }); }
+    const leg = document.createElement("div"); leg.className = "lrn-tvleg"; el.appendChild(leg);
+    const C = { ch, s, v, leg, lines: [], bars: [], idx: new Map(), title: "", sub: "" };
+    ch.subscribeCrosshairMove((p) => { const on = !!(p && p.time != null && p.seriesData && p.seriesData.get(s)); C.hover = on; legend(C, on ? C.idx.get(p.time) : null); });
+    ch.timeScale().subscribeVisibleLogicalRangeChange(() => { if (!C.hover) legend(C, null); });   // idle: the last candle in view, like TradingView
+    return C;
   }
-  function setSeries(C, bars, marks, levels, hl) {
+  function legend(C, i) {
+    if (!C || !C.bars.length) return; let k = i;
+    if (k == null) { const r = C.ch.timeScale().getVisibleLogicalRange(); k = r ? Math.max(0, Math.min(C.bars.length - 1, Math.floor(r.to))) : C.bars.length - 1; }
+    const b = C.bars[k], pv = k > 0 ? C.bars[k - 1].c : b.o, d = b.c - pv, col = b.c >= b.o ? TV.up : TV.down;
+    C.leg.innerHTML = `<div class="lrn-tvsym"><b>${esc(C.title)}</b> · ${esc(C.sub)} <span class="lrn-tvdot"></span></div>
+      <div class="lrn-tvohlc" style="--c:${col}">O<i>${px2(b.o)}</i> H<i>${px2(b.h)}</i> L<i>${px2(b.l)}</i> C<i>${px2(b.c)}</i> <i>${d >= 0 ? "+" : "−"}${px2(Math.abs(d))} (${d >= 0 ? "+" : "−"}${Math.abs((d / (pv || 1)) * 100).toFixed(2)}%)</i></div>`
+      + (C.v && b.v ? `<div class="lrn-tvohlc">Vol <i style="color:${col}">${vol(b.v)}</i></div>` : "");
+  }
+  function setSeries(C, bars, marks, levels, hl, title, sub) {
     if (!C) return;
+    C.bars = bars; C.idx = new Map(bars.map((b, i) => [b.t + IST, i])); C.title = title; C.sub = sub;
+    C.ch.applyOptions({ watermark: { text: `${title}, ${sub.split(" ")[0]}` } });
     C.s.setData(bars.map((b) => { const x = { time: b.t + IST, open: b.o, high: b.h, low: b.l, close: b.c };
       if (hl != null && b.t === hl) Object.assign(x, { color: "#f0b429", wickColor: "#f0b429", borderColor: "#f0b429" }); return x; }));
+    if (C.v) { const has = bars.some((b) => b.v > 0); C.v.setData(has ? bars.map((b) => ({ time: b.t + IST, value: b.v || 0, color: b.c >= b.o ? "rgba(8,153,129,0.35)" : "rgba(242,54,69,0.35)" })) : []); }
     C.lines.forEach((l) => C.s.removePriceLine(l)); C.lines = levels.map((l) => C.s.createPriceLine({ price: l.v, color: l.c, lineWidth: l.w || 1, lineStyle: l.solid ? 0 : 2, axisLabelVisible: true, title: l.t }));
     const ms = marks.map((m) => ({ time: m.t + IST, position: m.pos === "above" ? "aboveBar" : "belowBar", color: TONE[m.tone] || "#d7dde8", shape: m.pos === "above" ? "arrowDown" : "arrowUp", text: m.text }))
       .concat(hl != null ? [{ time: hl + IST, position: "aboveBar", color: "#f0b429", shape: "circle", text: "◀ this candle" }] : []).sort((a, b) => a.time - b.time);
-    C.s.setMarkers(ms);
+    C.s.setMarkers(ms); legend(C, null);
   }
   function frame(C, bars, from, to) { if (!C || !bars.length) return; try { C.ch.timeScale().setVisibleRange({ from: from + IST, to: to + IST }); } catch { C.ch.timeScale().fitContent(); } }
   function drawTf() {
     const r = L.r, n = L.n, d = r.tf[n], T = r.trade;
-    document.querySelectorAll("#lrn-tf button").forEach((b) => b.classList.toggle("on", Number(b.dataset.n) === n));
-    $("lrn-t1").textContent = `${T.index} · ${n} min · ${T.date}`; $("lrn-t2").textContent = `${T.strike} ${T.side} premium · ${n} min`;
-    if (!L.charts.I) L.charts.I = mkChart($("lrn-cI")); if (!L.charts.P) L.charts.P = mkChart($("lrn-cP"));
+    document.querySelectorAll("#lrn-tf button, .lrn-tvtf button").forEach((b) => b.classList.toggle("on", Number(b.dataset.n) === n));
+    const ixName = T.index === "NIFTY" ? "NIFTY 50" : "SENSEX", exch = T.index === "NIFTY" ? "NSE" : "BSE", oexch = T.index === "NIFTY" ? "NFO" : "BFO";
+    $("lrn-t1").textContent = `${ixName} · ${T.date}`; $("lrn-t2").textContent = `${T.index} ${T.strike} ${T.side}`;
+    if (!L.charts.I) L.charts.I = mkChart($("lrn-cI"), false); if (!L.charts.P) L.charts.P = mkChart($("lrn-cP"), true);
     const LV = { pdc: "#f0b429", pdh: "#f0b429", pdl: "#f0b429", f15h: "#26c6da", f15l: "#26c6da", open: "#5d6776", callwall: "#ef5350", putwall: "#26a69a" };
     const SHORT = { pdc: "PDC", pdh: "PDH", pdl: "PDL", f15h: "F15 H", f15l: "F15 L", open: "Open", callwall: "Call wall", putwall: "Put wall" };
     const iLv = [];   // one line per price: "PDC · PDH" when yesterday closed at its high
@@ -241,7 +273,7 @@
       iLv.push({ v: l.v, c: LV[l.key] || "#8a94a3", t, solid: l.key === "callwall" || l.key === "putwall", w: l.key === "callwall" || l.key === "putwall" ? 2 : 1 }); }
     const pLv = [{ v: r.fill ? r.fill.px : T.price, c: "#4f8cff", t: r.fill ? "Entry" : "Plan", solid: true, w: 2 }]
       .concat(T.sl != null ? [{ v: T.sl, c: "#ef5350", t: "SL", solid: true, w: 2 }] : [], T.targets.map((x, i) => ({ v: x, c: "#26a69a", t: `T${i + 1}` })), r.base ? [{ v: r.base.v, c: "#f0b429", t: "Bottom" }] : []);
-    setSeries(L.charts.I, d.idx, d.marksIdx, iLv, L.hl); setSeries(L.charts.P, d.opt, d.marksOpt, pLv, L.hl);
+    setSeries(L.charts.I, d.idx, d.marksIdx, iLv, L.hl, ixName, `${n} · ${exch}`); setSeries(L.charts.P, d.opt, d.marksOpt, pLv, L.hl, `${T.index} ${T.strike} ${T.side}`, `${n} · ${oexch}`);
     const a = (r.base ? Math.min(r.base.t, r.ref.t) : r.ref.t) - 50 * 60, b = Math.max(r.sim.exitT, r.ref.t) + 40 * 60, w = n === 15 ? 3 : 1;
     const from = L.hl != null ? L.hl - 40 * 60 * w : a - (w - 1) * 60 * 60, to = L.hl != null ? L.hl + 40 * 60 * w : b + (w - 1) * 60 * 60;
     frame(L.charts.I, d.idx, from, to); frame(L.charts.P, d.opt, from, to);
@@ -266,22 +298,18 @@
     $("lrn-go").onclick = analyze;
     $("lrn-text").addEventListener("input", schedParse);
     $("lrn-text").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) analyze(); });
-    $("lrn-date").addEventListener("change", () => { loadSaved(); schedParse(); });
+    $("lrn-date").addEventListener("change", schedParse);
     $("lrn-index").addEventListener("change", schedParse);
-    $("lrn-days").addEventListener("change", (e) => { if (e.target.value) { $("lrn-date").value = e.target.value; loadSaved(); } });
-    $("lrn-save").onclick = async () => {
-      const j = await api("trades", { method: "POST", body: JSON.stringify(body()) }).catch((e) => ({ error: e.message }));
-      if (j.error) return msg(`⚠️ ${esc(j.error)}`, "warn");
-      if (j.saved && j.saved.trade.date !== $("lrn-date").value) $("lrn-date").value = j.saved.trade.date;
-      msg(j.duplicate ? "This trade is already saved." : "✅ Saved. It is in the date filter now.", "info"); loadSaved();
-    };
+    $("lrn-days").addEventListener("change", loadSaved);
     document.querySelector(".lrn").addEventListener("click", async (e) => {
-      const o = e.target.closest("[data-lrn-open]"), del = e.target.closest("[data-lrn-del]"), tf = e.target.closest("#lrn-tf button"), kc = e.target.closest("[data-lrn-hl]");
-      if (o) { const s = (L.saved || []).find((x) => x.id === o.dataset.lrnOpen); if (s) { $("lrn-text").value = canon(s.trade); $("lrn-index").value = s.trade.index; analyze(); } }
+      const o = e.target.closest("[data-lrn-open]"), del = e.target.closest("[data-lrn-del]"), tf = e.target.closest("#lrn-tf button, .lrn-tvtf button"), kc = e.target.closest("[data-lrn-hl]"), fs = e.target.closest("[data-lrn-fs]");
+      if (o) { const s = (L.saved || []).find((x) => x.id === o.dataset.lrnOpen); if (s) { $("lrn-text").value = s.text || canon(s.trade); $("lrn-index").value = s.trade.index; $("lrn-date").value = s.trade.date; await analyze(); $("lrn-sum").scrollIntoView({ behavior: "smooth", block: "start" }); } }
       else if (del) { if (!confirm("Delete this saved trade?")) return; await api(`trades/${del.dataset.lrnDel}`, { method: "DELETE" }).catch(() => null); loadSaved(); }
       else if (tf && L.r) { L.n = Number(tf.dataset.n); L.hl = null; drawTf(); }
+      else if (fs) { const w = $(fs.dataset.lrnFs), on = !w.classList.contains("lrn-full"); document.querySelectorAll(".lrn-full").forEach((x) => x.classList.remove("lrn-full")); if (on) w.classList.add("lrn-full"); fs.textContent = on ? "✕" : "⤢"; document.body.classList.toggle("lrn-fullbody", on); }
       else if (kc && L.r) { const t = Number(kc.dataset.lrnHl); L.hl = L.hl === t ? null : t; drawTf(); $("lrn-cI").scrollIntoView({ behavior: "smooth", block: "center" }); }
     });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && document.querySelector(".lrn-full")) { document.querySelectorAll(".lrn-full").forEach((x) => x.classList.remove("lrn-full")); document.querySelectorAll("[data-lrn-fs]").forEach((b) => (b.textContent = "⤢")); document.body.classList.remove("lrn-fullbody"); } });
     document.querySelector(".lrn").addEventListener("keydown", (e) => { const kc = e.target.closest("[data-lrn-hl]"); if (kc && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); kc.click(); } });
   }
 

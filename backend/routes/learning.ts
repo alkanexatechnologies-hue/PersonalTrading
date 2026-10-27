@@ -13,7 +13,15 @@ import { analyzeTrade, tOf, LearnTrade } from "../learning/learningEngine";
 import { indexDay, bandDay, listedLeg, dayComplete, istDay, LEARN_META, learningSource } from "../learning/learningFeed";
 
 const FILE = dataFile("learning-trades.json");
-interface Saved { id: string; createdAt: number; text: string; trade: LearnTrade }
+interface Saved { id: string; createdAt: number; updatedAt?: number; text: string; trade: LearnTrade; result?: { status: string; fill: number | null; best: number | null; hits: number; sl: boolean } }
+const sameTrade = (a: LearnTrade, b: LearnTrade) => JSON.stringify({ ...a, note: undefined }) === JSON.stringify({ ...b, note: undefined });
+/** Add the trade (or refresh the one already saved) — every analysed trade is kept so it can be reopened later. */
+function upsert(text: string, trade: LearnTrade, result?: Saved["result"]): { saved: Saved; duplicate: boolean } {
+  const all = load(), dup = all.find((s) => sameTrade(s.trade, trade));
+  if (dup) { if (result) dup.result = result; dup.updatedAt = nowSec(); if (trade.note) dup.trade.note = trade.note; save(all); return { saved: dup, duplicate: true }; }
+  const s: Saved = { id: crypto.randomBytes(6).toString("hex"), createdAt: nowSec(), text: String(text || "").slice(0, 400), trade, result };
+  all.push(s); if (all.length > 2000) all.shift(); save(all); return { saved: s, duplicate: false };
+}
 function load(): Saved[] { try { return JSON.parse(fs.readFileSync(FILE, "utf8")); } catch { return []; } }
 function save(v: Saved[]) { fs.mkdirSync(path.dirname(FILE), { recursive: true }); fs.writeFileSync(FILE, JSON.stringify(v, null, 1)); }
 const nowSec = () => Math.floor(Date.now() / 1000);
@@ -48,7 +56,7 @@ export function learningRouter(expiriesFor: (index: LearnIndex) => Promise<strin
       const strike = p.strikeShort ? resolveShortStrike(p.strike!, spot, meta.step) : p.strike!;
       if (strike % meta.step !== 0) return res.json({ available: false, parsed: p, error: `${strike} is not a ${index} strike (steps of ${meta.step}).` });
       const trade: LearnTrade = { index, date: day, strike, side: p.side!, how: p.how || "at", price: p.price!, sl: p.sl, targets: p.targets, time: p.time!, note: String(req.body?.note || "").slice(0, 200) || undefined };
-      const key = JSON.stringify(trade); if (memo.has(key)) return res.json(memo.get(key));
+      const key = JSON.stringify(trade); if (memo.has(key)) { const m = memo.get(key); upsert(String(req.body?.text || ""), trade, undefined); return res.json(m); }
       const band = await bandDay(index, day), expiries = await expiriesFor(index).catch(() => [] as string[]);
       let opt = band.find((l) => l.strike === strike && l.side === trade.side)?.bars || [], note = "";
       if (!opt.some((b) => Math.abs(b.t - t0) <= 300)) {   // outside the recorded ATM±3 band → the listed contract, if not expired
@@ -63,7 +71,8 @@ export function learningRouter(expiriesFor: (index: LearnIndex) => Promise<strin
       const out: any = analyzeTrade({ trade, idx, prev, opt, band, lot: meta.lot, step: meta.step, expiryDay: isExpiryDay(index, day, expiries), source: learningSource(index) });
       if (note) out.dataNotes.unshift(note);
       if (p.strikeShort) out.dataNotes.unshift(`"${p.strike}" was read as ${strike} (nearest to ${index} ${Math.round(spot)} at ${p.time}).`);
-      const r = { available: true, parsed: p, ...out }; memo.set(key, r); if (memo.size > 60) memo.delete(memo.keys().next().value!);
+      const sv = upsert(String(req.body?.text || ""), trade, { status: out.status, fill: out.fill?.px ?? null, best: out.fill ? out.sim.mfe.px : null, hits: out.sim.hits.length, sl: !!out.sim.sl });
+      const r = { available: true, parsed: p, ...out, savedId: sv.saved.id }; memo.set(key, r); if (memo.size > 60) memo.delete(memo.keys().next().value!);
       res.json(r);
     } catch (e: any) { res.status(502).json({ available: false, parsed: p, error: e?.message || "Learning analysis failed" }); }
   });
@@ -71,15 +80,13 @@ export function learningRouter(expiriesFor: (index: LearnIndex) => Promise<strin
   router.get("/trades", (req: Request, res: Response) => {
     const date = String(req.query.date || ""), all = load();
     const days = [...new Set(all.map((s) => s.trade.date))].sort().reverse();
-    res.json({ trades: all.filter((s) => !date || s.trade.date === date).sort((a, b) => a.trade.time.localeCompare(b.trade.time)), days });
+    const counts = Object.fromEntries(days.map((d) => [d, all.filter((s) => s.trade.date === d).length]));
+    res.json({ trades: all.filter((s) => !date || s.trade.date === date).sort((a, b) => b.trade.date.localeCompare(a.trade.date) || a.trade.time.localeCompare(b.trade.time)), days, counts });
   });
   router.post("/trades", (req: Request, res: Response) => {
     const { parsed: p, err } = readTrade(req.body); if (err) return res.status(400).json({ error: err });
-    const all = load(), trade: LearnTrade = { index: p.index as LearnIndex, date: p.date!, strike: p.strike!, side: p.side!, how: p.how || "at", price: p.price!, sl: p.sl, targets: p.targets, time: p.time!, note: String(req.body?.note || "").slice(0, 200) || undefined };
-    const dup = all.find((s) => JSON.stringify({ ...s.trade, note: undefined }) === JSON.stringify({ ...trade, note: undefined }));
-    if (dup) return res.json({ saved: dup, duplicate: true });
-    const s: Saved = { id: crypto.randomBytes(6).toString("hex"), createdAt: nowSec(), text: String(req.body?.text || "").slice(0, 400), trade };
-    all.push(s); if (all.length > 2000) all.shift(); save(all); res.json({ saved: s });
+    const trade: LearnTrade = { index: p.index as LearnIndex, date: p.date!, strike: p.strike!, side: p.side!, how: p.how || "at", price: p.price!, sl: p.sl, targets: p.targets, time: p.time!, note: String(req.body?.note || "").slice(0, 200) || undefined };
+    res.json(upsert(String(req.body?.text || ""), trade));
   });
   router.delete("/trades/:id", (req: Request, res: Response) => {
     const all = load(), n = all.length, left = all.filter((s) => s.id !== req.params.id); if (left.length === n) return res.status(404).json({ error: "not found" });

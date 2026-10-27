@@ -34,7 +34,7 @@ async function intraday1m(body: Record<string, unknown>): Promise<Bar1[]> {
   const r = await withDhanPriority("low", () => dhanFetch("/charts/intraday", { method: "POST", accessToken: cfg.accessToken, clientId: cfg.clientId, body: { interval: "1", ...body } }));
   if (!r.ok) throw new Error(`Dhan intraday ${r.status}`);
   const j: any = await r.json(), ts: number[] = j?.timestamp || [];
-  return ts.map((t, i) => ({ t, o: +j.open[i], h: +j.high[i], l: +j.low[i], c: +j.close[i], oi: j.open_interest?.[i] != null ? +j.open_interest[i] : null }))
+  return ts.map((t, i) => ({ t, o: +j.open[i], h: +j.high[i], l: +j.low[i], c: +j.close[i], oi: j.open_interest?.[i] != null ? +j.open_interest[i] : null, v: +(j.volume?.[i] ?? 0) || 0 }))
     .filter((b) => b.c > 0 && mn(b.t) >= 555 && mn(b.t) < 930);
 }
 
@@ -61,7 +61,7 @@ export async function bandDay(index: LearnIndex, day: string): Promise<BandLeg[]
     raw.timestamp.forEach((t, i) => {
       if (istDay(t) !== day || mn(t) < 555 || mn(t) >= 930 || !(raw.close[i] > 0) || !(raw.strike[i] > 0)) return;
       const k = `${raw.strike[i]}${side}`, m = legs.get(k) || new Map<number, Bar1>(); if (m.has(t)) return;
-      m.set(t, { t, o: raw.open[i], h: raw.high[i], l: raw.low[i], c: raw.close[i], oi: raw.oi?.[i] ?? null }); legs.set(k, m);
+      m.set(t, { t, o: raw.open[i], h: raw.high[i], l: raw.low[i], c: raw.close[i], oi: raw.oi?.[i] ?? null, v: Number(raw.volume?.[i] ?? 0) || 0 }); legs.set(k, m);
     });
   }
   return [...legs.entries()].map(([k, m]) => ({ strike: Number(k.slice(0, -2)), side: k.slice(-2) as "CE" | "PE", bars: [...m.values()].sort((a, b) => a.t - b.t) }));

@@ -5,7 +5,7 @@
 // simple English. Pure functions, no network, no look-ahead into the trade decision (everything before the entry uses only
 // bars before the entry; after-entry facts are labelled as results). Learning / advisory only — no trading logic reads this.
 
-export interface Bar1 { t: number; o: number; h: number; l: number; c: number; oi?: number | null }
+export interface Bar1 { t: number; o: number; h: number; l: number; c: number; oi?: number | null; v?: number }
 export interface BandLeg { strike: number; side: "CE" | "PE"; bars: Bar1[] }
 export interface LearnTrade {
   index: "NIFTY" | "SENSEX"; date: string; strike: number; side: "CE" | "PE"; how: "above" | "at"; price: number;
@@ -33,8 +33,8 @@ const lakh = (v: number) => `${v >= 0 ? "+" : "−"}${(Math.abs(v) / 1e5).toFixe
 export function agg(bars: Bar1[], n: number): Bar1[] {
   const out: Bar1[] = []; let cur: Bar1 | null = null, key = -1;
   for (const b of bars) { const m = mn(b.t); if (m < 555 || m >= 930) continue; const k = Math.floor((m - 555) / n);
-    if (k !== key || !cur) { if (cur) out.push(cur); cur = { t: b.t - (m - 555 - k * n) * 60, o: b.o, h: b.h, l: b.l, c: b.c, oi: b.oi ?? null }; key = k; }
-    else { cur.h = Math.max(cur.h, b.h); cur.l = Math.min(cur.l, b.l); cur.c = b.c; if (b.oi != null) cur.oi = b.oi; } }
+    if (k !== key || !cur) { if (cur) out.push(cur); cur = { t: b.t - (m - 555 - k * n) * 60, o: b.o, h: b.h, l: b.l, c: b.c, oi: b.oi ?? null, v: b.v || 0 }; key = k; }
+    else { cur.h = Math.max(cur.h, b.h); cur.l = Math.min(cur.l, b.l); cur.c = b.c; cur.v = (cur.v || 0) + (b.v || 0); if (b.oi != null) cur.oi = b.oi; } }
   if (cur) out.push(cur); return out;
 }
 const at = (bars: Bar1[], t: number) => { let x: Bar1 | null = null; for (const b of bars) { if (b.t > t) break; x = b; } return x; };
