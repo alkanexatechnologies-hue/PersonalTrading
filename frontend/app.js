@@ -8345,26 +8345,30 @@ function initPremarket() {
     </div>
     <div class="pm-strip" id="pm-strip"></div>
     <div class="pmx-key" id="pmx-key" aria-label="Key points"></div>
-    <section class="pmx-pcr" id="pmx-pcr" aria-label="PCR and India VIX"><div class="pm-na">Loading PCR and VIX…</div></section>
-    <div class="pmx-rh"><section class="pmx-pn" id="pmx-results"><div class="pm-na">Loading results review…</div></section><section class="pmx-pn" id="pmx-top8"><div class="pm-na">Loading top 15 NIFTY stocks…</div></section></div>
-    <section class="pmx-pn pmx-ipos" id="pmx-ipos" aria-label="Institutional positioning"><div class="pm-na">Loading institutional positioning…</div></section>
-    <div class="pmx-grid">
-      <div class="pmx-col c1">
-        <section class="pmx-pn a-in" id="pmx-in"><div class="pm-na">Loading market inputs…</div></section>
+    <!-- Priority order for an index-option buyer (owner, 2026-10-27): today's call → option positioning (PCR · max pain ·
+         VIX) → trade construction → why → institutions → sectors / history → stock-level detail → more detail -->
+    <div class="pmx-grid pmx-prio">
+      <div class="pmx-prow r3 pmx-call">
+        <section class="pmx-pn a-cmd" id="pmx-1"></section>
+        <section class="pmx-pn a-dec" id="pmx-4"></section>
+        <section class="pmx-pn a-lvl" id="pmx-3"></section>
+      </div>
+    <section class="pmx-pcr" id="pmx-pcr" aria-label="PCR, max pain and India VIX"><div class="pm-na">Loading PCR, max pain and VIX…</div></section>
+      <div class="pmx-prow r2">
         <section class="pmx-pn a-strk" id="pmx-strk"></section>
         <section class="pmx-pn a-prem" id="pmx-prem"></section>
       </div>
-      <div class="pmx-col c2">
-        <section class="pmx-pn a-cmd" id="pmx-1"></section>
+      <div class="pmx-prow r3">
         <section class="pmx-pn a-why" id="pmx-2"></section>
+        <section class="pmx-pn a-in" id="pmx-in"><div class="pm-na">Loading market inputs…</div></section>
+        <section class="pmx-pn a-news" id="pmx-news"></section>
+      </div>
+    <section class="pmx-pn pmx-ipos" id="pmx-ipos" aria-label="Institutional positioning"><div class="pm-na">Loading institutional positioning…</div></section>
+      <div class="pmx-prow r2">
         <section class="pmx-pn a-heat" id="pmx-heatbox"><div id="pmx-5"></div><div class="pmx-ctr"><div id="pmx-pos"></div><div id="pmx-neg"></div></div></section>
         <section class="pmx-pn a-sim" id="pmx-sim"></section>
       </div>
-      <div class="pmx-col c3">
-        <section class="pmx-pn a-lvl" id="pmx-3"></section>
-        <section class="pmx-pn a-dec" id="pmx-4"></section>
-        <section class="pmx-pn a-news" id="pmx-news"></section>
-      </div>
+    <div class="pmx-rh"><section class="pmx-pn" id="pmx-results"><div class="pm-na">Loading results review…</div></section><section class="pmx-pn" id="pmx-top8"><div class="pm-na">Loading top 15 NIFTY stocks…</div></section></div>
     </div>
     <details class="pmx-more" id="pmx-more"><summary>More detail — Global markets · Macro &amp; risk · FII / DII · Sector strength · News flash · Sentiment timeline · and all earlier panels</summary>
     <div class="pmx-row pmx-r4"><section class="pmx-pn" id="pmx-7"></section><section class="pmx-pn" id="pmx-8"></section><section class="pmx-pn" id="pmx-9"></section><section class="pmx-pn" id="pmx-10"></section><section class="pmx-pn" id="pmx-11"></section></div>
@@ -8630,7 +8634,7 @@ function renderPMCommand(d) {
   const adj = p.closingAdjustment ? `<div class="pmx-note">ⓘ ${pmEsc(p.closingAdjustment.note)} (last traded ${n(p.lastTraded && p.lastTraded.value)} → official close ${n(p.officialClose && p.officialClose.value)}).</div>` : "";
   const scoreTile = (x) => `<div class="pmx-sc" title="${pmAttr(x.formula)}"><div class="k">${pmEsc(x.label)}${x.experimental ? ' <b class="pmx-exp">EXP</b>' : ""}</div><div class="v ${x.value == null ? "mut" : pmCls(x.value)}">${x.value == null ? "hidden" : (x.value > 0 ? "+" : "") + x.value + (x.key === "heat" ? "%" : "")}</div><div class="s">${pmEsc(x.value == null ? "input missing" : x.inputs)}</div></div>`;
   const nh = pr.horizons.map((h) => h.n).join("/");
-  pmxSet("pmx-1", pmxH(2, "Prediction Command Center", `<span class="pmx-tag">${pmEsc(pr.status)}</span> updated ${pmT(d.generatedAt)}`) + `
+  pmxSet("pmx-1", pmxH(1, "Prediction Command Center", `<span class="pmx-tag">${pmEsc(pr.status)}</span> updated ${pmT(d.generatedAt)}`) + `
     <div class="pmx-b3">
       <div class="pmx-bx"><div class="k">Market regime</div><div class="big neu">${pmEsc(a.regime.label)}</div><div class="s">${pmEsc(a.regime.detail || "")}</div></div>
       <div class="pmx-bx"><div class="k">NIFTY 50 bias</div><div class="big ${pmDirCls(a.niftyBias.direction)}">${pmEsc(a.niftyBias.direction)}</div><div class="s">${pmEsc(a.niftyBias.source)}${a.niftyBias.candle ? " · " + pmEsc(a.niftyBias.candle.slice(11, 16)) : ""}</div></div>
@@ -8644,7 +8648,7 @@ function renderPMCommand(d) {
     <div class="pmx-fresh">${Object.entries(a.freshness).map(([k, v]) => `<span>${pmEsc(k)} ${pmFresh(v)}</span>`).join("")}</div>${adj}`);
   // 2 · Why
   const li = (arr) => (arr && arr.length ? `<ol class="pmx-nl">${arr.map((x) => `<li>${pmEsc(x)}</li>`).join("")}</ol>` : `<div class="pm-in-none">None now</div>`);
-  pmxSet("pmx-2", pmxH(3, "Why this view?") + `<div class="pmx-why">${pmEsc(b.why)}</div>
+  pmxSet("pmx-2", pmxH(6, "Why this view?") + `<div class="pmx-why">${pmEsc(b.why)}</div>
     <div class="k up">▲ Bullish factors</div>${li(b.bullish)}<div class="k dn">▼ Bearish factors</div>${li(b.bearish)}
     <div class="k neu">◆ Contradictory signals</div>${li(b.contradictions)}<div class="k">⚠ Would invalidate this view</div>${li(b.invalidation)}
     <div class="pmx-note">${pmEsc(b.oiDisclaimer)}</div>`);
@@ -8652,7 +8656,7 @@ function renderPMCommand(d) {
   const seq = (c.sequence || []).map((r) => r.spot
     ? `<tr class="pmx-spot"><td>▶ NIFTY spot</td><td class="num">${n(r.price)}</td><td>—</td><td>${d.phase === "CLOSED" ? "CLOSED" : "LIVE"}</td><td class="num">0</td><td class="ev">${d.phase === "CLOSED" ? "official close" : "at " + pmT(c.spotTs)}</td></tr>`
     : `<tr class="${r.side === "resistance" ? "rs" : "sp"}" title="${pmAttr((r.methods || []).join(" | "))}"><td>${pmEsc(r.kinds.join(" · "))}</td><td class="num">${n(r.price)}</td><td class="str ${pmEsc(String(r.strength || "").toLowerCase())}">${pmEsc(r.strength || "—")}</td><td><span class="pm-cc-st ${String(r.status).toLowerCase()}">${pmEsc(r.status)}</span></td><td class="num ${pmCls(r.distance)}">${sg(r.distance, 0)}</td><td class="ev">${pmEsc(r.evidence)}</td></tr>`).join("");
-  pmxSet("pmx-3", pmxH(4, "Critical NIFTY levels", `Spot <b>${n(c.spot)}</b> ${d.phase === "CLOSED" ? "(CLOSED)" : pmT(c.spotTs)}`) +
+  pmxSet("pmx-3", pmxH(3, "Critical NIFTY levels", `Spot <b>${n(c.spot)}</b> ${d.phase === "CLOSED" ? "(CLOSED)" : pmT(c.spotTs)}`) +
     (c.note ? `<div class="pmx-note warn">${pmEsc(c.note)}</div>` : "") +
     `<div class="pm-scroll"><table class="pmx-lv"><thead><tr><th>Level</th><th class="num">Price</th><th>Strength</th><th>Status</th><th class="num">Distance</th><th>Evidence</th></tr></thead><tbody>${seq || '<tr><td colspan="6">No levels — source data unavailable</td></tr>'}</tbody></table></div>
     <div class="pmx-note">OI strikes within 1 % of spot · PCR ${c.oi ? c.oi.pcr ?? "—" : "—"} · max pain ${c.oi ? c.oi.maxPain ?? "—" : "—"} · hover a row for method &amp; invalidation. OI alone never triggers a trade.</div>`);
@@ -8663,7 +8667,7 @@ function renderPMCommand(d) {
   const det = (k, v) => `<tr><td>${k}</td><td class="num">${v}</td></tr>`;
   const ev = dd.evidenceStatus;
   const inval = (b.invalidation || []).concat((dd.candidates || []).filter((x) => x.block).map((x) => `${x.setup}: ${x.block}`)).slice(0, 3);
-  pmxSet("pmx-4", pmxH(10, "Master trade decision <span class=\"mut\">(arbiter only)</span>") + `
+  pmxSet("pmx-4", pmxH(2, "Master trade decision <span class=\"mut\">(arbiter only)</span>") + `
     <div class="pmx-dbox ${pmDirCls(dd.action)}"><div class="dw">${pmEsc(dd.action)}</div><div class="s">${pmEsc(dd.reason || "")}</div>
       <div class="s">${pmEsc(dd.candle || "")}${dd.setup ? " · setup: " + pmEsc(dd.setup) : ""}${dd.guard ? ` · guard: ${pmEsc(dd.guard)}` : ""}</div>
       <div class="pmx-ev">${ev ? pmEsc(ev.label) : "Evidence: no active setup — no win-rate is claimed"}</div></div>
@@ -8723,7 +8727,7 @@ function pmxRenderKey() {
 // ---- panels fed by /premarket/command extras (inputs, similar sessions, news impact, premiums, strikes)
 function pmxRenderExtras(d) {
   const x = d.x || {};
-  if (x.error) { pmxSet("pmx-in", pmxH(1, "Market input selection") + `<div class="pm-na">${pmEsc(x.error)}</div>`); return; }
+  if (x.error) { pmxSet("pmx-in", pmxH(7, "Market input selection") + `<div class="pm-na">${pmEsc(x.error)}</div>`); return; }
   PM.x = x;
   pmxRenderInputs(); pmxRenderSim(); pmxRenderNewsImpact(); pmxRenderPremium(x.premium); pmxRenderStrikes(x.strikes);
 }
@@ -8734,7 +8738,7 @@ function pmxRenderInputs() {
   const mode = PM.inMode || "auto", view = PM.inView || (snap ? "snap" : "now");
   const list = snap && (mode === "manual" || view === "snap") ? snap.inputs : (ins.current || []);
   const sim = PM.sim;
-  const head = pmxH(1, "Market input selection <span class=\"mut\">(auto at 09:25)</span>", `<span class="pmx-seg" role="group"><button type="button" data-in-mode="auto" aria-pressed="${mode === "auto"}">Auto</button><button type="button" data-in-mode="manual" aria-pressed="${mode === "manual"}">Manual scenario</button></span>`);
+  const head = pmxH(7, "Market input selection <span class=\"mut\">(auto at 09:25)</span>", `<span class="pmx-seg" role="group"><button type="button" data-in-mode="auto" aria-pressed="${mode === "auto"}">Auto</button><button type="button" data-in-mode="manual" aria-pressed="${mode === "manual"}">Manual scenario</button></span>`);
   const snapLine = snap ? `09:25 snapshot taken ${pmT(snap.at)} · ${ins.revisions.length} revision${ins.revisions.length === 1 ? "" : "s"} since` : "09:25 snapshot not taken yet today (taken automatically on a trading session)";
   const viewSeg = mode === "auto" && snap ? `<span class="pmx-seg" role="group"><button type="button" data-in-view="snap" aria-pressed="${view === "snap"}">09:25</button><button type="button" data-in-view="now" aria-pressed="${view === "now"}">Now</button></span>` : "";
   const ov = PM.overrides || {};
@@ -8770,7 +8774,7 @@ function pmxRenderSim() {
   const x = PM.x || {}, simd = PM.sim && PM.sim.similar ? PM.sim.similar : null;
   const r = simd || x.similar;
   const v = (x.similar && x.similar.validation) || (r && r.validation);
-  const head = pmxH(5, "Historical similar scenarios", simd ? '<b class="pmx-simtag">SIMULATED</b>' : (r && r.rows ? `top ${r.rows.length} of ${r.compared} past sessions` : ""));
+  const head = pmxH(10, "Historical similar scenarios", simd ? '<b class="pmx-simtag">SIMULATED</b>' : (r && r.rows ? `top ${r.rows.length} of ${r.compared} past sessions` : ""));
   if (!r || !r.rows) { pmxSet("pmx-sim", head + `<div class="pm-in-none">${pmEsc((r && r.reason) || "Unavailable")}</div>${v ? `<div class="pmx-note warn">${pmEsc(v.note)}</div>` : ""}`); return; }
   const sg = (v2) => (v2 == null ? "—" : (v2 > 0 ? "+" : "") + pmNum(v2, 0));
   const rows = r.rows.map((x2, i) => `<tr title="${pmAttr("Matched: " + x2.matched.join(", "))}"><td>${i + 1}</td><td>${pmEsc(x2.date)}</td><td class="num">${x2.similarity}%</td><td>${x2.matched.length}/${x2.compared}</td><td class="num ${pmCls(x2.outcome.m15)}">${sg(x2.outcome.m15)}</td><td class="num ${pmCls(x2.outcome.m30)}">${sg(x2.outcome.m30)}</td><td class="num ${pmCls(x2.outcome.m60)}">${sg(x2.outcome.m60)}</td><td class="num"><span class="up">${sg(x2.outcome.maxUp)}</span> / <span class="dn">${sg(x2.outcome.maxDown)}</span></td></tr>`).join("");
@@ -8781,29 +8785,29 @@ function pmxRenderSim() {
     ${v ? `<div class="pmx-note warn">${pmEsc(v.note)}</div>` : ""}`);
 }
 function pmxRenderNewsImpact() {
-  const n = (PM.x || {}).news; if (!n) { pmxSet("pmx-news", pmxH(6, "News impact") + `<div class="pm-in-none">News unavailable</div>`); return; }
+  const n = (PM.x || {}).news; if (!n) { pmxSet("pmx-news", pmxH(8, "News impact") + `<div class="pm-in-none">News unavailable</div>`); return; }
   const tab = PM.niTab || "All";
   const tabs = Object.entries(n.tabs).map(([k, v]) => `<button type="button" data-ni="${k}" aria-pressed="${tab === k}">${k} (${v})</button>`).join("");
   const rows = n.rows.filter((r) => tab === "All" || r.impact === tab).slice(0, 9).map((r) => `<tr class="${r.strength === "High" ? "hi" : r.strength === "Low" ? "lo" : ""}" title="${pmAttr((r.interpretation || "") + " · " + r.affected.join(", "))}"><td class="num">${r.ageH < 1 ? Math.max(1, Math.round(r.ageH * 60)) + "m" : r.ageH.toFixed(1) + "h"}</td><td><a href="${pmAttr(/^https?:/.test(r.link) ? r.link : "#")}" target="_blank" rel="noopener">${pmEsc(r.headline)}</a><div class="pmx-src">${pmEsc(r.source)} · <span class="${r.kind === "CONFIRMED FACT" ? "up" : "mut"}">${pmEsc(r.kind)}</span> · ${pmEsc(r.affected.join(", "))}</div></td><td><span class="pmx-imp2 ${pmxImpCls(r.impact)}">${pmEsc(r.impact)}</span><div class="pmx-src">${pmEsc(r.strength)}</div></td></tr>`).join("");
-  pmxSet("pmx-news", pmxH(6, "News impact", pmEsc(n.window)) + `<div class="pmx-seg pmx-tabs" role="group">${tabs}</div><div class="pm-scroll"><table class="pmx-ct pmx-nt"><thead><tr><th class="num">Age</th><th>Headline</th><th>Impact</th></tr></thead><tbody>${rows || '<tr><td colspan="3">No headlines in this tab</td></tr>'}</tbody></table></div><div class="pmx-note">Impact text is the app's interpretation; official releases are marked CONFIRMED FACT. A new major headline triggers a logged reassessment of the inputs.</div>`);
+  pmxSet("pmx-news", pmxH(8, "News impact", pmEsc(n.window)) + `<div class="pmx-seg pmx-tabs" role="group">${tabs}</div><div class="pm-scroll"><table class="pmx-ct pmx-nt"><thead><tr><th class="num">Age</th><th>Headline</th><th>Impact</th></tr></thead><tbody>${rows || '<tr><td colspan="3">No headlines in this tab</td></tr>'}</tbody></table></div><div class="pmx-note">Impact text is the app's interpretation; official releases are marked CONFIRMED FACT. A new major headline triggers a logged reassessment of the inputs.</div>`);
   const box = pmEl("pmx-news");
   if (box && !box._bound) { box._bound = true; box.addEventListener("click", (e) => { const b = e.target.closest("[data-ni]"); if (!b) return; PM.niTab = b.getAttribute("data-ni"); pmxRenderNewsImpact(); }); }
 }
 function pmxRenderPremium(pr) {
-  if (!pr) { pmxSet("pmx-prem", pmxH(7, "Option premium analysis") + `<div class="pm-in-none">Option chain unavailable</div>`); return; }
+  if (!pr) { pmxSet("pmx-prem", pmxH(5, "Option premium analysis") + `<div class="pm-in-none">Option chain unavailable</div>`); return; }
   const sp = (v) => (v == null ? "—" : `${v}%`), ch = (v) => (v == null ? "" : ` <span class="${pmCls(v)}">${v > 0 ? "+" : ""}${v}%</span>`);
   const spk = (l) => (l.spike === "NONE" || l.spike === "NO DATA" ? "" : ` <b class="pmx-spk2">${pmEsc(l.spike)}</b>`);
   const rows = pr.rows.map((r) => `<tr class="${r.atm ? "pmx-atm" : ""}"><td>${r.strike}${r.atm ? " (ATM)" : ""}</td><td class="num">${r.ce.ltp == null ? "—" : "₹" + pmNum(r.ce.ltp, 2)}${ch(r.ce.chgPct)}${spk(r.ce)}</td><td class="num">${r.pe.ltp == null ? "—" : "₹" + pmNum(r.pe.ltp, 2)}${ch(r.pe.chgPct)}${spk(r.pe)}</td><td class="num">${r.ce.iv == null ? "—" : pmNum(r.ce.iv, 1)} / ${r.pe.iv == null ? "—" : pmNum(r.pe.iv, 1)}</td><td class="num">${sp(r.ce.spreadPct)} / ${sp(r.pe.spreadPct)}</td><td>${pmEsc(r.ce.liquidity)}</td></tr>`).join("");
   const dt = pr.detection;
-  pmxSet("pmx-prem", pmxH(7, "Option premium analysis", `spot ${pr.spotChangePct > 0 ? "+" : ""}${pr.spotChangePct}% vs prev close`) + `<div class="pmx-prem">
+  pmxSet("pmx-prem", pmxH(5, "Option premium analysis", `spot ${pr.spotChangePct > 0 ? "+" : ""}${pr.spotChangePct}% vs prev close`) + `<div class="pmx-prem">
     <div class="pm-scroll"><table class="pmx-ct"><thead><tr><th>Strike</th><th class="num">CE (chg)</th><th class="num">PE (chg)</th><th class="num">IV CE / PE</th><th class="num">Spread CE / PE</th><th>Liquidity</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="pmx-spkbox ${dt.label === "No spike" ? "" : "on"}"><div class="k">Premium spike detection</div><div class="big">${pmEsc(dt.label)}</div><div class="s">${pmEsc(dt.driver)}</div>${dt.withoutSpot ? '<div class="s neu">Spike without spot confirmation</div>' : ""}${dt.lowLiquidity ? '<div class="s neu">Low-liquidity spike present</div>' : ""}</div>
   </div><div class="pmx-note">${pmEsc(pr.rule)} · spread = ${pmEsc(pr.spread)}.</div>`);
 }
 function pmxRenderStrikes(st) {
-  if (!st) { pmxSet("pmx-strk", pmxH(8, "Strike selection") + `<div class="pm-in-none">No direction from the arbiter — no strike comparison.</div>`); return; }
+  if (!st) { pmxSet("pmx-strk", pmxH(4, "Strike selection") + `<div class="pm-in-none">No direction from the arbiter — no strike comparison.</div>`); return; }
   const rows = st.rows.map((r) => `<tr class="${r.selected ? "pmx-atm" : ""}"><td>${r.strike}</td><td class="${r.type === "CE" ? "up" : "dn"}">${pmEsc(r.type)} <span class="mut">${pmEsc(r.kind)}</span></td><td class="num">${r.ltp == null ? "—" : "₹" + pmNum(r.ltp, 2)}</td><td class="num">${r.delta == null ? "—" : pmNum(r.delta, 2)}</td><td class="num">${r.iv == null ? "—" : pmNum(r.iv, 1)}</td><td>${pmEsc(r.liquidity)}</td><td class="num">${r.spreadPct == null ? "—" : r.spreadPct + "%"}</td><td class="num">${r.rr == null ? "—" : "1:" + pmNum(r.rr, 2)}</td></tr><tr class="pmx-whyr ${r.selected ? "pmx-atm" : ""}"><td colspan="8" class="why">${pmEsc(r.why)}</td></tr>`).join("");
-  pmxSet("pmx-strk", pmxH(8, "Strike selection <span class=\"mut\">(with explanation)</span>", pmEsc(st.note)) + `<div class="pm-scroll"><table class="pmx-ct"><thead><tr><th>Strike</th><th>Type</th><th class="num">LTP</th><th class="num">Delta</th><th class="num">IV</th><th>Liquidity</th><th class="num">Spread</th><th class="num">R:R</th></tr></thead><tbody>${rows}</tbody></table></div><div class="pmx-note">R:R uses the arbiter's spot plan × delta, minus estimated costs. A rising premium alone never selects a strike.</div>`);
+  pmxSet("pmx-strk", pmxH(4, "Strike selection <span class=\"mut\">(with explanation)</span>", pmEsc(st.note)) + `<div class="pm-scroll"><table class="pmx-ct"><thead><tr><th>Strike</th><th>Type</th><th class="num">LTP</th><th class="num">Delta</th><th class="num">IV</th><th>Liquidity</th><th class="num">Spread</th><th class="num">R:R</th></tr></thead><tbody>${rows}</tbody></table></div><div class="pmx-note">R:R uses the arbiter's spot plan × delta, minus estimated costs. A rising premium alone never selects a strike.</div>`);
 }
 
 // 6 · Sector strength vs NIFTY at 09:13 (heat-map sectors minus the model's 09:13 NIFTY estimate)
@@ -8866,6 +8870,14 @@ async function loadPMPcr(force) {
   PM.pcrAt = Date.now();
   try { const d = await fetch("/api/premarket/pcr-vix", { screen: "premarket" }).then((r) => r.json()); if (d && d.indices) { PM.pcr = d; renderPMPcr(d); } } catch { /* keep last */ }
 }
+// Max pain: the strike where option writers would pay the least at expiry. Shown with how far the index is from it and
+// how many days remain; the "pull" toward it is a reference, strongest on expiry day, not a forecast.
+function pmMaxPain(m) {
+  if (!m || m.strike == null) return `<div class="s pmx-mp">Max pain <b>—</b></div>`;
+  const d = m.dist, away = d == null ? "" : Math.abs(d) < 1 ? " · at max pain" : ` · index ${d > 0 ? "above" : "below"} by ${pmNum(Math.abs(d), 0)} (${pmPct(m.distPct).replace("+", "")})`;
+  const days = m.daysToExpiry == null ? "" : m.daysToExpiry <= 0 ? " · <span class='cau'>expiry today</span>" : ` · ${m.daysToExpiry} day${m.daysToExpiry === 1 ? "" : "s"} to expiry`;
+  return `<div class="s pmx-mp" title="Max pain = the strike where option buyers' payout (writers' loss) is smallest at expiry. Price often drifts toward it into expiry, most on expiry day; it is a reference, not a forecast.">🎯 Max pain <b>${pmNum(m.strike, 0)}</b>${away}${days}</div>`;
+}
 function renderPMPcr(d) {
   const box = pmEl("pmx-pcr"); if (!box) return;
   const T = { bull: "up", bear: "dn", neutral: "neu", caution: "cau" };
@@ -8882,6 +8894,7 @@ function renderPMPcr(d) {
       <div class="v"><b>${x.pcr != null ? x.pcr.toFixed(2) : "—"}</b><span class="pill">${pmEsc(b.label || "—")}</span></div>
       ${scale(d.pcrBands, x.pcr, 0.3, 2)}
       <div class="s">${pmEsc(b.meaning || "")}</div>
+      ${pmMaxPain(x.maxPain)}
       <div class="s">Near ATM ±5: <b>${x.nearPcr != null ? x.nearPcr.toFixed(2) : "—"}</b> ${x.nearBand ? `<span class="${T[x.nearBand.tone]}">${pmEsc(x.nearBand.label)}</span>` : ""}${ch != null ? ` · since open ${ch > 0 ? "▲ +" : ch < 0 ? "▼ " : ""}${ch.toFixed(2)}` : ""}</div></div>`;
   };
   const v = d.vix;
@@ -8892,11 +8905,11 @@ function renderPMPcr(d) {
       <div class="s"><span class="${T[v.trend.tone]}">${pmEsc(v.trend.label)}</span>${v.dayLow != null ? ` · day ${pmNum(v.dayLow, 2)}–${pmNum(v.dayHigh, 2)}` : ""}</div></div>` : `<div class="pmx-pc"><span class="k">INDIA VIX</span><div class="pm-na">VIX unavailable</div></div>`;
   const leg = (bands) => bands.map((b) => `<span class="${T[b.tone]}">${b.max == null ? `&gt; ${b.min}` : b.min === 0 ? `&lt; ${b.max}` : `${b.min}–${b.max}`} ${pmEsc(b.label)}</span>`).join(" · ");
   const sess = (d.indices || []).find((x) => x.session);
-  box.innerHTML = `<div class="pmx-hd2"><h3>PCR &amp; India VIX</h3><span class="mut">${d.marketOpen ? "live" : `market closed${sess ? " — last session " + pmEsc(sess.session) : ""}`}</span></div>
+  box.innerHTML = `<div class="pmx-hd2"><h3>PCR · Max Pain &amp; India VIX</h3><span class="mut">${d.marketOpen ? "live" : `market closed${sess ? " — last session " + pmEsc(sess.session) : ""}`}</span></div>
     <div class="pmx-pcg">${(d.indices || []).map(card).join("")}${vixCard}</div>
     <div class="pmx-note"><b>PCR levels:</b> ${leg(d.pcrBands)}</div>
     <div class="pmx-note"><b>VIX levels:</b> ${leg(d.vixBands)}</div>
-    <div class="pmx-note">${pmEsc(d.note || "")} High PCR = more put writing (support below); low PCR = more call writing (resistance above); the extremes are crowded and can reverse.</div>`;
+    <div class="pmx-note">${pmEsc(d.note || "")} High PCR = more put writing (support below); low PCR = more call writing (resistance above); the extremes are crowded and can reverse. Max pain is where option writers lose least at expiry — price often drifts toward it into expiry (most on expiry day); a reference, not a signal.</div>`;
 }
 
 async function loadPMHeat(force) {

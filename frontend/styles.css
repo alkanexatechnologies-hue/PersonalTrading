@@ -8241,3 +8241,46 @@ body.gc-has-full { overflow: hidden; }
   .gc-head .mcx-seg { flex-wrap: wrap; }
   .gc-tl > div { font-size: 9px; }
 }
+
+/* ================= Market Sentiment — priority rows (owner, 2026-10-27) =================
+   today's call → PCR · max pain · VIX → trade construction → why → institutions → sectors / history → stock detail */
+.pmx-grid.pmx-prio { display: flex !important; flex-direction: column; gap: 5px; grid-template-areas: none !important; }
+.pmx-prio .pmx-pn { grid-area: auto !important; min-width: 0; }
+.pmx-prio > .pmx-pcr, .pmx-prio > .pmx-ipos, .pmx-prio > .pmx-rh { margin: 0; }
+.pmx-prow { display: grid; gap: 5px; align-items: start; }
+.pmx-prow.r3 { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr); }
+.pmx-prow.r2 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.pmx-prow.pmx-call > .pmx-pn { border-color: #2f4a7a; }
+.pmx-mp { color: #cfd8e6; }
+.pmx-mp b { color: #f2b03a; font-family: 'JetBrains Mono', ui-monospace, monospace; }
+@media (max-width: 1100px) { .pmx-prow.r3 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .pmx-prow.r3 > .pmx-pn:first-child { grid-column: 1 / -1; } }
+@media (max-width: 760px) { .pmx-prow.r3, .pmx-prow.r2 { grid-template-columns: minmax(0, 1fr); } .pmx-prow.r3 > .pmx-pn:first-child { grid-column: auto; } }
+
+/* ================= Market Sentiment — compact (owner, 2026-10-27: "compact, no unwanted space") ================= */
+/* one-line header: brand · tabs (icon beside the label) · status, all on a single slim bar */
+#panel-premarket .pm-top { padding: 4px 10px; margin-bottom: 4px; gap: 10px; border-radius: 8px; }
+#panel-premarket .pm-logo { width: 24px; height: 24px; font-size: 13px; border-radius: 6px; }
+#panel-premarket .pm-brand h1 { font-size: 14px; }
+#panel-premarket .pm-brand p { display: none; }
+#panel-premarket .pm-nav button { flex-direction: row; gap: 5px; padding: 4px 9px; font-size: 11.5px; border-radius: 6px; }
+#panel-premarket .pm-nav button .ico { font-size: 12px; }
+#panel-premarket .pm-live { flex-direction: row; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+#panel-premarket .pm-live > * { margin: 0 !important; }
+#panel-premarket .pm-substrip { margin-bottom: 4px; font-size: 11px; }
+/* index strip: shorter tiles */
+#panel-premarket .pm-strip { gap: 4px; margin-bottom: 4px; }
+#panel-premarket .pm-ix { padding: 4px 7px; border-radius: 7px; }
+#panel-premarket .pm-ix-v { font-size: 14px; margin-top: 0; }
+#panel-premarket .pm-ix-f { margin-top: 1px; }
+#panel-premarket .pmx-key { gap: 4px; margin-bottom: 4px; }
+/* priority rows: tight gaps; row 1 panels share one height, long lists scroll inside their panel (no empty gaps) */
+#panel-premarket .pmx-prio { gap: 4px; }
+#panel-premarket .pmx-prow { gap: 4px; }
+#panel-premarket .pmx-prio .pmx-pn { padding: 4px 7px; gap: 2px; }
+@media (min-width: 1101px) {
+  #panel-premarket .pmx-prow { align-items: stretch; }
+  #panel-premarket .pmx-prow.pmx-call > .pmx-pn { max-height: 330px; overflow-y: auto; scrollbar-width: thin; }
+  #panel-premarket .pmx-prow.r2 > .pmx-pn, #panel-premarket .pmx-prow.r3:not(.pmx-call) > .pmx-pn { max-height: 300px; overflow-y: auto; scrollbar-width: thin; }
+}
+#panel-premarket .pmx-pcr { padding: 4px 7px; margin-bottom: 0; gap: 3px; }
+#panel-premarket .pmx-ipos, #panel-premarket .pmx-rh { margin: 0; gap: 4px; }

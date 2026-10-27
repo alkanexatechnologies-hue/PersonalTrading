@@ -9921,7 +9921,11 @@ router.get("/premarket/pcr-vix", async (_req: Request, res: Response) => {
         let open: number | null = null;
         try { const day = loadMinuteDay(today, sym, String(oi.expiry)); if (day.length && day[0].pcr != null) open = day[0].pcr; } catch { /* none */ }
         const b = bandOf(pcr, PCR_BANDS), bn = bandOf(near, PCR_BANDS);
-        return { symbol: sym, name: def.name, available: true, expiry: oi.expiry, pcr, band: b, nearPcr: near, nearBand: bn, putOi: oi.totalPeOi, callOi: oi.totalCeOi,
+        // max pain (strike where option writers pay the least at expiry) — from the same chain, no extra Dhan call
+        const spot = oi.underlying ?? null, mp = oi.maxPain ?? null;
+        const daysToExpiry = oi.expiry ? Math.round((Date.parse(String(oi.expiry) + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / 86400_000) : null;
+        const maxPain = mp != null ? { strike: mp, spot, dist: spot != null ? Math.round((spot - mp) * 100) / 100 : null, distPct: spot != null && mp ? Math.round(((spot - mp) / mp) * 10000) / 100 : null, daysToExpiry } : null;
+        return { symbol: sym, name: def.name, available: true, expiry: oi.expiry, pcr, band: b, nearPcr: near, nearBand: bn, putOi: oi.totalPeOi, callOi: oi.totalCeOi, maxPain,
           pcrAtOpen: open, change: open != null && pcr != null ? Math.round((pcr - open) * 100) / 100 : null,
           session: oi.sessionDate || null, live: isMarketOpenIST() && !oi.sessionDate, asOf: oi.asOf ?? null };
       } catch (e: any) { return { symbol: sym, name: def.name, available: false, reason: e?.message || "chain unavailable" }; }
