@@ -96,3 +96,10 @@ test("engine on real data: 27 Oct NIFTY 22750 PE above 50 (trader call) hits T1â
   assert.equal(r.status, "ALL TARGETS"); assert.equal(hm(r.fill!.t), "10:07");
   assert.ok(r.sim.hits.every((h) => hm(h.t) <= "10:21")); assert.equal(r.callWall!.strike, 22800); assert.equal(r.oi.wall!.held, true);
 });
+
+test("nearest weekly expiry of a day (a later expiry is a different option)", async () => {
+  const { nearestExpiry } = await import("./learningFeed");
+  assert.equal(nearestExpiry("NIFTY", "2026-10-23"), "2026-10-27");   // Friday â†’ next Tuesday
+  assert.equal(nearestExpiry("NIFTY", "2026-10-27"), "2026-10-27");   // expiry day itself
+  assert.equal(nearestExpiry("SENSEX", "2026-10-23"), "2026-10-29");
+});

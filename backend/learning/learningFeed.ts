@@ -67,6 +67,30 @@ export async function bandDay(index: LearnIndex, day: string): Promise<BandLeg[]
   return [...legs.entries()].map(([k, m]) => ({ strike: Number(k.slice(0, -2)), side: k.slice(-2) as "CE" | "PE", bars: [...m.values()].sort((a, b) => a.t - b.t) }));
 }
 
+/** The traded strike when it was outside the ATM±3 band: the same nearest-expiry rolling series, fetched further out
+ *  (Dhan serves ATM±10). The strike moves between ATM+n series as the spot moves, so every n it visited is read. */
+export async function wideLeg(index: LearnIndex, day: string, strike: number, side: "CE" | "PE", idx: Bar1[]): Promise<Bar1[]> {
+  const step = LEARN_META[index].step, sym = SYM[index], m = new Map<number, Bar1>();
+  if (!idx.length) return [];
+  const rels = idx.map((b) => Math.round((strike - Math.round(b.c / step) * step) / step));
+  const lo = Math.max(-10, Math.min(...rels) - 1), hi = Math.min(10, Math.max(...rels) + 1);
+  for (let rel = lo; rel <= hi; rel++) {
+    if (rel >= -3 && rel <= 3) continue;   // already in the band
+    const raw: Raw | null = await withDhanPriority("low", () => rawFor(sym, day, side, rel, dayComplete(day))).catch(() => null);
+    raw?.timestamp.forEach((t, i) => {
+      if (raw.strike[i] !== strike || istDay(t) !== day || mn(t) < 555 || mn(t) >= 930 || !(raw.close[i] > 0) || m.has(t)) return;
+      m.set(t, { t, o: raw.open[i], h: raw.high[i], l: raw.low[i], c: raw.close[i], oi: raw.oi?.[i] ?? null, v: Number(raw.volume?.[i] ?? 0) || 0 });
+    });
+  }
+  return [...m.values()].sort((a, b) => a.t - b.t);
+}
+
+/** The weekly expiry that was nearest on `day` (NIFTY Tuesday, SENSEX Thursday; a holiday can only move it earlier). */
+export const nearestExpiry = (index: LearnIndex, day: string) => {
+  const wd = index === "NIFTY" ? 2 : 4, d = new Date(day + "T00:00:00Z").getUTCDay();
+  return addDays(day, (wd - d + 7) % 7);
+};
+
 /** The traded strike when it was outside the rolling band: the listed contract (works only until it expires). */
 export async function listedLeg(index: LearnIndex, day: string, strike: number, side: "CE" | "PE", expiry: string | null): Promise<Bar1[]> {
   const f = path.join(CACHE, index, `${day}_${strike}${side}.json`), hit = readCache<Bar1[]>(f); if (hit) return hit;

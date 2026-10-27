@@ -146,8 +146,12 @@ export function analyzeTrade(I: LearnInput) {
     .filter((r) => (r.ce != null || r.pe != null) && Math.abs(r.strike - spot) <= step * 3);
   const wall = isPE ? callWall : putWall, wallLeg = wall ? I.band.find((l) => l.strike === wall.strike && l.side === (isPE ? "CE" : "PE")) : null;
   const wallA = wallLeg ? oiAt(wallLeg, tA) : null, wallB = wallLeg ? oiAt(wallLeg, ref.t) : null;
-  const wallHeld = wallA && wallB ? wallB >= wallA * 0.97 : null;
-  const oiRead = !wall ? "No OI wall found in the recorded strikes." : wallHeld
+  // a wall the index has already crossed is broken, whatever its OI says (CE: spot under the put wall; PE: spot over the call wall)
+  const wallCrossed = !!wall && (isPE ? spot > wall.strike + step * 0.2 : spot < wall.strike - step * 0.2);
+  const wallHeld = wallCrossed ? false : wallA && wallB ? wallB >= wallA * 0.97 : null;
+  const oiRead = !wall ? "No OI wall found in the recorded strikes." : wallCrossed
+    ? `${I.trade.index} ${Math.round(spot)} was already ${isPE ? "above the" : "below the"} ${wall.strike} ${isPE ? "call wall" : "put wall"} at your entry: that ${isPE ? "ceiling" : "floor"} had broken. ${isPE ? "Call" : "Put"} OI there is ${(wallB! / 1e5).toFixed(0)} lakh, but writers at a broken level are trapped, not strong.`
+    : wallHeld
     ? `${wall.strike} ${isPE ? "CE" : "PE"} OI stayed at ${(wallB! / 1e5).toFixed(0)} lakh (${lakh(wallB! - wallA!)} in 12 min): the ${isPE ? "call" : "put"} writers did not run. The wall held.`
     : `${wall.strike} ${isPE ? "CE" : "PE"} OI fell ${lakh(wallB! - wallA!)} in 12 min: the ${isPE ? "call" : "put"} writers were leaving. The wall was weak.`;
 
@@ -198,7 +202,7 @@ export function analyzeTrade(I: LearnInput) {
     { ok: !!rev, text: rev ? `Reversal candle at the bottom (${hm(rev.t)} ${rev.kind})` : "No reversal candle on the premium at the entry" },
     { ok: nearBase, text: base ? `Entry ${fx(ref.px)} is ${nearBase ? "just" : "far"} above the bottom ${fx(base.v)}` : "Entry not tied to a premium bottom" },
     { ok: slUnder === true, text: T.sl == null ? "No SL given" : base ? `SL ${fx(T.sl)} ${slUnder ? "is under" : "is above"} the bottom ${fx(base.v)}` : `SL ${fx(T.sl)} (no bottom to compare)` },
-    { ok: wallHeld === true, text: wall ? `OI: the ${wallWord} ${wall.strike} ${wallHeld ? "held" : "did not hold"}` : "OI: no wall in the recorded strikes" },
+    { ok: wallHeld === true, text: wall ? `OI: the ${wallWord} ${wall.strike} ${wallCrossed ? "was already broken at the entry" : wallHeld ? "held" : "did not hold"}` : "OI: no wall in the recorded strikes" },
   ];
 
   // ------------------------------------------------------------------ angles (today's line for each lesson card)

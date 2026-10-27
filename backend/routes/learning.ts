@@ -10,7 +10,7 @@ import crypto from "crypto";
 import { dataFile } from "../config/dataDir";
 import { parseTrade, resolveShortStrike, LearnIndex } from "../learning/parseTrade";
 import { analyzeTrade, tOf, LearnTrade } from "../learning/learningEngine";
-import { indexDay, bandDay, listedLeg, dayComplete, istDay, LEARN_META, learningSource } from "../learning/learningFeed";
+import { indexDay, bandDay, wideLeg, listedLeg, nearestExpiry, dayComplete, istDay, LEARN_META, learningSource } from "../learning/learningFeed";
 
 const FILE = dataFile("learning-trades.json");
 interface Saved { id: string; createdAt: number; updatedAt?: number; text: string; trade: LearnTrade; result?: { status: string; fill: number | null; best: number | null; hits: number; sl: boolean } }
@@ -59,9 +59,16 @@ export function learningRouter(expiriesFor: (index: LearnIndex) => Promise<strin
       const key = JSON.stringify(trade); if (memo.has(key)) { const m = memo.get(key); upsert(String(req.body?.text || ""), trade, undefined); return res.json(m); }
       const band = await bandDay(index, day), expiries = await expiriesFor(index).catch(() => [] as string[]);
       let opt = band.find((l) => l.strike === strike && l.side === trade.side)?.bars || [], note = "";
-      if (!opt.some((b) => Math.abs(b.t - t0) <= 300)) {   // outside the recorded ATM±3 band → the listed contract, if not expired
-        const listed = await listedLeg(index, day, strike, trade.side, expiries.find((e) => e >= day) ?? null).catch(() => []);
-        if (listed.length) { opt = listed; note = `${strike} ${trade.side} was outside the recorded ATM±3 band, so the listed contract's own data is used.`; }
+      const covers = (b: { t: number }[]) => b.some((x) => Math.abs(x.t - t0) <= 300);
+      if (!covers(opt)) {   // outside the ATM±3 band → the same rolling series further out (ATM±10), then the listed contract
+        const wide = await wideLeg(index, day, strike, trade.side, idx).catch(() => []);
+        const merged = [...new Map([...opt, ...wide].map((b) => [b.t, b])).values()].sort((a, b) => a.t - b.t);
+        if (covers(merged)) { opt = merged; note = `${strike} ${trade.side} was outside ATM±3 at ${trade.time}, so Dhan's wider rolling series (up to ATM±10, same weekly expiry) is used.`; }
+        else {   // only the contract that was the nearest expiry that day — a later expiry is a different option
+          const near = nearestExpiry(index, day), exp = expiries.find((e) => e >= day && e <= near) ?? null;
+          const listed = await listedLeg(index, day, strike, trade.side, exp).catch(() => []);
+          if (listed.length) { opt = listed; note = `${strike} ${trade.side} was outside the recorded band, so the listed ${exp} contract's own data is used.`; }
+        }
       }
       if (!opt.length) return res.json({ available: false, parsed: p, error: `No premium data for ${strike} ${trade.side} on ${day}. Only strikes within ATM±3 are recorded for expired contracts. Try a strike nearer the money.` });
       // the written price must match the option: "above 200" on a premium of 2,073 means a wrong strike / CE-PE / price
