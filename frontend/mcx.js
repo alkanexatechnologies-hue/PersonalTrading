@@ -375,8 +375,11 @@
   function setView(v) {
     X.view = v;
     document.body.classList.toggle("mcx-oi", v === "oi");
+    document.body.classList.toggle("mcx-learn", v === "learn");
     document.querySelectorAll("[data-mcx-view]").forEach((b) => { const on = b.getAttribute("data-mcx-view") === v; b.classList.toggle("active", on); b.setAttribute("aria-selected", String(on)); });
     const host = $("mcx-oi-host"); if (host) host.hidden = v !== "oi";
+    const lh = $("mcx-learn-host"); if (lh) lh.hidden = v !== "learn";
+    if (v === "learn" && typeof window.lrnMount === "function") window.lrnMount(lh);   // 🎓 Learning (learning.js)
     if (v === "oi") mountOia(); else { restoreOia(); setTimeout(fitFrame, 50); }
   }
 

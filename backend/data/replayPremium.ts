@@ -65,7 +65,8 @@ export function sameContract(prevLastStraddle: number | null, dayFirstStraddle: 
 }
 
 // ---------------------------------------------------------------------------------------------------------------- I/O
-async function rawFor(sym: string, day: string, side: Side, rel: number, allowFetch: boolean): Promise<Raw | null> {
+/** One rolling-option series (side, ATM+rel) of one day: research cache → own cache → Dhan (when allowFetch). Also used by learning/learningFeed. */
+export async function rawFor(sym: string, day: string, side: Side, rel: number, allowFetch: boolean): Promise<Raw | null> {
   const c = REPLAY_INDEX[sym]; if (!c) return null;
   const dir = path.join(DATA_DIR, c.dir);
   try { const f = coveringFile(fs.readdirSync(dir), day, side, rel); if (f) return JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")); } catch { /* not cached */ }

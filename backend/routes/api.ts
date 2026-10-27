@@ -86,6 +86,7 @@ import * as LM from "../premium/levelMemory";
 import * as OWN from "../premium/ownerLevels";
 import * as CRUDE from "../sentiment/crudeMove";
 import { mcxDeskRouter } from "./mcxDesk";
+import { learningRouter } from "./learning";
 import { syncKeyConfigured, syncKeyValid } from "../auth/syncKey";
 import { premiumStructure } from "../premium/premiumStructure";
 import * as C4F from "../premium/c4Feed";
@@ -373,6 +374,8 @@ router.use((req: Request, res: Response, next: NextFunction) => {
 // breaker + cache — backend/mcx/mcxFeed.ts).
 router.use("/gold", requirePermission("oiAnalysis"), mcxDeskRouter("GOLD"));
 router.use("/crude", requirePermission("oiAnalysis"), mcxDeskRouter("CRUDE"));
+router.use("/learning", requirePermission("oiAnalysis"), learningRouter((index) =>
+  cached(`learn-exp:${index}`, 30 * 60_000, async () => { const def = findSymbolDef(index === "NIFTY" ? "^NSEI" : "^BSESN"); const ch: any = def ? await dhanChainForExpiry(def, 0) : null; return (ch?.expiries || []) as string[]; })));
 router.get("/data-control", (_req: Request, res: Response) => { res.json(dataControlStatus()); });
 router.post("/data-control", requireAdmin, (req: Request, res: Response) => {
   const b = req.body || {};

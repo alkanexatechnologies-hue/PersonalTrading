@@ -7,7 +7,7 @@
          under the home indicator. Android ignores it harmlessly. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>BC Data Status</title>
-    <link rel="stylesheet" href="styles.css?v=20261027-ms2" />
+    <link rel="stylesheet" href="styles.css?v=20261027-lrn2" />
     <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   </head>
   <body class="oi-focus">
@@ -1605,10 +1605,12 @@
             <div class="mcx-tabs" role="tablist" aria-label="Market Command views">
               <button type="button" role="tab" class="mcx-tab active" data-mcx-view="mc" aria-selected="true" title="chart · plan · options">⚡ Market Command</button>
               <button type="button" role="tab" class="mcx-tab" data-mcx-view="oi" aria-selected="false" title="1-min monitor · wall builder · movement · summary">🔬 OI Analysis</button>
+              <button type="button" role="tab" class="mcx-tab" data-mcx-view="learn" aria-selected="false" title="replay a past trade on that day's data · after 3:30 PM">🎓 Learning</button>
             </div>
             <section class="mcx-tape" id="mcx-tape" aria-label="Market stats"></section>
             <div class="mcx-dec" id="mcx-dec"></div>
             <div class="mcx-oiview" id="mcx-oi-host" hidden></div>
+            <div class="mcx-learnview" id="mcx-learn-host" hidden></div>
 
             <!-- ===== INDEX CARDS (hidden in the redesign: VIX moved to the tape, direction to the decision row) ===== -->
             <div class="mc2-cards" id="mc2-cards">
@@ -2667,13 +2669,14 @@
         <div id="dc-body" class="dc-body">Loading…</div>
       </div>
     </div>
-    <script src="app.js?v=20261027-ms1"></script>
+    <script src="app.js?v=20261027-lrn1"></script>
     <script src="mcsummary.js?v=20261012-dh1"></script>
     <script src="premiumcenter.js?v=20261025-pl1"></script>
     <script src="oimonitor.js?v=20261024-mcx1"></script>
     <script src="liquidity.js?v=20261007-lqa7"></script>
     <script src="levelReaction.js?v=20261025-lr1"></script>
-    <script src="mcx.js?v=20261025-pl1"></script>
+    <script src="mcx.js?v=20261027-lrn1"></script>
+    <script src="learning.js?v=20261027-lrn2"></script>
     <script src="mcxdesk.js?v=20261025-m2"></script>
   </body>
 </html>

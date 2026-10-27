@@ -21,6 +21,7 @@ export const DC_SCREENS: DcItem[] = [
   { key: "liquidityanalysis", label: "💧 Liquidity Analysis", group: "Trading", note: "Research screen — 20-day history fetched once a day" },
   { key: "marketanalysis", label: "📊 Market Analysis", group: "Trading" },
   { key: "oianalysis", label: "🔬 OI Analysis", group: "Trading" },
+  { key: "learning", label: "🎓 Learning (Market Command tab)", group: "Trading", note: "Replays a past trade on that day's Dhan data — after 15:30 only, low priority, cached per day" },
   { key: "oicommand", label: "🎯 Trader Dashboard", group: "Trading" },
   { key: "goldcommand", label: "🪙 Gold Command (MCX)", group: "Trading", note: "MCX GOLDM / GOLD futures + options — isolated: low Dhan priority, own throttle, never slows the Indian screens" },
   { key: "crudecommand", label: "🛢️ Crude Oil Command (MCX)", group: "Trading", note: "MCX CRUDEOILM / CRUDEOIL futures + options — isolated like the Gold desk (shares its throttle)" },
