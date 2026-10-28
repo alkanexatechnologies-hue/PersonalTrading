@@ -84,6 +84,15 @@ export function learningRouter(expiriesFor: (index: LearnIndex) => Promise<strin
     } catch (e: any) { res.status(502).json({ available: false, parsed: p, error: e?.message || "Learning analysis failed" }); }
   });
 
+  // 📚 market lessons: one written lesson per session (liquidity taken, why it fell / rose, strategies) — backend/learning/lessons/<day>.json
+  const LESSON_DIR = path.join(process.cwd(), "backend", "learning", "lessons");
+  router.get("/lessons", (req: Request, res: Response) => {
+    let days: string[] = []; try { days = fs.readdirSync(LESSON_DIR).filter((f) => /^\d{4}-\d{2}-\d{2}\.json$/.test(f)).map((f) => f.slice(0, 10)).sort().reverse(); } catch { /* none yet */ }
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.day || "")) ? String(req.query.day) : days[0];
+    let lesson: any = null; if (day && days.includes(day)) { try { lesson = JSON.parse(fs.readFileSync(path.join(LESSON_DIR, day + ".json"), "utf8")); } catch { /* bad file */ } }
+    res.json({ days, lesson });
+  });
+
   router.get("/trades", (req: Request, res: Response) => {
     const date = String(req.query.date || ""), all = load();
     const days = [...new Set(all.map((s) => s.trade.date))].sort().reverse();

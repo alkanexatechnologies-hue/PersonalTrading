@@ -33,6 +33,8 @@
   function shell(host) {
     host.innerHTML = `
 <div class="lrn">
+  <details class="lrn-card lrn-mkt" id="lrn-mkt" open><summary><b>📚 बाज़ार का पाठ</b> <span class="lrn-hint">कहाँ liquidity ली · क्यों गिरा, क्यों चढ़ा · strategies</span></summary>
+    <div class="lrn-mkt-bar"><label class="lrn-hint" for="lrn-mkt-day">दिन</label><select class="lrn-in" id="lrn-mkt-day"></select></div><div id="lrn-mkt-body"><span class="lrn-hint">लोड हो रहा है…</span></div></details>
   <div class="lrn-top">
     <div class="lrn-card">
       <div class="lrn-h"><b>✍️ Write your trade in your own words</b><span>premium, time, SL, targets</span></div>
@@ -313,10 +315,33 @@
     document.querySelector(".lrn").addEventListener("keydown", (e) => { const kc = e.target.closest("[data-lrn-hl]"); if (kc && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); kc.click(); } });
   }
 
+  // ------------------------------------------------------------------ 📚 market lesson of a session (/api/learning/lessons)
+  const SIDE = { SSL: ["🔻 Sell-side liquidity", "lrn-ssl"], BSL: ["🔺 Buy-side liquidity", "lrn-bsl"], RETEST: ["↩️ Flip retest", "lrn-rt"] };
+  async function loadLesson(day) {
+    const box = $("lrn-mkt-body"), sel = $("lrn-mkt-day"); if (!box) return;
+    try {
+      const j = await api(`lessons${day ? `?day=${day}` : ""}`), x = j.lesson;
+      if (sel && !sel.options.length) sel.innerHTML = (j.days || []).map((d) => `<option value="${d}">${dmy(d)}</option>`).join("");
+      if (!x) { box.innerHTML = `<span class="lrn-hint">इस दिन का पाठ अभी नहीं लिखा गया।</span>`; return; }
+      if (sel) sel.value = x.day;
+      const li = (a) => (a || []).map((v) => `<li>${v}</li>`).join("");   // lesson files are written by the app owner (Hindi + <b>)
+      const n = (v) => (v == null ? "—" : Math.round(v).toLocaleString("en-IN"));
+      const idx = x.indices.map((I) => { const N = I.numbers || {};
+        return `<section class="lrn-mk-ix"><h4>${esc(I.index)}</h4>
+          <p class="lrn-hint">कल H ${n(N.prevHigh)} · L ${n(N.prevLow)} · C ${n(N.prevClose)} → आज O ${n(N.open)} · H ${n(N.high)} (${esc(N.highAt || "")}) · L ${n(N.low)} (${esc(N.lowAt || "")}) · C ${n(N.close)}</p>
+          <ol class="lrn-liq">${I.liquidity.map((q) => `<li class="${(SIDE[q.side] || [])[1] || ""}"><div class="lrn-liq-h"><time>${esc(q.time)}</time><b>${(SIDE[q.side] || [q.side])[0]}</b><span>${esc(q.level)}</span></div><p>${esc(q.what)}</p><p class="lrn-hint">➜ ${esc(q.after)}</p></li>`).join("")}</ol>
+          <div class="lrn-mk-why"><div><h5 class="lrn-dn">📉 क्यों गिरा</h5><ul>${li(I.downLogic)}</ul></div><div><h5 class="lrn-up">📈 क्यों चढ़ा</h5><ul>${li(I.upLogic)}</ul></div></div></section>`; }).join("");
+      const st = `<section><h4>🧭 आज की strategies — क्या चला, क्या नहीं</h4><div class="lrn-strats">${x.strategies.map((g) => `<div class="lrn-strat"><b>${esc(g.name)}</b> <span class="lrn-hint">${esc(g.when)}</span><p><i>नियम:</i> ${esc(g.rule)}</p><p><i>आज:</i> ${esc(g.today)}</p><p class="lrn-st">${esc(g.status)}</p></div>`).join("")}</div></section>`;
+      box.innerHTML = `<p class="lrn-mk-title"><b>${esc(x.title)}</b></p><p>${esc(x.summary)}</p><div class="lrn-mk-grid">${idx}</div>${st}
+        <section><h4>🧠 सबक</h4><ol>${li(x.lessons)}</ol></section><p class="lrn-hint">⚠️ ${esc(x.caveat)}</p>`;
+    } catch (e) { box.innerHTML = `<span class="lrn-hint">${esc(e.message)}</span>`; }
+  }
+  document.addEventListener("change", (e) => { if (e.target && e.target.id === "lrn-mkt-day") loadLesson(e.target.value); });
+
   /** Called by mcx.js when the 🎓 Learning view opens. */
   window.lrnMount = function (host) {
     if (!host) return;
-    if (!L.mounted) { shell(host); wire(); L.mounted = true; loadSaved(); if (!$("lrn-text").value) $("lrn-text").placeholder = `e.g. BUY Nifty 22750 PE above 50, SL 37, target 78 95 105, time 10:07`; }
+    if (!L.mounted) { shell(host); wire(); L.mounted = true; loadSaved(); loadLesson(); if (!$("lrn-text").value) $("lrn-text").placeholder = `e.g. BUY Nifty 22750 PE above 50, SL 37, target 78 95 105, time 10:07`; }
     else if (L.r) setTimeout(drawTf, 30);   // the charts were hidden: redraw at the visible size
   };
 })();

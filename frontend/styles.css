@@ -8468,3 +8468,20 @@ body.one-mode #mcx-desk, body.one-mode #best-trade, body.one-mode #success-ind {
 .one-market summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; list-style: none; }
 @media (max-width: 900px) { .one-mks { grid-template-columns: minmax(0, 1fr); } }
 body.one-mode .mc-tog:has(#mc-tog-trade), body.one-mode .mc-tog:has(#mc-tog-planlv) { display: none !important; }   /* their lines are trade calls: off in One Trade mode */
+/* 📚 Learning: market lesson of the day (2026-10-28) */
+.lrn-mkt { margin-bottom: 10px; font-size: 14px; line-height: 1.5; }
+.lrn-mkt > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; cursor: pointer; min-height: 44px; list-style: none; }
+.lrn-mkt-bar { display: flex; align-items: center; gap: 8px; margin: 4px 0; } .lrn-mkt-bar select { min-height: 44px; font-size: 16px; }
+.lrn-mk-title { font-size: 16px; margin: 6px 0 2px; }
+.lrn-mk-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 8px; }
+.lrn-mk-ix { border: 1px solid #1e2530; border-radius: 8px; padding: 8px 10px; background: #0d1117; min-width: 0; } .lrn-mk-ix h4 { margin: 0 0 4px; }
+.lrn-liq { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.lrn-liq li { border-left: 3px solid #4f8cff; background: #121821; border-radius: 6px; padding: 6px 8px; } .lrn-liq li p { margin: 2px 0; }
+.lrn-liq li.lrn-ssl { border-left-color: #ef5350; } .lrn-liq li.lrn-bsl { border-left-color: #26a69a; } .lrn-liq li.lrn-rt { border-left-color: #f0b429; }
+.lrn-liq-h { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; } .lrn-liq-h time { font-family: 'JetBrains Mono', monospace; color: #9aa3b0; }
+.lrn-mk-why { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; } .lrn-mk-why h5 { margin: 6px 0 2px; font-size: 13px; }
+.lrn-mk-why ul, .lrn-mkt ol { margin: 2px 0; padding-left: 18px; } .lrn-dn { color: #ef5350; } .lrn-up { color: #26a69a; }
+.lrn-strats { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.lrn-strat { border: 1px solid #1e2530; border-radius: 8px; padding: 8px 10px; background: #0d1117; } .lrn-strat p { margin: 4px 0; } .lrn-strat i { font-style: normal; color: #9aa3b0; }
+.lrn-st { font-size: 13px; color: #f0b429; }
+@media (max-width: 900px) { .lrn-mk-grid, .lrn-mk-why { grid-template-columns: minmax(0, 1fr); } }
