@@ -7982,7 +7982,7 @@ body.ppc-fullwidth .watchlist, body.ppc-fullwidth #watchlist { display: none !im
    OI Movement, Multi-Timeframe Direction and the option chain (their useful content moved to the tape / decision row) */
 #panel-marketcommand .mc2-cards, #panel-marketcommand #mc-decision, #panel-marketcommand #mc-bo,
 #panel-marketcommand #mc-oimove-panel, #panel-marketcommand #mc-mtfdir-panel, #panel-marketcommand .mcx-hidden-oc { display: none !important; }
-body.mcx-oi #panel-marketcommand .mc2-main, body.mcx-oi #mcx-dec, body.mcx-oi #mcx-ot { display: none !important; }
+body.mcx-oi #panel-marketcommand .mc2-main, body.mcx-oi #mcx-dec, body.mcx-oi #mcx-desk, body.mcx-oi #mcx-ot { display: none !important; }
 #mcx-oi-host .oia-wrap .te-navbtn, #mcx-oi-host .oia-wrap .te-brand { display: none; }
 .mcx-tabs { display: flex; gap: 0; border-bottom: 1px solid #1e2530; margin: 6px 0; }
 .mcx-tab { min-height: 42px; padding: 5px 16px; background: transparent; border: 1px solid transparent; border-bottom: 2px solid transparent; border-radius: 8px 8px 0 0; color: #aeb7c4; font-size: 13px; font-weight: 700; text-align: left; cursor: pointer; margin-bottom: -1px; }
@@ -8286,7 +8286,7 @@ body.gc-has-full { overflow: hidden; }
 #panel-premarket .pmx-ipos, #panel-premarket .pmx-rh { margin: 0; gap: 4px; }
 
 /* ============================ 🎓 Learning — Market Command tab (learning.js · owner-approved design 2026-10-27) ============================ */
-body.mcx-learn #panel-marketcommand .mc2-main, body.mcx-learn #mcx-dec, body.mcx-learn #mcx-ot, body.mcx-learn #mcx-tape { display: none !important; }
+body.mcx-learn #panel-marketcommand .mc2-main, body.mcx-learn #mcx-dec, body.mcx-learn #mcx-desk, body.mcx-learn #mcx-ot, body.mcx-learn #mcx-tape { display: none !important; }
 .lrn { color: #d7dde8; font-size: 14px; line-height: 1.5; padding-bottom: 24px; }
 .lrn-card { background: #11151c; border: 1px solid #1e2530; border-radius: 8px; padding: 10px 12px; min-width: 0; }
 .lrn-h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
@@ -8376,3 +8376,25 @@ body.lrn-fullbody { overflow: hidden; }
 .lrn-pgo { flex: 1; display: grid; grid-template-columns: 62px 1fr auto; gap: 8px; align-items: center; background: none; border: 0; color: #d7dde8; font: inherit; font-size: 13px; text-align: left; padding: 7px 10px; cursor: pointer; min-height: 48px; }
 .lrn-pgo:hover { background: #161d29; } .lrn-pd { color: #8a94a3; font-size: 12px; line-height: 1.3; } .lrn-pd b { color: #fff; font-size: 13px; } .lrn-pm b { color: #fff; }
 .lrn-px { background: none; border: 0; border-left: 1px solid #2a3443; color: #8a94a3; width: 44px; font-size: 18px; cursor: pointer; } .lrn-px:hover { color: #ef5350; }
+
+/* 🎙 ProTrader desk commentary (Market Command, 2026-10-28) */
+.mcx-desk { background: #11151c; border: 1px solid #1e2530; border-radius: 8px; margin-bottom: 6px; font-size: 13px; line-height: 1.45; color: #d6dbe3; }
+.mcx-desk > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 7px 10px; cursor: pointer; min-height: 44px; list-style: none; }
+.mcx-desk > summary::-webkit-details-marker { display: none; }
+.mcx-desk > summary::after { content: "▾"; margin-left: auto; color: #9aa3b0; } .mcx-desk[open] > summary::after { content: "▴"; }
+.mcx-dk-head { flex: 1 1 320px; min-width: 0; font-size: 14px; }
+.mcx-dk-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; padding: 0 10px 10px; }
+.mcx-dk-body ul { margin: 4px 0 0; padding-left: 18px; } .mcx-dk-body li { margin: 2px 0; }
+.mcx-dk-trades { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.mcx-dk-side { border: 1px solid #1e2530; border-radius: 8px; padding: 8px 10px; background: #0d1117; min-width: 0; }
+.mcx-dk-side.ce { border-left: 3px solid #26c6a6; } .mcx-dk-side.pe { border-left: 3px solid #ff6b72; }
+.mcx-dk-side p { margin: 4px 0 0; } .mcx-dk-trig { color: #c3cad4; }
+.mcx-dk-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 6px; }
+.mcx-dk-grid span { display: flex; flex-direction: column; background: #151b24; border-radius: 6px; padding: 4px 6px; min-width: 0; }
+.mcx-dk-grid i { font-style: normal; font-size: 12px; color: #9aa3b0; } .mcx-dk-grid b { font-size: 17px; font-family: 'JetBrains Mono', monospace; }
+.mcx-dk-grid small { font-size: 12px; color: #9aa3b0; }
+.mcx-dk-sub, .mcx-dk-st { font-size: 12.5px; color: #c3cad4; } .mcx-dk-cond { margin: 6px 0 0; }
+.mcx-dk-note { grid-column: 1 / -1; margin: 0; font-size: 12px; color: #9aa3b0; }
+@media (max-width: 900px) { .mcx-dk-body, .mcx-dk-trades { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 420px) { .mcx-dk-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .mcx-dk-head { flex-basis: 100%; } }
+.mcx-desk .mcx-h { font-size: 12px; }

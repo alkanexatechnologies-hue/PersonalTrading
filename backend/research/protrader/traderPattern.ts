@@ -37,7 +37,7 @@ function ownDays(ix: IX, after: string): DayData[] {
     (d.timestamp || []).forEach((t: number, i: number) => {
       const mn = Math.floor(((t + 19800) % 86400) / 60); if (mn < 555 || mn >= 930 || !(d.close[i] > 0)) return;
       if (d.spot?.[i] > 0 && !dd.spot.has(t)) dd.spot.set(t, d.spot[i]);
-      const k = `${d.strike[i]}${m[2]}`, a = dd.legs.get(k) || []; if (!a.some((x) => x.t === t)) a.push({ t, o: d.open[i], h: d.high[i], l: d.low[i], c: d.close[i], v: d.volume?.[i] ?? null, oi: d.oi?.[i] ?? null, iv: null });
+      const k = `${d.strike[i]}${m[2]}`, a: Min[] = dd.legs.get(k) || []; if (!a.some((x) => x.t === t)) a.push({ t, o: d.open[i], h: d.high[i], l: d.low[i], c: d.close[i], v: d.volume?.[i] ?? null, oi: d.oi?.[i] ?? null, iv: null });
       dd.legs.set(k, a);
     });
     by.set(day, dd);

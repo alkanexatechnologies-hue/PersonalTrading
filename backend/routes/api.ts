@@ -243,6 +243,7 @@ import { writeBaseline as writeStrategyBaseline, checkStrategyIntegrity } from "
 import { getMarketNews } from "../news/news";
 import { getNewsIntel } from "../news/intel";
 import { commandRoute, type CCInputs } from "../sentiment/commandCenter";
+import * as KLS from "../levels/levelSheet";
 import { DATA_DIR } from "../config/dataDir";
 import { readModel as readContribModel, refreshModelIfDue as refreshContribModel } from "../sentiment/niftyWeights";
 import { logPrediction, resolveDay as resolvePredictionDay, report as predictionReport, argmaxClass, type PredictionRecord } from "../sentiment/predictionLog";
@@ -282,6 +283,7 @@ import {
   last,
 } from "../indicators";
 import { buildMarketCommentary, detectStructure, formatTradeReview } from "../commentary/marketCommentary";
+import { buildDeskCommentary } from "../commentary/deskCommentary";
 import { CONFIG, DEFAULT_SYMBOLS, DISCLAIMER, SymbolDef, nearestStrike, SWING_SYMBOLS, findSymbolDef, ALL_SYMBOLS } from "../config";
 import { istDateOfSec } from "../util/istTime";
 import { getOptionTopPickAuditLog } from "../optionTopPick/auditLog";
@@ -8400,6 +8402,36 @@ router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Reque
   res.json(out);
 });
 
+// ===================== 🎙 ProTrader desk commentary (Market Command, Hindi) — owner 2026-10-28 =====================
+// /api/desk-commentary?symbol=^NSEI|^BSESN · the approved Trade Plan + the co-pilot's trade state + today's 5-min candles,
+// told the way a desk trader explains it (deskCommentary.ts). No new rule and no new Dhan load: the premium-center payload
+// and candles come from the shared caches.
+router.get("/desk-commentary", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
+  if (!def || def.type !== "index" || !def.fno) return res.status(400).json({ error: "F&O index symbol required" });
+  try {
+    const out = await cachedSwr(`desk-cmt:${def.symbol}`, 20_000, 120_000, async () => {
+      const [d, c5all] = await Promise.all([premiumCenterPayload({ symbol: def.symbol, interval: "15m" }), getCandlesCached(def.symbol, "5m" as Interval).catch(() => [] as any[])]);
+      if (!d?.available || !d.trader) return { available: false, error: d?.error || "plan not ready" };
+      const nowSec = Math.floor(Date.now() / 1000), day = new Date((nowSec + 19800) * 1000).toISOString().slice(0, 10);
+      const c5 = (c5all || []).filter((b: any) => new Date((b.time + 19800) * 1000).toISOString().slice(0, 10) === day);
+      const P = d.trader.plans || {}, ow = d.oiWalls || {}, row = (_pcLastChain.get(`${def.symbol}:0`)?.v?.strikes || []).find((r: any) => r.strike === d.atm);
+      const tr = _cp.day === day ? _cp.trades?.[def.symbol] || null : null, pd = _cp.day === day ? _cp.pending?.[def.symbol] || null : null;
+      return { available: true, symbol: def.symbol, ...buildDeskCommentary({
+        index: d.name || def.name, nowSec, step: d.step || 50, lot: def.lotSize || 1, atr15: d.trader.atr15 ?? null,
+        spot: d.spot?.price, dayHigh: d.spot?.high ?? null, dayLow: d.spot?.low ?? null, prevClose: d.spot?.prevClose ?? null, c5,
+        bull: P.bull || null, bear: P.bear || null, noTrade: P.noTrade || null,
+        callWall: ow.call ? { strike: ow.call.strike, oiL: ow.call.oiL, state: ow.call.state } : d.oi?.callWall ? { strike: d.oi.callWall.strike, oiL: d.oi.callWall.oiL } : null,
+        putWall: ow.put ? { strike: ow.put.strike, oiL: ow.put.oiL, state: ow.put.state } : d.oi?.putWall ? { strike: d.oi.putWall.strike, oiL: d.oi.putWall.oiL } : null,
+        atm: row && row.ceOi != null && row.peOi != null ? { strike: row.strike, ceOi: row.ceOi, peOi: row.peOi } : null,
+        trade: tr, pending: pd ? { side: pd.side, trigger: pd.trigger, from: pd.from, until: pd.until } : null,
+        premLive: tr && tr.state !== "CLOSED" ? cpPremOf(d, def.symbol, tr.side, tr.strike) : null,
+      }) };
+    });
+    res.json(out);
+  } catch (e: any) { res.status(502).json({ available: false, error: e?.message || "desk commentary failed" }); }
+});
+
 // ===================== Zero-Hero (expiry-day cheap OTM) — live read; advisory only =====================
 // /api/zero-hero-live?symbol=^NSEI|^BSESN|...&budget=3000 · uses the same cached chain (with last-good fallback), 5-min
 // candles and the 1-minute OI log; adds no new Dhan load beyond the shared caches.
@@ -9419,7 +9451,8 @@ async function cpDrain() {
 // 15-min candle + best opportunity (NIFTY + SENSEX, only when there is one). Everything else is computed and shown on the
 // screens but not sent. Add a kind here to send it again.
 // 2026-10-24 owner: also the trade follow-ups — TRADE GIVEN, TARGET 1 / 2, STOP LOSS / breakeven, TIME EXIT (NIFTY + SENSEX)
-const TG_ALLOW = new Set<string>(["plan", "open913", "best", "oi15", "trade", "paper"]);
+// 2026-10-28 owner: the 09:12 key level sheet (★★ / ★★★ levels, NIFTY + SENSEX)
+const TG_ALLOW = new Set<string>(["plan", "open913", "best", "oi15", "trade", "paper", "levels912"]);
 let _tgDropped = 0;
 const cpSend = (text: string, htmlReady = false, kind = "other") => { if (!TG_ALLOW.has(kind)) { _tgDropped++; return; } for (const part of TG.splitParts(text)) _cpQueue.push({ text: "🎖 <b>ProTrader</b>\n" + TG.emphasize(htmlReady ? part : TG.htmlify(CP.stripTags(part))), html: true }); cpDrain().catch(() => {}); try { fs.appendFileSync(path.join(process.cwd(), "data", "copilot-log.txt"), `\n[${new Date(Date.now() + 19800000).toISOString().slice(0, 19)}]\n${String(text).replace(/<[^>]+>/g, "")}\n`); } catch { /* best-effort */ } };
 const _published = (() => { try { return JSON.parse(fs.readFileSync(path.join(process.cwd(), "backend", "research", "published", "odds.json"), "utf8")); } catch { return null; } })();
@@ -9465,6 +9498,11 @@ async function copilotTick() {
     if (wd === 0 || wd === 6) return;
     if (_cp.day !== day) { _cp = { day, trades: {}, closed: [], sent: {}, seen: {}, pending: {} }; cpSave(); }
     const pay = (sym: string) => premiumCenterPayload({ symbol: sym, interval: "15m" });
+    // 📍 09:12 key level sheet (NIFTY + SENSEX): built once after the 09:08 pre-open price, saved for every screen, ★★/★★★ to Telegram
+    if (istMin >= 552 && istMin <= 560 && !_cp.sent.levels912) {
+      const sheets = (await Promise.all(Object.keys(KL_SYMS).map((x) => klBuild(x).catch(() => null)))).filter(Boolean) as KLS.LevelSheet[];
+      if (sheets.length) { _cp.sent.levels912 = nowSec; cpSave(); cpSend(KLS.levelSheetMsg(sheets), true, "levels912"); }
+    }
     // 09:13 plan (every co-pilot message stays inside market hours 09:13–15:30; the next-day plan follows at 15:31)
     if (istMin >= 553 && istMin <= 560 && !_cp.sent.plan) {
       const list = (await Promise.all(["^NSEI", "^BSESN"].map((x) => pay(x).catch(() => null)))).filter((x: any) => x?.available);
@@ -9977,6 +10015,47 @@ router.get("/premarket/overview", async (req: Request, res: Response) => {
     res.json({ available: false, error: e?.message || "overview failed" });
   }
 });
+// ===================== 09:12 KEY LEVEL SHEET (owner 2026-10-28) =====================
+// One ranked level list per index per day, built at 09:12 IST and shown on every Indian screen (levels/levelSheet.ts).
+// Importance = how many reasons agree at a price — information only, never an entry / stop / plan input.
+const KL_DIR = path.join(DATA_DIR, "key-levels"), KL_SYMS: Record<string, "NIFTY" | "SENSEX"> = { "^NSEI": "NIFTY", "^BSESN": "SENSEX" };
+const klFile = (day: string) => path.join(KL_DIR, `${day}.json`);
+function klRead(day: string): Record<string, KLS.LevelSheet> { try { return JSON.parse(fs.readFileSync(klFile(day), "utf8")); } catch { return {}; } }
+async function klBuild(sym: string): Promise<KLS.LevelSheet> {
+  const def = findSymbolDef(sym); if (!def || !KL_SYMS[sym]) throw new Error(`no level sheet for ${sym}`);
+  const day = istDateStr(), istD = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(0, 10);
+  const [daily, c15, oi, q] = await Promise.all([
+    getDailyCached(sym, 15).catch(() => [] as any[]), getCandlesCached(sym, "15m").catch(() => [] as any[]),
+    getOiCached(def).catch(() => null as any), cached(`quote:${sym}`, TTL_QUOTE, () => getProvider().getQuote(sym)).catch(() => null as any)]);
+  const prev = (daily as any[]).filter((c) => istD(c.time) < day).pop() || null;
+  const spot = Number(q?.price) || Number(oi?.underlying) || (prev ? prev.close : NaN); if (!Number.isFinite(spot)) throw new Error(`${def.name}: no price`);
+  const strikes: any[] = oi?.available ? oi.topStrikes || [] : [];
+  const sheet = KLS.buildLevelSheet({ index: KL_SYMS[sym], day, builtAt: Math.floor(Date.now() / 1000), spot, step: sym === "^BSESN" ? 100 : 50,
+    prevDay: prev ? { day: istD(prev.time), high: prev.high, low: prev.low, close: prev.close } : null,
+    prevWeek: KLS.prevWeekHL(daily as any[], day),
+    ownerLevels: (c15 as any[]).length ? OWN.ownerLevelsFor(c15 as any, day) : [],
+    callWalls: strikes.map((x) => ({ strike: x.strike, oi: x.ceOi || 0 })), putWalls: strikes.map((x) => ({ strike: x.strike, oi: x.peOi || 0 })),
+    oiAsOf: oi?.sessionDate || (oi?.asOf ? new Date(oi.asOf + 19800000).toISOString().slice(0, 16).replace("T", " ") : null) });
+  const all = klRead(day); all[sym] = sheet;
+  try { fs.mkdirSync(KL_DIR, { recursive: true }); fs.writeFileSync(klFile(day), JSON.stringify(all)); } catch { /* the sheet is still returned */ }
+  return sheet;
+}
+/** Today's sheet: the stored 09:12 one; built now when missing (server started late, holiday, after hours) or when it was
+ *  built before 09:12 on a weekday and it is now past 09:12. */
+async function klSheet(sym: string): Promise<KLS.LevelSheet> {
+  const day = istDateStr(), have = klRead(day)[sym], ist = new Date(Date.now() + 19800000), m = ist.getUTCHours() * 60 + ist.getUTCMinutes(), wd = ist.getUTCDay();
+  const t912 = Math.floor(Date.parse(`${day}T09:12:00+05:30`) / 1000);
+  if (have && !(wd >= 1 && wd <= 5 && m >= 552 && have.builtAt < t912)) return have;
+  return cached(`kl:${sym}:${day}`, 60_000, () => klBuild(sym));
+}
+router.get("/key-levels", async (req: Request, res: Response) => {
+  const syms = String(req.query.sym || "^NSEI,^BSESN").split(",").filter((x) => KL_SYMS[x]);
+  if (!syms.length) return res.json({ sheets: {}, error: "Key level sheets are kept for NIFTY and SENSEX." });
+  const out: Record<string, KLS.LevelSheet | { error: string }> = {};
+  await Promise.all(syms.map(async (s) => { try { out[s] = await klSheet(s); } catch (e: any) { out[s] = { error: e?.message || "level sheet unavailable" }; } }));
+  res.json({ sheets: out });
+});
+
 // ===================== Market Sentiment · Prediction Command Center =====================
 // Composed from EXISTING caches/engines only (overview, shared option-chain cache, arbiter decision,
 // 09:13 heat map, contribution model, prediction log). The arbiter stays the single source of the

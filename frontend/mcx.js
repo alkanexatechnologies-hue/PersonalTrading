@@ -19,7 +19,7 @@
   const set = (node, html) => { if (node && node.__mcx !== html) { node.innerHTML = html; node.__mcx = html; } };   // no flicker: write only on change
   const mcOn = () => $("panel-marketcommand")?.classList.contains("active") && !document.hidden;
 
-  const X = { c5: {}, view: "mc", plan: "bull", tab: "levels", seen: null, pc: {}, desk: null, hour: null, pos: {}, sent: null, walls: {}, c4: {}, ot: { strike: null, side: "both", tf: 5, expiry: null, expiries: [], sym: null, data: {}, charts: {} }, wb: { win: "15", data: null, sym: null }, err: {} };
+  const X = { c5: {}, view: "mc", plan: "bull", tab: "levels", seen: null, pc: {}, desk: null, hour: null, pos: {}, sent: null, walls: {}, dk: {}, c4: {}, ot: { strike: null, side: "both", tf: 5, expiry: null, expiries: [], sym: null, data: {}, charts: {} }, wb: { win: "15", data: null, sym: null }, err: {} };
   window.__mcx = X;   // read-only handle for diagnosis in the browser console
   const get = async (url, ms) => { try { const d = await fetchJSON(url, ms || 25000); if (d && (d.error || d.disabled)) X.err[url.split("?")[0]] = d.error || "disabled"; return d; } catch (e) { X.err[url.split("?")[0]] = String((e && e.message) || e); return null; } };
 
@@ -38,6 +38,7 @@
     if (due("crude", 60_000)) J(get("/api/crude-move", 40000).then((d) => { if (d && d.available) { X.crude = d; X.crudeAt = now; } }));
     if (due("sent", 300_000)) J(get("/api/market-sentiment-brief").then((d) => { if (d && d.india) { X.sent = d; X.sentAt = now; } }));
     if (MC.tf !== "5m" && due("c5" + sym, 60_000)) J(get(`/api/candles/${enc}?interval=5m`).then((d) => { if (d && Array.isArray(d.candles) && d.candles.length) { X.c5[sym] = d.candles; X["c5" + sym + "At"] = now; } }));   // 5m reaction on the ladder
+    if (!MC.replayDate && due("desk" + sym, 30_000)) J(get(`/api/desk-commentary?symbol=${enc}`).then((d) => { if (d && d.available) { X.dk[sym] = d; X["desk" + sym + "At"] = now; } }));   // 🎙 ProTrader commentary
     if (due("walls" + sym, 60_000)) J(get(`/api/oi-walls?symbol=${enc}`).then((d) => { if (d && d.available) { X.walls[sym] = d; X["walls" + sym + "At"] = now; } }));
     await Promise.all(jobs);
   }
@@ -166,6 +167,39 @@
       ${p ? [kv("Buy", `${p.strike ?? "—"} ${ce ? "CE" : "PE"}`, ce ? "mcx-up" : "mcx-dn"), kv("Start", `${f0(p.entry)} ${ce ? "▲" : "▼"}`), kv("SL", f0(p.stop), "mcx-dn"), kv("T1", f0(p.t1), "mcx-up"), kv("T2", p.t2 != null ? f0(p.t2) : "—", "mcx-up"), kv("R:R", `1:${p.rr ?? "—"}`), kv("Entry", "retest")].join("") : `<span class="mcx-kv mcx-mu">${pc ? "no " + (ce ? "bull" : "bear") + " plan" : "loading plan…"}</span>`}</div>
       <p class="mcx-risk">${nt ? `No-trade zone <b>${f0(nt.from)} – ${f0(nt.to)}</b> · ` : ""}${realRisk ? `real risk up to ~${realRisk} pts (15-min-close stop) · ` : ""}not given if the premium is 10%+ above its trigger price, or in a fast market</p></section>`;
     set($("mcx-dec"), live + bias + plan);
+  }
+
+  // ------------------------------------------------------------ 🎙 ProTrader desk commentary (Hindi; /api/desk-commentary)
+  // The approved Trade Plan told the way a desk trader explains it: what the candles just did, the market condition, the UP
+  // and DOWN trade with the exact premium, and the rules. The summary line stays visible; the details open on a tap.
+  const DESK_KEY = "mcx-desk-open";
+  function renderDesk() {
+    const el = $("mcx-desk"); if (!el) return;
+    const c = !MC.replayDate && !MC.lastData?.historical ? X.dk[MC.sym] : null;
+    if (!c) { el.hidden = true; return; }
+    el.hidden = false;
+    if (el.__deskInit !== true) { el.__deskInit = true; try { el.open = localStorage.getItem(DESK_KEY) !== "0"; } catch { el.open = true; } el.addEventListener("toggle", () => { try { localStorage.setItem(DESK_KEY, el.open ? "1" : "0"); } catch {} }); }
+    const rs = (v) => (v == null ? "—" : "₹" + f0(v)), side = (k) => {
+      if (!k) return "";
+      const ce = k.side === "CE";
+      return `<div class="mcx-dk-side ${ce ? "ce" : "pe"}"><div class="mcx-row"><b class="${ce ? "mcx-up" : "mcx-dn"}">${ce ? "🟢 UP" : "🔴 DOWN"} · ${k.strike ?? "—"} ${k.side}</b>${k.expiry ? `<span class="mcx-mu">${esc(k.expiry.slice(5))} expiry</span>` : ""}<span class="mcx-mu">अभी ${rs(k.premNow)}</span><span class="mcx-chip">risk ${esc(k.risk)}</span></div>
+        <p class="mcx-dk-trig">${k.trigger}</p>
+        <div class="mcx-dk-grid"><span><i>Buy</i><b>${rs(k.buyAt)}</b><small>${k.buyMax != null ? `ठीक ${rs(k.buyAt)}–${rs(k.buyMax)}` : ""}</small></span>
+          <span><i>SL</i><b class="mcx-dn">${rs(k.stopPrem)}</b><small>index ${f0(k.stopIdx)}</small></span>
+          <span><i>T1</i><b class="mcx-up">${rs(k.t1Prem)}</b><small>index ${f0(k.t1Idx)}</small></span>
+          <span><i>T2</i><b class="mcx-up">${rs(k.t2Prem)}</b><small>${k.t2Idx != null ? "index " + f0(k.t2Idx) : ""}</small></span></div>
+        <p class="mcx-dk-sub">1:${esc(k.rr)} · प्रति lot risk ${rs(k.perLotRisk)}, reward ${rs(k.perLotReward)} · <b>${rs(k.skipAbove)} से ऊपर हो तो छोड़ें</b>${k.history ? ` · ${esc(k.history)}` : ""}</p>
+        <p class="mcx-dk-st">स्थिति: <b>${esc(k.status)}</b></p></div>`;
+    };
+    const li = (a) => a.map((x) => `<li>${x}</li>`).join("");   // server-built HTML (numbers + <b> only)
+    const html = `<summary><span class="mcx-badge ${c.tone === "ce" ? "ce" : c.tone === "pe" ? "pe" : "wait"}">🎙 ProTrader</span><span class="mcx-dk-head">${c.headline}</span><span class="mcx-mu">${esc(c.asOf)} · ${esc(c.condition.label)}</span></summary>
+      <div class="mcx-dk-body">
+        <section><h3 class="mcx-h">क्या हुआ</h3><ul>${li(c.story)}</ul><p class="mcx-dk-cond"><b>${esc(c.condition.label)}</b> — ${esc(c.condition.text)}</p></section>
+        <section><h3 class="mcx-h">बाज़ार की हालत</h3><ul>${li(c.market)}</ul></section>
+        <section class="mcx-dk-trades">${side(c.up)}${side(c.down)}</section>
+        <section><h3 class="mcx-h">नियम</h3><ul>${li(c.rules)}</ul></section>
+        <p class="mcx-dk-note">${esc(c.note)}</p></div>`;
+    set(el, html);
   }
 
   // ------------------------------------------------------------ key-level ladder (the chart's levels + OI walls + plan starts)
@@ -424,6 +458,7 @@
     const d = typeof MC !== "undefined" ? MC.lastData : null; if (!d) return;
     try { renderTape(d); } catch (e) { console.warn("[mcx] tape", e); }
     try { renderDecision(d); } catch (e) { console.warn("[mcx] decision", e); }
+    try { renderDesk(); } catch (e) { console.warn("[mcx] desk", e); }
     try { renderLevels(d); } catch (e) { console.warn("[mcx] levels", e); }
     try { drawPlanLevels(); } catch (e) { console.warn("[mcx] plan levels", e); }
     try { renderC4(); } catch (e) { console.warn("[mcx] c4", e); }
