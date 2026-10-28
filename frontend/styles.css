@@ -8583,3 +8583,15 @@ body.mcx-rules #panel-marketcommand .mc2-main, body.mcx-rules #mcx-dec, body.mcx
 .rl-infos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; } .rl-infos .one-card { display: flex; flex-direction: column; gap: 2px; } .rl-infos p { margin: 4px 0 0; }
 .rl-common { margin: 0; padding-left: 28px; display: flex; flex-direction: column; gap: 4px; } .rl-foot { margin: 4px 0 0; }
 @media (max-width: 760px) { .rl-infos { grid-template-columns: minmax(0, 1fr); } .rl-tbl th { white-space: normal; width: 30%; } }
+/* 🔄 Reversal / ❌ fake-reversal candles (One Trade chart, 2026-10-29) */
+.scn-rvbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; } .scn-rvbar .one-mu { font-size: 13px; }
+.rv-real { color: #26a69a; } .rv-fake { color: #ff9800; } .rv-weak { color: #9598a1; } .rv-pend { color: #f5c542; }
+.scn-rv summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; list-style: none; } .scn-rv summary .scn-h { margin: 0; }
+.scn-rv-base { margin: 4px 0 8px; padding: 8px 10px; border-radius: 8px; background: #0d1117; border: 1px solid #1e2530; font-size: 13.5px; }
+.scn-rv-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.scn-rv-list button { width: 100%; display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 8px 10px; border-radius: 8px; border: 1px solid #1e2530; border-left: 4px solid #2a3340; background: #0d1117; color: #e5e7eb; cursor: pointer; font-size: 13.5px; }
+.scn-rv-list .rv-REAL { border-left-color: #26a69a; } .scn-rv-list .rv-FAKE { border-left-color: #ff9800; } .scn-rv-list .rv-WEAK { border-left-color: #9598a1; } .scn-rv-list .rv-PENDING { border-left-color: #f5c542; }
+.scn-rv-list button.on { border-color: #2962ff; background: #10172a; }
+.scn-rv-h { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; } .scn-rv-h time { margin-left: auto; color: #9aa3b0; font-family: 'JetBrains Mono', monospace; }
+.scn-rv-st { border: 1px solid; border-radius: 999px; padding: 1px 8px; font-weight: 700; font-size: 13px; }
+@media (max-width: 760px) { .scn-rv-list { grid-template-columns: minmax(0, 1fr); } }

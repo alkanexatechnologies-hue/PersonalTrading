@@ -1,4 +1,146 @@
 {
+ "reversal": {
+  "NIFTY": {
+   "all": {
+    "n": 842,
+    "realPct": 42.4,
+    "fakePct": 38.1,
+    "weakPct": 19.5
+   },
+   "atLevel": {
+    "n": 173,
+    "realPct": 38.7,
+    "fakePct": 39.9,
+    "weakPct": 21.4
+   },
+   "noLevel": {
+    "n": 669,
+    "realPct": 43.3,
+    "fakePct": 37.7,
+    "weakPct": 19
+   },
+   "dev": {
+    "n": 429,
+    "realPct": 41.7,
+    "fakePct": 36.6,
+    "weakPct": 21.7
+   },
+   "val": {
+    "n": 413,
+    "realPct": 43.1,
+    "fakePct": 39.7,
+    "weakPct": 17.2
+   },
+   "byPattern": {
+    "Strong red close": {
+     "n": 294,
+     "realPct": 41.5,
+     "fakePct": 38.4,
+     "weakPct": 20.1
+    },
+    "Strong green close": {
+     "n": 342,
+     "realPct": 41.2,
+     "fakePct": 39.2,
+     "weakPct": 19.6
+    },
+    "Hammer": {
+     "n": 42,
+     "realPct": 40.5,
+     "fakePct": 50,
+     "weakPct": 9.5
+    },
+    "Shooting star": {
+     "n": 37,
+     "realPct": 51.4,
+     "fakePct": 37.8,
+     "weakPct": 10.8
+    },
+    "Bullish engulfing": {
+     "n": 65,
+     "realPct": 41.5,
+     "fakePct": 36.9,
+     "weakPct": 21.5
+    },
+    "Bearish engulfing": {
+     "n": 62,
+     "realPct": 50,
+     "fakePct": 24.2,
+     "weakPct": 25.8
+    }
+   }
+  },
+  "SENSEX": {
+   "all": {
+    "n": 831,
+    "realPct": 44.9,
+    "fakePct": 37.2,
+    "weakPct": 17.9
+   },
+   "atLevel": {
+    "n": 186,
+    "realPct": 40.3,
+    "fakePct": 40.9,
+    "weakPct": 18.8
+   },
+   "noLevel": {
+    "n": 645,
+    "realPct": 46.2,
+    "fakePct": 36.1,
+    "weakPct": 17.7
+   },
+   "dev": {
+    "n": 422,
+    "realPct": 43.6,
+    "fakePct": 36.7,
+    "weakPct": 19.7
+   },
+   "val": {
+    "n": 409,
+    "realPct": 46.2,
+    "fakePct": 37.7,
+    "weakPct": 16.1
+   },
+   "byPattern": {
+    "Hammer": {
+     "n": 48,
+     "realPct": 37.5,
+     "fakePct": 45.8,
+     "weakPct": 16.7
+    },
+    "Strong red close": {
+     "n": 299,
+     "realPct": 47.8,
+     "fakePct": 35.1,
+     "weakPct": 17.1
+    },
+    "Strong green close": {
+     "n": 342,
+     "realPct": 42.7,
+     "fakePct": 38.9,
+     "weakPct": 18.4
+    },
+    "Bearish engulfing": {
+     "n": 53,
+     "realPct": 45.3,
+     "fakePct": 28.3,
+     "weakPct": 26.4
+    },
+    "Shooting star": {
+     "n": 35,
+     "realPct": 37.1,
+     "fakePct": 48.6,
+     "weakPct": 14.3
+    },
+    "Bullish engulfing": {
+     "n": 54,
+     "realPct": 53.7,
+     "fakePct": 31.5,
+     "weakPct": 14.8
+    }
+   }
+  }
+ },
  "generated": "2026-10-28",
  "rules": {
   "target": 40,

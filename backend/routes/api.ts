@@ -287,6 +287,7 @@ import { buildDeskCommentary } from "../commentary/deskCommentary";
 import * as OT from "../premium/oneTrade";
 import { buildScenarioMap, maxPainOf, scnSessions } from "../premium/scenarioMap";
 import { buildChartLesson } from "../learning/chartSchool";
+import { reversalsByDay } from "../premium/reversalRead";
 import SCN_STATS from "../premium/scenario-stats.json";
 import { CONFIG, DEFAULT_SYMBOLS, DISCLAIMER, SymbolDef, nearestStrike, SWING_SYMBOLS, findSymbolDef, ALL_SYMBOLS } from "../config";
 import { istDateOfSec } from "../util/istTime";
@@ -8520,8 +8521,13 @@ function scnFor(def: any, whatIf: number | null = null): Promise<any> {
         targetDay: ss.targetDay, targetIsToday: ss.targetIsToday, opening, stats: { all: st, dev: sp.dev, val: sp.val } });
       const keep = new Set([ss.base.day, ...ss.prior.slice(0, 1).map((x) => x.day), ss.targetDay]);
       const day = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(0, 10);
+      const candles = (bars || []).filter((b: any) => keep.has(day(b.time))).map((b: any) => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close }));
+      // 🔄 reversal / ❌ fake-reversal candles on the shown days (levels: that day's previous-session H / L / C)
+      const hlc = (x: any) => (x ? [{ label: "कल का High", price: x.high }, { label: "कल का Low", price: x.low }, { label: "कल का Close", price: x.close }] : []);
+      const nowBars = (bars || []).filter((b: any) => b.time + 900 <= nowSec);   // only closed candles are judged
+      const reversals = [...reversalsByDay(nowBars, [ss.base.day], hlc(ss.prior[0])), ...(ss.live ? reversalsByDay(nowBars, [ss.targetDay], hlc(ss.base)) : [])];
       return { available: true, symbol: def.symbol, nowSec, spot: d?.spot?.price ?? null, live: ss.live, generated: (SCN_STATS as any).generated,
-        candles: (bars || []).filter((b: any) => keep.has(day(b.time))).map((b: any) => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close })), ...map };
+        candles, reversals, reversalStats: (SCN_STATS as any).reversal?.[name] ?? null, ...map };
     });
 }
 router.get("/one-trade/scenarios", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {

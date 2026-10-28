@@ -10,7 +10,7 @@
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   const f0 = (v) => (v == null || !isFinite(v) ? "—" : Math.round(v).toLocaleString("en-IN"));
   const store = { get: (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
-  const S = { wi: {}, auto: {}, spoke: {}, last: {}, host: null, sym: store.get("scn-sym", "^NSEI"), sel: store.get("scn-sel", "GAP_DOWN"), br: null, tr: null, data: {}, err: null, C: null, timer: null, sig: "" };
+  const S = { rv: store.get("scn-rv", "1") === "1", rvFocus: null, wi: {}, auto: {}, spoke: {}, last: {}, host: null, sym: store.get("scn-sym", "^NSEI"), sel: store.get("scn-sel", "GAP_DOWN"), br: null, tr: null, data: {}, err: null, C: null, timer: null, sig: "" };
   const DAYS = ["रविवार", "सोमवार", "मंगलवार", "बुधवार", "गुरुवार", "शुक्रवार", "शनिवार"], MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const dayLbl = (d) => { const x = new Date(d + "T00:00:00Z"); return `${DAYS[x.getUTCDay()]} ${x.getUTCDate()} ${MON[x.getUTCMonth()]}`; };
   const at = (day, m) => Date.parse(day + "T00:00:00Z") / 1000 + m * 60;   // IST wall-clock as chart time
@@ -25,7 +25,9 @@
         <div class="scn-idx" role="tablist" aria-label="Index">${[["^NSEI", "NIFTY"], ["^BSESN", "SENSEX"]].map(([s, n]) => `<button type="button" role="tab" data-scn-sym="${s}">${n}</button>`).join("")}</div></div>
       <div id="scn-open"></div>
       <div class="scn-chips" role="tablist" aria-label="Scenario" id="scn-chips"></div>
+      <div class="scn-rvbar"><button type="button" class="one-btn" data-scn-rv="toggle" id="scn-rv-btn"></button><span class="one-mu">chart पर: <b class="rv-real">▲▼ 🔄 असली पलटाव</b> · <b class="rv-fake">❌ झूठा पलटाव</b> · <b class="rv-weak">↔ sideways</b> · <b class="rv-pend">⏳ पुष्टि बाकी</b></span></div>
       <div class="scn-body"><div class="scn-cw"><div class="scn-legend" id="scn-legend"></div><div class="scn-chart" id="scn-chart"></div></div><div class="scn-panel" id="scn-panel"><p class="one-mu">लोड हो रहा है…</p></div></div>
+      <div id="scn-rev"></div>
       <p class="scn-foot one-mu" id="scn-foot"></p></section>`;
   }
 
@@ -45,12 +47,18 @@
   function draw() {
     const d = cur(), s = scen(), C = chart(); if (!d || !d.available || !s || !C) return;
     const narrow = (document.getElementById("scn-chart")?.clientWidth || 999) < 560;   // phone: numbers only on the axis, no marker text
-    const sig = `${S.sym}|${s.id}|${S.br}|${S.tr}|${d.nowSec}|${narrow}`; if (sig === S.sig) return; S.sig = sig;
+    const sig = `${S.sym}|${s.id}|${S.br}|${S.tr}|${d.nowSec}|${narrow}|${S.rv}|${S.rvFocus}`; if (sig === S.sig) return; S.sig = sig;
     for (const l of C.lines) C.ch.removeSeries(l); C.lines = [];
     for (const p of C.pls) C.c.removePriceLine(p); C.pls = [];
     const bars = d.candles.map((b) => ({ time: b.time + IST, open: b.open, high: b.high, low: b.low, close: b.close })), last = bars.length ? bars[bars.length - 1].time : 0;
     const fut = []; for (let m = 555; m <= 915; m += 15) { const t = at(d.targetDay, m); if (t > last) fut.push({ time: t }); }
     C.c.setData([...bars, ...fut]);
+    // 🔄 reversal / ❌ fake-reversal candles (backend premium/reversalRead.ts)
+    C.c.setMarkers(S.rv ? (d.reversals || []).slice().sort((a, b) => a.time - b.time).map((r) => {
+      const up = r.dir === "UP", on = r.time === S.rvFocus, st = RV[r.status] || RV.PENDING;
+      return { time: r.time + IST, position: up ? "belowBar" : "aboveBar", color: on ? "#ffffff" : st.color, size: on ? 2 : 1,
+        shape: r.status === "REAL" ? (up ? "arrowUp" : "arrowDown") : "circle", text: narrow ? st.icon : `${st.icon} ${st.short}` };
+    }) : []);
     // branches: the focused one solid + labelled, the rest dashed
     const focus = S.br && s.branches.some((b) => b.id === S.br) ? S.br : s.branches[0] && s.branches[0].id;
     const startPt = !d.targetIsToday && bars.length ? [{ time: last, value: d.base.close }] : [];
@@ -73,8 +81,26 @@
     const t = s.trades.find((x) => x.id === S.tr) || bestTrade(s);
     if (t) { pl(t.entry, "#2962ff", narrow ? t.side : `${t.side} entry ${f0(t.entry)}`, 0, 2, true); pl(t.stop, "#f23645", "SL", 0, 1, true); pl(t.target, "#089981", "🎯", 0, 2, true); }
     const n = bars.length + fut.length, base = d.candles.filter((b) => new Date((b.time + IST) * 1000).toISOString().slice(0, 10) === d.base.day).length;
-    C.ch.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - fut.length - base - 6), to: n + 1 });
+    const fi = S.rvFocus != null ? bars.findIndex((b) => b.time === S.rvFocus + IST) : -1;
+    C.ch.timeScale().setVisibleLogicalRange(fi >= 0 ? { from: Math.max(0, fi - 14), to: fi + 14 } : { from: Math.max(0, n - fut.length - base - 6), to: n + 1 });
     legend(d, s, focus);
+  }
+  const RV = { REAL: { icon: "🔄", short: "पलटाव", color: "#26a69a", hi: "असली पलटाव" }, FAKE: { icon: "❌", short: "झूठा", color: "#ff9800", hi: "झूठा पलटाव (trap)" },
+    WEAK: { icon: "↔", short: "sideways", color: "#9598a1", hi: "ज़ोर नहीं (sideways)" }, PENDING: { icon: "⏳", short: "पुष्टि बाकी", color: "#f5c542", hi: "पुष्टि बाकी (अगला 1 घंटा)" } };
+  function renderRev(d) {
+    const el = document.getElementById("scn-rev"), btn = document.getElementById("scn-rv-btn"); if (!el) return;
+    if (btn) { btn.textContent = S.rv ? "🔄 Reversal candles: चालू" : "🔄 Reversal candles: बंद"; btn.classList.toggle("on", S.rv); btn.setAttribute("aria-pressed", S.rv); }
+    if (!S.rv) { el.innerHTML = ""; return; }
+    const rs = (d.reversals || []).slice().sort((a, b) => b.time - a.time), st = d.reversalStats, k = { REAL: 0, FAKE: 0, WEAK: 0, PENDING: 0 };
+    for (const r of rs) k[r.status]++;
+    const day = (t) => dayLbl(new Date((t + IST) * 1000).toISOString().slice(0, 10)), hmT = (t) => new Date((t + IST) * 1000).toISOString().slice(11, 16);
+    const base = st ? `<p class="scn-rv-base">📊 <b>2 साल में ऐसी ${st.all.n} candles:</b> 🔄 असली <b>${st.all.realPct}%</b> · ❌ झूठी <b>${st.all.fakePct}%</b> · ↔ sideways ${st.all.weakPct}% — कल के H/L/C पर बनी तो असली सिर्फ़ ${st.atLevel.realPct}% (level अपने आप में भरोसा नहीं)। <b>इसलिए पलटाव की candle पर नहीं, अगली candle की पुष्टि पर entry।</b></p>` : "";
+    el.innerHTML = `<details class="scn-rv" open><summary><h4 class="scn-h">🔄 Reversal और ❌ Fake reversal candles <span class="one-mu">(15-min · ${rs.length} · 🔄 ${k.REAL} · ❌ ${k.FAKE} · ↔ ${k.WEAK} · ⏳ ${k.PENDING})</span></h4></summary>${base}
+      ${rs.length ? `<ol class="scn-rv-list">${rs.map((r) => { const x = RV[r.status] || RV.PENDING; return `<li><button type="button" data-scn-rvf="${r.time}" class="${r.time === S.rvFocus ? "on" : ""} rv-${r.status}" aria-pressed="${r.time === S.rvFocus}">
+        <span class="scn-rv-h"><span class="scn-rv-st" style="border-color:${x.color};color:${x.color}">${x.icon} ${x.hi}</span><b>${r.dir === "UP" ? "▲ ऊपर की ओर" : "▼ नीचे की ओर"}</b><time>${day(r.time)} ${hmT(r.time)}</time></span>
+        <span class="cs-chips"><span class="one-chip">🕯️ ${esc(r.pattern)}</span>${r.level ? `<span class="one-chip">📏 ${esc(r.level.label)} ${f0(r.level.price)}</span>` : ""}<span class="one-chip">पहले ${r.priorMove} pts ${r.dir === "UP" ? "गिरा" : "चढ़ा"}</span></span>
+        <span>${esc(r.text)}</span><span class="one-mu">🧠 ${esc(r.lesson)}</span></button></li>`; }).join("")}</ol>` : `<p class="one-mu">इन दिनों में कोई पलटाव candle नहीं बनी।</p>`}
+      <p class="one-mu">पहचान: 3 candles की चाल (आम candle से 1.2 गुना) के बाद नया high/low बनाकर उल्टा बंद होना (hammer / shooting star / engulfing / मज़बूत close)। फ़ैसला अगले 1 घंटे (4 candles) से: पुरानी तरफ़ 15-min close = ❌ झूठा, नई तरफ़ एक आम candle जितनी चाल = 🔄 असली। Trade signal नहीं — पढ़ने में मदद।</p></details>`;
   }
   const short = (l) => ({ PDH: "PDH", PDL: "PDL", PDC: "PDC", WH: "5D High", WL: "5D Low", CALL_WALL: "Call wall", PUT_WALL: "Put wall", MAX_PAIN: "Max pain" })[l.key] || "Round " + f0(l.price);
   const bestTrade = (s) => s.trades.filter((x) => x.verdict === "GOOD").sort((a, b) => b.avgPts - a.avgPts)[0] || s.trades[0] || null;
@@ -114,6 +140,7 @@
       ${lv ? `<h5 class="scn-h">📍 Levels <span class="one-mu">✋ टिके · 💥 टूटे · 💧 sweep · ↩ वापसी</span></h5><ul class="scn-lv">${lv}</ul>` : ""}
       <h5 class="scn-h">🎙 ProTrader की बात</h5><ol class="scn-story">${s.story.map((x) => `<li>${esc(x)}</li>`).join("")}</ol>
       <button type="button" class="one-btn" data-scn-say="1">📢 यह scenario सुनाएँ</button>`;
+    renderRev(d);
     foot.innerHTML = `${(d.honesty || []).map(esc).join(" · ")}<br>Data: ${esc(d.source)} · research/protrader/RESULTS_SCENARIO.md`;
     draw();
   }
@@ -154,7 +181,10 @@
   document.addEventListener("click", (e) => {
     if (!S.host) return;
     if (e.target.closest("[data-scn-wi]") && S.host.contains(e.target)) { S.wi[S.sym] = null; const i = document.getElementById("scn-wi-in"); if (i) i.value = ""; load(); return; }
-    const b = e.target.closest("[data-scn-sym],[data-scn-sel],[data-scn-br],[data-scn-tr],[data-scn-say]"); if (!b || !S.host.contains(b)) return;
+    const b = e.target.closest("[data-scn-sym],[data-scn-sel],[data-scn-br],[data-scn-tr],[data-scn-say],[data-scn-rv],[data-scn-rvf]"); if (!b || !S.host.contains(b)) return;
+    if (b.dataset.scnRv) { S.rv = !S.rv; S.rvFocus = null; store.set("scn-rv", S.rv ? "1" : "0"); render(); return; }
+    if (b.dataset.scnRvf) { const t = Number(b.dataset.scnRvf); S.rvFocus = S.rvFocus === t ? null : t; render(); if (S.rvFocus) document.getElementById("scn-chart")?.scrollIntoView({ block: "nearest", behavior: "smooth" }); return; }
+    if (b.dataset.scnSym) { S.rvFocus = null; }
     if (b.dataset.scnSym) { S.sym = b.dataset.scnSym; store.set("scn-sym", S.sym); S.br = S.tr = null; S.sig = ""; const i = document.getElementById("scn-wi-in"); if (i) i.value = S.wi[S.sym] || ""; render(); load(); }
     else if (b.dataset.scnSel) { S.sel = b.dataset.scnSel; store.set("scn-sel", S.sel); S.br = S.tr = null; render(); }
     else if (b.dataset.scnBr) { S.br = b.dataset.scnBr; render(); }

@@ -120,3 +120,29 @@ Real Dhan 1-min index data (research raw1m), 2024-10-01 → 2026-10-26. Trades 1
 | WL:S | DEV | 28 | 32.1% | 50% | 21.4% | 50% | 13 · 53.8% · +12.3 | 19 · 31.6% · -1.1 |
 | WL:S | VAL | 38 | 31.6% | 60.5% | 13.2% | 36.8% | 17 · 35.3% · +1.2 | 26 · 23.1% · -0.6 |
 
+## 🔄 Reversal vs ❌ fake reversal candles (15-min, premium/reversalRead.ts)
+
+| Index | Group | Candles | Real | Fake | Sideways |
+|---|---|---|---|---|---|
+| NIFTY | all | 842 | 42.4% | 38.1% | 19.5% |
+| NIFTY | at PDH/PDL/PDC | 173 | 38.7% | 39.9% | 21.4% |
+| NIFTY | away from levels | 669 | 43.3% | 37.7% | 19% |
+| NIFTY | DEV | 429 | 41.7% | 36.6% | 21.7% |
+| NIFTY | VAL | 413 | 43.1% | 39.7% | 17.2% |
+| NIFTY | Strong red close | 294 | 41.5% | 38.4% | 20.1% |
+| NIFTY | Strong green close | 342 | 41.2% | 39.2% | 19.6% |
+| NIFTY | Hammer | 42 | 40.5% | 50% | 9.5% |
+| NIFTY | Shooting star | 37 | 51.4% | 37.8% | 10.8% |
+| NIFTY | Bullish engulfing | 65 | 41.5% | 36.9% | 21.5% |
+| NIFTY | Bearish engulfing | 62 | 50% | 24.2% | 25.8% |
+| SENSEX | all | 831 | 44.9% | 37.2% | 17.9% |
+| SENSEX | at PDH/PDL/PDC | 186 | 40.3% | 40.9% | 18.8% |
+| SENSEX | away from levels | 645 | 46.2% | 36.1% | 17.7% |
+| SENSEX | DEV | 422 | 43.6% | 36.7% | 19.7% |
+| SENSEX | VAL | 409 | 46.2% | 37.7% | 16.1% |
+| SENSEX | Hammer | 48 | 37.5% | 45.8% | 16.7% |
+| SENSEX | Strong red close | 299 | 47.8% | 35.1% | 17.1% |
+| SENSEX | Strong green close | 342 | 42.7% | 38.9% | 18.4% |
+| SENSEX | Bearish engulfing | 53 | 45.3% | 28.3% | 26.4% |
+| SENSEX | Shooting star | 35 | 37.1% | 48.6% | 14.3% |
+| SENSEX | Bullish engulfing | 54 | 53.7% | 31.5% | 14.8% |
