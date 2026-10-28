@@ -10072,7 +10072,7 @@ function renderMCBreakout(d) {
 function mcboMarkers(d) {
   const out = [];
   const bo = d && d.breakout;
-  if (!MC.show.trade) return out;
+  if (!MC.show.trade || (typeof oneMode === "function" && oneMode())) return out;   // 🎯 One Trade mode: trade calls live only in the One Trade tab
   if (!bo || !bo.available) { const h = d.decisionHistory || {}; (h.signals || []).forEach((x) => { const buy = x.finalAction === "BUY_CE"; out.push({ time: x.candleTime, position: buy ? "belowBar" : "aboveBar", color: buy ? "#16c784" : "#ea3943", shape: buy ? "arrowUp" : "arrowDown", text: buy ? "BUY CE" : "BUY PE" }); }); return out; }
   (bo.blocked || []).slice(-8).forEach((x) => {
     out.push({ time: x.time, position: x.dir === "BUY" ? "belowBar" : "aboveBar", color: "rgba(148,163,184,.75)", shape: "circle", text: x.state === "WAIT FOR PULLBACK" ? "EXT" : "R:R✕" });
@@ -10110,7 +10110,7 @@ function mcClean() { const t = el("mc-tog-clean"); return t ? t.checked : true; 
 // the chart is the underlying). Rebuilt only when the plan changes.
 function applyMCBreakoutLines(d) {
   if (!MC.candleSeries) return;
-  const sig = MC.show.trade ? arbActiveSignal(d) : null;   // the ARBITER's plan, never S2's
+  const sig = MC.show.trade && !(typeof oneMode === "function" && oneMode()) ? arbActiveSignal(d) : null;   // the ARBITER's plan, never S2's (none in 🎯 One Trade mode)
   const p = sig ? sig.plan : null;
   const sig2 = p ? JSON.stringify([sig.barTime, p.entry, p.stopLoss, p.target1, p.target2, p.trigger, mcClean()]) : "";
   if (MC._boSig === sig2) return;
@@ -10448,7 +10448,7 @@ function mcDrawLevelRays() {
   const cmap = new Map((MC._candles || []).map((c) => [c.time, c]));
   // C4 marks (mcx.js, owner-approved 2026-10-25) sit on the candle that CONTAINS their 5-min bar, on any timeframe
   const snapC = (t) => { const cs = MC._candles || []; let lo = 0, hi = cs.length - 1, r = null; while (lo <= hi) { const k = (lo + hi) >> 1; if (cs[k].time <= t) { r = cs[k]; lo = k + 1; } else hi = k - 1; } return r; };
-  const mk = [...(MC._ovMarkers || []), ...(MC._c4Marks || [])].map((m) => {
+  const mk = [...(MC._ovMarkers || []), ...((typeof oneMode === "function" && oneMode()) ? [] : MC._c4Marks || [])].map((m) => {
     const c = m.snap ? snapC(m.time) : cmap.get(m.time);
     let x = null; try { x = c ? MC.chart.timeScale().timeToCoordinate(c.time) : null; } catch {}
     if (x == null || !c || x < 0 || x > plotW) return "";

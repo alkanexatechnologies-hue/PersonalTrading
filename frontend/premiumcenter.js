@@ -74,7 +74,7 @@ function ppcShell() {
   <div id="ppc-pt" class="ppc-pt"></div>
   <div id="ppc-coach" class="ppc-coach"></div>
   <div id="ppc-radar" class="ppc-radar"></div>
-  <div class="ppc-sec">② Trade plan <span id="ppc-planfor" class="ppc-sub"></span></div>
+  <div class="ppc-sec" id="ppc-sec2">② Trade plan <span id="ppc-planfor" class="ppc-sub"></span></div>
   <div class="ppc-plans" id="ppc-plans"></div>
   <details class="ppc-calc" id="ppc-calc"><summary>🧮 <b>Premium calculator</b> <span class="ppc-sub">— the premium at any index price</span></summary><div id="ppc-calc-body"></div></details>
   <div class="ppc-sec" id="ppc-sec3" hidden>③ Expiry zero-hero</div>

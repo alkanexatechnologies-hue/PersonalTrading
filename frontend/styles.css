@@ -8407,3 +8407,45 @@ body.lrn-fullbody { overflow: hidden; }
 .mcx-dk-steps th { text-align: left; white-space: nowrap; color: #9aa3b0; font-weight: 600; padding: 4px 10px 4px 0; vertical-align: top; width: 1%; }
 .mcx-dk-steps td { padding: 4px 0; border-bottom: 1px solid #1a2029; }
 @media (max-width: 420px) { .mcx-dk-steps th { white-space: normal; width: 34%; } }
+
+/* 🎯 One Trade tab (Market Command, 2026-10-28) */
+body.mcx-one #panel-marketcommand .mc2-main, body.mcx-one #mcx-dec, body.mcx-one #mcx-ot, body.mcx-one #mcx-desk { display: none !important; }
+.mcx-oneview { display: flex; flex-direction: column; gap: 8px; color: #d6dbe3; font-size: 14px; line-height: 1.5; }
+.one-card { background: #11151c; border: 1px solid #1e2530; border-radius: 10px; padding: 10px 12px; min-width: 0; }
+.one-hero.ce { border-left: 4px solid #26c6a6; } .one-hero.pe { border-left: 4px solid #ff6b72; }
+.one-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.one-title { margin: 0; font-size: 20px; } .one-h { margin: 0 0 6px; font-size: 13px; letter-spacing: .4px; color: #9aa3b0; text-transform: uppercase; display: inline; }
+.one-badge { padding: 4px 10px; border-radius: 999px; font-weight: 700; font-size: 13px; }
+.one-badge.ce { background: #0c2420; border: 1px solid #136e5c; color: #26c6a6; } .one-badge.pe { background: #2a1215; border: 1px solid #7a2a31; color: #ff6b72; }
+.one-badge.wait { background: #2a210a; border: 1px solid #8a6a1a; color: #f5c542; }
+.one-mu { color: #9aa3b0; font-size: 12.5px; } .one-up { color: #26c6a6 !important; } .one-dn { color: #ff6b72 !important; }
+.one-chip { border: 1px solid #2a3340; border-radius: 6px; padding: 1px 6px; font-size: 12px; color: #c3cad4; }
+.one-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.one-btn { min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #2a3340; background: #151b24; color: #e5e7eb; font-size: 14px; cursor: pointer; }
+.one-btn.on { border-color: #136e5c; background: #0c2420; color: #26c6a6; }
+.one-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+.one-grid span { display: flex; flex-direction: column; background: #151b24; border-radius: 8px; padding: 6px 8px; min-width: 0; }
+.one-grid i { font-style: normal; font-size: 12px; color: #9aa3b0; } .one-grid b { font-size: 20px; font-family: 'JetBrains Mono', monospace; } .one-grid small { font-size: 12px; color: #9aa3b0; }
+.one-track { position: relative; height: 26px; margin: 12px 4px 4px; border-radius: 6px; background: linear-gradient(90deg, #4a1d22 0%, #2a2f38 33.3%, #0f3a31 100%); font-size: 12px; }
+.one-track span { position: absolute; top: 4px; color: #c3cad4; } .one-tk-sl { left: 6px; } .one-tk-tg { right: 6px; } .one-tk-en { transform: translateX(-50%); }
+.one-tk-now { top: -4px !important; width: 4px; height: 34px; margin-left: -2px; border-radius: 2px; background: #f5c542; box-shadow: 0 0 0 2px #11151c; }
+.one-note { margin: 8px 0 0; } .one-waits { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+.one-wait { border: 1px solid #1e2530; border-radius: 8px; padding: 8px 10px; background: #0d1117; min-width: 0; } .one-wait p { margin: 4px 0; } .one-btitle { font-size: 15px; }
+.one-steps { width: 100%; border-collapse: collapse; font-size: 13px; } .one-steps th { text-align: left; white-space: nowrap; color: #9aa3b0; font-weight: 600; padding: 3px 10px 3px 0; vertical-align: top; width: 1%; } .one-steps td { padding: 3px 0; border-bottom: 1px solid #1a2029; }
+.one-feed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.one-feed li { display: grid; grid-template-columns: 52px minmax(0, 1fr) 44px; gap: 8px; align-items: start; background: #0d1117; border-radius: 8px; padding: 6px 8px; border-left: 3px solid #2a3340; }
+.one-feed li.k-OPEN { border-left-color: #3b82f6; } .one-feed li.k-TARGET { border-left-color: #26c6a6; } .one-feed li.k-SL { border-left-color: #ff6b72; } .one-feed li.k-WARN { border-left-color: #f5c542; } .one-feed li.k-PROGRESS { border-left-color: #26c6a6; }
+.one-feed time { font-family: 'JetBrains Mono', monospace; color: #9aa3b0; padding-top: 2px; } .one-feed p { margin: 0; }
+.one-play { width: 44px; height: 44px; border-radius: 8px; border: 1px solid #2a3340; background: #151b24; color: #e5e7eb; cursor: pointer; }
+.one-tbl { overflow-x: auto; } .one-tbl table { width: 100%; border-collapse: collapse; font-size: 13px; } .one-tbl th, .one-tbl td { text-align: left; padding: 5px 8px; border-bottom: 1px solid #1a2029; white-space: nowrap; } .one-tbl th { color: #9aa3b0; font-weight: 600; }
+.one-how summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; list-style: none; } .one-how ol { margin: 6px 0 0; padding-left: 20px; } .one-how li { margin: 4px 0; }
+@media (max-width: 900px) { .one-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .one-waits { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 420px) { .one-title { font-size: 17px; } .one-steps th { white-space: normal; width: 34%; } }
+/* 🎯 One Trade mode: trade calls only on the One Trade tab; the other screens keep market information */
+body.ot-mode #mcx-dec section[aria-label="Live signal"], body.ot-mode #mcx-dec section[aria-label="Trade plan"], body.ot-mode #mcx-c4, body.ot-mode #mcbo-tag,
+body.ot-mode .mcx-dk-best, body.ot-mode .mcx-dk-trades, body.ot-mode #mc-open-tradeexec, body.ot-mode #mc-strike-picks, body.ot-mode #mc-plan, body.ot-mode #mc-signal-detail,
+body.ot-mode #mc-cmd-entry-zone, body.ot-mode #mc-oim-trade-sig, body.ot-mode #mc-oim-trade-guid, body.ot-mode #oia-open-tradeexec, body.ot-mode #ot-open-tradeexec, body.ot-mode #ot-ctx-setup,
+body.ot-mode #ppc-pt, body.ot-mode #ppc-coach, body.ot-mode #ppc-radar, body.ot-mode #ppc-sec2, body.ot-mode #ppc-plans, body.ot-mode #ppc-master,
+body.ot-mode #ppc-sec3, body.ot-mode #ppc-btsd, body.ot-mode #ppc-zh-today { display: none !important; }
+.mcx-oneview { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; } .one-card, .one-tbl { max-width: 100%; box-sizing: border-box; }
+.mcx-oneview { contain: inline-size; } @media (max-width: 600px) { .one-tbl th, .one-tbl td { white-space: normal; padding: 5px 4px; } }

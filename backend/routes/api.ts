@@ -284,6 +284,7 @@ import {
 } from "../indicators";
 import { buildMarketCommentary, detectStructure, formatTradeReview } from "../commentary/marketCommentary";
 import { buildDeskCommentary } from "../commentary/deskCommentary";
+import * as OT from "../premium/oneTrade";
 import { CONFIG, DEFAULT_SYMBOLS, DISCLAIMER, SymbolDef, nearestStrike, SWING_SYMBOLS, findSymbolDef, ALL_SYMBOLS } from "../config";
 import { istDateOfSec } from "../util/istTime";
 import { getOptionTopPickAuditLog } from "../optionTopPick/auditLog";
@@ -8409,8 +8410,10 @@ router.get("/premium-center", requirePermission("oiAnalysis"), async (req: Reque
 router.get("/desk-commentary", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
   const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
   if (!def || def.type !== "index" || !def.fno) return res.status(400).json({ error: "F&O index symbol required" });
-  try {
-    const out = await cachedSwr(`desk-cmt:${def.symbol}`, 20_000, 120_000, async () => {
+  try { res.json(await deskFor(def)); } catch (e: any) { res.status(502).json({ available: false, error: e?.message || "desk commentary failed" }); }
+});
+function deskFor(def: any): Promise<any> {
+    return cachedSwr(`desk-cmt:${def.symbol}`, 20_000, 120_000, async () => {
       const [d, c5all] = await Promise.all([premiumCenterPayload({ symbol: def.symbol, interval: "15m" }), getCandlesCached(def.symbol, "5m" as Interval).catch(() => [] as any[])]);
       if (!d?.available || !d.trader) return { available: false, error: d?.error || "plan not ready" };
       const nowSec = Math.floor(Date.now() / 1000), day = new Date((nowSec + 19800) * 1000).toISOString().slice(0, 10);
@@ -8431,8 +8434,30 @@ router.get("/desk-commentary", requirePermission("oiAnalysis"), async (req: Requ
         premLive: tr && tr.state !== "CLOSED" ? cpPremOf(d, def.symbol, tr.side, tr.strike) : null,
       }) };
     });
-    res.json(out);
-  } catch (e: any) { res.status(502).json({ available: false, error: e?.message || "desk commentary failed" }); }
+}
+
+// ===================== 🎯 One Trade (Market Command tab) — owner 2026-10-28, ProTrader APPROVE (RESULTS_ONE_TRADE.md) =====================
+// One trade at a time across NIFTY + SENSEX, fixed 1:2 target, Hindi commentary (premium/oneTrade.ts). The co-pilot's
+// first trade given while the tab is flat becomes THE trade; the co-pilot job follows it. State: data/one-trade.json.
+const OT_FILE = path.join(process.cwd(), "data", "one-trade.json");
+let _ot: OT.OneState = (() => { try { return JSON.parse(fs.readFileSync(OT_FILE, "utf8")); } catch { return OT.fresh(""); } })();
+const otSave = () => { try { fs.writeFileSync(OT_FILE, JSON.stringify(_ot)); } catch { /* best-effort */ } };
+const otDay = (day: string) => { if (_ot.day !== day) { _ot = OT.fresh(day); otSave(); } };
+router.get("/one-trade", requirePermission("oiAnalysis"), async (_req: Request, res: Response) => {
+  try {
+    const nowSec = Math.floor(Date.now() / 1000), day = new Date((nowSec + 19800) * 1000).toISOString().slice(0, 10);
+    const st = _ot.day === day ? _ot : OT.fresh(day), t = st.trade;
+    let liveNow: any = null;
+    if (t) {
+      const d: any = await premiumCenterPayload({ symbol: t.symbol, interval: "15m" }).catch(() => null);
+      liveNow = OT.live(t, d?.spot?.price ?? null, d ? cpPremOf(d, t.symbol, t.side, t.strike) : null);
+    }
+    // flat: what each index is waiting for (the desk commentary's best opportunity)
+    const waiting = t ? [] : (await Promise.all(["^NSEI", "^BSESN"].map((x) => deskFor(findSymbolDef(x)).catch(() => null)))).filter((x: any) => x?.available)
+      .map((x: any) => ({ symbol: x.symbol, index: x.index, headline: x.headline, best: x.best, structure: x.structure, asOf: x.asOf }));
+    res.json({ available: true, day, nowSec, trade: t, live: liveNow, closed: st.closed, events: st.events.slice(-60), waiting,
+      record: { period: "2024-11-19 → 2026-10-26", oneAtATimeVal: { perTrade: 106, pf: 1.15, win: 49.5 }, oneAtATimeDev: { perTrade: -226, pf: 0.74, win: 40 }, source: "RESULTS_ONE_TRADE.md" } });
+  } catch (e: any) { res.status(502).json({ available: false, error: e?.message || "one trade failed" }); }
 });
 
 // ===================== Zero-Hero (expiry-day cheap OTM) — live read; advisory only =====================
@@ -9531,6 +9556,11 @@ async function copilotTick() {
           if ((tr.state as string) === "CLOSED") { _cp.closed.push(tr); _cp.trades[sym] = null; _cp.sent[`cool|${sym}`] = nowSec; }
           cpSave();
         }
+        // 🎯 One Trade: follow THE trade (1:2 target, 15-min close stop, 15:12)
+        if (_ot.day === day && _ot.trade && _ot.trade.symbol === sym) {
+          const c15o = (d.chart?.candles || []).filter((c: any) => c.time + 900 <= nowSec), l15 = c15o.length ? { time: c15o[c15o.length - 1].time + 900, close: c15o[c15o.length - 1].close } : null;
+          if (OT.step(_ot, { spot: d.spot.price, prem: cpPremOf(d, sym, _ot.trade.side, _ot.trade.strike), last15: l15, nowSec, istMin }).length) otSave();
+        }
         // a TRIGGERED setup waiting for its retest → give the trade on the retest, or let it expire after 30 minutes
         const pd = _cp.pending?.[sym];
         if (pd && !(_cp.trades[sym] && _cp.trades[sym].state !== "CLOSED")) {
@@ -9550,6 +9580,7 @@ async function copilotTick() {
             }
             if (t) {
               t.review = pd.review; t.entryKind = "RETEST"; _cp.trades[sym] = t; delete _cp.pending[sym]; cpSave();
+              otDay(day); if (OT.adopt(_ot, t, { delta: pl.delta ?? null, review: pd.review?.grade ?? null, trigger: pd.trigger })) otSave();   // 🎯 One Trade: only when flat
               cpSend(`📌 <b>TRADE GIVEN ON THE RETEST (review ${pd.review.grade}${pd.review.grade === "B" ? " — HALF SIZE" : ""})</b>\n5-min candle ${new Date((r.hit.time + 19800) * 1000).toISOString().slice(11, 16)} came back to ${Math.round(pd.side === "bull" ? r.hit.low : r.hit.high)} and closed ${Math.round(r.hit.close)} — ${pd.side === "bull" ? "above" : "below"} ${Math.round(pd.trigger)}. I will follow it to Target 1, Target 2, stop or 15:12.\n` + TG.tradeAlert(d, pd.side, "TRIGGERED", cpOdds(sym)), true, "trade");
             }
           } else if (r.expired || !pl || Math.round(pl.trigger) !== Math.round(pd.trigger) || istMin > 885) {

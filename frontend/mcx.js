@@ -72,7 +72,7 @@
   // with buyer risk, BULL / BEAR starts · stops · targets, plus the unbroken Buyer / Seller trendlines' current value.
   // Today's plan only: hidden on a ↺ replay date. Redrawn only when the lines change.
   function drawPlanLevels() {
-    const cs = MC.candleSeries, T = X.pc[MC.sym]?.trader, on = $("mc-tog-planlv")?.checked !== false && !MC.replayDate && !MC.lastData?.historical;
+    const cs = MC.candleSeries, T = X.pc[MC.sym]?.trader, on = $("mc-tog-planlv")?.checked !== false && !MC.replayDate && !MC.lastData?.historical && !(typeof oneMode === "function" && oneMode());   // plan starts are trade calls: none in 🎯 One Trade mode
     if (X.plSeries !== cs) { X.plSeries = cs; X.plLines = []; X.plSig = null; }   // the chart was rebuilt: its lines went with it
     let specs = [];
     if (on && cs && T && !T.error && typeof ppcLevelLines === "function") {
@@ -248,12 +248,13 @@
     const ct = lc ? lc.candle : null, ctxt = ct ? `${hm(ct.time)} candle O ${f0(ct.open)} H ${f0(ct.high)} L ${f0(ct.low)} C ${f0(ct.close)}` : "";
     const rxTip = (x) => `Last closed 5-min ${ctxt}. ${f0(x.p)} acted as ${x.rx.role}: ${LR.LABEL[x.rx.code].text}${x.rx.wickPct != null ? ` · wick ${Math.round(x.rx.wickPct * 100)}% of the candle` : ""}. Information only — in a 2-year test a rejection candle at a level was right about as often as a random entry (no edge).`;
     const col = { R: "#F23645", S: "#089981", P: "#f5c542", N: "#4ea1ff" };
-    const tabs = [["levels", "Levels"], ["plan", "Plan"], ["notes", "Notes"]].map(([k, l]) => `<button type="button" role="tab" data-mcx-tab="${k}" class="${X.tab === k ? "on" : ""}" aria-selected="${X.tab === k}">${l}</button>`).join("");
+    if ((typeof oneMode === "function" && oneMode()) && X.tab === "plan") X.tab = "levels";
+    const tabs = [["levels", "Levels"], ...((typeof oneMode === "function" && oneMode()) ? [] : [["plan", "Plan"]]), ["notes", "Notes"]].map(([k, l]) => `<button type="button" role="tab" data-mcx-tab="${k}" class="${X.tab === k ? "on" : ""}" aria-selected="${X.tab === k}">${l}</button>`).join("");
     let body = "";
-    if (X.tab === "levels") body = rows.map((x) => { const dd = x.kind === "N" ? null : x.p - s; return `<div class="mcx-lv${x.kind === "N" ? " spot" : ""}" title="${esc(x.why)}"><span class="bar" style="background:${col[x.kind]}"></span><span class="nm"><span class="nmt">${esc(x.label)} <small>${x.why ? "· " + esc(x.why) : ""}</small></span>${x.rx ? `<span class="rj ${LR.LABEL[x.rx.code].cls}" title="${esc(rxTip(x))}">${LR.LABEL[x.rx.code].short.replace("5m ", "")}</span>` : ""}</span><span class="px${x.range ? " rg" : ""}">${x.range || f0(x.p)}</span><span class="ds" style="color:${dd == null ? "#8ab8ff" : dd > 0 ? "#ff6b72" : "#26c6a6"}">${dd == null ? "SPOT" : sg(dd)}</span></div>`; }).join("") + (ct ? `<p class="mcx-rjnote" title="Rejection = wick into the level ≥ 40% of the candle and a close back on the level's side; break = a close beyond it. Information, not a signal.">5m ${esc(hm(ct.time))}: ${rx.length ? rx.map((x) => `${esc(LR.LABEL[x.rx.code].short.replace("5m ", ""))} ${esc(x.label)} ${f0(x.p)}`).join(" · ") : "no level reached"} · <i>info, not a signal</i></p>` : "");
+    if (X.tab === "levels") body = rows.filter((x) => !(x.kind === "P" && (typeof oneMode === "function" && oneMode()))).map((x) => { const dd = x.kind === "N" ? null : x.p - s; return `<div class="mcx-lv${x.kind === "N" ? " spot" : ""}" title="${esc(x.why)}"><span class="bar" style="background:${col[x.kind]}"></span><span class="nm"><span class="nmt">${esc(x.label)} <small>${x.why ? "· " + esc(x.why) : ""}</small></span>${x.rx ? `<span class="rj ${LR.LABEL[x.rx.code].cls}" title="${esc(rxTip(x))}">${LR.LABEL[x.rx.code].short.replace("5m ", "")}</span>` : ""}</span><span class="px${x.range ? " rg" : ""}">${x.range || f0(x.p)}</span><span class="ds" style="color:${dd == null ? "#8ab8ff" : dd > 0 ? "#ff6b72" : "#26c6a6"}">${dd == null ? "SPOT" : sg(dd)}</span></div>`; }).join("") + (ct ? `<p class="mcx-rjnote" title="Rejection = wick into the level ≥ 40% of the candle and a close back on the level's side; break = a close beyond it. Information, not a signal.">5m ${esc(hm(ct.time))}: ${rx.length ? rx.map((x) => `${esc(LR.LABEL[x.rx.code].short.replace("5m ", ""))} ${esc(x.label)} ${f0(x.p)}`).join(" · ") : "no level reached"} · <i>info, not a signal</i></p>` : "");
     else if (X.tab === "plan") body = `<p class="mcx-note" style="font-size:12px;color:#c9d0da">A trade exists only after a 15-min candle CLOSES beyond a start, then a 5-min retest — no chasing, no new trade in a fast market.</p>${P.bull ? `<p class="mcx-note" style="padding:6px 8px;margin-top:6px;background:#0c2420;border:1px solid #136e5c;border-radius:6px;color:#e7ebf0">Bull: 15-min close above <b>${f0(P.bull.entry)}</b> → buy ${P.bull.strike} CE · SL ${f0(P.bull.stop)} · T1 ${f0(P.bull.t1)}</p>` : ""}${P.bear ? `<p class="mcx-note" style="padding:6px 8px;margin-top:4px;background:#2a1215;border:1px solid #7a2a31;border-radius:6px;color:#e7ebf0">Bear: 15-min close below <b>${f0(P.bear.entry)}</b> → buy ${P.bear.strike} PE · SL ${f0(P.bear.stop)} · T1 ${f0(P.bear.t1)}</p>` : ""}`;
     else body = `<ul class="mcx-note" style="padding-left:16px;display:flex;flex-direction:column;gap:4px;font-size:12px;color:#c9d0da"><li>Data age ${d.dataAgeSec != null ? Math.round(d.dataAgeSec) + " s" : "—"}${d.dataStale ? " · STALE" : ""}${d.historical ? " · REPLAY" : ""}.</li><li>PCR shown is the whole chain (${d.oi?.pcr ?? "—"}); the OI screen's near-the-money PCR is a different basis.</li><li>OI walls are positioning, not a forecast (2-year study).</li></ul>`;
-    set($("mcx-levels"), `<div class="mcx-row" style="margin-bottom:6px"><h2 class="mcx-h">Key Levels &amp; Trade Plan</h2><div class="mcx-seg" role="tablist" style="margin-left:auto">${tabs}</div></div>${body}`);
+    set($("mcx-levels"), `<div class="mcx-row" style="margin-bottom:6px"><h2 class="mcx-h">${(typeof oneMode === "function" && oneMode()) ? "Key Levels" : "Key Levels &amp; Trade Plan"}</h2><div class="mcx-seg" role="tablist" style="margin-left:auto">${tabs}</div></div>${body}`);
   }
 
   // ------------------------------------------------------------ option terminal (CE / PE premium charts)
@@ -422,10 +423,13 @@
     X.view = v;
     document.body.classList.toggle("mcx-oi", v === "oi");
     document.body.classList.toggle("mcx-learn", v === "learn");
+    document.body.classList.toggle("mcx-one", v === "one");
     document.querySelectorAll("[data-mcx-view]").forEach((b) => { const on = b.getAttribute("data-mcx-view") === v; b.classList.toggle("active", on); b.setAttribute("aria-selected", String(on)); });
     const host = $("mcx-oi-host"); if (host) host.hidden = v !== "oi";
     const lh = $("mcx-learn-host"); if (lh) lh.hidden = v !== "learn";
     if (v === "learn" && typeof window.lrnMount === "function") window.lrnMount(lh);   // 🎓 Learning (learning.js)
+    const oh = $("mcx-one-host"); if (oh) oh.hidden = v !== "one";
+    if (typeof window.oneMount === "function") window.oneMount(v === "one" ? oh : null);   // 🎯 One Trade (oneTrade.js); null = stop polling
     if (v === "oi") mountOia(); else { restoreOia(); setTimeout(fitFrame, 50); }
   }
 

@@ -14,7 +14,8 @@ const IST = 19800, mn = (t: number) => Math.floor(((t + IST) % 86400) / 60);
 const COST = (p: number) => Math.max(0.5, 0.0025 * p);
 const IDX = { NIFTY: { step: 50, lot: 75 }, SENSEX: { step: 100, lot: 20 } } as const;
 export type Cfg = { name: string; range: boolean; cutoff: number; skipExpiry: boolean; entry: "plan" | "retest" | "sweep"; wideStop: boolean; structFilter?: boolean;
-  hardStop?: number; noChase?: number; premTargets?: boolean; timeBlock?: boolean; fastSkip?: number };
+  hardStop?: number; noChase?: number; premTargets?: boolean; timeBlock?: boolean; fastSkip?: number;
+  fixedR?: number };   // fixedR: one full exit at entry ± R × (entry − stop) on the index (2026-10-28 "One Trade" 1:2 proposal)
 // LIVE = the approved co-pilot (backtest #2: T2 + T3a); every P-config changes exactly one rule (RESULTS3.md, pre-registered)
 const LIVE: Cfg = { name: "LIVE", range: true, cutoff: 885, skipExpiry: true, entry: "retest", wideStop: false };
 const CFGS: Cfg[] = [
@@ -115,11 +116,17 @@ export function run(cfgs = CFGS) {
           if (e0 == null || e0 <= 0) { trades.push({ cfg: cfg.name, idx: name, day: D, i, n: days.length, res: "NO-PREMIUM" }); continue; }
           if (cfg.noChase != null) { const pT = premAt(leg, g0.t); if (pT != null && pT > 0 && e0 > (1 + cfg.noChase) * pT) { trades.push({ cfg: cfg.name, idx: name, day: D, i, n: days.length, res: "CHASE-SKIP" }); continue; } }
           let state = "OPEN", halfP: number | null = null, exitP: number | null = null, endT = 912;
+          const tgtR = cfg.fixedR != null ? g.entryIdx + g.s * cfg.fixedR * Math.abs(g.entryIdx - g.stop) : null;
           const hard = cfg.hardStop != null ? g.entryIdx - g.s * cfg.hardStop * a : null;
           for (const [t, px] of M) {
             if (t < g.t) continue; const m = mn(t), pv = cfg.premTargets ? premAt(leg, t) : null;
             if (m >= 912) { exitP = premAt(leg, t); break; }
             if (state === "OPEN" && hard != null && g.s * (px - hard) <= 0) { state = "SL"; exitP = premAt(leg, t); endT = m; break; }
+            if (tgtR != null) {   // fixed R:R: the whole position leaves at the target; the stop is the plan's 15-min close
+              if (g.s * (px - tgtR) >= 0) { state = "TARGET"; exitP = premAt(leg, t); endT = m; break; }
+              if ((m + 1) % g.stopTf === 0 && g.s * (px - g.stop) < 0) { state = "SL"; exitP = premAt(leg, t); endT = m; break; }
+              continue;
+            }
             if (state === "OPEN" && (g.s * (px - g.t1) >= 0 || (pv != null && pv >= 1.5 * e0))) { state = "T1"; halfP = premAt(leg, t); }
             if (state === "T1" && ((g.t2 != null && g.s * (px - g.t2) >= 0) || (pv != null && pv >= 2 * e0))) { state = "T2"; exitP = premAt(leg, t); endT = m; break; }
             if (state === "T1" && pv != null && pv <= e0) { state = "T1+BE"; exitP = pv; endT = m; break; }   // P3: after half, the stop is the entry PREMIUM
@@ -129,7 +136,7 @@ export function run(cfgs = CFGS) {
           if (state === "OPEN") state = "TIME"; else if (state === "T1") state = "T1+TIME";
           const gross = halfP != null ? 0.5 * (halfP - e0) + 0.5 * (exitP - e0) : exitP - e0;
           const net = gross - COST(e0) - (halfP != null ? 0.5 * COST(halfP) + 0.5 * COST(exitP) : COST(exitP)) - 40 / lot;
-          trades.push({ cfg: cfg.name, idx: name, day: D, i, n: days.length, time: g.m, side: g.s, res: state, net: Math.round(net * 100) / 100, pct: Math.round((net / e0) * 1000) / 10, rs: Math.round(net * lot), exp: exp.has(D) });
+          trades.push({ cfg: cfg.name, idx: name, day: D, i, n: days.length, time: g.m, side: g.s, res: state, end: endT, risk: Math.abs(g.entryIdx - g.stop), net: Math.round(net * 100) / 100, pct: Math.round((net / e0) * 1000) / 10, rs: Math.round(net * lot), exp: exp.has(D) });
           freeAt = endT + 15;
         }
       }

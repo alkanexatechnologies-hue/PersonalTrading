@@ -340,3 +340,34 @@ time exit 15:15.
 
 **Verdict:** REJECT. No live change. The trader's results come from selection the rule cannot see (which days, which
 bases). Next step: log the trader's calls forward, with the context at each call, and re-test after 30+ calls.
+
+## 2026-10-28 · "One Trade" — fixed 1:2 target, one trade at a time across NIFTY + SENSEX — `protrader/oneTradeStudy.ts`
+
+**Owner's request:** a single 🎯 One Trade tab: the system picks the best trade, no new trade until the open one is
+closed, target fixed at 1:2.
+
+**Proposal (written before the run):**
+- Entries unchanged: the approved co-pilot plan (15-min close beyond the start, 5-min retest within 30 min, 14:45 cut-off,
+  expiry-day and range-day skips).
+- Exit change: one full exit at entry ± 2 × (entry − plan stop) on the index, instead of T1 half + T2 / breakeven.
+  The stop stays the plan's 15-min close; time exit 15:12.
+- Across NIFTY + SENSEX, a trade is taken only after the previous one closed.
+
+**Data:** real Dhan 1-min index + ATM premiums, 2024-11-19 → 2026-10-26, 298 sessions with trades. DEV before
+2025-10-28, VAL after. Net of costs, ₹ per lot.
+
+**Result:**
+
+| | LIVE (T1/T2) | FIXED 1:2 |
+|---|---|---|
+| NIFTY DEV / VAL | −₹192 / −₹127 | −₹146 / −₹7 |
+| SENSEX DEV / VAL | −₹341 / −₹26 | −₹309 / −₹4 |
+| One at a time, both · DEV / VAL | −₹274 / +₹23 (PF 0.67 / 1.03) | −₹226 / **+₹106 (PF 0.74 / 1.15)** |
+| Win % (one at a time, all) | 36.8 % | 44.6 % |
+
+The 1:2 exit is better than LIVE in every split, for both indices and in both halves. One-at-a-time changes little,
+but it removes the clashing second trade.
+
+**Verdict:** APPROVE for the One Trade tab (fixed 1:2, one at a time). This is better than the current exits, but it is
+not a proven edge: the DEV year is still negative after costs. The tab must say so. The Telegram co-pilot's T1/T2
+messages are not changed by this verdict.
