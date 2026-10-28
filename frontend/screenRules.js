@@ -58,11 +58,57 @@
     ["📈 Option Terminal", "Option Terminal (setup label One Trade mode में छिपा)", "info", "ℹ️",
       [["Logic", "CE / PE के chart; ऊपर \"Setup\" = Market Command के trade plan / early move की स्थिति"]], ""],
     ["🧪 AI Paper Trading", "Menu से छिपा (One Trade mode)", "warn", "⚠️ Paper — असली पैसा नहीं",
-      [["Logic", "Index options, stock options और stock intraday — तीनों अलग capital · दिशा कल का H/L, कल का close, दिन का open, VWAP, opening range, OI walls, swing से (RSI/MACD नहीं) · profit +15% premium पर cap, trailing stop"]], ""],
+      [["Directional", "OI का TAKE signal + 1 घंटे का bulletin उसी तरफ़"], ["Scalp", "5-min और 15-min bulletin एक तरफ़, या 5-min signal के साथ तेज़ उछाल"],
+       ["शर्तें", "खर्च के बाद R:R ठीक · जीत की संभावना ≥ 52% (directional) / ≥ 54% (scalp) · दिन का घाटा −3% पर बंद · 15:25 तक सब बंद"],
+       ["Entry levels", "कल का H/L/close, दिन का open, VWAP, opening range, OI walls, swing (RSI/MACD नहीं) · profit +15% premium पर cap, trailing stop"]], "Paper DB में असली नापा हुआ win rate — zero-loss का वादा नहीं।"],
     ["⭐ Option Top Pick", "Menu से छिपा (One Trade mode)", "info", "ℹ️ Stocks के लिए",
       [["Logic", "F&O stocks scan → दो अलग सूचियाँ: Liquidity Directional और Stock Setup (indicators + OI + S/R)"]], "सलाह मात्र।"],
     ["🧾 Trade Execution · AI Dashboard / Signals / Review / Performance / Validation", "Menu से छिपे (One Trade mode)", "info", "ℹ️",
       [["Logic", "ऊपर के engines के फ़ैसले और paper नतीजे दिखाने वाली screens; One Trade mode में इनका trade हिस्सा बंद"]], ""],
+  ];
+  // 🔍 C4 step by step (premium/c4Live.ts, research/protrader/fakeUpPaperCore.ts, SUPERVISOR_LOG 2026-10-24)
+  const C4 = [
+    ["1. Level", "आपके तरीके वाले S/R: पिछले 5 दिनों में जहाँ भाव <b>कई बार पलटा</b> (15-min swing highs/lows का झुंड); जो कभी high और कभी low रहा वह <b>flip zone</b>। दिन शुरू होने से पहले तय।"],
+    ["2. Fake-up", "5-min candles पर भाव level के <b>ऊपर गया पर वापस नीचे बंद</b> हुआ (झूठा breakout) — यह पक्का होने पर ही आगे।"],
+    ["3. Call writing", "उसी समय (4 candles में) <b>ATM CE का OI बढ़ा और CE premium घटा</b> = ऊपर बेचने वाले बैठ गए।"],
+    ["4. पुराना touch", "वही level आज <b>30+ मिनट पहले</b> भी छुआ गया था (एक level पर दिन में एक बार)।"],
+    ["5. Entry", "पुष्टि वाली 5-min candle के close पर <b>ATM PE</b> खरीदें।"],
+    ["6. Stop / Target", "Stop = पिछली 4 candles का high (entry से कम से कम 0.25 ATR ऊपर) · Target = उतनी ही दूरी नीचे (<b>1:1</b>) · ज़्यादा से ज़्यादा <b>60 मिनट</b>।"],
+    ["सिर्फ़ PE", "C4 केवल गिरावट (PE) पकड़ता है — ऊपर की तरफ़ का इसका कोई version नहीं।"],
+    ["2 साल का test", "299 signals, खर्च के बाद <b>+₹265/trade</b> (सावधान अनुमान +₹193), PF 1.47 · पुराना हिस्सा +₹210, नया +₹371 · पर 2024 के दूसरे हिस्से में −₹150 और 2025 के पहले हिस्से में −₹13।"],
+    ["सावधानी", "यह नियम <b>22,304 combinations में से चुना</b> गया — इसलिए असली नतीजा test से कमज़ोर हो सकता है (selection bias)। ProTrader verdict: <b>CONTINUE PAPER TESTING</b> — ~30 paper signals के बाद फ़ैसला।"],
+    ["Live", "26 Oct से paper test; 28 Oct को Market Command पर दिखे दोनों C4 trades घाटे में (NIFTY PE −₹15, SENSEX PE SL −₹98)।"],
+  ];
+  const DESKS = [
+    ["🎯 Trader Dashboard", "Option group → Trader Dashboard", "info", "ℹ️ अलग engine",
+      [["Logic", "Option chain + VWAP/ADX (15-min) + 4-Layer (RSI/MACD नहीं) + GainzAlgo v2 + futures buildup · हर model की OI दिशा से तुलना: <b>कम से कम 2 सहमत और 0 विरोध</b> = consensus"],
+       ["रोक", "Premium decay = पूरी रोक · कमज़ोर setup (quality < 30) छिपा · वही trade दोबारा नहीं जब तक exit या ATR जितनी चाल न हो"]], ""],
+    ["⚡ Early Moves", "Option group → Early Moves", "info", "ℹ️ चाल की शुरुआत पकड़ता है",
+      [["Logic", "5-min पर <b>नई साफ़ दिशा</b> + momentum बस शुरू (squeeze खुला / नया trend) + volume साथ + दिन की आम range का <b>छोटा हिस्सा ही इस्तेमाल</b> हुआ"],
+       ["रोक", "पहले से फैली चाल (ज़्यादा RSI / दिन की range ज़्यादातर खर्च) = late — नहीं दिखाता"]], ""],
+    ["🔬 Master Strategy Lab", "Option group → Master Strategy Lab", "info", "ℹ️ आज कौन सा तरीका",
+      [["Strategies", "Trend Continuation · Squeeze Breakout · Opening Range Breakout · Wall Rejection · Wall Breakout · Pullback Continuation"],
+       ["Logic", "आज की हालत से हर strategy का मेल × उसका पुराना record → दिन की पसंदीदा strategy (दिन भर lock) · कोई साफ़ न हो तो <b>\"आज कोई सही strategy नहीं → WAIT\"</b> · Arbiter के फ़ैसले को कभी नहीं बदलता"]], "Score = हालत का मेल, जीत की संभावना नहीं।"],
+    ["🕘 Opening Play 9:20 (OPHL)", "Option group", "info", "ℹ️ सुबह का तरीका",
+      [["दिशा", "Open बनाम कल का High/Low (या level का buffer के साथ टूटना)"],
+       ["Score", "Market 40% (level, नया high/low, VWAP, EMA9/21, OI) + Option 60% (ATM premium अपना session high तोड़े, OI, momentum)"],
+       ["Entry", "Score ≥ 75 <b>और</b> index break + option break + VWAP तीनों एक साथ"],
+       ["Stop / Target", "Premium पर 25% stop · T1 / T2 / T3 = 1R / 2R / 3R"]], ""],
+    ["📽 Strategy Replay", "Option group → Strategy Replay", "info", "ℹ️ पुराना दिन दोबारा",
+      [["Logic", "चुने हुए दिन की असली candles पर engine को candle-दर-candle चलाकर दिखाता है कि कब क्या संकेत बनता — trade नहीं देता"]], ""],
+    ["🌊 Liquidity Status", "Option group → Liquidity Status", "info", "ℹ️ sweep / trap की पहचान",
+      [["Logic", "Opening range + मुख्य levels → sweep (stop-loss लेकर वापसी), असली break या trap की पहचान + OI + VWAP / EMA structure → checklist और trader action"]], "सलाह मात्र।"],
+    ["📊 Stock Options", "Stock Option desk", "info", "ℹ️ F&O stocks",
+      [["Logic", "F&O stocks के CE / PE: Option Top Pick (Liquidity Directional + Stock Setup) और Liquidity Status वाले scanners"]], ""],
+    ["📈 Swing screens", "Selected Stock · Bull % Rank · Today Big Movers · Big Move 20–100% · Move Timing", "info", "ℹ️ stocks की research",
+      [["Bull % Rank", "कितने % दिन stock ऊपर बंद हुआ (पूरा + पिछले 20 दिन), streak"],
+       ["Today Big Movers", "Opening gap + आज का volume (आम से ज़्यादा) + range का फैलाव + 15-min momentum"],
+       ["Big Move 20–100%", "सिकुड़ा हुआ base, volume सूखा, breakout के पास, लंबा trend मज़बूत, पहले से न भागा + stock का अपना 6 महीने में 20/50/100% का इतिहास"],
+       ["Move Timing", "दिन के किस समय stock सबसे ज़्यादा चलता है"]], "Intraday trade signal नहीं — stocks चुनने की research।"],
+    ["🪙 Gold · 🛢️ Crude Command", "Gold / Crude desks (MCX)", "info", "ℹ️ हमेशा WAIT",
+      [["Logic", "MCX futures / options के levels, round numbers, OI — <b>अभी कोई tested trading नियम नहीं</b>, इसलिए signal हमेशा WAIT"]], "सिर्फ़ जानकारी; Indian screens की speed पर असर नहीं डालते।"],
+    ["🧪 Backtest (Dhan) · Universal Indicator Lab", "Backtest group", "info", "ℹ️ test के औज़ार",
+      [["Logic", "किसी indicator / नियम को पुराने Dhan data पर चलाकर उसका नतीजा देखने के औज़ार — live trade नहीं देते"]], ""],
   ];
   const INFO = [
     ["🗺️ Scenario Map", "One Trade tab", "09:11 के opening से gap up / down / flat का scenario, levels, sweep zones और 2 साल की probability। Trade signal नहीं — तैयारी।"],
@@ -94,10 +140,15 @@
       </section>
       <h3 class="rl-h">✅ जहाँ trade अभी मिलते हैं</h3>${LIVE.map(card).join("")}
       <h3 class="rl-h">🙈 One Trade mode में छिपे engines — उनका logic</h3>${HIDDEN.map(card).join("")}
+      <h3 class="rl-h">🔍 C4 — कदम-दर-कदम</h3>
+      <details class="one-card rl-card rl-warn" open><summary><span class="rl-t"><b>C4 = झूठे उछाल (fake-up) पर PE</b><span class="rl-where">Market Command chart पर दिखता था (One Trade mode में छिपा) · आपका नियम</span></span><span class="rl-st">⚠️ Paper test — edge पक्का नहीं</span></summary>
+        <table class="rl-tbl"><tbody>${C4.map(([k, v]) => `<tr><th scope="row">${k}</th><td>${v}</td></tr>`).join("")}</tbody></table>
+        <p class="rl-rec">🧠 आसान भाषा में: भाव आपके level के ऊपर झाँका, पर टिक नहीं पाया, और उसी समय call बेचने वाले बढ़ गए — यानी ऊपर दीवार है। तब PE, छोटा target (1:1), एक घंटे में बाहर।</p></details>
+      <h3 class="rl-h">🗂 बाकी screens (अलग desks) — उनका logic</h3>${DESKS.map(card).join("")}
       <h3 class="rl-h">📚 सिर्फ़ जानकारी / पढ़ाई</h3>
       <div class="rl-infos">${INFO.map(([t, w, x]) => `<div class="one-card"><b>${t}</b><span class="rl-where">${w}</span><p>${x}</p></div>`).join("")}</div>
       <h3 class="rl-h">🧭 हर जगह लागू नियम</h3><ol class="one-card rl-common">${COMMON.map((x) => `<li>${x}</li>`).join("")}</ol>
-      <p class="one-mu rl-foot">स्रोत: हर engine के अपने नियम (code) और <code>backend/research/SUPERVISOR_LOG.md</code> के test नतीजे · अपडेट 29 Oct 2026। Trader Dashboard, Early Moves, Strategy Lab, Stock / Swing, Gold, Crude की screens इसमें शामिल नहीं।</p>
+      <p class="one-mu rl-foot">स्रोत: हर engine के अपने नियम (code) और <code>backend/research/SUPERVISOR_LOG.md</code> के test नतीजे · अपडेट 29 Oct 2026। ProTrader के 2 साल के test से सिर्फ़ One Trade (approved) और C4 (paper) गुज़रे हैं; बाकी desks का ऐसा test नहीं हुआ।</p>
     </div>`;
   };
 })();
