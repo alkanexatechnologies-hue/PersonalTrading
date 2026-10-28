@@ -10,7 +10,7 @@
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   const f0 = (v) => (v == null || !isFinite(v) ? "—" : Math.round(v).toLocaleString("en-IN"));
   const store = { get: (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
-  const S = { host: null, sym: store.get("scn-sym", "^NSEI"), sel: store.get("scn-sel", "GAP_DOWN"), br: null, tr: null, data: {}, err: null, C: null, timer: null, sig: "" };
+  const S = { wi: {}, auto: {}, spoke: {}, last: {}, host: null, sym: store.get("scn-sym", "^NSEI"), sel: store.get("scn-sel", "GAP_DOWN"), br: null, tr: null, data: {}, err: null, C: null, timer: null, sig: "" };
   const DAYS = ["रविवार", "सोमवार", "मंगलवार", "बुधवार", "गुरुवार", "शुक्रवार", "शनिवार"], MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const dayLbl = (d) => { const x = new Date(d + "T00:00:00Z"); return `${DAYS[x.getUTCDay()]} ${x.getUTCDate()} ${MON[x.getUTCMonth()]}`; };
   const at = (day, m) => Date.parse(day + "T00:00:00Z") / 1000 + m * 60;   // IST wall-clock as chart time
@@ -21,7 +21,9 @@
   function shell() {
     S.host.innerHTML = `<section class="one-card scn" aria-label="Scenario map">
       <div class="scn-head"><div class="scn-ttl"><h3 class="one-h">🗺️ Scenario Map</h3><span class="scn-for" id="scn-for"></span></div>
+        <form class="scn-wi" id="scn-wi"><label for="scn-wi-in">🔮 Opening अनुमान</label><input id="scn-wi-in" type="number" inputmode="decimal" step="any" min="1" placeholder="जैसे GIFT Nifty से"><button type="submit" class="one-btn">देखें</button><button type="button" class="one-btn" data-scn-wi="clear" aria-label="अनुमान हटाएँ">✕</button></form>
         <div class="scn-idx" role="tablist" aria-label="Index">${[["^NSEI", "NIFTY"], ["^BSESN", "SENSEX"]].map(([s, n]) => `<button type="button" role="tab" data-scn-sym="${s}">${n}</button>`).join("")}</div></div>
+      <div id="scn-open"></div>
       <div class="scn-chips" role="tablist" aria-label="Scenario" id="scn-chips"></div>
       <div class="scn-body"><div class="scn-cw"><div class="scn-legend" id="scn-legend"></div><div class="scn-chart" id="scn-chart"></div></div><div class="scn-panel" id="scn-panel"><p class="one-mu">लोड हो रहा है…</p></div></div>
       <p class="scn-foot one-mu" id="scn-foot"></p></section>`;
@@ -61,7 +63,9 @@
       C.lines.push(ser);
     }
     const pl = (price, color, title, style = 2, width = 1, keep) => { if (price != null && isFinite(price)) C.pls.push(C.c.createPriceLine({ price, color, lineWidth: width, lineStyle: style, axisLabelVisible: true, title: narrow && !keep ? "" : title })); };
-    if (s.id !== "FALL" && s.id !== "RISE" && s.id !== "SWEEP") pl(s.open, "#787b86", `Open ≈ ${f0(s.open)}`, 1);
+    const isOpen = d.opening && d.opening.scenario === s.id;
+    if (isOpen) pl(s.open, "#f5c542", `${/what-if/.test(d.opening.source) ? "🔮" : "🔔"} Opening ${f0(s.open)}`, 0, 2, true);
+    else if (s.id !== "FALL" && s.id !== "RISE" && s.id !== "SWEEP") pl(s.open, "#787b86", `Open ≈ ${f0(s.open)}`, 1);
     const shown = new Set();
     for (const l of s.levels) { shown.add(l.key); pl(l.price, l.role === "S" ? "#26a69a" : "#ef5350", `${short(l)} · ${l.holdPct >= l.breakPct ? (l.role === "S" ? "टिके " : "रुके ") + l.holdPct : "टूटे " + l.breakPct}%`, 2); }
     if (!narrow) for (const l of d.levels) if (!shown.has(l.key) && (l.kind === "OI" || l.kind === "MP" || l.key === "PDC")) pl(l.price, l.kind === "OI" ? "#7e57c2" : l.kind === "MP" ? "#ba68c8" : "#787b86", short(l), 3);
@@ -88,6 +92,9 @@
     const panel = document.getElementById("scn-panel"), chips = document.getElementById("scn-chips"), forEl = document.getElementById("scn-for"), foot = document.getElementById("scn-foot");
     if (!d) { panel.innerHTML = `<p class="one-mu">${esc(S.err || "लोड हो रहा है…")}</p>`; return; }
     if (!d.available) { panel.innerHTML = `<p class="one-mu">${esc(d.error || "डेटा उपलब्ध नहीं")}</p>`; return; }
+    const ob = document.getElementById("scn-open"), istMin = Math.floor(((Date.now() / 1000 + IST) % 86400) / 60);
+    if (ob) ob.innerHTML = d.opening ? `<div class="scn-ob"><div class="one-row"><span class="one-badge ${d.opening.gapPts < 0 ? "pe" : d.opening.bucket === "FLAT" ? "wait" : "ce"}">${/what-if/.test(d.opening.source) ? "🔮 अगर opening" : "🔔 Opening"} ${f0(d.opening.price)} · ${esc(d.opening.label)}</span><span class="one-mu">${esc(d.opening.source)}</span><button type="button" class="one-btn" data-scn-say="open">📢 सुनाएँ</button></div><ol>${d.opening.review.map((x) => `<li>${esc(x)}</li>`).join("")}</ol></div>`
+      : d.targetIsToday && istMin < 556 ? `<div class="scn-ob wait"><span class="one-badge wait">⏳ 09:11 पर आज का opening number आएगा</span> <span class="one-mu">Gap up / down देखकर यह map अपने आप बदल जाएगा।</span></div>` : "";
     forEl.textContent = `${d.targetIsToday ? "आज" : "अगला session"} · ${dayLbl(d.targetDay)} · base ${dayLbl(d.base.day)} (H ${f0(d.base.high)} · L ${f0(d.base.low)} · C ${f0(d.base.close)})`;
     chips.innerHTML = d.scenarios.map((s) => `<button type="button" role="tab" data-scn-sel="${s.id}" class="${s.id === S.sel ? "on" : ""}" aria-selected="${s.id === S.sel}"><span>${esc(s.icon)} ${esc(chipName(s, d))}</span><small>${s.chance != null ? Math.round(s.chance) + "% दिन" : "stop pools"}</small></button>`).join("");
     const s = scen(); if (!s) return;
@@ -114,7 +121,17 @@
 
   async function load() {
     const sym = S.sym;
-    try { const d = await fetchJSON("/api/one-trade/scenarios?symbol=" + encodeURIComponent(sym), 30000); if (d) { S.data[sym] = d; S.err = null; S.sig = ""; if (sym === S.sym) render(); } }
+    S.last[sym] = Date.now();
+    try {
+      const d = await fetchJSON("/api/one-trade/scenarios?symbol=" + encodeURIComponent(sym) + (S.wi[sym] ? "&open=" + S.wi[sym] : ""), 30000);
+      if (d) {
+        S.data[sym] = d; S.err = null; S.sig = "";
+        const isWi = d.opening && /what-if/.test(d.opening.source), ok = d.opening ? `${sym}|${d.targetDay}|${isWi ? "wi" + d.opening.price : d.opening.at}` : null;
+        if (ok && sym === S.sym && !S.auto[ok]) { S.auto[ok] = 1; S.sel = d.opening.scenario; S.br = S.tr = null; }   // today's opening picks the scenario once; the owner can still switch
+        if (ok && !isWi && !S.spoke[ok]) { S.spoke[ok] = 1; let v = false; try { v = localStorage.getItem("one-voice") === "1"; } catch {} if (v && typeof window.oneSay === "function" && sym === S.sym) window.oneSay(d.opening.review.join(" ")); }
+        if (sym === S.sym) render();
+      }
+    }
     catch (e) { S.err = String((e && e.message) || e); if (sym === S.sym) render(); }
   }
 
@@ -124,15 +141,25 @@
     if (!host) { if (S.C) { try { S.C.ch.remove(); } catch {} S.C = null; } S.host = null; return; }
     if (S.host !== host || !host.querySelector("#scn-chart")) { if (S.C) { try { S.C.ch.remove(); } catch {} S.C = null; } S.host = host; shell(); }
     S.sig = ""; render(); load();
-    S.timer = setInterval(() => { if (!document.hidden && S.host && S.host.offsetParent) load(); }, 300000);
+    S.timer = setInterval(() => {
+      if (document.hidden || !S.host || !S.host.offsetParent) return;
+      const m = Math.floor(((Date.now() / 1000 + IST) % 86400) / 60), morning = m >= 540 && m <= 575;
+      if (morning || Date.now() - (S.last[S.sym] || 0) >= 300000) load();
+    }, 30000);
   };
+  document.addEventListener("submit", (e) => {
+    if (!S.host || e.target.id !== "scn-wi") return; e.preventDefault();
+    const v = Number(document.getElementById("scn-wi-in").value); S.wi[S.sym] = v > 0 ? v : null; load();
+  });
   document.addEventListener("click", (e) => {
     if (!S.host) return;
+    if (e.target.closest("[data-scn-wi]") && S.host.contains(e.target)) { S.wi[S.sym] = null; const i = document.getElementById("scn-wi-in"); if (i) i.value = ""; load(); return; }
     const b = e.target.closest("[data-scn-sym],[data-scn-sel],[data-scn-br],[data-scn-tr],[data-scn-say]"); if (!b || !S.host.contains(b)) return;
-    if (b.dataset.scnSym) { S.sym = b.dataset.scnSym; store.set("scn-sym", S.sym); S.br = S.tr = null; S.sig = ""; render(); if (!S.data[S.sym]) load(); }
+    if (b.dataset.scnSym) { S.sym = b.dataset.scnSym; store.set("scn-sym", S.sym); S.br = S.tr = null; S.sig = ""; const i = document.getElementById("scn-wi-in"); if (i) i.value = S.wi[S.sym] || ""; render(); load(); }
     else if (b.dataset.scnSel) { S.sel = b.dataset.scnSel; store.set("scn-sel", S.sel); S.br = S.tr = null; render(); }
     else if (b.dataset.scnBr) { S.br = b.dataset.scnBr; render(); }
     else if (b.dataset.scnTr) { S.tr = b.dataset.scnTr; render(); }
+    else if (b.dataset.scnSay === "open") { const d = cur(); if (d && d.opening && typeof window.oneSay === "function") window.oneSay(d.opening.review.join(" ")); }
     else if (b.dataset.scnSay) { const s = scen(); if (s && typeof window.oneSay === "function") window.oneSay(`${s.title}. ${s.story.join(" ")}`); }
   });
 })();

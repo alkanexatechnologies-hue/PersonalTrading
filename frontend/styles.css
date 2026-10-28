@@ -8531,3 +8531,8 @@ body.one-mode .mc-tog:has(#mc-tog-trade), body.one-mode .mc-tog:has(#mc-tog-plan
 @media (max-width: 1100px) { .scn-body { grid-template-columns: minmax(0, 1fr); } .scn-panel { max-height: none; overflow: visible; } .scn-chart { height: 440px; } }
 @media (max-width: 900px) { .scn-chips { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 600px) { .scn-chips { grid-template-columns: repeat(2, minmax(0, 1fr)); } .scn-chart { height: 360px; } .scn-idx { width: 100%; } .scn-idx button { flex: 1; } .scn-g b { font-size: 15px; } }
+.scn-ob { border: 1px solid #8a6a1a; background: #1d1708; border-radius: 8px; padding: 8px 10px; } .scn-ob.wait { border-color: #2a3340; background: #0d1117; }
+.scn-ob ol { margin: 6px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 3px; font-size: 14px; }
+.scn-wi { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; } .scn-wi label { font-size: 13px; color: #c3cad4; }
+.scn-wi input { width: 150px; min-height: 44px; padding: 0 10px; border-radius: 8px; border: 1px solid #2a3340; background: #0d1117; color: #e5e7eb; font-size: 16px; }
+@media (max-width: 600px) { .scn-wi { width: 100%; } .scn-wi input { flex: 1; min-width: 0; width: auto; } .scn-wi label { width: 100%; } }

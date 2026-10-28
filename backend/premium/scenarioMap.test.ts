@@ -61,3 +61,20 @@ test("map: 5 scenarios with branches, 1:2 trades and Hindi stories (NIFTY, 28 Oc
   const fall = m.scenarios[2]; assert.ok(fall.levels.every((l) => l.price < 22698.85)); assert.ok(fall.branches[0].path.every((w) => w.m >= 555 && w.m <= 930));
   assert.ok(m.levels.some((l) => l.key === "MAX_PAIN") && m.levels.some((l) => l.key === "PDL" && l.price === 22497.7));
 });
+
+test("🔔 09:11 opening re-anchors the map and picks today's scenario", () => {
+  const S: any = STATS, at = Date.parse("2026-10-29T09:11:00+05:30") / 1000;
+  const mk = (price: number, today = true) => buildScenarioMap({ index: "NIFTY", step: 50, base: { day: "2026-10-28", open: 22678, high: 22778.05, low: 22497.7, close: 22698.85 },
+    prior: [], spot: price, callWall: 22700, putWall: 22600, maxPain: 22700, targetDay: "2026-10-29", targetIsToday: today,
+    opening: { price, at, source: "pre-open (09:08 discovery)" }, stats: { all: S.indices.NIFTY, dev: S.split.NIFTY.dev, val: S.split.NIFTY.val } });
+  const d = mk(22630);
+  assert.equal(d.opening!.scenario, "GAP_DOWN"); assert.equal(d.opening!.bucket, "DOWN"); assert.equal(d.opening!.gapPts, -69);
+  assert.equal(d.scenarios[0].id, "GAP_DOWN"); assert.equal(d.scenarios[0].open, 22630); assert.match(d.scenarios[0].title, /आज: Gap Down 69 points/);
+  assert.match(d.opening!.review[0], /09:11 — NIFTY का opening 22,630.*−69 points → Gap Down 50–100/);
+  assert.equal(d.scenarios.find((s) => s.id === "GAP_UP")!.open, 22698.85 + 75);   // the other side stays a what-if
+  const big = mk(22560);
+  assert.equal(big.opening!.bucket, "BIG_DOWN"); assert.match(big.scenarios[0].chanceNote, /बड़ा Gap Down \(100\+\)/);
+  const flat = mk(22720);
+  assert.equal(flat.opening!.scenario, "RISE"); assert.equal(flat.scenarios[0].id, "RISE"); assert.equal(flat.scenarios.find((s) => s.id === "FALL")!.open, 22720);
+  assert.equal(mk(22630, false).opening!.scenario, "GAP_DOWN");   // a what-if for tomorrow works the same way
+});

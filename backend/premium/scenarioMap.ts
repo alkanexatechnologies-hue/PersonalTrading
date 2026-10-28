@@ -5,12 +5,15 @@
 // carries its branches (path waypoints in session minutes, with the historical probability), the levels where the market
 // may hold / break / recover, and the 1:2 trades (target 40, stop 20 NIFTY pts; SENSEX × 3.25) with their past win % and
 // a DEV / VAL consistency verdict. Paths are illustrative timing; the odds are measured. Advisory only, no new co-pilot rule.
-import type { IndexStats, LevelStat, TradeStat, GapStat } from "./scenarioStats";
+import { gapKey } from "./scenarioStats";
+import type { IndexStats, LevelStat, TradeStat, GapStat, GapKey } from "./scenarioStats";
 
 export interface SessionHLC { day: string; open: number; high: number; low: number; close: number }
 export interface MapInput {
   index: "NIFTY" | "SENSEX"; step: number; base: SessionHLC; prior: SessionHLC[]; spot: number | null;
   callWall: number | null; putWall: number | null; maxPain: number | null; targetDay: string; targetIsToday: boolean;
+  /** the session's opening number, picked at 09:11 from the pre-open (or the first candle's open) — re-anchors the map */
+  opening?: { price: number; at: number; source: string } | null;
   stats: { all: IndexStats; dev: IndexStats; val: IndexStats };
 }
 export interface MapLevel { key: string; label: string; price: number; kind: "PD" | "WEEK" | "ROUND" | "OI" | "MP"; note: string }
@@ -21,10 +24,13 @@ export interface MapTrade { id: string; label: string; side: "CE" | "PE"; strike
 export interface LevelRead { key: string; label: string; price: number; role: "S" | "R"; holdPct: number; breakPct: number; sweepPct: number; recoverPct: number; n: number; read: string }
 export interface Scenario { id: string; icon: string; title: string; open: number; chance: number | null; chanceNote: string; story: string[];
   branches: Branch[]; levels: LevelRead[]; trades: MapTrade[]; sweep: { price: number; pct: number; label: string }[] }
-export interface ScenarioMap { index: string; base: SessionHLC; targetDay: string; targetIsToday: boolean; k: number; tgt: number; sl: number;
+export interface OpeningRead { price: number; at: number; source: string; gapPts: number; bucket: string; label: string; scenario: string; review: string[] }
+export interface ScenarioMap { index: string; base: SessionHLC; targetDay: string; targetIsToday: boolean; k: number; tgt: number; sl: number; opening: OpeningRead | null;
   levels: MapLevel[]; scenarios: Scenario[]; source: string; honesty: string[] }
 
 const f0 = (v: number) => Math.round(v).toLocaleString("en-IN");
+const hmI = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(11, 16);
+const bucketLbl = (g: string, k: number) => { const a = Math.round(50 * k), b = Math.round(100 * k); return ({ BIG_DOWN: `बड़ा Gap Down (${b}+)`, DOWN: `Gap Down ${a}–${b}`, FLAT: `Flat open (±${a})`, UP: `Gap Up ${a}–${b}`, BIG_UP: `बड़ा Gap Up (${b}+)` } as Record<string, string>)[g] || g; };
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const LBL: Record<string, string> = { PDH: "कल का High (PDH)", PDL: "कल का Low (PDL)", PDC: "कल का Close (PDC)", WH: "5-दिन High", WL: "5-दिन Low", RND_UP: "Round strike ऊपर", RND_DN: "Round strike नीचे" };
 
@@ -74,9 +80,14 @@ export function buildScenarioMap(I: MapInput): ScenarioMap {
   const firstStat = (ls: MapLevel[], role: "S" | "R") => ls.find((l) => lvlStat(l.key, role)) || ls[0];
 
   // ---------- gap scenarios ----------
+  // the real opening (09:11): its gap bucket picks the scenario and replaces the assumed open
+  const O = I.opening && Number.isFinite(I.opening.price) && I.opening.price > 0 ? I.opening : null;   // the route passes it only for the target session (or a what-if)
+  const wi = !!O && /what-if/.test(O.source), tagT = wi ? "🔮 अगर: " : "🔔 आज: ";
+  const oGap = O ? (O.price - B.close) / k : 0, oKey = O ? gapKey(oGap) : null, oDir: 1 | -1 = oGap < 0 ? -1 : 1;
   const gapScenario = (dir: 1 | -1): Scenario => {
-    const gk = dir < 0 ? "DOWN" : "UP", g: GapStat = I.stats.all.gaps[gk], gd = I.stats.dev.gaps[gk], gv = I.stats.val.gaps[gk];
-    const open = B.close + dir * 75 * k, half = (g.medOr15 * k) / 2, orH = open + half, orL = open - half;
+    const real = !!O && oKey !== "FLAT" && oDir === dir;
+    const gk: GapKey = real ? oKey! : dir < 0 ? "DOWN" : "UP", g: GapStat = I.stats.all.gaps[gk], gd = I.stats.dev.gaps[gk], gv = I.stats.val.gaps[gk];
+    const open = real ? O!.price : B.close + dir * 75 * k, half = (g.medOr15 * k) / 2, orH = open + half, orL = open - half;
     const next = dir < 0 ? firstStat(below(orL), "S") : firstStat(above(orH), "R");
     const nextP = next ? next.price : open + dir * 2 * T;
     const fill: Branch = { id: "fill", name: `Gap fill — ${f0(B.close)} (PDC) तक वापसी`, prob: g.fillPct, probNote: `${g.fillPct}% gap-${dir < 0 ? "down" : "up"} दिनों में gap भरा (10:15 तक ${g.fillBy1015Pct}%)`, color: "#26a69a",
@@ -96,11 +107,11 @@ export function buildScenarioMap(I: MapInput): ScenarioMap {
     ];
     const lr = levels.map((l) => read(l, open)).filter((x): x is LevelRead => !!x).filter((x) => Math.abs(x.price - open) <= 4 * T);
     const best = trades.filter((t) => t.verdict === "GOOD").sort((a, b) => b.avgPts - a.avgPts)[0];
-    return { id: dir < 0 ? "GAP_DOWN" : "GAP_UP", icon: dir < 0 ? "🔻" : "🔺", title: `Gap ${dir < 0 ? "Down" : "Up"} ${Math.round(50 * k)}–${Math.round(100 * k)} points`, open,
-      chance: g.sharePct, chanceNote: `${g.sharePct}% दिन ऐसे खुले (${g.n} दिन, 2 साल)`, branches: [fill, go, sweep], levels: lr, trades,
+    return { id: dir < 0 ? "GAP_DOWN" : "GAP_UP", icon: dir < 0 ? "🔻" : "🔺", title: real ? `${tagT}Gap ${dir < 0 ? "Down" : "Up"} ${Math.round(Math.abs(open - B.close))} points` : `Gap ${dir < 0 ? "Down" : "Up"} ${Math.round(50 * k)}–${Math.round(100 * k)} points`, open,
+      chance: g.sharePct, chanceNote: `${real ? `${bucketLbl(gk, k)} gap · ` : ""}${g.sharePct}% दिन ऐसे खुले (${g.n} दिन, 2 साल)`, branches: [fill, go, sweep], levels: lr, trades,
       sweep: [{ price: dir < 0 ? orL : orH, pct: dir < 0 ? g.orLowSweepPct : g.orHighSweepPct, label: `पहले 15-min का ${dir < 0 ? "low" : "high"} (≈)` }],
       story: [
-        `मान लीजिए ${I.index} ${f0(open)} के आसपास खुलता है (${f0(B.close)} से ${dir < 0 ? "−" : "+"}${Math.round(75 * k)})।`,
+        real ? `${wi ? `🔮 अगर ${I.index} ${f0(open)} पर खुले` : `🔔 ${hmI(O!.at)} पर ${I.index} का opening ${f0(open)}`} — कल के close ${f0(B.close)} से ${dir < 0 ? "−" : "+"}${Math.round(Math.abs(open - B.close))} (${bucketLbl(gk, k)})।` : `मान लीजिए ${I.index} ${f0(open)} के आसपास खुलता है (${f0(B.close)} से ${dir < 0 ? "−" : "+"}${Math.round(75 * k)})।`,
         `पहली 15-min candle आमतौर पर ~${f0(g.medOr15 * k)} points की होती है: ≈ ${f0(orL)} – ${f0(orH)}। इसी का high / low आज का पहला फ़ैसला है।`,
         `Gap भरना (${f0(B.close)} तक): ${g.fillPct}%। Gap की दिशा में पहले ${P} points: ${g.contPct}%। यानी ${g.contPct > g.fillPct ? "gap अक्सर अपनी दिशा में चलता है" : "gap अक्सर भर जाता है"}।`,
         best ? `सबसे भरोसेमंद trade (पुराने + नए data दोनों में फ़ायदा): ${best.label} — ${best.win}% जीत, औसत ${best.avgPts > 0 ? "+" : ""}${best.avgPts} points।` : "इस gap में कोई trade दोनों हिस्सों में लगातार फ़ायदे में नहीं — पहले 30 मिनट सिर्फ़ देखिए, One Trade signal का इंतज़ार।",
@@ -109,7 +120,7 @@ export function buildScenarioMap(I: MapInput): ScenarioMap {
 
   // ---------- flat open → falls / rises ----------
   const flatScenario = (dir: 1 | -1): Scenario => {
-    const open = B.close, role: "S" | "R" = dir < 0 ? "S" : "R";
+    const open = O && oKey === "FLAT" ? O.price : B.close, role: "S" | "R" = dir < 0 ? "S" : "R";
     const side = dir < 0 ? below(open) : above(open), L1 = firstStat(side, role), L2 = side.filter((l) => l !== L1 && lvlStat(l.key, role))[0] || side.find((l) => l !== L1);
     const p1 = L1 ? L1.price : open + dir * T, p2 = L2 ? L2.price : p1 + dir * T;
     const st = L1 ? lvlStat(L1.key, role) : undefined, sd = L1 ? lvlStat(L1.key, role, I.stats.dev) : undefined, sv = L1 ? lvlStat(L1.key, role, I.stats.val) : undefined;
@@ -127,7 +138,7 @@ export function buildScenarioMap(I: MapInput): ScenarioMap {
     const lr = levels.map((l) => read(l, open)).filter((x): x is LevelRead => !!x).filter((x) => dir * (x.price - open) > 0).sort((a, b) => Math.abs(a.price - open) - Math.abs(b.price - open)).slice(0, 4);
     const sustain = lr.filter((x) => x.holdPct >= x.breakPct).sort((a, b) => b.holdPct - a.holdPct)[0];
     const best = trades.filter((t) => t.verdict === "GOOD").sort((a, b) => b.avgPts - a.avgPts)[0];
-    return { id: dir < 0 ? "FALL" : "RISE", icon: dir < 0 ? "↘" : "↗", title: dir < 0 ? "Flat open → बाज़ार गिरे" : "Flat open → बाज़ार चढ़े", open,
+    return { id: dir < 0 ? "FALL" : "RISE", icon: dir < 0 ? "↘" : "↗", title: (O && oKey === "FLAT" ? tagT : "") + (dir < 0 ? "Flat open → बाज़ार गिरे" : "Flat open → बाज़ार चढ़े"), open,
       chance: g.sharePct, chanceNote: `Flat open (±${Math.round(50 * k)}) ${g.sharePct}% दिन`, branches: [hold, brk, rec], levels: lr, trades,
       sweep: L1 && st ? [{ price: p1 + dir * 9 * k, pct: st.sweepPct, label: `${L1.label} के ${dir < 0 ? "नीचे" : "ऊपर"} stop-loss pool` }] : [],
       story: [
@@ -154,7 +165,23 @@ export function buildScenarioMap(I: MapInput): ScenarioMap {
       ...pools.slice(0, 4).map((p) => `${p.label} (≈ ${f0(p.price)}): sweep होकर पलटने का चांस ${p.pct}%${p.st ? `, टूटकर चलने का ${p.st.breakPct}%` : ""}।`),
       "Sweep entry अकेले 2 साल के test में REJECT हुई थी (three-trades study) — sweep देखकर One Trade signal की पुष्टि का इंतज़ार कीजिए।"] });
 
-  return { index: I.index, base: B, targetDay: I.targetDay, targetIsToday: I.targetIsToday, k, tgt: T, sl: SL, levels, scenarios,
+  // 🔔 the opening review: which scenario today is, its odds, the first-candle plan
+  let opening: OpeningRead | null = null;
+  if (O && oKey) {
+    const id = oKey === "FLAT" ? (oGap < 0 ? "FALL" : "RISE") : oDir < 0 ? "GAP_DOWN" : "GAP_UP", sc = scenarios.find((x) => x.id === id)!, g = I.stats.all.gaps[oKey];
+    const pts = Math.round(O.price - B.close), best = sc.trades.filter((t) => t.verdict === "GOOD").sort((a, b) => b.avgPts - a.avgPts)[0];
+    const half = (g.medOr15 * k) / 2, sup = below(O.price)[0], res = above(O.price)[0];
+    opening = { price: O.price, at: O.at, source: O.source, gapPts: pts, bucket: oKey, label: `${bucketLbl(oKey, k)} (${pts >= 0 ? "+" : "−"}${Math.abs(pts)})`, scenario: id, review: [
+      `${wi ? `🔮 अगर ${I.index} ${f0(O.price)} पर खुले` : `🔔 ${hmI(O.at)} — ${I.index} का opening ${f0(O.price)}`}: कल के close ${f0(B.close)} से ${pts >= 0 ? "+" : "−"}${Math.abs(pts)} points → ${bucketLbl(oKey, k)}।`,
+      `2 साल में ऐसे ${g.n} दिन: gap भरा ${g.fillPct}% (10:15 तक ${g.fillBy1015Pct}%) · gap की दिशा में पहले ${P} points ${g.contPct}% · पहले 15-min का high/low sweep होकर पलटा ${oDir < 0 ? g.orLowSweepPct : g.orHighSweepPct}%।`,
+      `पहली 15-min candle आमतौर पर ~${f0(g.medOr15 * k)} points: ≈ ${f0(O.price - half)} – ${f0(O.price + half)}। 09:30 के बाद 15-min close जिस तरफ़ टूटे, वही दिशा।`,
+      `पास के levels: नीचे ${sup ? `${sup.label} ${f0(sup.price)}` : "—"} · ऊपर ${res ? `${res.label} ${f0(res.price)}` : "—"}।`,
+      best ? `सबसे भरोसेमंद trade: ${best.label} — entry ≈ ${f0(best.entry)}, SL ${f0(best.stop)}, target ${f0(best.target)} (${best.win}% जीत)।` : "इस opening में कोई trade दोनों data हिस्सों में लगातार फ़ायदे में नहीं — पहले 30 मिनट देखिए, One Trade signal का इंतज़ार।",
+    ] };
+    scenarios.sort((a, b) => (a.id === id ? -1 : b.id === id ? 1 : 0));
+  }
+
+  return { index: I.index, base: B, targetDay: I.targetDay, targetIsToday: I.targetIsToday, k, tgt: T, sl: SL, opening, levels, scenarios,
     source: `${I.stats.all.from} → ${I.stats.all.to}, ${I.stats.all.sessions} sessions (real Dhan 1-min data)`,
     honesty: ["Probability = पिछले 2 साल में ऐसा कितनी बार हुआ — भविष्य की गारंटी नहीं।", "रास्ते (lines) का समय सांकेतिक है; levels और % असली data से हैं।",
       "Avg points premium cost से पहले के हैं; 1:2 में ~34% से कम जीत = घाटा।", "Trade सिर्फ़ One Trade signal पर — यह map तैयारी के लिए है।"] };

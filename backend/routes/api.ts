@@ -8468,25 +8468,50 @@ router.get("/one-trade", requirePermission("oiAnalysis"), async (_req: Request, 
 // /api/one-trade/scenarios?symbol=^NSEI|^BSESN · the next session's what-ifs (gap down / up 50–100, falls / rises from a
 // flat open, liquidity-sweep pools) from the last completed session's levels + OI walls + max pain, with the odds measured
 // on 2 years of real Dhan 1-min data (premium/scenario-stats.json, research/protrader/scenarioStudy.ts). Shared caches only.
-router.get("/one-trade/scenarios", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
-  const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
-  if (!def || def.type !== "index" || !def.fno || !["^NSEI", "^BSESN"].includes(def.symbol)) return res.status(400).json({ error: "NIFTY or SENSEX required" });
-  try {
-    res.json(await cachedSwr(`scn-map:${def.symbol}`, 60_000, 600_000, async () => {
+// 🔔 09:11 opening (owner 2026-10-28): the session's opening number re-anchors the map and picks today's scenario.
+const OPEN_FILE = path.join(process.cwd(), "data", "open-snap.json");
+let _open: { day: string; rows: Record<string, { price: number; at: number; source: string }> } = (() => { try { return JSON.parse(fs.readFileSync(OPEN_FILE, "utf8")); } catch { return { day: "", rows: {} }; } })();
+/** From 09:11 the index quote carries the pre-open (09:00–09:08) discovered price. While it still equals yesterday's close
+ *  (feed not updated) it is retried; from 09:16 the first 15-min candle's open is used instead. Saved once per day per index. */
+async function openingOf(sym: string, prevClose: number, bars: any[]): Promise<{ price: number; at: number; source: string } | null> {
+  const nowSec = Math.floor(Date.now() / 1000), ist = new Date((nowSec + 19800) * 1000), day = ist.toISOString().slice(0, 10), istMin = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  if (ist.getUTCDay() === 0 || ist.getUTCDay() === 6 || istMin < 551) return null;
+  if (_open.day !== day) _open = { day, rows: {} };
+  if (_open.rows[sym]) return _open.rows[sym];
+  let row: { price: number; at: number; source: string } | null = null;
+  if (istMin < 556) {
+    const q: any = await cached(`quote:${sym}`, TTL_QUOTE, () => getProvider().getQuote(sym)).catch(() => null), p = Number(q?.price);
+    if (Number.isFinite(p) && p > 0 && Math.abs(p - prevClose) > 0.01) row = { price: Math.round(p * 100) / 100, at: nowSec, source: "pre-open (09:08 discovery)" };
+  } else {
+    const first = (bars || []).find((b: any) => new Date((b.time + 19800) * 1000).toISOString().slice(0, 10) === day);
+    if (first) row = { price: first.open, at: first.time, source: "first 15-min candle open" };
+  }
+  if (row) { _open.rows[sym] = row; try { fs.writeFileSync(OPEN_FILE, JSON.stringify(_open)); } catch { /* memory copy still used */ } }
+  return row;
+}
+function scnFor(def: any, whatIf: number | null = null): Promise<any> {
+    return cachedSwr(`scn-map:${def.symbol}:${whatIf ?? (_open.day === istDateStr() && _open.rows[def.symbol] ? "open" : "pre")}`, 60_000, 600_000, async () => {
       const nowSec = Math.floor(Date.now() / 1000), name = def.symbol === "^NSEI" ? "NIFTY" : "SENSEX";
       const [bars, d] = await Promise.all([getCandlesCached(def.symbol, "15m" as Interval).catch(() => [] as any[]), premiumCenterPayload({ symbol: def.symbol, interval: "15m" }).catch(() => null as any)]);
       const ss = scnSessions(bars || [], nowSec); if (!ss) return { available: false, error: "no session data" };
+      // 🔮 what-if: the owner's expected opening (e.g. from GIFT Nifty) before 09:11, or for tomorrow in the evening
+      const opening = whatIf != null ? { price: whatIf, at: nowSec, source: "🔮 आपका अनुमान (what-if)" } : ss.targetIsToday ? await openingOf(def.symbol, ss.base.close, bars || []).catch(() => null) : null;
       const st: any = (SCN_STATS as any).indices[name], sp: any = (SCN_STATS as any).split[name], ow = d?.oiWalls || {};
       const chain = _pcLastChain.get(`${def.symbol}:0`)?.v?.strikes || [];
       const map = buildScenarioMap({ index: name as any, step: d?.step || (name === "NIFTY" ? 50 : 100), base: ss.base, prior: ss.prior, spot: d?.spot?.price ?? null,
         callWall: ow.call?.strike ?? d?.oi?.callWall?.strike ?? null, putWall: ow.put?.strike ?? d?.oi?.putWall?.strike ?? null, maxPain: maxPainOf(chain),
-        targetDay: ss.targetDay, targetIsToday: ss.targetIsToday, stats: { all: st, dev: sp.dev, val: sp.val } });
+        targetDay: ss.targetDay, targetIsToday: ss.targetIsToday, opening, stats: { all: st, dev: sp.dev, val: sp.val } });
       const keep = new Set([ss.base.day, ...ss.prior.slice(0, 1).map((x) => x.day), ss.targetDay]);
       const day = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(0, 10);
       return { available: true, symbol: def.symbol, nowSec, spot: d?.spot?.price ?? null, live: ss.live, generated: (SCN_STATS as any).generated,
         candles: (bars || []).filter((b: any) => keep.has(day(b.time))).map((b: any) => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close })), ...map };
-    }));
-  } catch (e: any) { res.status(502).json({ available: false, error: e?.message || "scenario map failed" }); }
+    });
+}
+router.get("/one-trade/scenarios", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
+  if (!def || def.type !== "index" || !def.fno || !["^NSEI", "^BSESN"].includes(def.symbol)) return res.status(400).json({ error: "NIFTY or SENSEX required" });
+  const w = Number(req.query.open), whatIf = Number.isFinite(w) && w > 0 ? Math.round(w * 100) / 100 : null;
+  try { res.json(await scnFor(def, whatIf)); } catch (e: any) { res.status(502).json({ available: false, error: e?.message || "scenario map failed" }); }
 });
 
 // ===================== Zero-Hero (expiry-day cheap OTM) — live read; advisory only =====================
@@ -9560,6 +9585,8 @@ async function copilotTick() {
       const sheets = (await Promise.all(Object.keys(KL_SYMS).map((x) => klBuild(x).catch(() => null)))).filter(Boolean) as KLS.LevelSheet[];
       if (sheets.length) { _cp.sent.levels912 = nowSec; cpSave(); cpSend(KLS.levelSheetMsg(sheets), true, "levels912"); }
     }
+    // 🔔 09:11 opening number for the Scenario Map (NIFTY + SENSEX), retried until it is caught (first candle from 09:16)
+    if (istMin >= 551 && istMin <= 575 && (_open.day !== day || !_open.rows["^NSEI"] || !_open.rows["^BSESN"])) await Promise.all(["^NSEI", "^BSESN"].map((x) => scnFor(findSymbolDef(x)).catch(() => null)));
     // 09:13 plan (every co-pilot message stays inside market hours 09:13–15:30; the next-day plan follows at 15:31)
     if (istMin >= 553 && istMin <= 560 && !_cp.sent.plan) {
       const list = (await Promise.all(["^NSEI", "^BSESN"].map((x) => pay(x).catch(() => null)))).filter((x: any) => x?.available);
