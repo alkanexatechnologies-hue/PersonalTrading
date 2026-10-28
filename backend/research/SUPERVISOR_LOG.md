@@ -321,3 +321,22 @@ positive. 1 of 6 criteria pass.
   SENSEX 21 Oct 10:05 reproduced; 23 Oct none (as research).
 - **Not a logic change:** no entry, exit, plan or co-pilot behaviour changed; the card states the tested record and
   "positive result, not a proven edge". Verdict on C4 itself still waits for 30 live paper signals (from 26 Oct).
+
+## 2026-10-28 · TP27 "premium W at a key level" (the experienced trader's 27 Oct calls as a rule) — `protrader/traderPattern.ts`
+
+**Proposal (written before the run):** ATM option, 3-min candles. The premium makes a base ≥ 20 % under its session high,
+then a green engulfing / strong candle closes within 30 % of the base, while the index's 15-min extreme sits at a key
+level (PDH / PDL / PDC, first-15-min high / low, call wall for PE / put wall for CE). Stop = base × 0.98, target 2R,
+time exit 15:15.
+
+**Data:** Dhan 1-min rolling options, NIFTY 503 / SENSEX 502 sessions (2024-10-14 → 2026-10-27), DEV ⅔ / VAL ⅓.
+
+**Result (after costs, ₹ per lot):**
+- 1,760 trades; 522 target / 1,157 stop / 81 time; win 32.7 %; −₹137 per trade (conservative −₹285); PF 0.82.
+- Negative in DEV (−₹92) and VAL (−₹222), and for NIFTY and SENSEX on their own.
+- Without the level (control) −₹159: the key level adds about ₹22 per trade, not an edge.
+- Best sub-groups, both picked after the fact: put wall DEV +₹177 → VAL −₹113; PDH DEV +₹35 → VAL −₹97. Neither holds.
+- The rule does catch 27 Oct: 22800 PE at 10:15 and 22750 CE at 10:00 both hit target.
+
+**Verdict:** REJECT. No live change. The trader's results come from selection the rule cannot see (which days, which
+bases). Next step: log the trader's calls forward, with the context at each call, and re-test after 30+ calls.
