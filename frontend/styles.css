@@ -8459,3 +8459,12 @@ body.one-mode [data-tab="aipreview"], body.one-mode [data-nav="aipreview"],
 body.one-mode [data-tab="aipperf"], body.one-mode [data-nav="aipperf"],
 body.one-mode [data-tab="aipvalid"], body.one-mode [data-nav="aipvalid"],
 body.one-mode .mg-btn[data-mode="aipaper"] { display: none !important; }
+/* One Trade mode: the Market Command tab shows the chart only — the ProTrader card moved into the One Trade tab; top-bar trade chips go */
+body.one-mode #mcx-desk, body.one-mode #best-trade, body.one-mode #success-ind { display: none !important; }
+.one-mks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 6px; }
+.one-mk { border: 1px solid #1e2530; border-radius: 8px; padding: 8px 10px; background: #0d1117; min-width: 0; } .one-mk p { margin: 4px 0; }
+.one-mk ul, .one-mk ol { margin: 2px 0 6px; padding-left: 18px; } .one-mk li { margin: 2px 0; }
+.one-h4 { margin: 8px 0 2px; font-size: 12.5px; color: #9aa3b0; font-weight: 700; }
+.one-market summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; list-style: none; }
+@media (max-width: 900px) { .one-mks { grid-template-columns: minmax(0, 1fr); } }
+body.one-mode .mc-tog:has(#mc-tog-trade), body.one-mode .mc-tog:has(#mc-tog-planlv) { display: none !important; }   /* their lines are trade calls: off in One Trade mode */

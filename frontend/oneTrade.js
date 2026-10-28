@@ -88,7 +88,13 @@
         <li><b>ईमानदार रिकॉर्ड</b> (2 साल, असली Dhan data, खर्च के बाद, प्रति lot): पिछला साल ${r.oneAtATimeVal ? `+₹${r.oneAtATimeVal.perTrade}/trade, PF ${r.oneAtATimeVal.pf}, जीत ${r.oneAtATimeVal.win}%` : "—"}; उससे पहले का साल ${r.oneAtATimeDev ? `−₹${Math.abs(r.oneAtATimeDev.perTrade)}/trade, PF ${r.oneAtATimeDev.pf}` : "—"}। पुराने T1/T2 तरीके से बेहतर, पर पक्का edge नहीं — सलाह मात्र, कोई order नहीं लगता।</li>
         <li>यह trade Telegram co-pilot का ही पहला trade है; Telegram के T1/T2 संदेश अलग नियम पर चलते हैं — इस screen पर 1:2 वाला नियम मानें।</li>
       </ol></details>`;
-    const html = bar + hero + feed + done + how;
+    const li = (a) => (a || []).map((x) => `<li>${x}</li>`).join("");   // server-built HTML (numbers + <b> only)
+    const mk = (d.market || []).map((m) => `<div class="one-mk"><div class="one-row"><b>${esc(m.index)}</b>${m.structure ? `<span class="one-chip ${m.structure.bias === "UP" ? "one-up" : m.structure.bias === "DOWN" ? "one-dn" : ""}">${esc(m.structure.label)}</span>` : ""}<span class="one-mu">${esc(m.asOf || "")}</span></div>
+        ${m.intro ? `<p>${m.intro}</p>` : ""}${m.structure ? `<p>${m.structure.text}</p>` : m.condition ? `<p><b>${esc(m.condition.label)}</b> — ${esc(m.condition.text)}</p>` : ""}
+        <h4 class="one-h4">📺 क्या हुआ</h4><ul>${li(m.story)}</ul><h4 class="one-h4">🔗 Option chain</h4><ul>${li([...(m.oiRead || []), ...(m.market || [])])}</ul>
+        ${m.lessons && m.lessons.length ? `<h4 class="one-h4">🧠 Junior के लिए सबक</h4><ol>${li(m.lessons)}</ol>` : ""}</div>`).join("");
+    const market = mk ? `<details class="one-card one-market" open><summary><h3 class="one-h">📺 बाज़ार की live commentary (NIFTY · SENSEX)</h3></summary><div class="one-mks">${mk}</div></details>` : "";
+    const html = bar + hero + feed + market + done + how;
     if (host.__one !== html) { host.innerHTML = html; host.__one = html; }
     // speak new events (only those that arrive after the first load, so the backlog is not read out)
     for (const e of d.events || []) { const k = e.t + "|" + e.kind; if (!O.primed) { O.spoken.add(k); continue; } if (!O.spoken.has(k)) { O.spoken.add(k); if (voiceOn()) say(e.text); } }

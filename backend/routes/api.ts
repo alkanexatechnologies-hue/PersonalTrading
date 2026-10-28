@@ -8453,9 +8453,11 @@ router.get("/one-trade", requirePermission("oiAnalysis"), async (_req: Request, 
       liveNow = OT.live(t, d?.spot?.price ?? null, d ? cpPremOf(d, t.symbol, t.side, t.strike) : null);
     }
     // flat: what each index is waiting for (the desk commentary's best opportunity)
-    const waiting = t ? [] : (await Promise.all(["^NSEI", "^BSESN"].map((x) => deskFor(findSymbolDef(x)).catch(() => null)))).filter((x: any) => x?.available)
-      .map((x: any) => ({ symbol: x.symbol, index: x.index, headline: x.headline, best: x.best, structure: x.structure, asOf: x.asOf }));
-    res.json({ available: true, day, nowSec, trade: t, live: liveNow, closed: st.closed, events: st.events.slice(-60), waiting,
+    const desks = (await Promise.all(["^NSEI", "^BSESN"].map((x) => deskFor(findSymbolDef(x)).catch(() => null)))).filter((x: any) => x?.available);
+    const waiting = t ? [] : desks.map((x: any) => ({ symbol: x.symbol, index: x.index, headline: x.headline, best: x.best, structure: x.structure, asOf: x.asOf }));
+    // the market read (moved here from the Market Command card: that tab now shows the chart only)
+    const market = desks.map((x: any) => ({ symbol: x.symbol, index: x.index, asOf: x.asOf, intro: x.intro, structure: x.structure, story: x.story, oiRead: x.oiRead, market: x.market, condition: x.condition, lessons: x.lessons }));
+    res.json({ available: true, day, nowSec, trade: t, live: liveNow, closed: st.closed, events: st.events.slice(-60), waiting, market,
       record: { period: "2024-11-19 → 2026-10-26", oneAtATimeVal: { perTrade: 106, pf: 1.15, win: 49.5 }, oneAtATimeDev: { perTrade: -226, pf: 0.74, win: 40 }, source: "RESULTS_ONE_TRADE.md" } });
   } catch (e: any) { res.status(502).json({ available: false, error: e?.message || "one trade failed" }); }
 });
