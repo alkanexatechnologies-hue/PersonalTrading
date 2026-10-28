@@ -8564,3 +8564,22 @@ body.one-mode .mc-tog:has(#mc-tog-trade), body.one-mode .mc-tog:has(#mc-tog-plan
 .cs-rules { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 3px; }
 @media (max-width: 1100px) { .cs-chart { height: 420px; } }
 @media (max-width: 760px) { .cs-evs, .cs-grid { grid-template-columns: minmax(0, 1fr); } .cs-chart { height: 360px; } .cs-days { width: 100%; } .cs-days select { flex: 1; min-width: 0; } }
+/* 📘 Screen Rules tab (Market Command, 2026-10-29) */
+body.mcx-rules #panel-marketcommand .mc2-main, body.mcx-rules #mcx-dec, body.mcx-rules #mcx-ot, body.mcx-rules #mcx-desk, body.mcx-rules #mcx-tape { display: none !important; }
+.rl { display: flex; flex-direction: column; gap: 8px; color: #d6dbe3; font-size: 14px; line-height: 1.55; }
+.rl-top p { margin: 6px 0 0; } .rl-h { margin: 10px 0 2px; font-size: 15px; color: #c3cad4; }
+.rl-card summary { cursor: pointer; min-height: 44px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 12px; list-style: none; }
+.rl-card summary::-webkit-details-marker { display: none; }
+.rl-card summary::before { content: "▸"; color: #9aa3b0; margin-right: 2px; } .rl-card[open] summary::before { content: "▾"; }
+.rl-t { display: flex; flex-direction: column; flex: 1 1 260px; min-width: 0; } .rl-t b { font-size: 15px; } .rl-where { font-size: 12.5px; color: #9aa3b0; }
+.rl-st { font-size: 13px; padding: 3px 10px; border-radius: 999px; border: 1px solid #2a3340; }
+.rl-ok { border-left: 4px solid #26c6a6; } .rl-ok .rl-st { color: #26c6a6; border-color: #136e5c; background: #0c2420; }
+.rl-warn { border-left: 4px solid #f5c542; } .rl-warn .rl-st { color: #f5c542; border-color: #8a6a1a; background: #2a210a; }
+.rl-info { border-left: 4px solid #4ea1ff; } .rl-info .rl-st { color: #8cc1ff; border-color: #24456e; background: #0e1a2b; }
+.rl-tbl { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13.5px; }
+.rl-tbl th { text-align: left; vertical-align: top; color: #9aa3b0; font-weight: 600; padding: 5px 12px 5px 0; white-space: nowrap; width: 1%; }
+.rl-tbl td { padding: 5px 0; border-bottom: 1px solid #1a2029; }
+.rl-rec { margin: 8px 0 0; padding: 6px 10px; border-radius: 6px; background: #0d1117; font-size: 13px; color: #c3cad4; }
+.rl-infos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; } .rl-infos .one-card { display: flex; flex-direction: column; gap: 2px; } .rl-infos p { margin: 4px 0 0; }
+.rl-common { margin: 0; padding-left: 28px; display: flex; flex-direction: column; gap: 4px; } .rl-foot { margin: 4px 0 0; }
+@media (max-width: 760px) { .rl-infos { grid-template-columns: minmax(0, 1fr); } .rl-tbl th { white-space: normal; width: 30%; } }
