@@ -15,7 +15,7 @@ const COST = (p: number) => Math.max(0.5, 0.0025 * p);
 const IDX = { NIFTY: { step: 50, lot: 75 }, SENSEX: { step: 100, lot: 20 } } as const;
 export type Cfg = { name: string; range: boolean; cutoff: number; skipExpiry: boolean; entry: "plan" | "retest" | "sweep"; wideStop: boolean; structFilter?: boolean;
   hardStop?: number; noChase?: number; premTargets?: boolean; timeBlock?: boolean; fastSkip?: number;
-  fixedR?: number };   // fixedR: one full exit at entry ± R × (entry − stop) on the index (2026-10-28 "One Trade" 1:2 proposal)
+  fixedR?: number; extra?: ("sweep" | "break")[] };   // extra: 2026-10-28 "three trades" — add the 5-min sweep-reclaim and day-range breakout entries to the plan entries   // fixedR: one full exit at entry ± R × (entry − stop) on the index (2026-10-28 "One Trade" 1:2 proposal)
 // LIVE = the approved co-pilot (backtest #2: T2 + T3a); every P-config changes exactly one rule (RESULTS3.md, pre-registered)
 const LIVE: Cfg = { name: "LIVE", range: true, cutoff: 885, skipExpiry: true, entry: "retest", wideStop: false };
 const CFGS: Cfg[] = [
@@ -76,7 +76,7 @@ export function run(cfgs = CFGS) {
       }
       // ---- sweep signals (T4): a 5-min candle trades through a ladder level and closes back inside
       const sweepSig: any[] = [];
-      if (cfgs.some((c) => c.entry === "sweep")) {
+      if (cfgs.some((c) => c.entry === "sweep" || c.extra?.includes("sweep"))) {
         const lv = lad(pc), used = new Set<string>();
         for (const c of B5) {
           const m = mn(c.time) + 5; if (m < 570 || m > 839) continue;
@@ -91,14 +91,28 @@ export function run(cfgs = CFGS) {
           }
         }
       }
+      // ---- day-range breakout (owner's 12:45 trade): a 5-min close beyond the session's high / low so far, 10:30–14:30;
+      // stop = the breakout candle's other end; first break per side per day
+      const breakSig: any[] = [];
+      if (cfgs.some((c) => c.extra?.includes("break"))) {
+        let hi = -Infinity, lo = Infinity; const done = new Set<number>();
+        for (const c of B5) {
+          const m = mn(c.time) + 5;
+          if (m >= 630 && m <= 870) {
+            if (!done.has(1) && c.close > hi && hi > -Infinity) { done.add(1); breakSig.push({ m, t: c.time + 300, s: 1, entryIdx: c.close, trigger: hi, stop: c.low, t1: c.close + 2 * (c.close - c.low), t2: null, missed: false, stopTf: 5, kind: "break" }); }
+            if (!done.has(-1) && c.close < lo && lo < Infinity) { done.add(-1); breakSig.push({ m, t: c.time + 300, s: -1, entryIdx: c.close, trigger: lo, stop: c.high, t1: c.close - 2 * (c.high - c.close), t2: null, missed: false, stopTf: 5, kind: "break" }); }
+          }
+          hi = Math.max(hi, c.high); lo = Math.min(lo, c.low);
+        }
+      }
       for (const cfg of cfgs) {
         if (cfg.skipExpiry && exp.has(D)) { trades.push({ cfg: cfg.name, idx: name, day: D, i, n: days.length, res: "EXPIRY-SKIP" }); continue; }
         let freeAt = 0;
-        const sigs = (cfg.entry === "sweep" ? sweepSig : planSig).slice().sort((x, y) => x.m - y.m);
+        const sigs = (cfg.entry === "sweep" ? sweepSig : [...planSig, ...(cfg.extra?.includes("sweep") ? sweepSig.map((x) => ({ ...x, kind: "sweep" })) : []), ...(cfg.extra?.includes("break") ? breakSig : [])]).slice().sort((x, y) => x.m - y.m);
         for (const g0 of sigs) {
           let g = { ...g0 };
           if (g.missed) { trades.push({ cfg: cfg.name, idx: name, day: D, i, n: days.length, res: "MISSED" }); continue; }
-          if (cfg.entry === "retest") {   // wait ≤ 30 min for a pullback to the broken level that a 5-min close holds
+          if (cfg.entry === "retest" && !g.kind) {   // wait ≤ 30 min for a pullback to the broken level that a 5-min close holds
             const r = B5.find((c) => c.time >= g.t && c.time < g.t + 1800 && (g.s > 0 ? c.low <= g.trigger + 0.25 * a : c.high >= g.trigger - 0.25 * a) && g.s * (c.close - g.trigger) > 0);
             if (!r) { trades.push({ cfg: cfg.name, idx: name, day: D, i, n: days.length, res: "NO-RETEST" }); continue; }
             g = { ...g, t: r.time + 300, m: mn(r.time) + 5, entryIdx: r.close };
@@ -136,7 +150,7 @@ export function run(cfgs = CFGS) {
           if (state === "OPEN") state = "TIME"; else if (state === "T1") state = "T1+TIME";
           const gross = halfP != null ? 0.5 * (halfP - e0) + 0.5 * (exitP - e0) : exitP - e0;
           const net = gross - COST(e0) - (halfP != null ? 0.5 * COST(halfP) + 0.5 * COST(exitP) : COST(exitP)) - 40 / lot;
-          trades.push({ cfg: cfg.name, idx: name, day: D, i, n: days.length, time: g.m, side: g.s, res: state, end: endT, risk: Math.abs(g.entryIdx - g.stop), net: Math.round(net * 100) / 100, pct: Math.round((net / e0) * 1000) / 10, rs: Math.round(net * lot), exp: exp.has(D) });
+          trades.push({ cfg: cfg.name, idx: name, day: D, i, n: days.length, time: g.m, side: g.s, res: state, kind: g.kind || "plan", end: endT, risk: Math.abs(g.entryIdx - g.stop), net: Math.round(net * 100) / 100, pct: Math.round((net / e0) * 1000) / 10, rs: Math.round(net * lot), exp: exp.has(D) });
           freeAt = endT + 15;
         }
       }

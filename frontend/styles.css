@@ -8488,3 +8488,4 @@ body.one-mode .mc-tog:has(#mc-tog-trade), body.one-mode .mc-tog:has(#mc-tog-plan
 .lrn-hand { margin-top: 10px; } .lrn-plan li.win { border-left-color: #26a69a; } .lrn-plan li.loss { border-left-color: #ef5350; } .lrn-plan li.watch { border-left-color: #8a94a3; } .lrn-plan i { font-style: normal; color: #9aa3b0; }
 .lrn-tbl { overflow-x: auto; max-width: 100%; } .lrn-tiers { width: 100%; border-collapse: collapse; font-size: 14px; } .lrn-tiers th, .lrn-tiers td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #1e2530; vertical-align: top; } .lrn-tiers th { color: #9aa3b0; font-weight: 600; } .lrn-tiers .n { text-align: right; white-space: nowrap; }
 @media (max-width: 600px) { .lrn-tiers td:nth-child(2), .lrn-tiers th:nth-child(2) { display: none; } }
+.one-lots { min-height: 44px; font-size: 16px; background: #151b24; color: #e5e7eb; border: 1px solid #2a3340; border-radius: 8px; padding: 0 8px; }

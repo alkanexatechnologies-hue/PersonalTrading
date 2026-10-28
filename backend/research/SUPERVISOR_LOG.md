@@ -371,3 +371,33 @@ but it removes the clashing second trade.
 **Verdict:** APPROVE for the One Trade tab (fixed 1:2, one at a time). This is better than the current exits, but it is
 not a proven edge: the DEV year is still negative after costs. The tab must say so. The Telegram co-pilot's T1/T2
 messages are not changed by this verdict.
+
+## 2026-10-28 · "Three trades" — the 28 Oct best day as a rule (owner: "I need that strategy", 3 lots) — `protrader/threeTradesStudy.ts`
+
+**Proposal (written before the run):** keep the approved plan entry (15-min close + retest), and add two entries.
+- **Sweep-reclaim:** a 5-min candle trades through a ladder level and closes back inside; stop beyond the wick.
+- **Day-range breakout:** the first 5-min close beyond the session's high or low so far, 10:30–14:30; stop at the
+  candle's other end.
+
+All entries use a fixed 1:2 target, one trade at a time across NIFTY + SENSEX, a 14:45 cut-off and a 15:12 exit.
+
+**Data:** real Dhan 1-min data, 2024-11-19 → 2026-10-26. DEV / VAL split. Net of costs, 3 lots.
+
+**Result (one at a time, both indices):**
+
+| | Trades | Win % | ₹ / trade (1 lot) | 3 lots, 2 years | Worst drawdown (3 lots) |
+|---|---|---|---|---|---|
+| One Trade 1:2 (approved) | 404 | 44.6 % | −₹67 (VAL +₹134) | −₹80,886 | −₹2.07 L |
+| + sweep | 1,064 | 41.4 % | −₹148 | −₹4.72 L | −₹5.40 L |
+| + breakout | 725 | 41.2 % | −₹106 | −₹2.31 L | −₹2.89 L |
+| **Three trades** | 1,228 | 40.2 % | **−₹168** (DEV −₹205 / VAL −₹128) | **−₹6.20 L** | **−₹6.69 L** |
+
+By entry type inside "three trades":
+- **Sweep:** −₹167 / −₹92 (DEV / VAL).
+- **Breakout:** −₹322 / −₹170.
+- **Plan:** −₹216; it loses its best slots to the earlier sweep trades.
+- Removing the range-day skip does not help (−₹146).
+
+**Verdict:** REJECT. No live change. 28 Oct was a day when all three worked, but over two years the sweep and
+breakout entries lose after costs in both halves, and they push out the approved trade. The lesson page keeps the day
+as a learning example, labelled as hindsight.

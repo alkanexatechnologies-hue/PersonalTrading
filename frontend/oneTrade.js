@@ -12,7 +12,8 @@
   const sgn = (v, unit) => (v == null || !isFinite(v) ? "—" : (v >= 0 ? "+" : "−") + (unit || "") + Math.abs(Math.round(v)).toLocaleString("en-IN"));
   const hm = (t) => new Date((t + IST) * 1000).toISOString().slice(11, 16);
   const O = { host: null, timer: null, data: null, spoken: new Set(), primed: false };
-  const VKEY = "one-voice";
+  const VKEY = "one-voice", LKEY = "one-lots";
+  const lots = () => { try { const n = Number(localStorage.getItem(LKEY)); return n >= 1 && n <= 50 ? Math.round(n) : 1; } catch { return 1; } };
   // 🎯 One Trade mode (default on): every other screen hides its trade calls (styles.css body.ot-mode, plus the chart code)
   const MKEY = "one-mode";
   window.oneMode = () => { try { return localStorage.getItem(MKEY) !== "0"; } catch { return true; } };
@@ -37,7 +38,7 @@
   }
   function summaryText(d) {
     const t = d.trade, L = d.live || {};
-    if (t) return `${t.name} ${t.strike} ${t.side} चालू है। Entry ${rs(t.entryPrem)}, अभी ${rs(L.prem)}, एक lot पर ${sgn(L.pnlLot, "₹")}। Stop loss ${f0(t.stop)}, target ${f0(t.target)}।`;
+    if (t) return `${t.name} ${t.strike} ${t.side} चालू है। Entry ${rs(t.entryPrem)}, अभी ${rs(L.prem)}, ${lots()} lot पर ${sgn(L.pnlLot != null ? L.pnlLot * lots() : null, "₹")}। Stop loss ${f0(t.stop)}, target ${f0(t.target)}।`;
     const w = (d.waiting || [])[0];
     return `अभी कोई trade नहीं है। ${(d.waiting || []).map((x) => `${x.index}: ${String(x.headline || "").replace(/<[^>]+>/g, "")}`).join(" ")}`.trim() || (w ? "" : "अभी कोई trade नहीं है।");
   }
@@ -48,7 +49,7 @@
     if (!d) { host.innerHTML = `<section class="one-card"><p class="one-mu">लोड हो रहा है…</p></section>`; return; }
     if (!d.available) { host.innerHTML = `<section class="one-card"><p class="one-mu">${esc(d.error || "डेटा उपलब्ध नहीं")}</p></section>`; return; }
     const t = d.trade, L = d.live || {}, von = voiceOn();
-    const bar = `<div class="one-bar" role="toolbar" aria-label="Voice"><button type="button" class="one-btn${von ? " on" : ""}" data-one="voice" aria-pressed="${von}">${von ? "🔊 आवाज़ चालू" : "🔇 आवाज़ बंद"}</button><button type="button" class="one-btn" data-one="say">📢 अभी की स्थिति सुनाएँ</button><button type="button" class="one-btn${window.oneMode() ? " on" : ""}" data-one="mode" aria-pressed="${window.oneMode()}" title="On: trade calls appear only on this tab; other screens show market information only, and trade-only screens (Trade Execution, AI Paper, Top Pick) leave the menu">${window.oneMode() ? "🎯 Trade सिर्फ़ इस tab पर" : "👁 सभी screens पर trades"}</button><span class="one-mu">${esc(d.day)} · हर 15 सेकंड में update</span></div>`;
+    const bar = `<div class="one-bar" role="toolbar" aria-label="Voice"><button type="button" class="one-btn${von ? " on" : ""}" data-one="voice" aria-pressed="${von}">${von ? "🔊 आवाज़ चालू" : "🔇 आवाज़ बंद"}</button><button type="button" class="one-btn" data-one="say">📢 अभी की स्थिति सुनाएँ</button><button type="button" class="one-btn${window.oneMode() ? " on" : ""}" data-one="mode" aria-pressed="${window.oneMode()}" title="On: trade calls appear only on this tab; other screens show market information only, and trade-only screens (Trade Execution, AI Paper, Top Pick) leave the menu">${window.oneMode() ? "🎯 Trade सिर्फ़ इस tab पर" : "👁 सभी screens पर trades"}</button><label class="one-mu" for="one-lots">Lots</label><select id="one-lots" class="one-lots">${[1, 2, 3, 4, 5, 10].map((n) => `<option value="${n}"${n === lots() ? " selected" : ""}>${n}</option>`).join("")}</select><span class="one-mu">${esc(d.day)} · हर 15 सेकंड में update</span></div>`;
     let hero;
     if (t) {
       const ce = t.side === "CE", pos = L.r != null ? Math.max(0, Math.min(100, ((L.r + 1) / 3) * 100)) : null;   // −1R (stop) … +2R (target)
@@ -57,7 +58,7 @@
         <div class="one-grid">
           <span><i>Entry</i><b>${rs(t.entryPrem)}</b><small>index ${f0(t.entrySpot)}</small></span>
           <span><i>अभी</i><b>${rs(L.prem)}</b><small>index ${f0(L.spot)}</small></span>
-          <span><i>P&amp;L (1 lot = ${L.lot || "—"})</i><b class="${(L.pnlLot || 0) >= 0 ? "one-up" : "one-dn"}">${sgn(L.pnlLot, "₹")}</b><small>${sgn(L.pnl)} प्रति unit · ${L.r != null ? L.r.toFixed(2) + "R" : "—"}</small></span>
+          <span><i>P&amp;L (${lots()} lot × ${L.lot || "—"})</i><b class="${(L.pnlLot || 0) >= 0 ? "one-up" : "one-dn"}">${sgn(L.pnlLot != null ? L.pnlLot * lots() : null, "₹")}</b><small>${sgn(L.pnl)} प्रति unit · ${L.r != null ? L.r.toFixed(2) + "R" : "—"}</small></span>
           <span><i>🛑 Stop loss</i><b class="one-dn">${f0(t.stop)}</b><small>15-min close · ≈ ${rs(t.stopPrem)}</small></span>
           <span><i>🎯 Target 1:2</i><b class="one-up">${f0(t.target)}</b><small>index touch · ≈ ${rs(t.targetPrem)}</small></span>
         </div>
@@ -75,7 +76,7 @@
     const ev = (d.events || []).slice().reverse();
     const feed = `<section class="one-card" aria-label="Commentary"><h3 class="one-h">🎙 Hindi commentary</h3>${ev.length ? `<ol class="one-feed">${ev.map((e, i) => `<li class="k-${esc(e.kind)}"><time>${hm(e.t)}</time><p>${esc(e.text)}</p><button type="button" class="one-play" data-one-say="${ev.length - 1 - i}" aria-label="सुनें">▶</button></li>`).join("")}</ol>` : `<p class="one-mu">आज अभी कोई trade event नहीं।</p>`}</section>`;
     const cl = d.closed || [];
-    const done = `<section class="one-card" aria-label="Today's trades"><h3 class="one-h">📒 आज के trades</h3>${cl.length ? `<div class="one-tbl"><table><thead><tr><th>समय</th><th>Trade</th><th>Entry</th><th>Exit</th><th>नतीजा</th><th>1 lot</th></tr></thead><tbody>${cl.map((x) => { const lot = x.symbol === "^BSESN" ? 20 : 75, pl = x.exitPrem != null && x.entryPrem != null ? (x.exitPrem - x.entryPrem) * lot : null; return `<tr><td>${hm(x.openedAt)}–${x.closedAt ? hm(x.closedAt) : ""}</td><td>${esc(x.name)} ${x.strike} ${x.side}</td><td>${rs(x.entryPrem)}</td><td>${rs(x.exitPrem)}</td><td>${x.state === "TARGET" ? "🎯 Target" : x.state === "SL" ? "🛑 SL" : "⏰ Time"}</td><td class="${(pl || 0) >= 0 ? "one-up" : "one-dn"}">${sgn(pl, "₹")}</td></tr>`; }).join("")}</tbody></table></div>` : `<p class="one-mu">आज अभी कोई trade बंद नहीं हुआ।</p>`}</section>`;
+    const done = `<section class="one-card" aria-label="Today's trades"><h3 class="one-h">📒 आज के trades</h3>${cl.length ? `<div class="one-tbl"><table><thead><tr><th>समय</th><th>Trade</th><th>Entry</th><th>Exit</th><th>नतीजा</th><th>${lots()} lot</th></tr></thead><tbody>${cl.map((x) => { const lot = (x.symbol === "^BSESN" ? 20 : 75) * lots(), pl = x.exitPrem != null && x.entryPrem != null ? (x.exitPrem - x.entryPrem) * lot : null; return `<tr><td>${hm(x.openedAt)}–${x.closedAt ? hm(x.closedAt) : ""}</td><td>${esc(x.name)} ${x.strike} ${x.side}</td><td>${rs(x.entryPrem)}</td><td>${rs(x.exitPrem)}</td><td>${x.state === "TARGET" ? "🎯 Target" : x.state === "SL" ? "🛑 SL" : "⏰ Time"}</td><td class="${(pl || 0) >= 0 ? "one-up" : "one-dn"}">${sgn(pl, "₹")}</td></tr>`; }).join("")}</tbody></table></div>` : `<p class="one-mu">आज अभी कोई trade बंद नहीं हुआ।</p>`}</section>`;
     const r = d.record || {};
     const how = `<details class="one-card one-how"><summary><h3 class="one-h">ℹ️ यह screen कैसे काम करता है</h3></summary>
       <ol>
@@ -111,6 +112,7 @@
     O.host = host; render(); load();
     O.timer = setInterval(() => { if (!document.hidden && O.host && !O.host.hidden) load(); }, 15000);
   };
+  document.addEventListener("change", (e) => { if (e.target && e.target.id === "one-lots") { try { localStorage.setItem(LKEY, e.target.value); } catch {} if (O.host) { O.host.__one = null; render(); } } });
   document.addEventListener("click", (e) => {
     const b = e.target.closest("[data-one],[data-one-say]"); if (!b || !O.host || !O.host.contains(b)) return;
     if (b.dataset.one === "voice") { const on = !voiceOn(); try { localStorage.setItem(VKEY, on ? "1" : "0"); } catch {} if (on) say("आवाज़ चालू। हर trade की जानकारी अब बोली जाएगी।"); else if ("speechSynthesis" in window) speechSynthesis.cancel(); O.host.__one = null; render(); }
