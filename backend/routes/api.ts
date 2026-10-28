@@ -8453,6 +8453,11 @@ function sqlSync(): Promise<void> {
   return new Promise((resolve) => require("child_process").execFile(process.execPath, [path.join(process.cwd(), "scripts", "sqlserver", "sync.mjs")], { cwd: process.cwd(), timeout: 15 * 60_000, maxBuffer: 16 << 20 },
     (err: any, out: string) => { console.log(err ? `[sql-sync] failed: ${String(err.message).slice(0, 300)}` : String(out).trim().slice(-400)); resolve(); }));
 }
+// ⚠️ EXPIRY-DAY PLAN TRADES — owner's decision 2026-10-29 (overrides ProTrader backtest #2, which skipped them: the
+// normal plan lost ~8.5% per trade on expiry over 2 years). The trades go through the same retest / review / chase
+// checks and are labelled HIGH RISK everywhere. Set to false to restore the skip. Logged in SUPERVISOR_LOG.md.
+const EXPIRY_PLAN_TRADES = true;
+const EXPIRY_RISK_HTML = "⚠️ <b>EXPIRY DAY · HIGH RISK</b> — owner allowed (29 Oct); 2-yr test: normal plan lost ~8.5%/trade on expiry. <b>1 lot only</b>, book at target, never move the SL.\n";
 // 🗄 trade history (owner 2026-10-29): the day's trades are appended here before the nightly reset, so they can be queried
 // later (scripts/sqlserver/load-app.mjs copies them into the local SQL Server). Best-effort; never blocks the job.
 const histAppend = (file: string, rows: any[]) => { if (!rows.length) return; try { fs.appendFileSync(path.join(process.cwd(), "data", file), rows.map((r) => JSON.stringify(r)).join("\n") + "\n"); } catch { /* best-effort */ } };
@@ -9674,9 +9679,12 @@ async function copilotTick() {
               cpSend(`⏹ <b>${d.name} ${leg} — NOT GIVEN at the retest</b>\n${why === "LATE ENTRY" ? "The premium ran 10%+ above its price at the trigger — ProTrader does not chase." : why === "FAST MARKET" ? "The last hour's candles are 1.5× normal size — stops get hit by noise; no new trade." : "The plan's numbers do not hold: " + bad.join("; ")}`, true, "trade");
             }
             if (t) {
-              t.review = pd.review; t.entryKind = "RETEST"; _cp.trades[sym] = t; delete _cp.pending[sym]; cpSave();
-              otDay(day); if (OT.adopt(_ot, t, { delta: pl.delta ?? null, review: pd.review?.grade ?? null, trigger: pd.trigger })) otSave();   // 🎯 One Trade: only when flat
-              cpSend(`📌 <b>TRADE GIVEN ON THE RETEST (review ${pd.review.grade}${pd.review.grade === "B" ? " — HALF SIZE" : ""})</b>\n5-min candle ${new Date((r.hit.time + 19800) * 1000).toISOString().slice(11, 16)} came back to ${Math.round(pd.side === "bull" ? r.hit.low : r.hit.high)} and closed ${Math.round(r.hit.close)} — ${pd.side === "bull" ? "above" : "below"} ${Math.round(pd.trigger)}. I will follow it to Target 1, Target 2, stop or 15:12.\n` + TG.tradeAlert(d, pd.side, "TRIGGERED", cpOdds(sym)), true, "trade");
+              t.review = pd.review; t.entryKind = "RETEST"; if (pd.expiryDay) t.expiryDay = true; _cp.trades[sym] = t; delete _cp.pending[sym]; cpSave();
+              otDay(day); if (OT.adopt(_ot, t, { delta: pl.delta ?? null, review: pd.review?.grade ?? null, trigger: pd.trigger })) {   // 🎯 One Trade: only when flat
+                if (pd.expiryDay) _ot.events.push({ t: nowSec, kind: "WARN", text: "⚠️ आज इस index की EXPIRY है — HIGH RISK: premium घंटे-घंटे में घटता है (2 साल के test में expiry-day plan trades औसत घाटे में रहे)। सिर्फ़ 1 lot, target पर तुरंत पूरा बेचें, SL नहीं खिसकाएँ।" });
+                otSave();
+              }
+              cpSend((pd.expiryDay ? EXPIRY_RISK_HTML : "") + `📌 <b>TRADE GIVEN ON THE RETEST (review ${pd.review.grade}${pd.review.grade === "B" ? " — HALF SIZE" : ""})</b>\n5-min candle ${new Date((r.hit.time + 19800) * 1000).toISOString().slice(11, 16)} came back to ${Math.round(pd.side === "bull" ? r.hit.low : r.hit.high)} and closed ${Math.round(r.hit.close)} — ${pd.side === "bull" ? "above" : "below"} ${Math.round(pd.trigger)}. I will follow it to Target 1, Target 2, stop or 15:12.\n` + TG.tradeAlert(d, pd.side, "TRIGGERED", cpOdds(sym)), true, "trade");
             }
           } else if (r.expired || !pl || Math.round(pl.trigger) !== Math.round(pd.trigger) || istMin > 885) {
             delete _cp.pending[sym]; cpSave();
@@ -9725,14 +9733,15 @@ async function copilotTick() {
             else if (free && T.rangeDay) (cpNotGiven(d.name, side === "bull" ? "CE" : "PE", p.trigger, "RANGE DAY"), cpSend(`⚠️ <b>RANGE DAY — shown, not given</b> (${T.rangeDay.why}; no new trades after ${T.rangeDay.at})\n` + opp + rvH, true));
             // ProTrader-approved 2026-10-18 (backtest #2, ~2 yrs real premiums): no trade on the index's own EXPIRY DAY, and the
             // trade is given only on a RETEST of the broken level (5-min close holding beyond it) within 30 minutes
-            else if (free && rv && rv.grade !== "C" && d.expiry && d.expiry === day) (cpNotGiven(d.name, side === "bull" ? "CE" : "PE", p.trigger, "EXPIRY DAY"), cpSend(`⚠️ <b>EXPIRY DAY — plan trigger shown, not given</b> (normal plan lost ~8.5%/trade on expiry over 2 yrs). Today's expiry trades come from 🎲 EXPIRY MODE (paper / min size).\n` + opp + rvH, true));
+            // OWNER OVERRIDE 2026-10-29 (EXPIRY_PLAN_TRADES): expiry-day plan trades ARE given, labelled HIGH RISK (SUPERVISOR_LOG)
+            else if (!EXPIRY_PLAN_TRADES && free && rv && rv.grade !== "C" && d.expiry && d.expiry === day) (cpNotGiven(d.name, side === "bull" ? "CE" : "PE", p.trigger, "EXPIRY DAY"), cpSend(`⚠️ <b>EXPIRY DAY — plan trigger shown, not given</b> (normal plan lost ~8.5%/trade on expiry over 2 yrs). Today's expiry trades come from 🎲 EXPIRY MODE (paper / min size).\n` + opp + rvH, true));
             else if (free && rv && rv.grade !== "C" && !_cp.pending?.[sym]) {
               const c15 = (d.chart?.candles || []).filter((c: any) => c.time + 900 <= nowSec), from = c15.length ? c15[c15.length - 1].time + 900 : nowSec;
               _cp.pending = _cp.pending || {};
-              _cp.pending[sym] = { side, trigger: p.trigger, atr: T.atr15, from, until: from + 1800, review: { grade: rv.grade, score: rv.score, passed: rv.passed, failed: rv.failed },
+              _cp.pending[sym] = { expiryDay: !!(d.expiry && d.expiry === day), side, trigger: p.trigger, atr: T.atr15, from, until: from + 1800, review: { grade: rv.grade, score: rv.score, passed: rv.passed, failed: rv.failed },
                 strike: p.strike, premAtTrigger: cpPremOf(d, sym, side === "bull" ? "CE" : "PE", p.strike) ?? p.premNow ?? null };
               cpSave();
-              cpSend(`🎯 <b>TRIGGERED — WAITING FOR THE RETEST</b> (ProTrader rule)\n${side === "bull" ? "CE" : "PE"} is given only if, by ${new Date((from + 1800 + 19800) * 1000).toISOString().slice(11, 16)}, a 5-min candle comes back to within ${Math.round(0.25 * T.atr15)} pts of <b>${Math.round(p.trigger)}</b> and closes ${side === "bull" ? "above" : "below"} it. No chasing.\n` + opp + rvH, true);
+              cpSend((d.expiry && d.expiry === day ? EXPIRY_RISK_HTML : "") + `🎯 <b>TRIGGERED — WAITING FOR THE RETEST</b> (ProTrader rule)\n${side === "bull" ? "CE" : "PE"} is given only if, by ${new Date((from + 1800 + 19800) * 1000).toISOString().slice(11, 16)}, a 5-min candle comes back to within ${Math.round(0.25 * T.atr15)} pts of <b>${Math.round(p.trigger)}</b> and closes ${side === "bull" ? "above" : "below"} it. No chasing.\n` + opp + rvH, true);
             }
             else if (free && rv?.grade === "C") (cpNotGiven(d.name, side === "bull" ? "CE" : "PE", p.trigger, "REVIEW C"), cpSend(`⚠️ <b>REVIEW SAYS SKIP — not given as a trade (watch only)</b>\n` + opp + rvH, true));
             else cpSend(opp + rvH + (tracked ? "\n  (A trade on this index is already open — shown for information.)" : ""), true);

@@ -412,3 +412,15 @@ again. Setups positive in BOTH halves (≥ 8 trades each, before premium costs):
 and OR-high sweep short (+12.3 / +7.3), NIFTY gap-down OR-low break short (+7.7 / +3.7), NIFTY PDH rejection short (+4 / +8.3) and
 PDH break long (+5.3 / +4); SENSEX gap-up OR-high break long (+10 / +15.5). Samples are small (11–42 per half) — shown as
 "✅ consistent", not approved entries; trades stay on the One Trade signal.
+
+## 2026-10-29 · OWNER OVERRIDE: expiry-day plan trades are given again
+The owner chose to allow the normal plan's trades on the index's own expiry day (option 3 of 3 offered), after being shown
+the evidence: backtest #2 (APPROVE skip, 2026-10-18) and the expiry study (no expiry-day buyer strategy validated; the
+normal plan lost ~23.6% / ~11% per trade in development / validation on NIFTY expiry days, ~8.5% per trade on average).
+ProTrader's view is unchanged: **not recommended**. As the owner's decision it is implemented with safeguards:
+- `EXPIRY_PLAN_TRADES = true` in routes/api.ts (one switch; false restores the skip).
+- Same entry path as any day: 15-min close → 5-min retest within 30 min → Trade Review A/B → no chase (10%) → no fast market.
+- Labelled **⚠️ EXPIRY DAY · HIGH RISK — 1 lot only** on Telegram (trigger + trade given), the Premium Center chip and
+  the One Trade feed. EXPIRY MODE (paper / min size) keeps running alongside.
+- Tracked: the trades land in the co-pilot / One Trade history (local SQL tables app_copilot_trades / app_one_trade) so
+  the expiry-day results can be reviewed after 6–8 expiries.

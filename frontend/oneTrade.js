@@ -85,7 +85,7 @@
     const how = `<details class="one-card one-how"><summary><h3 class="one-h">ℹ️ यह screen कैसे काम करता है</h3></summary>
       <ol>
         <li><b>एक समय पर एक trade:</b> NIFTY और SENSEX दोनों में से जो पहले सारी शर्तें पास करे, वही trade। जब तक वह बंद नहीं होता, दूसरा trade नहीं।</li>
-        <li><b>Entry की शर्तें</b> (system के approved plan से): 15-min candle plan level के पार बंद हो → 30 मिनट में 5-min retest → Trade Review (A/B) → premium 10% से ज़्यादा न भागा हो → बाज़ार बहुत तेज़ न हो → 14:45 से पहले। Expiry day और range day पर trade नहीं।</li>
+        <li><b>Entry की शर्तें</b> (system के approved plan से): 15-min candle plan level के पार बंद हो → 30 मिनट में 5-min retest → Trade Review (A/B) → premium 10% से ज़्यादा न भागा हो → बाज़ार बहुत तेज़ न हो → 14:45 से पहले। Range day पर trade नहीं। Expiry day पर trade मिलता है (मालिक का फ़ैसला, 29 Oct) पर ⚠️ HIGH RISK label के साथ — सिर्फ़ 1 lot।</li>
         <li><b>Stop loss:</b> plan का stop level — फ़ैसला 15-min candle के close पर, touch पर नहीं।</li>
         <li><b>Target 1:2:</b> entry ± 2 × (entry से stop की दूरी), index पर; पहुँचते ही पूरा बेचें। Premium वाले भाव delta से अनुमान हैं (≈)।</li>
         <li><b>Time exit 15:12।</b> Trade बंद होते ही अगला trade खुला।</li>

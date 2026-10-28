@@ -1044,7 +1044,7 @@ async function ppcRenderProTrader(force) {
   if (P.anchor?.locked) chips.push(`<span class="ppc-pt-chip ok">🔒 Plan locked${P.anchor.rolls?.length ? ` · ${P.anchor.rolls.length} roll(s)` : ""}</span>`);
   if (T.rangeDay) chips.push(`<span class="ppc-pt-chip bad" title="${ppcEsc(T.rangeDay.why)}">⚠️ Range day — no new trades after ${ppcEsc(T.rangeDay.at)}</span>`);
   if (P.bull && P.bear && P.bear.entry >= P.bull.entry) chips.push(`<span class="ppc-pt-chip bad">⛔ Plan conflict — stand aside</span>`);
-  if (d.expiry && d.expiry === today) chips.push(`<span class="ppc-pt-chip exp">🎲 Expiry day — plan trades not given · EXPIRY MODE (paper / min size)</span>`);
+  if (d.expiry && d.expiry === today) chips.push(`<span class="ppc-pt-chip bad" title="Owner's decision 29 Oct: expiry-day plan trades are given. 2-year test: they lost ~8.5% per trade on average.">⚠️ Expiry day — plan trades GIVEN · HIGH RISK, 1 lot · EXPIRY MODE also running (paper)</span>`);
   const rows = [];
   const pd = isToday ? cp.pending?.[sym] : null;
   if (pd) rows.push(`<div class="ppc-pt-row wait">⏳ <b>Waiting for the retest</b> · ${pd.side === "bull" ? "CE" : "PE"} · level <b>${n0(pd.trigger)}</b> · until ${hm(pd.until)} · review ${ppcEsc(pd.review?.grade || "—")} — given only if a 5-min candle comes back within ${n0(0.25 * pd.atr)} pts and closes ${pd.side === "bull" ? "above" : "below"} it</div>`);
