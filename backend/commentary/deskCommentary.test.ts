@@ -47,3 +47,21 @@ test("an open co-pilot trade leads; pending retest and the time cut-offs change 
   assert.match(buildDeskCommentary({ ...base, nowSec: T(14, 50), spot: 22600 }).headline, /14:45 के बाद/);
   assert.equal(buildDeskCommentary({ ...base, nowSec: T(15, 13) }).tone, "closed");
 });
+
+test("live class: descending triangle read, the PE as the best opportunity with its steps, OI read and lessons", () => {
+  // falling highs, flat lows ≈ 22,682–22,692 (the 13:00 → 14:20 shape)
+  const hs = [22778, 22760, 22747, 22735, 22742, 22720, 22725, 22713, 22704, 22711, 22700, 22704];
+  const ls = [22731, 22725, 22690, 22715, 22718, 22692, 22705, 22691, 22684, 22694, 22682, 22688];
+  const bars: DeskBar[] = hs.map((h, i) => ({ time: T(13, 20) + i * 300, open: (h + ls[i]) / 2, high: h, low: ls[i], close: (h + ls[i]) / 2 + 2, volume: 1e6 }));
+  const c = buildDeskCommentary({ ...base, nowSec: T(14, 23), spot: 22690, c5: bars,
+    atm: { strike: 22700, ceOi: 6.3e6, peOi: 7.0e6, ceChg: 2.8e6, peChg: 3.6e6, ceLtpChgPct: -13.4, peLtpChgPct: -1.7 }, movers: [{ side: "PE", strike: 22600, chg: 5.5e6 }],
+    closedToday: [{ side: "CE", strike: 22750, won: true }] });
+  assert.equal(c.structure!.label, "DESCENDING TRIANGLE"); assert.equal(c.structure!.bias, "DOWN");
+  assert.equal(c.best!.side, "PE"); assert.equal(c.best!.title, "22700 PE (11-03 expiry)");
+  assert.match(c.best!.steps[0].v, /14:30 की 15-min candle <b>22,700<\/b> के नीचे बंद हो/);
+  assert.match(c.best!.steps.find((x) => x.k === "⏰ Deadline")!.v, /^14:45 तक/);   // the 14:45 entry cut-off caps the 30-min retest window
+  assert.ok(c.oiRead.some((x) => /CE premiums −13% गिरे/.test(x))); assert.ok(c.oiRead.some((x) => /22,600 PE में \+55\.0L/.test(x)));
+  assert.ok(c.oiRead.some((x) => /22,700<\/b> put wall पर है/.test(x)));
+  assert.ok(c.lessons.some((x) => /सीढ़ी/.test(x))); assert.ok(c.lessons.some((x) => /अच्छा trade हो चुका/.test(x)));
+  assert.match(c.intro, /^नमस्कार दोस्तों! 14:23 बजे NIFTY <b>22,690<\/b>/);
+});

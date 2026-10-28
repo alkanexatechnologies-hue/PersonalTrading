@@ -199,11 +199,16 @@
         <p class="mcx-dk-st">स्थिति: <b>${esc(k.status)}</b></p></div>`;
     };
     const li = (a) => a.map((x) => `<li>${x}</li>`).join("");   // server-built HTML (numbers + <b> only)
-    const html = `<summary><span class="mcx-badge ${c.tone === "ce" ? "ce" : c.tone === "pe" ? "pe" : "wait"}">🎙 ProTrader</span><span class="mcx-dk-head">${c.headline}</span><span class="mcx-mu">${esc(c.asOf)} · ${esc(c.condition.label)}</span></summary>
+    const st = c.structure, b = c.best;
+    const steps = b && b.steps && b.steps.length ? `<table class="mcx-dk-steps"><tbody>${b.steps.map((x) => `<tr><th scope="row">${esc(x.k)}</th><td>${x.v}</td></tr>`).join("")}</tbody></table>` : "";
+    const html = `<summary><span class="mcx-badge ${c.tone === "ce" ? "ce" : c.tone === "pe" ? "pe" : "wait"}">🎙 ProTrader LIVE</span><span class="mcx-dk-head">${c.headline}</span><span class="mcx-mu">${esc(c.asOf)} · ${esc(c.condition.label)}</span></summary>
       <div class="mcx-dk-body">
-        <section><h3 class="mcx-h">क्या हुआ</h3><ul>${li(c.story)}</ul><p class="mcx-dk-cond"><b>${esc(c.condition.label)}</b> — ${esc(c.condition.text)}</p></section>
-        <section><h3 class="mcx-h">बाज़ार की हालत</h3><ul>${li(c.market)}</ul></section>
+        ${c.intro ? `<p class="mcx-dk-intro">${c.intro}</p>` : ""}
+        <section><h3 class="mcx-h">📺 बाज़ार क्या कह रहा है</h3>${st ? `<p class="mcx-dk-cond"><b class="${st.bias === "UP" ? "mcx-up" : st.bias === "DOWN" ? "mcx-dn" : "mcx-am"}">${esc(st.label)}</b> — ${st.text}</p>` : ""}<ul>${li(c.story)}</ul>${st ? "" : `<p class="mcx-dk-cond"><b>${esc(c.condition.label)}</b> — ${esc(c.condition.text)}</p>`}</section>
+        <section><h3 class="mcx-h">🔗 Option chain क्या बोल रहा है</h3><ul>${li([...(c.oiRead || []), ...c.market])}</ul></section>
+        ${b ? `<section class="mcx-dk-best ${b.side === "CE" ? "ce" : b.side === "PE" ? "pe" : ""}"><h3 class="mcx-h">🎯 अभी का सबसे अच्छा मौका</h3><p class="mcx-dk-btitle"><b class="${b.side === "CE" ? "mcx-up" : b.side === "PE" ? "mcx-dn" : "mcx-am"}">${esc(b.title)}</b></p>${steps}<p class="mcx-dk-sub">${b.why}</p></section>` : ""}
         <section class="mcx-dk-trades">${side(c.up)}${side(c.down)}</section>
+        ${c.lessons && c.lessons.length ? `<section><h3 class="mcx-h">🧠 Junior के लिए सबक</h3><ol>${li(c.lessons)}</ol></section>` : ""}
         <section><h3 class="mcx-h">नियम</h3><ul>${li(c.rules)}</ul></section>
         <p class="mcx-dk-note">${esc(c.note)}</p></div>`;
     set(el, html);

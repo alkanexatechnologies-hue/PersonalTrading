@@ -8423,7 +8423,10 @@ router.get("/desk-commentary", requirePermission("oiAnalysis"), async (req: Requ
         bull: P.bull || null, bear: P.bear || null, noTrade: P.noTrade || null,
         callWall: ow.call ? { strike: ow.call.strike, oiL: ow.call.oiL, state: ow.call.state } : d.oi?.callWall ? { strike: d.oi.callWall.strike, oiL: d.oi.callWall.oiL } : null,
         putWall: ow.put ? { strike: ow.put.strike, oiL: ow.put.oiL, state: ow.put.state } : d.oi?.putWall ? { strike: d.oi.putWall.strike, oiL: d.oi.putWall.oiL } : null,
-        atm: row && row.ceOi != null && row.peOi != null ? { strike: row.strike, ceOi: row.ceOi, peOi: row.peOi } : null,
+        atm: row && row.ceOi != null && row.peOi != null ? { strike: row.strike, ceOi: row.ceOi, peOi: row.peOi, ceChg: row.ceChg ?? null, peChg: row.peChg ?? null,
+          ceLtpChgPct: ((a: any, b: any) => (a != null && b ? Math.round((a / b - 1) * 1000) / 10 : null))(row.ceLtp, row.cePrevClose), peLtpChgPct: ((a: any, b: any) => (a != null && b ? Math.round((a / b - 1) * 1000) / 10 : null))(row.peLtp, row.pePrevClose) } : null,
+        movers: (d.oi?.movers || []).filter((m: any) => (m.side === "CE" || m.side === "PE") && m.chg > 0).map((m: any) => ({ side: m.side, strike: m.strike, chg: m.chg })),
+        closedToday: (_cp.day === day ? _cp.closed || [] : []).filter((t: any) => t.index === def.symbol && t.entryPrem != null && t.exitPrem != null).map((t: any) => ({ side: t.side, strike: t.strike, won: t.exitPrem > t.entryPrem || t.state === "T1" || t.t1Prem != null })),
         trade: tr, pending: pd ? { side: pd.side, trigger: pd.trigger, from: pd.from, until: pd.until } : null,
         premLive: tr && tr.state !== "CLOSED" ? cpPremOf(d, def.symbol, tr.side, tr.strike) : null,
       }) };
