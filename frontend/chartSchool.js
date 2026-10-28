@@ -10,8 +10,8 @@
   const S = { host: null, sym: "^NSEI", date: null, data: null, C: null, focus: null, busy: false };
   // Dhan-style chart (owner, 2026-10-28): white background, Dhan's green / orange-red candles, light grid, EMA light + dark blue
   const KIND = { PD: ["कल", "#e09b00"], OR: ["Opening range", "#1e88e5"], ROUND: ["Round", "#9598a1"], SWING: ["Flip zone", "#9c27b0"], DAY: ["आज H/L", "#e57373"] };
-  const TONE = { bull: "#26a17b", bear: "#e0603f", neutral: "#f9a825" };
-  const DHAN = { up: "#4caf8f", down: "#e0603f", e9: "#4da3ff", e21: "#2f55e8" };
+  const TONE = { bull: "#089981", bear: "#F23645", neutral: "#f9a825" };
+  const DHAN = { up: "#089981", down: "#F23645", e9: "#4da3ff", e21: "#2f55e8" };   // candles: TradingView's default teal / red (owner, 2026-10-28)
   // the last 30 weekdays up to the last session, newest first (holidays show "data नहीं मिला")
   const sessions = () => { const out = []; let d = new Date(lastSession() + "T00:00:00Z"); while (out.length < 30) { if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) out.push(d.toISOString().slice(0, 10)); d = new Date(d - 864e5); } return out; };
   const DAYS = ["रवि", "सोम", "मंगल", "बुध", "गुरु", "शुक्र", "शनि"], MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -43,7 +43,7 @@
       timeScale: { borderColor: "#e0e3eb", timeVisible: true, secondsVisible: false },
       crosshair: { mode: 0, vertLine: { color: "#9598a1", style: 2, labelBackgroundColor: "#4a4f5c" }, horzLine: { color: "#9598a1", style: 2, labelBackgroundColor: "#4a4f5c" } },
       localization: { priceFormatter: (p) => Math.round(p).toLocaleString("en-IN"), timeFormatter: (t) => new Date(t * 1000).toISOString().slice(11, 16) } });
-    const c = ch.addCandlestickSeries({ upColor: DHAN.up, downColor: DHAN.down, wickUpColor: DHAN.up, wickDownColor: DHAN.down, borderVisible: false, priceLineVisible: true, priceLineColor: "#e0603f", priceLineStyle: 3 });
+    const c = ch.addCandlestickSeries({ upColor: DHAN.up, downColor: DHAN.down, borderVisible: true, borderUpColor: DHAN.up, borderDownColor: DHAN.down, wickUpColor: DHAN.up, wickDownColor: DHAN.down, priceLineVisible: true, priceLineStyle: 3 });
     const e9 = ch.addLineSeries({ color: DHAN.e9, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
     const e21 = ch.addLineSeries({ color: DHAN.e21, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
     // Dhan-style O H L C read-out of the candle under the cursor (the last candle otherwise)
