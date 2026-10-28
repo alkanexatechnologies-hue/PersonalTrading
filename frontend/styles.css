@@ -8442,10 +8442,20 @@ body.mcx-one #panel-marketcommand .mc2-main, body.mcx-one #mcx-dec, body.mcx-one
 @media (max-width: 900px) { .one-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .one-waits { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 420px) { .one-title { font-size: 17px; } .one-steps th { white-space: normal; width: 34%; } }
 /* 🎯 One Trade mode: trade calls only on the One Trade tab; the other screens keep market information */
-body.ot-mode #mcx-dec section[aria-label="Live signal"], body.ot-mode #mcx-dec section[aria-label="Trade plan"], body.ot-mode #mcx-c4, body.ot-mode #mcbo-tag,
-body.ot-mode .mcx-dk-best, body.ot-mode .mcx-dk-trades, body.ot-mode #mc-open-tradeexec, body.ot-mode #mc-strike-picks, body.ot-mode #mc-plan, body.ot-mode #mc-signal-detail,
-body.ot-mode #mc-cmd-entry-zone, body.ot-mode #mc-oim-trade-sig, body.ot-mode #mc-oim-trade-guid, body.ot-mode #oia-open-tradeexec, body.ot-mode #ot-open-tradeexec, body.ot-mode #ot-ctx-setup,
-body.ot-mode #ppc-pt, body.ot-mode #ppc-coach, body.ot-mode #ppc-radar, body.ot-mode #ppc-sec2, body.ot-mode #ppc-plans, body.ot-mode #ppc-master,
-body.ot-mode #ppc-sec3, body.ot-mode #ppc-btsd, body.ot-mode #ppc-zh-today { display: none !important; }
+body.one-mode #mcx-dec section[aria-label="Live signal"], body.one-mode #mcx-dec section[aria-label="Trade plan"], body.one-mode #mcx-c4, body.one-mode #mcbo-tag,
+body.one-mode .mcx-dk-best, body.one-mode .mcx-dk-trades, body.one-mode #mc-open-tradeexec, body.one-mode #mc-strike-picks, body.one-mode #mc-plan, body.one-mode #mc-signal-detail,
+body.one-mode #mc-cmd-entry-zone, body.one-mode #mc-oim-trade-sig, body.one-mode #mc-oim-trade-guid, body.one-mode #oia-open-tradeexec, body.one-mode #ot-open-tradeexec, body.one-mode #ot-ctx-setup,
+body.one-mode #ppc-pt, body.one-mode #ppc-coach, body.one-mode #ppc-radar, body.one-mode #ppc-sec2, body.one-mode #ppc-plans, body.one-mode #ppc-master,
+body.one-mode #ppc-sec3, body.one-mode #ppc-btsd, body.one-mode #ppc-zh-today { display: none !important; }
 .mcx-oneview { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; } .one-card, .one-tbl { max-width: 100%; box-sizing: border-box; }
 .mcx-oneview { contain: inline-size; } @media (max-width: 600px) { .one-tbl th, .one-tbl td { white-space: normal; padding: 5px 4px; } }
+/* 🎯 One Trade mode: trade-only screens leave the menu (desktop tabs, the mobile More sheet and bottom nav, the AI Paper mode card) */
+body.one-mode [data-tab="tradeexec"], body.one-mode [data-nav="tradeexec"],
+body.one-mode [data-tab="paper"], body.one-mode [data-nav="paper"],
+body.one-mode [data-tab="toppicks"], body.one-mode [data-nav="toppicks"],
+body.one-mode [data-tab="aipdash"], body.one-mode [data-nav="aipdash"],
+body.one-mode [data-tab="aipsignals"], body.one-mode [data-nav="aipsignals"],
+body.one-mode [data-tab="aipreview"], body.one-mode [data-nav="aipreview"],
+body.one-mode [data-tab="aipperf"], body.one-mode [data-nav="aipperf"],
+body.one-mode [data-tab="aipvalid"], body.one-mode [data-nav="aipvalid"],
+body.one-mode .mg-btn[data-mode="aipaper"] { display: none !important; }

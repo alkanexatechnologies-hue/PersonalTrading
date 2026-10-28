@@ -17,7 +17,10 @@
   const MKEY = "one-mode";
   window.oneMode = () => { try { return localStorage.getItem(MKEY) !== "0"; } catch { return true; } };
   function applyMode() {
-    document.body.classList.toggle("ot-mode", window.oneMode());
+    document.body.classList.toggle("one-mode", window.oneMode());
+    // a hidden trade-only screen that is open (e.g. restored from last time) → back to Market Command
+    const HIDDEN = ["tradeexec", "paper", "toppicks", "aipdash", "aipsignals", "aipreview", "aipperf", "aipvalid"], cur = document.querySelector(".tab.active")?.dataset.tab;
+    if (window.oneMode() && cur && HIDDEN.includes(cur) && typeof switchTab === "function") { try { switchTab("marketcommand"); } catch {} }
     try { if (typeof MC !== "undefined") { MC._boSig = null; MC._overlaySig = null; if (MC.lastData && typeof renderMCChart === "function") renderMCChart(MC.lastData); } } catch {}
     try { if (typeof window.mcxDrawPlanLevels === "function") window.mcxDrawPlanLevels(); } catch {}
   }
@@ -45,7 +48,7 @@
     if (!d) { host.innerHTML = `<section class="one-card"><p class="one-mu">लोड हो रहा है…</p></section>`; return; }
     if (!d.available) { host.innerHTML = `<section class="one-card"><p class="one-mu">${esc(d.error || "डेटा उपलब्ध नहीं")}</p></section>`; return; }
     const t = d.trade, L = d.live || {}, von = voiceOn();
-    const bar = `<div class="one-bar" role="toolbar" aria-label="Voice"><button type="button" class="one-btn${von ? " on" : ""}" data-one="voice" aria-pressed="${von}">${von ? "🔊 आवाज़ चालू" : "🔇 आवाज़ बंद"}</button><button type="button" class="one-btn" data-one="say">📢 अभी की स्थिति सुनाएँ</button><button type="button" class="one-btn${window.oneMode() ? " on" : ""}" data-one="mode" aria-pressed="${window.oneMode()}" title="On: trade calls appear only on this tab; other screens show market information only">${window.oneMode() ? "🎯 Trade सिर्फ़ इस tab पर" : "👁 सभी screens पर trades"}</button><span class="one-mu">${esc(d.day)} · हर 15 सेकंड में update</span></div>`;
+    const bar = `<div class="one-bar" role="toolbar" aria-label="Voice"><button type="button" class="one-btn${von ? " on" : ""}" data-one="voice" aria-pressed="${von}">${von ? "🔊 आवाज़ चालू" : "🔇 आवाज़ बंद"}</button><button type="button" class="one-btn" data-one="say">📢 अभी की स्थिति सुनाएँ</button><button type="button" class="one-btn${window.oneMode() ? " on" : ""}" data-one="mode" aria-pressed="${window.oneMode()}" title="On: trade calls appear only on this tab; other screens show market information only, and trade-only screens (Trade Execution, AI Paper, Top Pick) leave the menu">${window.oneMode() ? "🎯 Trade सिर्फ़ इस tab पर" : "👁 सभी screens पर trades"}</button><span class="one-mu">${esc(d.day)} · हर 15 सेकंड में update</span></div>`;
     let hero;
     if (t) {
       const ce = t.side === "CE", pos = L.r != null ? Math.max(0, Math.min(100, ((L.r + 1) / 3) * 100)) : null;   // −1R (stop) … +2R (target)
