@@ -35,7 +35,7 @@
 <div class="lrn">
   <details class="lrn-card lrn-mkt" id="lrn-mkt" open><summary><b>📚 बाज़ार का पाठ</b> <span class="lrn-hint">कहाँ liquidity ली · क्यों गिरा, क्यों चढ़ा · strategies</span></summary>
     <div class="lrn-mkt-bar"><label class="lrn-hint" for="lrn-mkt-day">दिन</label><select class="lrn-in" id="lrn-mkt-day"></select></div><div id="lrn-mkt-body"><span class="lrn-hint">लोड हो रहा है…</span></div></details>
-  <details class="lrn-card lrn-cs" id="lrn-cs" open><summary><b>📸 Chart School</b> <span class="lrn-hint">अपना NIFTY / SENSEX chart डालें → system उस दिन की असली candles से candle और level सिखाएगा</span></summary><div id="lrn-cs-host"></div></details>
+  <details class="lrn-card lrn-cs" id="lrn-cs" open><summary><b>📸 Chart School</b> <span class="lrn-hint">NIFTY / SENSEX और दिन चुनें → उस दिन की असली candles से candle और level की पढ़ाई</span></summary><div id="lrn-cs-host"></div></details>
   <div class="lrn-top">
     <div class="lrn-card">
       <div class="lrn-h"><b>✍️ Write your trade in your own words</b><span>premium, time, SL, targets</span></div>

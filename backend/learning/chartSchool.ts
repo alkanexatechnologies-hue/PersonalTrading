@@ -1,5 +1,5 @@
 // ============================ 📸 Chart School — candle + level lessons from a day's chart (owner, 2026-10-28) ============================
-// The owner uploads a NIFTY / SENSEX screenshot; the system reads THAT day's real 5-min candles (Dhan) and builds a training
+// The owner picks NIFTY / SENSEX and a day; the system reads THAT day's real 5-min candles (Dhan) and builds a training
 // chart: the levels that mattered (previous day H / L / C, the opening range, round numbers, swing flip zones, the day's
 // high / low) and the 8–12 candles that carried the day, each explained in Hindi — what the candle is, where it stood, why it
 // mattered, what an experienced trader does there. Pure functions; education only, no trade signal.

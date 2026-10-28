@@ -1,6 +1,5 @@
 // ============================ 📸 CHART SCHOOL — Learning screen (owner, 2026-10-28) ============================
-// Upload (or paste) a NIFTY / SENSEX chart screenshot for a day → the system builds that day's training chart from the real
-// 5-min candles: levels + numbered candles, each explained in Hindi (what the candle is, where it stood, why it mattered,
+// Pick NIFTY / SENSEX and a day (date filter) → the system builds that day's training chart from the real 5-min candles: levels + numbered candles, each explained in Hindi (what the candle is, where it stood, why it mattered,
 // what an experienced trader does). Data: /api/chart-school (backend learning/chartSchool.ts). Education only.
 (function () {
   "use strict";
@@ -8,26 +7,26 @@
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   const f0 = (v) => (v == null || !isFinite(v) ? "—" : Math.round(v).toLocaleString("en-IN"));
   const hm = (t) => new Date((t + IST) * 1000).toISOString().slice(11, 16);
-  const S = { host: null, sym: "^NSEI", file: null, img: null, data: null, C: null, focus: null, busy: false };
+  const S = { host: null, sym: "^NSEI", date: null, data: null, C: null, focus: null, busy: false };
   const KIND = { PD: ["कल", "#f5c542"], OR: ["Opening range", "#4ea1ff"], ROUND: ["Round", "#9aa3b0"], SWING: ["Flip zone", "#ab47bc"], DAY: ["आज H/L", "#ef9a9a"] };
   const TONE = { bull: "#26a69a", bear: "#ef5350", neutral: "#f5c542" };
+  // the last 30 weekdays up to the last session, newest first (holidays show "data नहीं मिला")
+  const sessions = () => { const out = []; let d = new Date(lastSession() + "T00:00:00Z"); while (out.length < 30) { if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) out.push(d.toISOString().slice(0, 10)); d = new Date(d - 864e5); } return out; };
+  const DAYS = ["रवि", "सोम", "मंगल", "बुध", "गुरु", "शुक्र", "शनि"], MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const dayLbl = (d) => { const x = new Date(d + "T00:00:00Z"); return `${DAYS[x.getUTCDay()]} ${x.getUTCDate()} ${MON[x.getUTCMonth()]}`; };
   const lastSession = () => { const n = new Date(Date.now() + IST * 1000); let d = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate())); if (n.getUTCHours() * 60 + n.getUTCMinutes() < 555) d = new Date(d - 864e5); while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d = new Date(d - 864e5); return d.toISOString().slice(0, 10); };
 
   function shell() {
     S.host.innerHTML = `<div class="cs">
-      <form class="cs-form" id="cs-form">
+      <div class="cs-form" role="group" aria-label="Index और दिन">
         <div class="cs-idx" role="tablist" aria-label="Index">${[["^NSEI", "NIFTY"], ["^BSESN", "SENSEX"]].map(([s, n]) => `<button type="button" role="tab" data-cs-sym="${s}">${n}</button>`).join("")}</div>
-        <label class="cs-f"><span>दिन</span><input type="date" id="cs-date" class="lrn-in" value="${lastSession()}"></label>
-        <label class="cs-file one-btn" for="cs-file">📷 Screenshot चुनें<input type="file" id="cs-file" accept="image/png,image/jpeg,image/webp" hidden></label>
-        <button type="submit" class="one-btn on" id="cs-go">🎓 Lesson बनाएँ</button>
-        <span class="lrn-hint" id="cs-fname">Screenshot चुनें या यहाँ paste (Ctrl / ⌘ + V) करें — बिना screenshot भी lesson बनता है।</span>
-      </form>
-      <div class="cs-panes" id="cs-panes">
-        <figure class="cs-shot" id="cs-shot" hidden><figcaption>📷 आपका chart</figcaption><img id="cs-img" alt="आपका chart screenshot"></figure>
-        <div class="cs-cw"><div class="cs-legend" id="cs-legend"></div><div class="cs-chart" id="cs-chart"></div></div>
+        <div class="cs-days"><button type="button" class="one-btn" data-cs-step="1" aria-label="पिछला दिन">◀</button>
+          <select class="lrn-in" id="cs-day" aria-label="दिन चुनें">${sessions().map((d) => `<option value="${d}">${dayLbl(d)} · ${d}</option>`).join("")}</select>
+          <button type="button" class="one-btn" data-cs-step="-1" aria-label="अगला दिन">▶</button></div>
+        <label class="cs-f"><span>या तारीख़</span><input type="date" id="cs-date" class="lrn-in" max="${lastSession()}"></label>
       </div>
+      <div class="cs-cw"><div class="cs-legend" id="cs-legend"></div><div class="cs-chart" id="cs-chart"></div></div>
       <div id="cs-body"><p class="lrn-hint">दिन और index चुनकर "Lesson बनाएँ" दबाएँ।</p></div>
-      <details class="cs-up"><summary><b>📂 मेरे पुराने charts</b></summary><div id="cs-list" class="cs-list"></div></details>
     </div>`;
     paintSym();
   }
@@ -83,57 +82,31 @@
   }
 
   // ------------------------------------------------------------ actions
-  async function showImage(id) {
-    const fig = $("cs-shot"), img = $("cs-img"); if (!fig || !img) return;
-    if (!id) { fig.hidden = true; return; }
-    try { const r = await fetch("/api/chart-school/image/" + encodeURIComponent(id)); if (!r.ok) throw 0; if (S.img) URL.revokeObjectURL(S.img); S.img = URL.createObjectURL(await r.blob()); img.src = S.img; fig.hidden = false; } catch { fig.hidden = true; }
-  }
   async function loadLesson(sym, date) {
     S.busy = true; S.focus = null; render();
     try { S.data = await fetchJSON(`/api/chart-school?symbol=${encodeURIComponent(sym)}&date=${date}`, 45000); }
     catch (e) { S.data = { available: false, error: String((e && e.message) || e) }; }
     S.busy = false; render(); draw();
   }
-  async function submit() {
-    const date = $("cs-date").value || lastSession();
-    if (S.file) {
-      const nm = $("cs-fname"); nm.textContent = "⏳ Screenshot save हो रहा है…";
-      try {
-        const r = await fetch(`/api/chart-school/upload?symbol=${encodeURIComponent(S.sym)}&date=${date}`, { method: "POST", headers: { "Content-Type": S.file.type || "image/png" }, body: S.file }).then((x) => x.json());
-        if (!r.ok) throw new Error(r.error || "upload failed");
-        nm.textContent = `✅ Saved: ${r.upload.id}`; S.file = null; $("cs-file").value = ""; await showImage(r.upload.id); loadList();
-      } catch (e) { nm.textContent = "⚠️ " + ((e && e.message) || e); }
-    }
-    await loadLesson(S.sym, date);
+  // the date filter: the select (last 30 weekdays), ◀ / ▶ and any date from the calendar; the lesson loads on every change
+  function go(date) {
+    if (!date) return; S.date = date;
+    const sel = $("cs-day"), cal = $("cs-date");
+    if (sel) { if (![...sel.options].some((o) => o.value === date)) sel.insertAdjacentHTML("afterbegin", `<option value="${date}">${dayLbl(date)} · ${date}</option>`); sel.value = date; }
+    if (cal) cal.value = date;
+    loadLesson(S.sym, date);
   }
-  async function loadList() {
-    const box = $("cs-list"); if (!box) return;
-    try {
-      const { uploads } = await fetchJSON("/api/chart-school/uploads", 15000);
-      box.innerHTML = (uploads || []).length ? uploads.map((u) => `<div class="cs-li"><button type="button" class="one-btn" data-cs-open="${esc(u.id)}" data-sym="${esc(u.symbol)}" data-date="${esc(u.date)}">📷 ${esc(u.date)} · ${u.symbol === "^NSEI" ? "NIFTY" : "SENSEX"}</button><button type="button" class="one-btn" data-cs-del="${esc(u.id)}" aria-label="हटाएँ">✕</button></div>`).join("") : `<p class="lrn-hint">अभी कोई screenshot नहीं।</p>`;
-    } catch { box.innerHTML = `<p class="lrn-hint">list नहीं मिली</p>`; }
-  }
-  function setFile(f) { if (!f || !/^image\/(png|jpeg|webp)$/.test(f.type)) return; S.file = f; const nm = $("cs-fname"); if (nm) nm.textContent = `📎 ${f.name || "pasted image"} (${Math.round(f.size / 1024)} KB) — "Lesson बनाएँ" दबाएँ`;
-    const img = $("cs-img"), fig = $("cs-shot"); if (img && fig) { if (S.img) URL.revokeObjectURL(S.img); S.img = URL.createObjectURL(f); img.src = S.img; fig.hidden = false; } }
-
   window.csMount = (host) => {
     if (!host) return;
-    if (S.host !== host) { if (S.C) { try { S.C.ch.remove(); } catch {} S.C = null; } S.host = host; shell(); loadList(); }
+    if (S.host !== host) { if (S.C) { try { S.C.ch.remove(); } catch {} S.C = null; } S.host = host; shell(); go(S.date || lastSession()); }
   };
-  document.addEventListener("change", (e) => { if (S.host && e.target && e.target.id === "cs-file") setFile(e.target.files && e.target.files[0]); });
-  document.addEventListener("submit", (e) => { if (S.host && e.target && e.target.id === "cs-form") { e.preventDefault(); submit(); } });
-  document.addEventListener("paste", (e) => {
-    if (!S.host || !S.host.offsetParent) return;
-    const it = [...((e.clipboardData && e.clipboardData.items) || [])].find((x) => /^image\//.test(x.type)); if (!it) return;
-    e.preventDefault(); setFile(it.getAsFile());
-  });
+  document.addEventListener("change", (e) => { if (!S.host || !e.target) return; if (e.target.id === "cs-day" || e.target.id === "cs-date") go(e.target.value); });
   document.addEventListener("click", (e) => {
     if (!S.host) return;
-    const b = e.target.closest("[data-cs-sym],[data-cs-ev],[data-cs-open],[data-cs-del],[data-cs-say]"); if (!b || !S.host.contains(b)) return;
-    if (b.dataset.csSym) { S.sym = b.dataset.csSym; paintSym(); }
+    const b = e.target.closest("[data-cs-sym],[data-cs-ev],[data-cs-step],[data-cs-say]"); if (!b || !S.host.contains(b)) return;
+    if (b.dataset.csSym) { S.sym = b.dataset.csSym; paintSym(); go(S.date || lastSession()); }
+    else if (b.dataset.csStep) { const sel = $("cs-day"), i = sel ? sel.selectedIndex + Number(b.dataset.csStep) : -1; if (sel && i >= 0 && i < sel.options.length) go(sel.options[i].value); }
     else if (b.dataset.csEv != null) { const n = Number(b.dataset.csEv); S.focus = n && n !== S.focus ? n : null; render(); draw(); if (S.focus) $("cs-chart")?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
-    else if (b.dataset.csOpen) { S.sym = b.dataset.sym; paintSym(); $("cs-date").value = b.dataset.date; showImage(b.dataset.csOpen); loadLesson(b.dataset.sym, b.dataset.date); }
-    else if (b.dataset.csDel) { if (confirm("यह screenshot हटाएँ?")) fetch("/api/chart-school/upload/" + encodeURIComponent(b.dataset.csDel), { method: "DELETE" }).then(loadList); }
     else if (b.dataset.csSay && S.data && S.data.available && typeof window.oneSay === "function") window.oneSay([...S.data.summary, ...S.data.events.map((x) => `${x.n}. ${x.title}. ${x.lesson}`)].join(" "));
   });
   let rz = 0; window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { if (S.data) draw(); }, 250); });

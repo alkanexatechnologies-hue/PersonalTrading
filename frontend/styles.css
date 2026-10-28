@@ -8542,12 +8542,8 @@ body.one-mode .mc-tog:has(#mc-tog-trade), body.one-mode .mc-tog:has(#mc-tog-plan
 .cs-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .cs-idx { display: inline-flex; border: 1px solid #2a3340; border-radius: 8px; overflow: hidden; }
 .cs-idx button { min-height: 44px; min-width: 84px; padding: 0 12px; background: #151b24; color: #c3cad4; border: 0; font-size: 14px; font-weight: 600; cursor: pointer; } .cs-idx button.on { background: #2962ff; color: #fff; }
+.cs-days { display: inline-flex; align-items: center; gap: 6px; } .cs-days select { min-height: 44px; } .cs-days .one-btn { min-width: 44px; padding: 0 10px; }
 .cs-f { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #9aa3b0; } .cs-f input { min-height: 44px; }
-.cs-file { display: inline-flex; align-items: center; cursor: pointer; }
-.cs-panes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 10px; align-items: start; }
-.cs-panes:has(.cs-shot[hidden]) { grid-template-columns: minmax(0, 1fr); }
-.cs-shot { margin: 0; border: 1px solid #2a2e39; border-radius: 8px; overflow: hidden; background: #0b0e14; } .cs-shot figcaption { font-size: 12.5px; color: #9aa3b0; padding: 4px 8px; }
-.cs-shot img { display: block; width: 100%; height: auto; max-height: 480px; object-fit: contain; background: #fff; }
 .cs-cw { position: relative; border: 1px solid #2a2e39; border-radius: 8px; overflow: hidden; background: #131722; min-width: 0; }
 .cs-chart { height: 480px; width: 100%; }
 .cs-legend { position: absolute; z-index: 3; top: 6px; left: 8px; font-size: 12px; color: #d1d4dc; pointer-events: none; background: rgba(19, 23, 34, .75); padding: 2px 6px; border-radius: 4px; }
@@ -8566,6 +8562,5 @@ body.one-mode .mc-tog:has(#mc-tog-trade), body.one-mode .mc-tog:has(#mc-tog-plan
 .cs-lv li b { font-family: 'JetBrains Mono', monospace; } .cs-lv li .lrn-hint { grid-column: 2 / -1; } .cs-sw { width: 10px; height: 10px; border-radius: 2px; }
 .cs-gl li { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; background: #0d1117; border-radius: 6px; padding: 5px 8px; } .cs-gl .lrn-hint { width: 100%; }
 .cs-rules { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 3px; }
-.cs-up summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; } .cs-list { display: flex; flex-wrap: wrap; gap: 6px; } .cs-li { display: inline-flex; gap: 4px; }
-@media (max-width: 1100px) { .cs-panes { grid-template-columns: minmax(0, 1fr); } .cs-chart { height: 420px; } }
-@media (max-width: 760px) { .cs-evs, .cs-grid { grid-template-columns: minmax(0, 1fr); } .cs-chart { height: 360px; } .cs-shot img { max-height: 300px; } }
+@media (max-width: 1100px) { .cs-chart { height: 420px; } }
+@media (max-width: 760px) { .cs-evs, .cs-grid { grid-template-columns: minmax(0, 1fr); } .cs-chart { height: 360px; } .cs-days { width: 100%; } .cs-days select { flex: 1; min-width: 0; } }

@@ -1,4 +1,4 @@
-import express, { Router, Request, Response, NextFunction } from "express";
+import { Router, Request, Response, NextFunction } from "express";
 import rateLimit from "express-rate-limit";
 import { getProvider, setActiveProvider } from "../data";
 import { syncSessionProvider, isMarketOpenIST, setFeedFlags, getFeedFlags, hasGrowwToken, growwProviderForOi, dhanProviderForOi, getGrowwTokenMasked, scrubGrowwToken } from "../data/sessionFeed";
@@ -8516,11 +8516,8 @@ router.get("/one-trade/scenarios", requirePermission("oiAnalysis"), async (req: 
 });
 
 // ===================== 📸 Chart School (Learning) — owner 2026-10-28 =====================
-// The owner uploads a NIFTY / SENSEX chart screenshot for a day; /api/chart-school builds that day's training chart from the
+// The owner picks NIFTY / SENSEX and a day; /api/chart-school builds that day's training chart from the
 // REAL 5-min candles (Dhan): levels + the candles that mattered, explained in Hindi (learning/chartSchool.ts). Education only.
-const CS_DIR = path.join(process.cwd(), "data", "chart-school"), CS_INDEX = path.join(CS_DIR, "index.json");
-type CsUpload = { id: string; symbol: string; date: string; at: number; file: string; note: string };
-const csList = (): CsUpload[] => { try { return JSON.parse(fs.readFileSync(CS_INDEX, "utf8")); } catch { return []; } };
 const csDef = (q: any) => { const def = findSymbolDef(String(q || "^NSEI")); return def && ["^NSEI", "^BSESN"].includes(def.symbol) ? def : null; };
 router.get("/chart-school", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
   const def = csDef(req.query.symbol); if (!def) return res.status(400).json({ error: "NIFTY or SENSEX required" });
@@ -8540,29 +8537,6 @@ router.get("/chart-school", requirePermission("oiAnalysis"), async (req: Request
       return { available: true, symbol: def.symbol, prevDay: pd || null, ...buildChartLesson({ index: def.symbol === "^NSEI" ? "NIFTY" : "SENSEX", day: date, bars, prev }) };
     }));
   } catch (e: any) { res.status(502).json({ available: false, error: e?.message || "chart lesson failed" }); }
-});
-router.get("/chart-school/uploads", requirePermission("oiAnalysis"), (_req: Request, res: Response) => res.json({ uploads: csList().slice(-60).reverse() }));
-router.post("/chart-school/upload", requirePermission("oiAnalysis"), express.raw({ type: ["image/png", "image/jpeg", "image/webp"], limit: "8mb" }), (req: Request, res: Response) => {
-  const def = csDef(req.query.symbol); if (!def) return res.status(400).json({ error: "NIFTY or SENSEX required" });
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : istDateStr();
-  const buf = req.body as Buffer, type = String(req.headers["content-type"] || "");
-  if (!Buffer.isBuffer(buf) || buf.length < 100) return res.status(400).json({ error: "PNG / JPG / WEBP image (≤ 8 MB) भेजें" });
-  const ext = type.includes("png") ? "png" : type.includes("webp") ? "webp" : "jpg", id = `${date}-${def.symbol === "^NSEI" ? "NIFTY" : "SENSEX"}-${Date.now().toString(36)}`;
-  try {
-    fs.mkdirSync(CS_DIR, { recursive: true }); fs.writeFileSync(path.join(CS_DIR, `${id}.${ext}`), buf);
-    const list = csList(); const row: CsUpload = { id, symbol: def.symbol, date, at: Math.floor(Date.now() / 1000), file: `${id}.${ext}`, note: String(req.query.note || "").slice(0, 200) };
-    list.push(row); fs.writeFileSync(CS_INDEX, JSON.stringify(list.slice(-500)));
-    res.json({ ok: true, upload: row });
-  } catch (e: any) { res.status(500).json({ error: e?.message || "save failed" }); }
-});
-router.get("/chart-school/image/:id", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
-  const row = csList().find((x) => x.id === req.params.id); if (!row) return res.status(404).end();
-  res.sendFile(path.join(CS_DIR, path.basename(row.file)));
-});
-router.delete("/chart-school/upload/:id", requirePermission("oiAnalysis"), (req: Request, res: Response) => {
-  const list = csList(), row = list.find((x) => x.id === req.params.id); if (!row) return res.status(404).json({ error: "not found" });
-  try { fs.unlinkSync(path.join(CS_DIR, path.basename(row.file))); } catch { /* already gone */ }
-  fs.writeFileSync(CS_INDEX, JSON.stringify(list.filter((x) => x.id !== row.id))); res.json({ ok: true });
 });
 
 // ===================== Zero-Hero (expiry-day cheap OTM) — live read; advisory only =====================
