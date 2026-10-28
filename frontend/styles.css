@@ -8544,10 +8544,10 @@ body.one-mode .mc-tog:has(#mc-tog-trade), body.one-mode .mc-tog:has(#mc-tog-plan
 .cs-idx button { min-height: 44px; min-width: 84px; padding: 0 12px; background: #151b24; color: #c3cad4; border: 0; font-size: 14px; font-weight: 600; cursor: pointer; } .cs-idx button.on { background: #2962ff; color: #fff; }
 .cs-days { display: inline-flex; align-items: center; gap: 6px; } .cs-days select { min-height: 44px; } .cs-days .one-btn { min-width: 44px; padding: 0 10px; }
 .cs-f { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #9aa3b0; } .cs-f input { min-height: 44px; }
-.cs-cw { position: relative; border: 1px solid #2a2e39; border-radius: 8px; overflow: hidden; background: #131722; min-width: 0; }
+.cs-cw { position: relative; border: 1px solid #e0e3eb; border-radius: 8px; overflow: hidden; background: #ffffff; min-width: 0; }
 .cs-chart { height: 480px; width: 100%; }
-.cs-legend { position: absolute; z-index: 3; top: 6px; left: 8px; font-size: 12px; color: #d1d4dc; pointer-events: none; background: rgba(19, 23, 34, .75); padding: 2px 6px; border-radius: 4px; }
-.cs-legend span { display: inline-flex; align-items: center; gap: 4px; margin-left: 10px; } .cs-legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.cs-legend { position: absolute; z-index: 3; top: 6px; left: 8px; font-size: 12px; color: #131722; pointer-events: none; background: rgba(255, 255, 255, .85); padding: 2px 6px; border-radius: 4px; line-height: 1.6; } .cs-legend .cs-o { margin-left: 8px; color: #6a6d78; } .cs-legend .cs-o b { font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+.cs-legend span { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; } .cs-legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
 .cs-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; background: #0d1117; border: 1px solid #1e2530; border-radius: 8px; padding: 8px 10px; } .cs-sum ul { margin: 0; padding-left: 18px; flex: 1 1 320px; }
 .cs-h { margin: 6px 0 4px; font-size: 14px; color: #c3cad4; }
 .cs-evs { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }

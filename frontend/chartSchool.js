@@ -8,8 +8,10 @@
   const f0 = (v) => (v == null || !isFinite(v) ? "—" : Math.round(v).toLocaleString("en-IN"));
   const hm = (t) => new Date((t + IST) * 1000).toISOString().slice(11, 16);
   const S = { host: null, sym: "^NSEI", date: null, data: null, C: null, focus: null, busy: false };
-  const KIND = { PD: ["कल", "#f5c542"], OR: ["Opening range", "#4ea1ff"], ROUND: ["Round", "#9aa3b0"], SWING: ["Flip zone", "#ab47bc"], DAY: ["आज H/L", "#ef9a9a"] };
-  const TONE = { bull: "#26a69a", bear: "#ef5350", neutral: "#f5c542" };
+  // Dhan-style chart (owner, 2026-10-28): white background, Dhan's green / orange-red candles, light grid, EMA light + dark blue
+  const KIND = { PD: ["कल", "#e09b00"], OR: ["Opening range", "#1e88e5"], ROUND: ["Round", "#9598a1"], SWING: ["Flip zone", "#9c27b0"], DAY: ["आज H/L", "#e57373"] };
+  const TONE = { bull: "#26a17b", bear: "#e0603f", neutral: "#f9a825" };
+  const DHAN = { up: "#4caf8f", down: "#e0603f", e9: "#4da3ff", e21: "#2f55e8" };
   // the last 30 weekdays up to the last session, newest first (holidays show "data नहीं मिला")
   const sessions = () => { const out = []; let d = new Date(lastSession() + "T00:00:00Z"); while (out.length < 30) { if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) out.push(d.toISOString().slice(0, 10)); d = new Date(d - 864e5); } return out; };
   const DAYS = ["रवि", "सोम", "मंगल", "बुध", "गुरु", "शुक्र", "शनि"], MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -36,13 +38,16 @@
   function chart() {
     if (S.C || typeof LightweightCharts === "undefined") return S.C;
     const el = $("cs-chart"); if (!el) return null;
-    const ch = LightweightCharts.createChart(el, { autoSize: true, layout: { background: { color: "#131722" }, textColor: "#b2b5be", fontSize: 12 },
-      grid: { vertLines: { color: "#1e222d" }, horzLines: { color: "#1e222d" } }, rightPriceScale: { borderColor: "#2a2e39" },
-      timeScale: { borderColor: "#2a2e39", timeVisible: true, secondsVisible: false }, crosshair: { mode: 0 },
+    const ch = LightweightCharts.createChart(el, { autoSize: true, layout: { background: { color: "#ffffff" }, textColor: "#4a4f5c", fontSize: 12 },
+      grid: { vertLines: { color: "#f0f2f6" }, horzLines: { color: "#f0f2f6" } }, rightPriceScale: { borderColor: "#e0e3eb" },
+      timeScale: { borderColor: "#e0e3eb", timeVisible: true, secondsVisible: false },
+      crosshair: { mode: 0, vertLine: { color: "#9598a1", style: 2, labelBackgroundColor: "#4a4f5c" }, horzLine: { color: "#9598a1", style: 2, labelBackgroundColor: "#4a4f5c" } },
       localization: { priceFormatter: (p) => Math.round(p).toLocaleString("en-IN"), timeFormatter: (t) => new Date(t * 1000).toISOString().slice(11, 16) } });
-    const c = ch.addCandlestickSeries({ upColor: "#26a69a", downColor: "#ef5350", wickUpColor: "#26a69a", wickDownColor: "#ef5350", borderVisible: false, priceLineVisible: false });
-    const e9 = ch.addLineSeries({ color: "#5fa8ff", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
-    const e21 = ch.addLineSeries({ color: "#2f5bea", lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+    const c = ch.addCandlestickSeries({ upColor: DHAN.up, downColor: DHAN.down, wickUpColor: DHAN.up, wickDownColor: DHAN.down, borderVisible: false, priceLineVisible: true, priceLineColor: "#e0603f", priceLineStyle: 3 });
+    const e9 = ch.addLineSeries({ color: DHAN.e9, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+    const e21 = ch.addLineSeries({ color: DHAN.e21, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+    // Dhan-style O H L C read-out of the candle under the cursor (the last candle otherwise)
+    ch.subscribeCrosshairMove((p) => { const b = p && p.time && p.seriesData ? p.seriesData.get(c) : null; ohlc(b || null); });
     S.C = { ch, c, e9, e21, pls: [] };
     return S.C;
   }
@@ -55,10 +60,16 @@
     C.e21.setData(d.bars.map((b, i) => (d.ema21[i] != null ? { time: T(b), value: d.ema21[i] } : { time: T(b) })));
     for (const p of C.pls) C.c.removePriceLine(p); C.pls = [];
     for (const l of d.levels) { const [nm, col] = KIND[l.kind] || ["", "#9aa3b0"]; C.pls.push(C.c.createPriceLine({ price: l.price, color: col, lineWidth: l.kind === "PD" || l.kind === "SWING" ? 2 : 1, lineStyle: l.kind === "DAY" ? 3 : 2, axisLabelVisible: true, title: narrow ? "" : l.label })); }
-    C.c.setMarkers(d.events.map((e) => ({ time: T(d.bars[e.idx]), position: e.tone === "bear" ? "aboveBar" : e.tone === "bull" ? "belowBar" : "aboveBar", color: e.n === S.focus ? "#ffffff" : TONE[e.tone], shape: e.tone === "bear" ? "arrowDown" : e.tone === "bull" ? "arrowUp" : "circle", text: String(e.n), size: e.n === S.focus ? 2 : 1 })));
+    C.c.setMarkers(d.events.map((e) => ({ time: T(d.bars[e.idx]), position: e.tone === "bear" ? "aboveBar" : e.tone === "bull" ? "belowBar" : "aboveBar", color: e.n === S.focus ? "#131722" : TONE[e.tone], shape: e.tone === "bear" ? "arrowDown" : e.tone === "bull" ? "arrowUp" : "circle", text: String(e.n), size: e.n === S.focus ? 2 : 1 })));
     if (S.focus) { const e = d.events.find((x) => x.n === S.focus); if (e) C.ch.timeScale().setVisibleLogicalRange({ from: Math.max(0, e.idx - 18), to: e.idx + 18 }); }
     else C.ch.timeScale().fitContent();
-    const lg = $("cs-legend"); if (lg) lg.innerHTML = `<b>${esc(d.index)}</b> · 5m · ${esc(d.day)} <span><i style="background:#5fa8ff"></i>EMA 9</span><span><i style="background:#2f5bea"></i>EMA 21</span>`;
+    ohlc(null);
+  }
+
+  function ohlc(b) {
+    const lg = $("cs-legend"), d = S.data; if (!lg || !d || !d.available) return;
+    const x = b || d.bars[d.bars.length - 1], ch = x.close - x.open, col = ch >= 0 ? DHAN.up : DHAN.down;
+    lg.innerHTML = `<b>${esc(d.index)}</b> · 5 · ${esc(d.day)} <span class="cs-o">O <b style="color:${col}">${f0(x.open)}</b> H <b style="color:${col}">${f0(x.high)}</b> L <b style="color:${col}">${f0(x.low)}</b> C <b style="color:${col}">${f0(x.close)}</b> <b style="color:${col}">${ch >= 0 ? "+" : "−"}${f0(Math.abs(ch))}</b></span><br><span><i style="background:${DHAN.e9}"></i>EMA 9</span><span><i style="background:${DHAN.e21}"></i>EMA 21</span>`;
   }
 
   // ------------------------------------------------------------ lesson body
