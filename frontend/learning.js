@@ -317,6 +317,15 @@
 
   // ------------------------------------------------------------------ 📚 market lesson of a session (/api/learning/lessons)
   const SIDE = { SSL: ["🔻 Sell-side liquidity", "lrn-ssl"], BSL: ["🔺 Buy-side liquidity", "lrn-bsl"], RETEST: ["↩️ Flip retest", "lrn-rt"] };
+  /** "How an experienced trader would handle this market" — the day's plan step by step and the P&L with 4 lots. */
+  function handling(h) {
+    if (!h) return "";
+    const money = (v) => (v == null ? "—" : `${v >= 0 ? "+" : "−"}₹${Math.abs(Math.round(v)).toLocaleString("en-IN")}`), net = (g) => g.gross - g.costs;
+    const steps = h.plan.map((s) => `<li class="${s.gross != null ? (net(s) >= 0 ? "win" : "loss") : "watch"}"><div class="lrn-liq-h"><time>${esc(s.time)}</time><b>${esc(s.action)}</b></div><p>${esc(s.why)}</p>
+      ${s.exit ? `<p><i>Exit:</i> ${esc(s.exit)} → <b class="${net(s) >= 0 ? "lrn-up" : "lrn-dn"}">${money(net(s))}</b> <span class="lrn-hint">(${money(s.gross)} − खर्च ₹${s.costs.toLocaleString("en-IN")})</span></p>` : ""}${s.warn ? `<p class="lrn-st">⚠️ ${esc(s.warn)}</p>` : ""}</li>`).join("");
+    const tiers = `<table class="lrn-tiers"><thead><tr><th>कैसे खेला</th><th>Trades</th><th class="n">4 lot पर नेट</th></tr></thead><tbody>${h.tiers.map((t) => `<tr><td><b>${esc(t.name)}</b></td><td>${esc(t.detail)}</td><td class="n ${net(t) >= 0 ? "lrn-up" : "lrn-dn"}"><b>${money(net(t))}</b><div class="lrn-hint">${money(t.gross)} − ₹${t.costs.toLocaleString("en-IN")}</div></td></tr>`).join("")}</tbody></table>`;
+    return `<section class="lrn-hand"><h4>🧑‍✈️ ${esc(h.title)}</h4><ol class="lrn-liq lrn-plan">${steps}</ol><h4>💰 4 lot पर कितना बनता</h4><div class="lrn-tbl">${tiers}</div><p class="lrn-hint">ℹ️ ${esc(h.note)}</p></section>`;
+  }
   async function loadLesson(day) {
     const box = $("lrn-mkt-body"), sel = $("lrn-mkt-day"); if (!box) return;
     try {
@@ -333,6 +342,7 @@
           <div class="lrn-mk-why"><div><h5 class="lrn-dn">📉 क्यों गिरा</h5><ul>${li(I.downLogic)}</ul></div><div><h5 class="lrn-up">📈 क्यों चढ़ा</h5><ul>${li(I.upLogic)}</ul></div></div></section>`; }).join("");
       const st = `<section><h4>🧭 आज की strategies — क्या चला, क्या नहीं</h4><div class="lrn-strats">${x.strategies.map((g) => `<div class="lrn-strat"><b>${esc(g.name)}</b> <span class="lrn-hint">${esc(g.when)}</span><p><i>नियम:</i> ${esc(g.rule)}</p><p><i>आज:</i> ${esc(g.today)}</p><p class="lrn-st">${esc(g.status)}</p></div>`).join("")}</div></section>`;
       box.innerHTML = `<p class="lrn-mk-title"><b>${esc(x.title)}</b></p><p>${esc(x.summary)}</p><div class="lrn-mk-grid">${idx}</div>${st}
+${handling(x.handling)}
         <section><h4>🧠 सबक</h4><ol>${li(x.lessons)}</ol></section><p class="lrn-hint">⚠️ ${esc(x.caveat)}</p>`;
     } catch (e) { box.innerHTML = `<span class="lrn-hint">${esc(e.message)}</span>`; }
   }
