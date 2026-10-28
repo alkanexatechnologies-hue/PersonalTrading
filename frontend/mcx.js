@@ -78,8 +78,13 @@
     if (on && cs && T && !T.error && typeof ppcLevelLines === "function") {
       const c = (MC._candles || []).slice(-120); if (c.length) {
         const lo = Math.min(...c.map((x) => x.low)), hi = Math.max(...c.map((x) => x.high)), pad = (T.atr15 || 0) * 1.5, inView = (p) => p >= lo - pad && p <= hi + pad;
-        specs = ppcLevelLines(T, { levels: true, plan: true, inView });
-        for (const tl of T.lines || []) {
+        const clean = typeof mcClean === "function" && mcClean();
+        specs = ppcLevelLines(T, { levels: !clean, plan: true, inView });
+        if (clean) {   // clean chart: both starts; a side's stop / targets only once price is past its start (the plan is live)
+          const spot = MC.lastData?.spot, live = { BULL: !!(T.plans?.bull && spot > T.plans.bull.entry), BEAR: !!(T.plans?.bear && spot < T.plans.bear.entry) };
+          specs = specs.filter((x) => / STARTS/.test(x.title) || (/^(BULL|BEAR) (STOP|T1|T2)/.test(x.title) && live[x.title.split(" ")[0]]));
+        }
+        for (const tl of clean ? [] : T.lines || []) {
           if (tl.broken || !tl.end) continue; const v = tl.projection?.[0]?.value ?? tl.end.price; if (!inView(v)) continue;
           specs.push({ price: v, color: tl.kind === "SELLER" ? "#f23645" : "#089981", lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title: `${tl.kind === "SELLER" ? "Seller" : "Buyer"} TL${tl.minor ? " (minor)" : ""}` });
         }
@@ -92,6 +97,8 @@
     for (const spec of specs) { try { X.plLines.push(cs.createPriceLine(spec)); } catch (e) { /* bad value */ } }
   }
   document.addEventListener("change", (e) => { if (e.target && e.target.id === "mc-tog-planlv") drawPlanLevels(); });
+  window.mcxDrawPlanLevels = () => { X.plSig = null; drawPlanLevels(); };
+  window.mcxPlanPrices = () => { const P = X.pc[MC.sym]?.trader?.plans; return P ? [P.bull?.entry, P.bear?.entry].filter((x) => x != null) : []; };
 
   // ------------------------------------------------------------ C4 card + its main-chart marks (information only)
   function renderC4() {

@@ -9797,7 +9797,7 @@ function renderMCChart(d) {
   // the set actually changed. On an unchanged poll (very common — levels update
   // slowly) nothing is recreated, so the lines/markers stay perfectly still.
   const overlaySig = JSON.stringify({
-    lv: MC.show.levels, bos: MC.show.bos, liq: MC.show.liq, orb: MC.show.orb,
+    lv: MC.show.levels, bos: MC.show.bos, liq: MC.show.liq, orb: MC.show.orb, clean: mcClean(),
     L: visible.map((l) => l.kind + "|" + l.price + "|" + l.short + "|" + (l === nearest ? 1 : 0)),
     M: markers.map((m) => m.time + "|" + m.shape + "|" + m.text + "|" + m.color),
   });
@@ -9812,7 +9812,7 @@ function renderMCChart(d) {
       const style = l.kind === "invalidation" ? 1 : (l.kind === "orb" || l.kind === "pdhl" || l.kind === "swing" || l.strength === "MEDIUM") ? 2 : 0;
       // drawn as a short ray + collision-free tag in the overlay (mcDrawLevelRays); the price line keeps
       // only the axis price, and only for the nearest level above and below price
-      const nearSide = l === visible.find((x) => x.price > d.spot) || l === visible.find((x) => x.price < d.spot) || l.kind === "invalidation";
+      const nearSide = l === visible.find((x) => x.price > d.spot) || l === visible.find((x) => x.price < d.spot) || (l.kind === "invalidation" && !mcClean());   // clean chart: the signal's STOP LOSS line already labels it
       MC._levelLines.push(MC.candleSeries.createPriceLine({ price: l.price, color: col, lineWidth: 1, lineStyle: style, lineVisible: false, axisLabelVisible: nearSide, title: "" }));
     });
     // markers are drawn in the overlay (mcDrawLevelRays): chart-library markers reserve extra price
@@ -10092,13 +10092,27 @@ function mcboMarkers(d) {
   return out;
 }
 
+// ---- Clean chart (owner, 2026-10-28: "so many levels on the main chart") — display only ----
+// On (default): the plan starts, the nearest support / resistance, the live plan's stop / target and the signal's entry /
+// stop. Everything else stays in the Key Levels panel and the ProTrader card. Off: every level, as before.
+function mcClean() { const t = el("mc-tog-clean"); return t ? t.checked : true; }
+(function () {
+  try { const v = localStorage.getItem("mc-clean"); if (v === "0") { const off = () => { const t = el("mc-tog-clean"); if (t) t.checked = false; }; off(); document.addEventListener("DOMContentLoaded", off); } } catch {}
+  document.addEventListener("change", (e) => {
+    if (!e.target || e.target.id !== "mc-tog-clean") return;
+    try { localStorage.setItem("mc-clean", e.target.checked ? "1" : "0"); } catch {}
+    MC._boSig = null; MC._overlaySig = null; try { if (MC.lastData) { renderMCChart(MC.lastData); } } catch {}
+    try { mcDrawLevelRays(); } catch {} try { if (typeof window.mcxDrawPlanLevels === "function") window.mcxDrawPlanLevels(); } catch {}
+  });
+})();
+
 // Entry / SL / T1 / T2 / Trigger price lines for the active signal (spot levels —
 // the chart is the underlying). Rebuilt only when the plan changes.
 function applyMCBreakoutLines(d) {
   if (!MC.candleSeries) return;
   const sig = MC.show.trade ? arbActiveSignal(d) : null;   // the ARBITER's plan, never S2's
   const p = sig ? sig.plan : null;
-  const sig2 = p ? JSON.stringify([sig.barTime, p.entry, p.stopLoss, p.target1, p.target2, p.trigger]) : "";
+  const sig2 = p ? JSON.stringify([sig.barTime, p.entry, p.stopLoss, p.target1, p.target2, p.trigger, mcClean()]) : "";
   if (MC._boSig === sig2) return;
   MC._boSig = sig2;
   (MC._boLines || []).forEach((pl) => { try { MC.candleSeries.removePriceLine(pl); } catch {} });
@@ -10108,10 +10122,11 @@ function applyMCBreakoutLines(d) {
     if (price == null) return;
     try { MC._boLines.push(MC.candleSeries.createPriceLine({ price, color, lineWidth: width, lineStyle: style, axisLabelVisible: true, title })); } catch {}
   };
-  add(p.target2, "#22c55e", 2, "TARGET 2");
-  add(p.target1, "#22c55e", 0, "TARGET 1", 2);
+  const clean = mcClean();   // clean chart: the signal's entry and stop only — its targets are in the tag
+  if (!clean) add(p.target2, "#22c55e", 2, "TARGET 2");
+  if (!clean) add(p.target1, "#22c55e", 0, "TARGET 1", 2);
   add(p.entry, "#facc15", 0, `ENTRY ${sig.dir === "BUY" ? "CE" : "PE"}`, 2);
-  if (p.trigger != null && p.trigger !== p.entry) add(p.trigger, "#38bdf8", 1, "TRIGGER");
+  if (!clean && p.trigger != null && p.trigger !== p.entry) add(p.trigger, "#38bdf8", 1, "TRIGGER");
   add(p.stopLoss, "#ef4444", 0, "STOP LOSS", 2);
 }
 
@@ -10127,8 +10142,8 @@ function ensureMCBoTag(container) {
   MC.boTag = tag;
   return tag;
 }
-// Collapsed to a one-line chip on phones until tapped; expanded elsewhere.
-function mcboTagOpen() { return MC._boTagOpen != null ? MC._boTagOpen : !(window.matchMedia && window.matchMedia("(max-width: 640px)").matches); }
+// Collapsed to a one-line chip on phones (and on a clean chart) until tapped; expanded elsewhere.
+function mcboTagOpen() { return MC._boTagOpen != null ? MC._boTagOpen : !mcClean() && !(window.matchMedia && window.matchMedia("(max-width: 640px)").matches); }   // clean chart: a one-line chip until tapped
 
 function mcboTagHtml(d, s) {
   const p = s.plan, o = s.option, buy = s.dir === "BUY";
@@ -10415,6 +10430,11 @@ function mcDrawLevelRays() {
     const zt = parseFloat(zEl.style.top), zh = parseFloat(zEl.style.height);
     if (isFinite(zt) && isFinite(zh)) rows.push({ y: zt + zh / 2, near: false, cls: "zone", dashed: false, noLine: true, text: `<span class="nm">Pullback</span> zone ${mcEscText(zLbl.textContent.replace("Resistance / Pullback Zone", "").trim()).replace(/\s*\(±\d+\)/, (m) => `<span class="nm">${m}</span>`)}` });
     zLbl.style.visibility = "hidden";
+  }
+  if (mcClean()) {   // clean chart: the nearest level each side + the stop; a level a plan line already marks is not repeated
+    const planPx = (typeof window.mcxPlanPrices === "function" ? window.mcxPlanPrices() : []), ptol = Math.max(tol * 2, 8);
+    for (let i = rows.length - 1; i >= 0; i--) { const r = rows[i]; if (r.cls === "zone") continue;
+      const keep = r.cls === "sl" || (r.near && !planPx.some((x) => Math.abs((MC.candleSeries.coordinateToPrice(r.y) ?? 0) - x) <= ptol)); if (!keep) rows.splice(i, 1); }
   }
   rows.sort((a, b) => a.y - b.y);
   // stack tags: at least 18 px apart; push back up if they run off the bottom
