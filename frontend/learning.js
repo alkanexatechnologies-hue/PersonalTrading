@@ -35,6 +35,7 @@
 <div class="lrn">
   <details class="lrn-card lrn-mkt" id="lrn-mkt" open><summary><b>📚 बाज़ार का पाठ</b> <span class="lrn-hint">कहाँ liquidity ली · क्यों गिरा, क्यों चढ़ा · strategies</span></summary>
     <div class="lrn-mkt-bar"><label class="lrn-hint" for="lrn-mkt-day">दिन</label><select class="lrn-in" id="lrn-mkt-day"></select></div><div id="lrn-mkt-body"><span class="lrn-hint">लोड हो रहा है…</span></div></details>
+  <details class="lrn-card lrn-cs" id="lrn-cs" open><summary><b>📸 Chart School</b> <span class="lrn-hint">अपना NIFTY / SENSEX chart डालें → system उस दिन की असली candles से candle और level सिखाएगा</span></summary><div id="lrn-cs-host"></div></details>
   <div class="lrn-top">
     <div class="lrn-card">
       <div class="lrn-h"><b>✍️ Write your trade in your own words</b><span>premium, time, SL, targets</span></div>
@@ -351,7 +352,7 @@ ${handling(x.handling)}
   /** Called by mcx.js when the 🎓 Learning view opens. */
   window.lrnMount = function (host) {
     if (!host) return;
-    if (!L.mounted) { shell(host); wire(); L.mounted = true; loadSaved(); loadLesson(); if (!$("lrn-text").value) $("lrn-text").placeholder = `e.g. BUY Nifty 22750 PE above 50, SL 37, target 78 95 105, time 10:07`; }
+    if (!L.mounted) { shell(host); wire(); L.mounted = true; if (window.csMount) window.csMount($("lrn-cs-host")); loadSaved(); loadLesson(); if (!$("lrn-text").value) $("lrn-text").placeholder = `e.g. BUY Nifty 22750 PE above 50, SL 37, target 78 95 105, time 10:07`; }
     else if (L.r) setTimeout(drawTf, 30);   // the charts were hidden: redraw at the visible size
   };
 })();

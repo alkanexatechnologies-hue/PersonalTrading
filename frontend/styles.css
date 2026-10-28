@@ -8536,3 +8536,36 @@ body.one-mode .mc-tog:has(#mc-tog-trade), body.one-mode .mc-tog:has(#mc-tog-plan
 .scn-wi { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; } .scn-wi label { font-size: 13px; color: #c3cad4; }
 .scn-wi input { width: 150px; min-height: 44px; padding: 0 10px; border-radius: 8px; border: 1px solid #2a3340; background: #0d1117; color: #e5e7eb; font-size: 16px; }
 @media (max-width: 600px) { .scn-wi { width: 100%; } .scn-wi input { flex: 1; min-width: 0; width: auto; } .scn-wi label { width: 100%; } }
+/* 📸 Chart School (Learning, 2026-10-28) */
+.lrn-cs summary { cursor: pointer; min-height: 44px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cs { display: flex; flex-direction: column; gap: 10px; color: #d6dbe3; font-size: 14px; line-height: 1.5; margin-top: 6px; }
+.cs-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cs-idx { display: inline-flex; border: 1px solid #2a3340; border-radius: 8px; overflow: hidden; }
+.cs-idx button { min-height: 44px; min-width: 84px; padding: 0 12px; background: #151b24; color: #c3cad4; border: 0; font-size: 14px; font-weight: 600; cursor: pointer; } .cs-idx button.on { background: #2962ff; color: #fff; }
+.cs-f { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #9aa3b0; } .cs-f input { min-height: 44px; }
+.cs-file { display: inline-flex; align-items: center; cursor: pointer; }
+.cs-panes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 10px; align-items: start; }
+.cs-panes:has(.cs-shot[hidden]) { grid-template-columns: minmax(0, 1fr); }
+.cs-shot { margin: 0; border: 1px solid #2a2e39; border-radius: 8px; overflow: hidden; background: #0b0e14; } .cs-shot figcaption { font-size: 12.5px; color: #9aa3b0; padding: 4px 8px; }
+.cs-shot img { display: block; width: 100%; height: auto; max-height: 480px; object-fit: contain; background: #fff; }
+.cs-cw { position: relative; border: 1px solid #2a2e39; border-radius: 8px; overflow: hidden; background: #131722; min-width: 0; }
+.cs-chart { height: 480px; width: 100%; }
+.cs-legend { position: absolute; z-index: 3; top: 6px; left: 8px; font-size: 12px; color: #d1d4dc; pointer-events: none; background: rgba(19, 23, 34, .75); padding: 2px 6px; border-radius: 4px; }
+.cs-legend span { display: inline-flex; align-items: center; gap: 4px; margin-left: 10px; } .cs-legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.cs-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; background: #0d1117; border: 1px solid #1e2530; border-radius: 8px; padding: 8px 10px; } .cs-sum ul { margin: 0; padding-left: 18px; flex: 1 1 320px; }
+.cs-h { margin: 6px 0 4px; font-size: 14px; color: #c3cad4; }
+.cs-evs { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.cs-ev button { width: 100%; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 8px; text-align: left; padding: 8px 10px; border-radius: 8px; border: 1px solid #1e2530; border-left: 4px solid #2a3340; background: #0d1117; color: #e5e7eb; cursor: pointer; font-size: 13.5px; }
+.cs-ev.t-bull button { border-left-color: #26a69a; } .cs-ev.t-bear button { border-left-color: #ef5350; } .cs-ev.t-neutral button { border-left-color: #f5c542; } .cs-ev.on button { border-color: #2962ff; background: #10172a; }
+.cs-n { width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; color: #0b0e14; }
+.cs-evb { display: flex; flex-direction: column; gap: 3px; min-width: 0; } .cs-evh { display: flex; justify-content: space-between; gap: 8px; } .cs-evh time { color: #9aa3b0; font-family: 'JetBrains Mono', monospace; }
+.cs-chips { display: flex; flex-wrap: wrap; gap: 4px; } .cs-p { color: #c3cad4; }
+.cs-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.cs-lv, .cs-gl { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.cs-lv li { display: grid; grid-template-columns: 10px auto minmax(0, 1fr); gap: 2px 8px; align-items: center; background: #0d1117; border-radius: 6px; padding: 5px 8px; }
+.cs-lv li b { font-family: 'JetBrains Mono', monospace; } .cs-lv li .lrn-hint { grid-column: 2 / -1; } .cs-sw { width: 10px; height: 10px; border-radius: 2px; }
+.cs-gl li { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; background: #0d1117; border-radius: 6px; padding: 5px 8px; } .cs-gl .lrn-hint { width: 100%; }
+.cs-rules { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 3px; }
+.cs-up summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; } .cs-list { display: flex; flex-wrap: wrap; gap: 6px; } .cs-li { display: inline-flex; gap: 4px; }
+@media (max-width: 1100px) { .cs-panes { grid-template-columns: minmax(0, 1fr); } .cs-chart { height: 420px; } }
+@media (max-width: 760px) { .cs-evs, .cs-grid { grid-template-columns: minmax(0, 1fr); } .cs-chart { height: 360px; } .cs-shot img { max-height: 300px; } }
