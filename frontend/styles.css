@@ -8489,3 +8489,45 @@ body.one-mode .mc-tog:has(#mc-tog-trade), body.one-mode .mc-tog:has(#mc-tog-plan
 .lrn-tbl { overflow-x: auto; max-width: 100%; } .lrn-tiers { width: 100%; border-collapse: collapse; font-size: 14px; } .lrn-tiers th, .lrn-tiers td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #1e2530; vertical-align: top; } .lrn-tiers th { color: #9aa3b0; font-weight: 600; } .lrn-tiers .n { text-align: right; white-space: nowrap; }
 @media (max-width: 600px) { .lrn-tiers td:nth-child(2), .lrn-tiers th:nth-child(2) { display: none; } }
 .one-lots { min-height: 44px; font-size: 16px; background: #151b24; color: #e5e7eb; border: 1px solid #2a3340; border-radius: 8px; padding: 0 8px; }
+/* 🗺️ Scenario Map (One Trade tab, 2026-10-28): TradingView-style chart + scenario panel */
+.scn { display: flex; flex-direction: column; gap: 10px; }
+.scn-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.scn-ttl { display: flex; flex-direction: column; gap: 2px; min-width: 0; } .scn-for { font-size: 13px; color: #c3cad4; }
+.scn-idx { display: inline-flex; border: 1px solid #2a3340; border-radius: 8px; overflow: hidden; }
+.scn-idx button { min-height: 44px; min-width: 88px; padding: 0 14px; background: #151b24; color: #c3cad4; border: 0; font-size: 14px; font-weight: 600; cursor: pointer; }
+.scn-idx button.on { background: #2962ff; color: #fff; }
+.scn-chips { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.scn-chips button { min-height: 52px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; padding: 6px 10px; border-radius: 8px; border: 1px solid #2a3340; background: #151b24; color: #e5e7eb; cursor: pointer; text-align: left; min-width: 0; }
+.scn-chips button span { font-size: 14px; font-weight: 600; } .scn-chips button small { font-size: 12px; color: #9aa3b0; }
+.scn-chips button.on { border-color: #2962ff; background: #10204a; box-shadow: inset 0 -3px 0 #2962ff; }
+.scn-body { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(300px, 1fr); gap: 10px; align-items: start; }
+.scn-cw { position: relative; min-width: 0; border: 1px solid #2a2e39; border-radius: 8px; overflow: hidden; background: #131722; }
+.scn-chart { height: 520px; width: 100%; }
+.scn-legend { position: absolute; z-index: 3; top: 6px; left: 8px; font-size: 12px; color: #d1d4dc; pointer-events: none; line-height: 1.6; background: rgba(19, 23, 34, .75); padding: 2px 6px; border-radius: 4px; }
+.scn-legend span { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; opacity: .7; } .scn-legend span.on { opacity: 1; font-weight: 700; }
+.scn-legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.scn-panel { display: flex; flex-direction: column; gap: 6px; max-height: 520px; overflow-y: auto; min-width: 0; padding-right: 2px; }
+.scn-pt h4 { margin: 0; font-size: 17px; } .scn-h { margin: 8px 0 2px; font-size: 13px; color: #9aa3b0; font-weight: 700; }
+.scn-br { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.scn-br button { width: 100%; display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; padding: 8px 10px; border-radius: 8px; border: 1px solid #1e2530; background: #0d1117; color: #e5e7eb; cursor: pointer; text-align: left; min-height: 44px; font-size: 14px; }
+.scn-br button.on { border-color: #3a4556; background: #151b24; }
+.scn-br .sw { width: 14px; height: 4px; border-radius: 2px; } .scn-br b { font-size: 17px; font-family: 'JetBrains Mono', monospace; }
+.scn-br .bar { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: #1e2530; overflow: hidden; } .scn-br .bar i { display: block; height: 100%; border-radius: 3px; }
+.scn-br small { grid-column: 1 / -1; color: #9aa3b0; font-size: 12px; }
+.scn-trs { display: flex; flex-direction: column; gap: 6px; }
+.scn-tr { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 8px; border: 1px solid #1e2530; border-left: 4px solid #2a3340; background: #0d1117; color: #e5e7eb; cursor: pointer; text-align: left; font-size: 13px; }
+.scn-tr.ce { border-left-color: #26c6a6; } .scn-tr.pe { border-left-color: #ff6b72; } .scn-tr.on { border-color: #2962ff; background: #10172a; }
+.scn-tr.v-AVOID { opacity: .72; }
+.scn-trh { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; } .scn-v { font-size: 12px; color: #c3cad4; } .scn-trl { font-size: 14px; font-weight: 600; }
+.scn-g { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.scn-g span { display: flex; flex-direction: column; background: #151b24; border-radius: 6px; padding: 4px 8px; } .scn-g i { font-style: normal; font-size: 12px; color: #9aa3b0; } .scn-g b { font-size: 17px; font-family: 'JetBrains Mono', monospace; }
+.scn-lv { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.scn-lv li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 8px; padding: 6px 8px; border-radius: 6px; background: #0d1117; border-left: 3px solid #2a3340; font-size: 13px; }
+.scn-lv li.S { border-left-color: #26a69a; } .scn-lv li.R { border-left-color: #ef5350; }
+.scn-lp { display: flex; gap: 6px; align-items: center; } .scn-lp b { font-family: 'JetBrains Mono', monospace; font-size: 15px; } .scn-ln { color: #c3cad4; align-self: center; min-width: 0; }
+.scn-st { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 12px; color: #c3cad4; font-size: 12.5px; }
+.scn-story { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+.scn-foot { margin: 0; font-size: 12px; }
+@media (max-width: 1100px) { .scn-body { grid-template-columns: minmax(0, 1fr); } .scn-panel { max-height: none; overflow: visible; } .scn-chart { height: 440px; } }
+@media (max-width: 900px) { .scn-chips { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .scn-chips { grid-template-columns: repeat(2, minmax(0, 1fr)); } .scn-chart { height: 360px; } .scn-idx { width: 100%; } .scn-idx button { flex: 1; } .scn-g b { font-size: 15px; } }

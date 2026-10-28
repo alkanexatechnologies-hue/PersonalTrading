@@ -36,6 +36,7 @@
     const v = speechSynthesis.getVoices().find((x) => /^hi(-|_)?IN/i.test(x.lang)) || speechSynthesis.getVoices().find((x) => /^hi/i.test(x.lang)); if (v) u.voice = v;
     speechSynthesis.speak(u);
   }
+  window.oneSay = say;
   function summaryText(d) {
     const t = d.trade, L = d.live || {};
     if (t) return `${t.name} ${t.strike} ${t.side} चालू है। Entry ${rs(t.entryPrem)}, अभी ${rs(L.prem)}, ${lots()} lot पर ${sgn(L.pnlLot != null ? L.pnlLot * lots() : null, "₹")}। Stop loss ${f0(t.stop)}, target ${f0(t.target)}।`;
@@ -46,8 +47,11 @@
   // ------------------------------------------------------------ render
   function render() {
     const host = O.host, d = O.data; if (!host) return;
-    if (!d) { host.innerHTML = `<section class="one-card"><p class="one-mu">लोड हो रहा है…</p></section>`; return; }
-    if (!d.available) { host.innerHTML = `<section class="one-card"><p class="one-mu">${esc(d.error || "डेटा उपलब्ध नहीं")}</p></section>`; return; }
+    // three stable parts: the trade (top), the 🗺️ scenario map (its own chart, scenarioMap.js) and the rest
+    const top = host.querySelector(".one-top"), rest = host.querySelector(".one-rest"); if (!top || !rest) return;
+    const put = (el, html) => { if (el.__one !== html) { el.innerHTML = html; el.__one = html; } };
+    if (!d) { put(top, `<section class="one-card"><p class="one-mu">लोड हो रहा है…</p></section>`); return; }
+    if (!d.available) { put(top, `<section class="one-card"><p class="one-mu">${esc(d.error || "डेटा उपलब्ध नहीं")}</p></section>`); return; }
     const t = d.trade, L = d.live || {}, von = voiceOn();
     const bar = `<div class="one-bar" role="toolbar" aria-label="Voice"><button type="button" class="one-btn${von ? " on" : ""}" data-one="voice" aria-pressed="${von}">${von ? "🔊 आवाज़ चालू" : "🔇 आवाज़ बंद"}</button><button type="button" class="one-btn" data-one="say">📢 अभी की स्थिति सुनाएँ</button><button type="button" class="one-btn${window.oneMode() ? " on" : ""}" data-one="mode" aria-pressed="${window.oneMode()}" title="On: trade calls appear only on this tab; other screens show market information only, and trade-only screens (Trade Execution, AI Paper, Top Pick) leave the menu">${window.oneMode() ? "🎯 Trade सिर्फ़ इस tab पर" : "👁 सभी screens पर trades"}</button><label class="one-mu" for="one-lots">Lots</label><select id="one-lots" class="one-lots">${[1, 2, 3, 4, 5, 10].map((n) => `<option value="${n}"${n === lots() ? " selected" : ""}>${n}</option>`).join("")}</select><span class="one-mu">${esc(d.day)} · हर 15 सेकंड में update</span></div>`;
     let hero;
@@ -95,8 +99,7 @@
         <h4 class="one-h4">📺 क्या हुआ</h4><ul>${li(m.story)}</ul><h4 class="one-h4">🔗 Option chain</h4><ul>${li([...(m.oiRead || []), ...(m.market || [])])}</ul>
         ${m.lessons && m.lessons.length ? `<h4 class="one-h4">🧠 Junior के लिए सबक</h4><ol>${li(m.lessons)}</ol>` : ""}</div>`).join("");
     const market = mk ? `<details class="one-card one-market" open><summary><h3 class="one-h">📺 बाज़ार की live commentary (NIFTY · SENSEX)</h3></summary><div class="one-mks">${mk}</div></details>` : "";
-    const html = bar + hero + feed + market + done + how;
-    if (host.__one !== html) { host.innerHTML = html; host.__one = html; }
+    put(top, bar + hero); put(rest, feed + market + done + how);
     // speak new events (only those that arrive after the first load, so the backlog is not read out)
     for (const e of d.events || []) { const k = e.t + "|" + e.kind; if (!O.primed) { O.spoken.add(k); continue; } if (!O.spoken.has(k)) { O.spoken.add(k); if (voiceOn()) say(e.text); } }
     O.primed = true;
@@ -108,15 +111,17 @@
   }
   window.oneMount = (host) => {
     clearInterval(O.timer); O.timer = null;
-    if (!host) { O.host = null; return; }
+    if (!host) { O.host = null; if (window.scnMount) window.scnMount(null); return; }
+    if (!host.querySelector(".one-top")) host.innerHTML = `<div class="one-top"></div><div class="one-scn"></div><div class="one-rest"></div>`;
     O.host = host; render(); load();
+    if (window.scnMount) window.scnMount(host.querySelector(".one-scn"));
     O.timer = setInterval(() => { if (!document.hidden && O.host && !O.host.hidden) load(); }, 15000);
   };
-  document.addEventListener("change", (e) => { if (e.target && e.target.id === "one-lots") { try { localStorage.setItem(LKEY, e.target.value); } catch {} if (O.host) { O.host.__one = null; render(); } } });
+  document.addEventListener("change", (e) => { if (e.target && e.target.id === "one-lots") { try { localStorage.setItem(LKEY, e.target.value); } catch {} if (O.host) { O.host.querySelectorAll(".one-top,.one-rest").forEach((el) => { el.__one = null; }); render(); } } });
   document.addEventListener("click", (e) => {
     const b = e.target.closest("[data-one],[data-one-say]"); if (!b || !O.host || !O.host.contains(b)) return;
-    if (b.dataset.one === "voice") { const on = !voiceOn(); try { localStorage.setItem(VKEY, on ? "1" : "0"); } catch {} if (on) say("आवाज़ चालू। हर trade की जानकारी अब बोली जाएगी।"); else if ("speechSynthesis" in window) speechSynthesis.cancel(); O.host.__one = null; render(); }
-    else if (b.dataset.one === "mode") { try { localStorage.setItem(MKEY, window.oneMode() ? "0" : "1"); } catch {} applyMode(); O.host.__one = null; render(); }
+    if (b.dataset.one === "voice") { const on = !voiceOn(); try { localStorage.setItem(VKEY, on ? "1" : "0"); } catch {} if (on) say("आवाज़ चालू। हर trade की जानकारी अब बोली जाएगी।"); else if ("speechSynthesis" in window) speechSynthesis.cancel(); O.host.querySelectorAll(".one-top,.one-rest").forEach((el) => { el.__one = null; }); render(); }
+    else if (b.dataset.one === "mode") { try { localStorage.setItem(MKEY, window.oneMode() ? "0" : "1"); } catch {} applyMode(); O.host.querySelectorAll(".one-top,.one-rest").forEach((el) => { el.__one = null; }); render(); }
     else if (b.dataset.one === "say") { if (O.data) say(summaryText(O.data)); }
     else if (b.dataset.oneSay != null) { const ev = (O.data && O.data.events) || [], x = ev[Number(b.dataset.oneSay)]; if (x) say(x.text); }
   });

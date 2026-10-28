@@ -285,6 +285,8 @@ import {
 import { buildMarketCommentary, detectStructure, formatTradeReview } from "../commentary/marketCommentary";
 import { buildDeskCommentary } from "../commentary/deskCommentary";
 import * as OT from "../premium/oneTrade";
+import { buildScenarioMap, maxPainOf, scnSessions } from "../premium/scenarioMap";
+import SCN_STATS from "../premium/scenario-stats.json";
 import { CONFIG, DEFAULT_SYMBOLS, DISCLAIMER, SymbolDef, nearestStrike, SWING_SYMBOLS, findSymbolDef, ALL_SYMBOLS } from "../config";
 import { istDateOfSec } from "../util/istTime";
 import { getOptionTopPickAuditLog } from "../optionTopPick/auditLog";
@@ -8460,6 +8462,31 @@ router.get("/one-trade", requirePermission("oiAnalysis"), async (_req: Request, 
     res.json({ available: true, day, nowSec, trade: t, live: liveNow, closed: st.closed, events: st.events.slice(-60), waiting, market,
       record: { period: "2024-11-19 → 2026-10-26", oneAtATimeVal: { perTrade: 106, pf: 1.15, win: 49.5 }, oneAtATimeDev: { perTrade: -226, pf: 0.74, win: 40 }, source: "RESULTS_ONE_TRADE.md" } });
   } catch (e: any) { res.status(502).json({ available: false, error: e?.message || "one trade failed" }); }
+});
+
+// ===================== 🗺️ Scenario Map (One Trade tab) — owner 2026-10-28 =====================
+// /api/one-trade/scenarios?symbol=^NSEI|^BSESN · the next session's what-ifs (gap down / up 50–100, falls / rises from a
+// flat open, liquidity-sweep pools) from the last completed session's levels + OI walls + max pain, with the odds measured
+// on 2 years of real Dhan 1-min data (premium/scenario-stats.json, research/protrader/scenarioStudy.ts). Shared caches only.
+router.get("/one-trade/scenarios", requirePermission("oiAnalysis"), async (req: Request, res: Response) => {
+  const def = findSymbolDef(String(req.query.symbol || "^NSEI"));
+  if (!def || def.type !== "index" || !def.fno || !["^NSEI", "^BSESN"].includes(def.symbol)) return res.status(400).json({ error: "NIFTY or SENSEX required" });
+  try {
+    res.json(await cachedSwr(`scn-map:${def.symbol}`, 60_000, 600_000, async () => {
+      const nowSec = Math.floor(Date.now() / 1000), name = def.symbol === "^NSEI" ? "NIFTY" : "SENSEX";
+      const [bars, d] = await Promise.all([getCandlesCached(def.symbol, "15m" as Interval).catch(() => [] as any[]), premiumCenterPayload({ symbol: def.symbol, interval: "15m" }).catch(() => null as any)]);
+      const ss = scnSessions(bars || [], nowSec); if (!ss) return { available: false, error: "no session data" };
+      const st: any = (SCN_STATS as any).indices[name], sp: any = (SCN_STATS as any).split[name], ow = d?.oiWalls || {};
+      const chain = _pcLastChain.get(`${def.symbol}:0`)?.v?.strikes || [];
+      const map = buildScenarioMap({ index: name as any, step: d?.step || (name === "NIFTY" ? 50 : 100), base: ss.base, prior: ss.prior, spot: d?.spot?.price ?? null,
+        callWall: ow.call?.strike ?? d?.oi?.callWall?.strike ?? null, putWall: ow.put?.strike ?? d?.oi?.putWall?.strike ?? null, maxPain: maxPainOf(chain),
+        targetDay: ss.targetDay, targetIsToday: ss.targetIsToday, stats: { all: st, dev: sp.dev, val: sp.val } });
+      const keep = new Set([ss.base.day, ...ss.prior.slice(0, 1).map((x) => x.day), ss.targetDay]);
+      const day = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(0, 10);
+      return { available: true, symbol: def.symbol, nowSec, spot: d?.spot?.price ?? null, live: ss.live, generated: (SCN_STATS as any).generated,
+        candles: (bars || []).filter((b: any) => keep.has(day(b.time))).map((b: any) => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close })), ...map };
+    }));
+  } catch (e: any) { res.status(502).json({ available: false, error: e?.message || "scenario map failed" }); }
 });
 
 // ===================== Zero-Hero (expiry-day cheap OTM) — live read; advisory only =====================

@@ -401,3 +401,14 @@ By entry type inside "three trades":
 **Verdict:** REJECT. No live change. 28 Oct was a day when all three worked, but over two years the sweep and
 breakout entries lose after costs in both halves, and they push out the approved trade. The lesson page keeps the day
 as a learning example, labelled as hindsight.
+
+## 2026-10-28 — 🗺️ Scenario Map odds (research + display, no live-logic change)
+Owner asked for a probability chart of the next session: gap down / up 50–100, which level holds / breaks / recovers, liquidity
+sweeps, and where a 40-point trade is. `scenarioStudy.ts` measured these on real Dhan 1-min data (2024-11 → 2026-10, 488 sessions
+per index, DEV / VAL halves) → `premium/scenario-stats.json`, `RESULTS_SCENARIO.md`. Display only (One Trade tab); the co-pilot and
+One Trade entry rules are unchanged, so no gate verdict is needed. ProTrader notes for the screen: every level type breaks more
+often than it holds (hold 24–38%, break 50–65%), sweep-then-hold is only 10–24% — "levels ≈ coin flip, the reaction matters"
+again. Setups positive in BOTH halves (≥ 8 trades each, before premium costs): NIFTY gap-up OR-high break long (+11.4 / +8.2 pts)
+and OR-high sweep short (+12.3 / +7.3), NIFTY gap-down OR-low break short (+7.7 / +3.7), NIFTY PDH rejection short (+4 / +8.3) and
+PDH break long (+5.3 / +4); SENSEX gap-up OR-high break long (+10 / +15.5). Samples are small (11–42 per half) — shown as
+"✅ consistent", not approved entries; trades stay on the One Trade signal.
