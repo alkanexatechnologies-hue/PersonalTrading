@@ -11,10 +11,8 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { execFileSync } from "child_process";
+import { ROOT, CONTAINER, DB, ist, sql } from "./lib.mjs";
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
-const CFG = JSON.parse(fs.readFileSync(path.join(ROOT, "data", "sqlserver.json"), "utf8"));
-const CONTAINER = "nsa-sqlserver", DB = CFG.database || "NSA_MARKET";
 const SOURCES = {
   NIFTY: path.join(ROOT, "data", "research-nifty20", "raw1m"),
   SENSEX: path.join(ROOT, "data", "research-multi", "SENSEX", "raw1m"),
@@ -22,9 +20,7 @@ const SOURCES = {
   FINNIFTY: path.join(ROOT, "data", "research-multi", "FINNIFTY", "raw1m"),
   MIDCPNIFTY: path.join(ROOT, "data", "research-multi", "MIDCPNIFTY", "raw1m"),
 };
-const ist = (t) => new Date((t + 19800) * 1000).toISOString().replace("T", " ").slice(0, 19);
-const sql = (q, db = DB) => execFileSync("docker", ["exec", CONTAINER, "/opt/mssql-tools18/bin/sqlcmd", "-C", "-S", "localhost", "-U", CFG.user, "-P", CFG.password, "-d", db, "-b", "-h", "-1", "-W", "-Q", `SET NOCOUNT ON; ${q}`], { encoding: "utf8", maxBuffer: 64 << 20 });
-const num = (v) => (v == null || !Number.isFinite(Number(v)) ? "" : String(v));
+const num = (v) => (v == null || !Number.isFinite(Number(v)) ? "" : String(v));   // the minute files are numeric only
 
 sql(`IF DB_ID('${DB}') IS NULL CREATE DATABASE ${DB};`, "master");
 sql(`

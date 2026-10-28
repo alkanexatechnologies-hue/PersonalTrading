@@ -8445,7 +8445,18 @@ function deskFor(def: any): Promise<any> {
 const OT_FILE = path.join(process.cwd(), "data", "one-trade.json");
 let _ot: OT.OneState = (() => { try { return JSON.parse(fs.readFileSync(OT_FILE, "utf8")); } catch { return OT.fresh(""); } })();
 const otSave = () => { try { fs.writeFileSync(OT_FILE, JSON.stringify(_ot)); } catch { /* best-effort */ } };
-const otDay = (day: string) => { if (_ot.day !== day) { _ot = OT.fresh(day); otSave(); } };
+// 🗄 local SQL Server copy (owner 2026-10-29): after the 15:50 research refresh, reload NSA_MARKET (2-year market data +
+// the app's trades / decisions / diary) via scripts/sqlserver/sync.mjs. Runs only where data/sqlserver.json exists (the
+// owner's Mac with the Docker SQL Server); async, so the server never waits on it; a failure is only logged.
+function sqlSync(): Promise<void> {
+  if (!fs.existsSync(path.join(process.cwd(), "data", "sqlserver.json"))) return Promise.resolve();
+  return new Promise((resolve) => require("child_process").execFile(process.execPath, [path.join(process.cwd(), "scripts", "sqlserver", "sync.mjs")], { cwd: process.cwd(), timeout: 15 * 60_000, maxBuffer: 16 << 20 },
+    (err: any, out: string) => { console.log(err ? `[sql-sync] failed: ${String(err.message).slice(0, 300)}` : String(out).trim().slice(-400)); resolve(); }));
+}
+// 🗄 trade history (owner 2026-10-29): the day's trades are appended here before the nightly reset, so they can be queried
+// later (scripts/sqlserver/load-app.mjs copies them into the local SQL Server). Best-effort; never blocks the job.
+const histAppend = (file: string, rows: any[]) => { if (!rows.length) return; try { fs.appendFileSync(path.join(process.cwd(), "data", file), rows.map((r) => JSON.stringify(r)).join("\n") + "\n"); } catch { /* best-effort */ } };
+const otDay = (day: string) => { if (_ot.day !== day) { if (_ot.day) histAppend("one-trade-history.jsonl", [..._ot.closed, ...(_ot.trade ? [_ot.trade] : [])].map((t) => ({ day: _ot.day, ...t }))); _ot = OT.fresh(day); otSave(); } };
 router.get("/one-trade", requirePermission("oiAnalysis"), async (_req: Request, res: Response) => {
   try {
     const nowSec = Math.floor(Date.now() / 1000), day = new Date((nowSec + 19800) * 1000).toISOString().slice(0, 10);
@@ -9603,7 +9614,10 @@ async function copilotTick() {
   try {
     const nowSec = Math.floor(Date.now() / 1000), ist = new Date((nowSec + 19800) * 1000), day = ist.toISOString().slice(0, 10), istMin = ist.getUTCHours() * 60 + ist.getUTCMinutes(), sec = ist.getUTCSeconds(), wd = ist.getUTCDay();
     if (wd === 0 || wd === 6) return;
-    if (_cp.day !== day) { _cp = { day, trades: {}, closed: [], sent: {}, seen: {}, pending: {} }; cpSave(); }
+    if (_cp.day !== day) {
+      if (_cp.day) { const done = new Set((_cp.closed || []).map((t: any) => `${t.index}|${t.openedAt}`)); histAppend("copilot-history.jsonl", [...(_cp.closed || []), ...Object.values(_cp.trades || {}).filter((t: any) => t && !done.has(`${t.index}|${t.openedAt}`))].map((t: any) => ({ day: _cp.day, ...t }))); }
+      _cp = { day, trades: {}, closed: [], sent: {}, seen: {}, pending: {} }; cpSave(); otDay(day);
+    }
     const pay = (sym: string) => premiumCenterPayload({ symbol: sym, interval: "15m" });
     // 📍 09:12 key level sheet (NIFTY + SENSEX): built once after the 09:08 pre-open price, saved for every screen, ★★/★★★ to Telegram
     if (istMin >= 552 && istMin <= 560 && !_cp.sent.levels912) {
@@ -9823,7 +9837,8 @@ async function copilotTick() {
         .then(() => ptScript("premiumBounceStudy.ts", [])).then((o) => console.log("[protrader] premium bounce study", o.split("\n").filter((l) => /bounces/.test(l)).join(" | ").slice(0, 300)))   // hot-premium rating odds
         // 📝 paper test of the fake-up rule (RESULTS_FAKE_MOVE.md §5) on today's data — same code as the backtest, paper only
         .then(() => { const outF = path.join(process.cwd(), "data", "paper-fakeup.json"); return ptScript("fakeUpPaper.ts", [outF]).then(() => { try { cpSend(JSON.parse(fs.readFileSync(outF, "utf8")).html, true, "paper"); } catch { /* best-effort */ } }); })
-        .catch((e) => console.log("[protrader] data refresh failed", e?.message));
+        .catch((e) => console.log("[protrader] data refresh failed", e?.message))
+        .then(() => sqlSync());   // 🗄 then the owner's local SQL Server copy (no-op on Render)
     }
     // 🎖 Friday 16:05 weekly re-check of the live logic on the refreshed data (reports drift; proposes, never changes logic)
     if (wd === 5 && istMin >= 965 && istMin <= 990 && !_cp.sent.ptWeekly) {
