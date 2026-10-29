@@ -8411,6 +8411,7 @@ body.lrn-fullbody { overflow: hidden; }
 /* 🎯 One Trade tab (Market Command, 2026-10-28) */
 body.mcx-one #panel-marketcommand .mc2-main, body.mcx-one #mcx-dec, body.mcx-one #mcx-ot, body.mcx-one #mcx-desk { display: none !important; }
 .mcx-oneview { display: flex; flex-direction: column; gap: 8px; color: #d6dbe3; font-size: 14px; line-height: 1.5; }
+.mcx-oneview[hidden], .mcx-oiview[hidden], .mcx-learnview[hidden] { display: none !important; }   /* a sub-view (One Trade / Screen Rules / …) left open must not stay under the Market Command chart */
 .one-card { background: #11151c; border: 1px solid #1e2530; border-radius: 10px; padding: 10px 12px; min-width: 0; }
 .one-hero.ce { border-left: 4px solid #26c6a6; } .one-hero.pe { border-left: 4px solid #ff6b72; }
 .one-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
